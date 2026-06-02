@@ -1,0 +1,146 @@
+// Package purchases records Goods Received Notes (GRN) from suppliers. Receiving
+// a purchase increments stock, audits movements, refreshes product cost/price,
+// and updates the supplier payable — all in one transaction.
+package purchases
+
+import (
+	"context"
+	"time"
+
+	"karots-pos/internal/db"
+
+	"github.com/shopspring/decimal"
+)
+
+type Purchase struct {
+	ID         int64           `db:"id"          json:"id"`
+	SupplierID int64           `db:"supplier_id" json:"supplier_id"`
+	InvoiceNo  *string         `db:"invoice_no"  json:"invoice_no,omitempty"`
+	Status     string          `db:"status"      json:"status"`
+	Subtotal   decimal.Decimal `db:"subtotal"    json:"subtotal"`
+	Discount   decimal.Decimal `db:"discount"    json:"discount"`
+	Total      decimal.Decimal `db:"total"       json:"total"`
+	PaidAmount decimal.Decimal `db:"paid_amount" json:"paid_amount"`
+	DueDate    *time.Time      `db:"due_date"    json:"due_date,omitempty"`
+	ReceivedBy *int64          `db:"received_by" json:"received_by,omitempty"`
+	Notes      *string         `db:"notes"       json:"notes,omitempty"`
+	CreatedAt  time.Time       `db:"created_at"  json:"created_at"`
+	// joined
+	SupplierName   string  `db:"supplier_name"   json:"supplier_name"`
+	ReceivedByName *string `db:"received_by_name" json:"received_by_name,omitempty"`
+}
+
+type PurchaseItem struct {
+	ID           int64           `db:"id"            json:"id"`
+	PurchaseID   int64           `db:"purchase_id"   json:"purchase_id"`
+	ProductID    int64           `db:"product_id"    json:"product_id"`
+	Quantity     decimal.Decimal `db:"quantity"      json:"quantity"`
+	CostPrice    decimal.Decimal `db:"cost_price"    json:"cost_price"`
+	SellingPrice decimal.Decimal `db:"selling_price" json:"selling_price"`
+	ExpiryDate   *time.Time      `db:"expiry_date"   json:"expiry_date,omitempty"`
+	Subtotal     decimal.Decimal `db:"subtotal"      json:"subtotal"`
+	ProductName  string          `db:"product_name"  json:"product_name"`
+}
+
+type Detail struct {
+	Purchase Purchase       `json:"purchase"`
+	Items    []PurchaseItem `json:"items"`
+}
+
+type Repository struct{ q db.Queryer }
+
+func NewRepository(q db.Queryer) *Repository { return &Repository{q: q} }
+
+type purchaseRow struct {
+	SupplierID int64
+	InvoiceNo  *string
+	Status     string
+	Subtotal   decimal.Decimal
+	Discount   decimal.Decimal
+	Total      decimal.Decimal
+	Paid       decimal.Decimal
+	DueDate    *time.Time
+	ReceivedBy int64
+	Notes      *string
+}
+
+func (r *Repository) InsertPurchase(ctx context.Context, p purchaseRow) (int64, error) {
+	var id int64
+	err := r.q.GetContext(ctx, &id, `
+		INSERT INTO purchases
+			(supplier_id, invoice_no, status, subtotal, discount, total, paid_amount, due_date, received_by, notes)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+		p.SupplierID, p.InvoiceNo, p.Status, p.Subtotal, p.Discount, p.Total, p.Paid, p.DueDate, p.ReceivedBy, p.Notes)
+	return id, err
+}
+
+func (r *Repository) InsertItem(ctx context.Context, purchaseID int64, it PurchaseItem) error {
+	_, err := r.InsertItemReturningID(ctx, purchaseID, it)
+	return err
+}
+
+// InsertItemReturningID inserts a purchase line and returns its id so a matching
+// stock batch can reference it.
+func (r *Repository) InsertItemReturningID(ctx context.Context, purchaseID int64, it PurchaseItem) (int64, error) {
+	var id int64
+	err := r.q.GetContext(ctx, &id, `
+		INSERT INTO purchase_items (purchase_id, product_id, quantity, cost_price, selling_price, expiry_date, subtotal)
+		VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+		purchaseID, it.ProductID, it.Quantity, it.CostPrice, it.SellingPrice, it.ExpiryDate, it.Subtotal)
+	return id, err
+}
+
+// MarkHasExpiry flags a product as expiry-tracked once a dated batch arrives.
+func (r *Repository) MarkHasExpiry(ctx context.Context, productID int64) error {
+	_, err := r.q.ExecContext(ctx, `UPDATE products SET has_expiry = true WHERE id = $1`, productID)
+	return err
+}
+
+// RefreshProductPricing updates a product's cost (always) and selling price
+// (only when a positive new price was supplied on the GRN line).
+func (r *Repository) RefreshProductPricing(ctx context.Context, productID int64, cost, selling decimal.Decimal) error {
+	_, err := r.q.ExecContext(ctx, `
+		UPDATE products
+		SET cost_price = $1,
+		    selling_price = CASE WHEN $2 > 0 THEN $2 ELSE selling_price END
+		WHERE id = $3`, cost, selling, productID)
+	return err
+}
+
+func (r *Repository) FindByID(ctx context.Context, id int64) (*Purchase, error) {
+	var p Purchase
+	err := r.q.GetContext(ctx, &p, `
+		SELECT pu.*, s.name AS supplier_name, u.name AS received_by_name
+		FROM purchases pu
+		JOIN suppliers s ON s.id = pu.supplier_id
+		LEFT JOIN users u ON u.id = pu.received_by
+		WHERE pu.id = $1`, id)
+	if err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
+func (r *Repository) Items(ctx context.Context, purchaseID int64) ([]PurchaseItem, error) {
+	var rows []PurchaseItem
+	err := r.q.SelectContext(ctx, &rows, `
+		SELECT pi.*, p.name AS product_name
+		FROM purchase_items pi
+		JOIN products p ON p.id = pi.product_id
+		WHERE pi.purchase_id = $1 ORDER BY pi.id`, purchaseID)
+	return rows, err
+}
+
+func (r *Repository) List(ctx context.Context, limit int) ([]Purchase, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	var rows []Purchase
+	err := r.q.SelectContext(ctx, &rows, `
+		SELECT pu.*, s.name AS supplier_name, u.name AS received_by_name
+		FROM purchases pu
+		JOIN suppliers s ON s.id = pu.supplier_id
+		LEFT JOIN users u ON u.id = pu.received_by
+		ORDER BY pu.created_at DESC LIMIT $1`, limit)
+	return rows, err
+}

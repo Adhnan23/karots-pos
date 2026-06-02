@@ -1,0 +1,103 @@
+package adminpages
+
+import (
+	"strconv"
+
+	"karots-pos/internal/features/products"
+	"karots-pos/internal/features/settings"
+	"karots-pos/internal/money"
+	"karots-pos/templates/layouts"
+)
+
+type LabelsData struct {
+	UserName string
+	Symbol   string
+	Products []products.Product
+}
+
+templ LabelsPage(d LabelsData) {
+	@layouts.Admin("Barcode Labels", d.UserName, "labels") {
+		<h1 class="text-2xl font-bold mb-6">Barcode Labels</h1>
+		<div class="bg-white rounded-2xl shadow-sm p-6 max-w-xl">
+			<p class="text-sm text-slate-500 mb-4">Pick a product and how many labels to print. The print sheet opens in a new tab.</p>
+			<form method="get" action="/admin/labels/print" target="_blank" class="space-y-4">
+				<div>
+					<label class="block text-sm font-medium mb-1">Product</label>
+					<select name="product_id" required class="w-full border rounded-lg px-3 py-2">
+						<option value="">Select…</option>
+						for _, p := range d.Products {
+							<option value={ strconv.FormatInt(p.ID, 10) }>{ p.Name } — { money.Format(d.Symbol, p.SellingPrice) }</option>
+						}
+					</select>
+				</div>
+				<div class="grid grid-cols-2 gap-4">
+					<div>
+						<label class="block text-sm font-medium mb-1">Number of labels</label>
+						<input name="qty" type="number" min="1" max="200" value="12" class="w-full border rounded-lg px-3 py-2"/>
+					</div>
+					<div class="flex items-end">
+						<label class="inline-flex items-center gap-2 text-sm">
+							<input type="checkbox" name="show_price" value="1" checked/> Show price
+						</label>
+					</div>
+				</div>
+				<button class="px-5 py-2.5 rounded-lg bg-indigo-600 text-white font-semibold">Generate Labels →</button>
+			</form>
+		</div>
+	}
+}
+
+// LabelSheetData drives the standalone, printable label sheet.
+type LabelSheetData struct {
+	Product   products.Product
+	Settings  settings.Settings
+	Count     int
+	ShowPrice bool
+}
+
+templ LabelSheet(d LabelSheetData) {
+	<!DOCTYPE html>
+	<html lang="en">
+		<head>
+			<meta charset="UTF-8"/>
+			<title>Labels — { d.Product.Name }</title>
+			<link rel="stylesheet" href="/static/css/app.css"/>
+			<script src="/static/vendor/jsbarcode.min.js"></script>
+		</head>
+		<body class="label-body">
+			<div class="label-toolbar">
+				<button onclick="window.print()">🖨 Print</button>
+				<span>{ d.Product.Name } — { strconv.Itoa(d.Count) } labels</span>
+			</div>
+			<div class="label-sheet">
+				for i := 0; i < d.Count; i++ {
+					<div class="label">
+						<div class="label-shop">{ d.Settings.ShopName }</div>
+						<div class="label-name">{ d.Product.Name }</div>
+						<svg class="barcode" data-code={ barcodeValue(d.Product) }></svg>
+						if d.ShowPrice {
+							<div class="label-price">{ money.Format(d.Settings.CurrencySymbol, d.Product.SellingPrice) }</div>
+						}
+					</div>
+				}
+			</div>
+			<script>
+				document.querySelectorAll('svg.barcode').forEach(function (el) {
+					try {
+						JsBarcode(el, el.getAttribute('data-code'), {
+							format: 'CODE128', displayValue: true, fontSize: 12, height: 38, margin: 2, width: 1.4,
+						});
+					} catch (e) { /* ignore bad codes */ }
+				});
+			</script>
+		</body>
+	</html>
+}
+
+// barcodeValue uses the product barcode when set, else a stable SKU from its id.
+func barcodeValue(p products.Product) string {
+	if p.Barcode != nil && *p.Barcode != "" {
+		return *p.Barcode
+	}
+	return "SKU" + strconv.FormatInt(p.ID, 10)
+}

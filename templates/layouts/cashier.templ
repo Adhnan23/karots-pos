@@ -1,0 +1,44 @@
+package layouts
+
+import "karots-pos/internal/features/auth"
+
+// Cashier is the terminal shell: a slim topbar with the terminal sections plus a
+// full-height work area. `active` highlights the current section; `role` decides
+// whether the Admin link is shown (cashiers don't get it).
+templ Cashier(title, userName, role, active string) {
+	@Base(title) {
+		<div class="h-full flex flex-col">
+			<header class="h-14 shrink-0 bg-slate-900 text-white flex items-center justify-between px-5">
+				<div class="flex items-center gap-6">
+					<div class="font-bold">POS Terminal</div>
+					<nav class="flex items-center gap-1 text-sm">
+						@cashierTab("/cashier", "Sell", active == "pos")
+						@cashierTab("/cashier/returns", "Returns", active == "returns")
+						@cashierTab("/cashier/damage", "Damage", active == "damage")
+						@cashierTab("/cashier/credit", "Credit", active == "credit")
+					</nav>
+				</div>
+				<div class="flex items-center gap-4 text-sm">
+					<span class="text-slate-300">{ userName }</span>
+					if role == auth.RoleAdmin || role == auth.RoleManager {
+						<a href="/admin" class="text-slate-300 hover:text-white">Admin</a>
+					}
+					<form method="post" action="/logout">
+						<button type="submit" class="text-red-300 hover:text-red-200">Log out</button>
+					</form>
+				</div>
+			</header>
+			<div class="flex-1 min-h-0">
+				{ children... }
+			</div>
+		</div>
+	}
+}
+
+templ cashierTab(href, label string, on bool) {
+	if on {
+		<a href={ templ.SafeURL(href) } class="px-3 py-1.5 rounded-lg bg-white/15 font-medium">{ label }</a>
+	} else {
+		<a href={ templ.SafeURL(href) } class="px-3 py-1.5 rounded-lg text-slate-300 hover:bg-white/10 hover:text-white">{ label }</a>
+	}
+}

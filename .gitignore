@@ -1,0 +1,6 @@
+/bin/
+/tmp/
+/karots-pos
+.env
+*_templ.go
+*.log

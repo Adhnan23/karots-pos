@@ -1,0 +1,66 @@
+package layouts
+
+// Admin is the management shell: a fixed sidebar plus a content area. `active`
+// is the nav key of the current page so the link can be highlighted.
+templ Admin(title, userName, active string) {
+	@Base(title) {
+		<div class="min-h-full flex">
+			<aside class="w-60 shrink-0 bg-slate-900 text-slate-200 flex flex-col">
+				<div class="px-5 py-4 border-b border-slate-800">
+					<div class="text-lg font-bold text-white">POS Admin</div>
+					<div class="text-xs text-slate-400">{ userName }</div>
+				</div>
+				<nav class="flex-1 px-3 py-4 space-y-1 text-sm overflow-auto">
+					@navLink("/admin", "Dashboard", active == "dashboard")
+					@navSection("Sell")
+					@navLink("/admin/sales", "Sales", active == "sales")
+					@navLink("/admin/customers", "Customers", active == "customers")
+					@navSection("Inventory")
+					@navLink("/admin/products", "Products", active == "products")
+					@navLink("/admin/stock", "Stock & Movements", active == "stock")
+					@navLink("/admin/conversions", "Conversions", active == "conversions")
+					@navLink("/admin/labels", "Barcode Labels", active == "labels")
+					@navLink("/admin/categories", "Categories", active == "categories-mgmt")
+					@navLink("/admin/units", "Units", active == "units-mgmt")
+					@navSection("Purchasing")
+					@navLink("/admin/purchases", "Purchases", active == "purchases")
+					@navLink("/admin/purchase-returns", "Purchase Returns", active == "purchase-returns")
+					@navLink("/admin/suppliers", "Suppliers", active == "suppliers")
+					@navSection("Cash")
+					@navLink("/admin/cash-register", "Cash Register", active == "cash-register")
+					@navLink("/admin/denominations", "Denominations", active == "denoms")
+					@navSection("Reports")
+					@navLink("/admin/reports", "All Reports (print)", active == "reports-hub")
+					@navLink("/admin/finance", "Finance & Profit", active == "finance")
+					@navLink("/admin/reports/low-stock", "Low Stock", active == "low-stock")
+					@navLink("/admin/reports/expiring", "Expiring Stock", active == "expiring")
+					@navLink("/admin/expenses", "Expenses", active == "expenses")
+					@navSection("Admin")
+					@navLink("/admin/users", "Users", active == "users")
+					@navLink("/admin/settings", "Settings", active == "settings")
+				</nav>
+				<div class="px-3 py-4 border-t border-slate-800 space-y-1 text-sm">
+					<a href="/cashier" class="block px-3 py-2 rounded-lg hover:bg-slate-800">Open Cashier →</a>
+					<form method="post" action="/logout">
+						<button type="submit" class="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-800 text-red-300">Log out</button>
+					</form>
+				</div>
+			</aside>
+			<main class="flex-1 min-w-0 p-8 overflow-auto">
+				{ children... }
+			</main>
+		</div>
+	}
+}
+
+templ navSection(label string) {
+	<div class="px-3 pt-4 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">{ label }</div>
+}
+
+templ navLink(href, label string, active bool) {
+	if active {
+		<a href={ templ.SafeURL(href) } class="block px-3 py-2 rounded-lg bg-indigo-600 text-white font-medium">{ label }</a>
+	} else {
+		<a href={ templ.SafeURL(href) } class="block px-3 py-2 rounded-lg hover:bg-slate-800">{ label }</a>
+	}
+}

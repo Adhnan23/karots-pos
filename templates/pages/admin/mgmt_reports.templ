@@ -1,0 +1,418 @@
+package adminpages
+
+import (
+	"strconv"
+
+	"karots-pos/internal/features/cashregister"
+	"karots-pos/internal/features/products"
+	"karots-pos/internal/features/purchases"
+	"karots-pos/internal/features/reports"
+	"karots-pos/internal/features/sales"
+	"karots-pos/internal/features/stock"
+	"karots-pos/internal/features/suppliers"
+	"karots-pos/internal/money"
+	"karots-pos/templates/layouts"
+
+	"github.com/shopspring/decimal"
+)
+
+// ============================ Reports hub ============================
+
+type ReportsHubData struct {
+	UserName string
+}
+
+templ ReportsHub(d ReportsHubData) {
+	@layouts.Admin("Reports", d.UserName, "reports-hub") {
+		<div class="mb-6">
+			<h1 class="text-2xl font-bold">Reports</h1>
+			<p class="text-sm text-slate-500">Filterable management reports — open one, set the range, then Print / Save as PDF.</p>
+		</div>
+		<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+			@reportCard("/admin/reports/sales", "Sales", "Receipts and totals over a date range")
+			@reportCard("/admin/reports/finance", "Finance / P&L", "Revenue, COGS, profit, dues for a period")
+			@reportCard("/admin/reports/cash-register", "Cash Register", "Drawer sessions with over/short")
+			@reportCard("/admin/reports/purchases", "Purchases", "GRNs received in a period")
+			@reportCard("/admin/reports/suppliers", "Suppliers", "Outstanding payables snapshot")
+			@reportCard("/admin/reports/inventory", "Inventory Valuation", "Stock on hand at cost & retail")
+			@reportCard("/admin/reports/batches", "Batches / Expiry", "Live batches and expiry dates")
+			@reportCard("/admin/reports/low-stock", "Low Stock", "Items at or below reorder level")
+			@reportCard("/admin/reports/expiring", "Expiring Stock", "Batches expiring soon")
+		</div>
+	}
+}
+
+templ reportCard(href, title, desc string) {
+	<a href={ templ.SafeURL(href) } class="block bg-white rounded-2xl shadow-sm p-5 hover:ring-2 hover:ring-indigo-300 transition">
+		<div class="font-semibold text-slate-800">{ title }</div>
+		<div class="text-sm text-slate-500 mt-1">{ desc }</div>
+	</a>
+}
+
+// Shared date-range filter (hidden when printing).
+templ rptRangeForm(action, from, to string) {
+	<form method="get" action={ templ.SafeURL(action) } class="no-print flex flex-wrap items-end gap-3 mb-5">
+		<div>
+			<label class="block text-xs text-slate-500 mb-1">From</label>
+			<input type="date" name="from" value={ from } class="border rounded-lg px-3 py-1.5"/>
+		</div>
+		<div>
+			<label class="block text-xs text-slate-500 mb-1">To</label>
+			<input type="date" name="to" value={ to } class="border rounded-lg px-3 py-1.5"/>
+		</div>
+		{ children... }
+		<button class="px-4 py-1.5 rounded-lg bg-slate-800 text-white text-sm">Apply</button>
+	</form>
+}
+
+templ rptPeriodLine(from, to string) {
+	<div class="text-sm text-slate-500 mb-4">Period: <span class="font-medium">{ from }</span> to <span class="font-medium">{ to }</span></div>
+}
+
+// ============================ Sales report ============================
+
+type SalesReportData struct {
+	ShopName, Symbol, From, To, Status string
+	Rows                               []sales.Sale
+	Count                              int
+	Gross, Discount, Net               decimal.Decimal
+}
+
+templ SalesReport(d SalesReportData) {
+	@layouts.Report("Sales Report", d.ShopName) {
+		@rptRangeForm("/admin/reports/sales", d.From, d.To) {
+			<div>
+				<label class="block text-xs text-slate-500 mb-1">Status</label>
+				<select name="status" class="border rounded-lg px-3 py-1.5">
+					@statusOpt("", "All", d.Status)
+					@statusOpt("completed", "Completed", d.Status)
+					@statusOpt("credit", "Credit", d.Status)
+					@statusOpt("partially_returned", "Partly returned", d.Status)
+					@statusOpt("returned", "Returned", d.Status)
+				</select>
+			</div>
+		}
+		@rptPeriodLine(d.From, d.To)
+		<table class="w-full text-sm">
+			<thead class="text-left text-slate-500 border-b">
+				<tr><th class="py-1.5">Receipt</th><th class="py-1.5">Date</th><th class="py-1.5">Type</th><th class="py-1.5">Status</th><th class="py-1.5 text-right">Discount</th><th class="py-1.5 text-right">Total</th></tr>
+			</thead>
+			<tbody>
+				for _, s := range d.Rows {
+					<tr class="border-b last:border-0">
+						<td class="py-1.5 font-medium">{ s.ReceiptNo }</td>
+						<td class="py-1.5 text-slate-500">{ s.CreatedAt.Format("2006-01-02 15:04") }</td>
+						<td class="py-1.5 capitalize">{ s.SaleType }</td>
+						<td class="py-1.5 capitalize">{ s.Status }</td>
+						<td class="py-1.5 text-right">{ money.Display(s.Discount) }</td>
+						<td class="py-1.5 text-right">{ money.Format(d.Symbol, s.Total) }</td>
+					</tr>
+				}
+				if len(d.Rows) == 0 {
+					<tr><td colspan="6" class="py-6 text-center text-slate-400">No sales in this period.</td></tr>
+				}
+			</tbody>
+			<tfoot class="border-t-2 font-semibold">
+				<tr>
+					<td class="py-2" colspan="4">{ strconv.Itoa(d.Count) } sales</td>
+					<td class="py-2 text-right">{ money.Display(d.Discount) }</td>
+					<td class="py-2 text-right">{ money.Format(d.Symbol, d.Net) }</td>
+				</tr>
+			</tfoot>
+		</table>
+	}
+}
+
+templ statusOpt(val, label, cur string) {
+	if val == cur {
+		<option value={ val } selected>{ label }</option>
+	} else {
+		<option value={ val }>{ label }</option>
+	}
+}
+
+// ============================ Finance report ============================
+
+type FinanceReportData struct {
+	ShopName, Symbol, From, To string
+	PL                         reports.PL
+}
+
+templ FinanceReport(d FinanceReportData) {
+	@layouts.Report("Finance / Profit & Loss", d.ShopName) {
+		@rptRangeForm("/admin/reports/finance", d.From, d.To) {
+		}
+		@rptPeriodLine(d.From, d.To)
+		<table class="w-full text-sm">
+			<tbody>
+				@plRow("Sales count", strconv.Itoa(d.PL.SalesCount))
+				@plMoney(d.Symbol, "Revenue", d.PL.Revenue, false)
+				@plMoney(d.Symbol, "Cost of goods sold (COGS)", d.PL.COGS, true)
+				@plMoney(d.Symbol, "Gross profit", d.PL.GrossProfit, false)
+				@plMoney(d.Symbol, "Operating expenses", d.PL.Expenses, true)
+				@plMoney(d.Symbol, "Net profit", d.PL.NetProfit, false)
+				@plMoney(d.Symbol, "Cash received", d.PL.Received, false)
+				@plMoney(d.Symbol, "Receivables (customer dues)", d.PL.Receivables, false)
+				@plMoney(d.Symbol, "Payables (supplier dues)", d.PL.Payables, false)
+				@plMoney(d.Symbol, "Cash withdrawn (drawer)", d.PL.CashWithdrawn, false)
+				@plMoney(d.Symbol, "Register over/short", d.PL.RegisterDiff, false)
+			</tbody>
+		</table>
+
+		if len(d.PL.TopProducts) > 0 {
+			<h3 class="font-semibold mt-6 mb-2">Top products</h3>
+			<table class="w-full text-sm">
+				<thead class="text-left text-slate-500 border-b">
+					<tr><th class="py-1.5">Product</th><th class="py-1.5 text-right">Qty</th><th class="py-1.5 text-right">Revenue</th><th class="py-1.5 text-right">Profit</th></tr>
+				</thead>
+				<tbody>
+					for _, p := range d.PL.TopProducts {
+						<tr class="border-b last:border-0">
+							<td class="py-1.5">{ p.ProductName }</td>
+							<td class="py-1.5 text-right">{ money.Display(p.Qty) }</td>
+							<td class="py-1.5 text-right">{ money.Format(d.Symbol, p.Revenue) }</td>
+							<td class="py-1.5 text-right">{ money.Format(d.Symbol, p.Profit) }</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+		}
+	}
+}
+
+templ plRow(label, value string) {
+	<tr class="border-b last:border-0"><td class="py-1.5">{ label }</td><td class="py-1.5 text-right font-medium">{ value }</td></tr>
+}
+
+templ plMoney(symbol, label string, v decimal.Decimal, negate bool) {
+	<tr class="border-b last:border-0">
+		<td class="py-1.5">{ label }</td>
+		<td class="py-1.5 text-right font-medium">
+			if negate {
+				({ money.Format(symbol, v) })
+			} else {
+				{ money.Format(symbol, v) }
+			}
+		</td>
+	</tr>
+}
+
+// ============================ Cash register report ============================
+
+type CashReportData struct {
+	ShopName, Symbol, From, To              string
+	Rows                                    []cashregister.SessionRow
+	Opening, Expected, Counted, OverShort   decimal.Decimal
+}
+
+templ CashRegisterReport(d CashReportData) {
+	@layouts.Report("Cash Register Report", d.ShopName) {
+		@rptRangeForm("/admin/reports/cash-register", d.From, d.To) {
+		}
+		@rptPeriodLine(d.From, d.To)
+		<table class="w-full text-sm">
+			<thead class="text-left text-slate-500 border-b">
+				<tr><th class="py-1.5">Cashier</th><th class="py-1.5">Opened</th><th class="py-1.5">Closed</th><th class="py-1.5 text-right">Opening</th><th class="py-1.5 text-right">Expected</th><th class="py-1.5 text-right">Counted</th><th class="py-1.5 text-right">Over/Short</th></tr>
+			</thead>
+			<tbody>
+				for _, s := range d.Rows {
+					<tr class="border-b last:border-0">
+						<td class="py-1.5 font-medium">{ s.UserName }</td>
+						<td class="py-1.5 text-slate-500">{ s.OpenedAt.Format("01-02 15:04") }</td>
+						<td class="py-1.5 text-slate-500">
+							if s.ClosedAt != nil {
+								{ s.ClosedAt.Format("01-02 15:04") }
+							} else {
+								open
+							}
+						</td>
+						<td class="py-1.5 text-right">{ money.Format(d.Symbol, s.OpeningCash) }</td>
+						<td class="py-1.5 text-right">{ optMoney(d.Symbol, s.ExpectedCash) }</td>
+						<td class="py-1.5 text-right">{ optMoney(d.Symbol, s.ClosingCash) }</td>
+						<td class="py-1.5 text-right">{ optMoney(d.Symbol, s.Difference) }</td>
+					</tr>
+				}
+				if len(d.Rows) == 0 {
+					<tr><td colspan="7" class="py-6 text-center text-slate-400">No sessions in this period.</td></tr>
+				}
+			</tbody>
+			<tfoot class="border-t-2 font-semibold">
+				<tr>
+					<td class="py-2" colspan="3">Totals</td>
+					<td class="py-2 text-right">{ money.Format(d.Symbol, d.Opening) }</td>
+					<td class="py-2 text-right">{ money.Format(d.Symbol, d.Expected) }</td>
+					<td class="py-2 text-right">{ money.Format(d.Symbol, d.Counted) }</td>
+					<td class="py-2 text-right">{ money.Format(d.Symbol, d.OverShort) }</td>
+				</tr>
+			</tfoot>
+		</table>
+	}
+}
+
+// ============================ Purchases report ============================
+
+type PurchasesReportData struct {
+	ShopName, Symbol, From, To string
+	Rows                       []purchases.Purchase
+	Total, Paid, Due           decimal.Decimal
+}
+
+templ PurchasesReport(d PurchasesReportData) {
+	@layouts.Report("Purchases Report", d.ShopName) {
+		@rptRangeForm("/admin/reports/purchases", d.From, d.To) {
+		}
+		@rptPeriodLine(d.From, d.To)
+		<table class="w-full text-sm">
+			<thead class="text-left text-slate-500 border-b">
+				<tr><th class="py-1.5">Date</th><th class="py-1.5">Supplier</th><th class="py-1.5">Invoice</th><th class="py-1.5">Status</th><th class="py-1.5 text-right">Total</th><th class="py-1.5 text-right">Paid</th><th class="py-1.5 text-right">Due</th></tr>
+			</thead>
+			<tbody>
+				for _, p := range d.Rows {
+					<tr class="border-b last:border-0">
+						<td class="py-1.5 text-slate-500">{ p.CreatedAt.Format("2006-01-02") }</td>
+						<td class="py-1.5 font-medium">{ p.SupplierName }</td>
+						<td class="py-1.5">{ strOrEmpty(p.InvoiceNo) }</td>
+						<td class="py-1.5 capitalize">{ p.Status }</td>
+						<td class="py-1.5 text-right">{ money.Format(d.Symbol, p.Total) }</td>
+						<td class="py-1.5 text-right">{ money.Display(p.PaidAmount) }</td>
+						<td class="py-1.5 text-right">{ money.Display(p.Total.Sub(p.PaidAmount)) }</td>
+					</tr>
+				}
+				if len(d.Rows) == 0 {
+					<tr><td colspan="7" class="py-6 text-center text-slate-400">No purchases in this period.</td></tr>
+				}
+			</tbody>
+			<tfoot class="border-t-2 font-semibold">
+				<tr>
+					<td class="py-2" colspan="4">Totals</td>
+					<td class="py-2 text-right">{ money.Format(d.Symbol, d.Total) }</td>
+					<td class="py-2 text-right">{ money.Display(d.Paid) }</td>
+					<td class="py-2 text-right">{ money.Display(d.Due) }</td>
+				</tr>
+			</tfoot>
+		</table>
+	}
+}
+
+// ============================ Suppliers report ============================
+
+type SuppliersReportData struct {
+	ShopName, Symbol string
+	Rows             []suppliers.Supplier
+	TotalPayable     decimal.Decimal
+}
+
+templ SuppliersReport(d SuppliersReportData) {
+	@layouts.Report("Suppliers — Outstanding Payables", d.ShopName) {
+		<table class="w-full text-sm">
+			<thead class="text-left text-slate-500 border-b">
+				<tr><th class="py-1.5">Supplier</th><th class="py-1.5">Contact</th><th class="py-1.5">Phone</th><th class="py-1.5 text-right">Outstanding</th></tr>
+			</thead>
+			<tbody>
+				for _, s := range d.Rows {
+					<tr class="border-b last:border-0">
+						<td class="py-1.5 font-medium">{ s.Name }</td>
+						<td class="py-1.5 text-slate-500">{ strOrEmpty(s.ContactPerson) }</td>
+						<td class="py-1.5 text-slate-500">{ strOrEmpty(s.Phone) }</td>
+						<td class="py-1.5 text-right">{ money.Format(d.Symbol, s.OutstandingBalance) }</td>
+					</tr>
+				}
+				if len(d.Rows) == 0 {
+					<tr><td colspan="4" class="py-6 text-center text-slate-400">No suppliers.</td></tr>
+				}
+			</tbody>
+			<tfoot class="border-t-2 font-semibold">
+				<tr><td class="py-2" colspan="3">Total payable</td><td class="py-2 text-right">{ money.Format(d.Symbol, d.TotalPayable) }</td></tr>
+			</tfoot>
+		</table>
+	}
+}
+
+// ============================ Inventory valuation ============================
+
+type InventoryReportData struct {
+	ShopName, Symbol       string
+	Rows                   []products.Product
+	CostValue, RetailValue decimal.Decimal
+}
+
+templ InventoryReport(d InventoryReportData) {
+	@layouts.Report("Inventory Valuation", d.ShopName) {
+		<table class="w-full text-sm">
+			<thead class="text-left text-slate-500 border-b">
+				<tr><th class="py-1.5">Product</th><th class="py-1.5">Category</th><th class="py-1.5 text-right">On hand</th><th class="py-1.5 text-right">Cost</th><th class="py-1.5 text-right">Cost value</th><th class="py-1.5 text-right">Retail value</th></tr>
+			</thead>
+			<tbody>
+				for _, p := range d.Rows {
+					<tr class="border-b last:border-0">
+						<td class="py-1.5 font-medium">{ p.Name }</td>
+						<td class="py-1.5 text-slate-500">{ p.CategoryName }</td>
+						<td class="py-1.5 text-right">{ money.Display(p.StockQty) } { p.UnitAbbr }</td>
+						<td class="py-1.5 text-right">{ money.Display(p.CostPrice) }</td>
+						<td class="py-1.5 text-right">{ money.Format(d.Symbol, p.StockQty.Mul(p.CostPrice)) }</td>
+						<td class="py-1.5 text-right">{ money.Format(d.Symbol, p.StockQty.Mul(p.SellingPrice)) }</td>
+					</tr>
+				}
+				if len(d.Rows) == 0 {
+					<tr><td colspan="6" class="py-6 text-center text-slate-400">No products.</td></tr>
+				}
+			</tbody>
+			<tfoot class="border-t-2 font-semibold">
+				<tr>
+					<td class="py-2" colspan="4">Totals</td>
+					<td class="py-2 text-right">{ money.Format(d.Symbol, d.CostValue) }</td>
+					<td class="py-2 text-right">{ money.Format(d.Symbol, d.RetailValue) }</td>
+				</tr>
+			</tfoot>
+		</table>
+	}
+}
+
+// ============================ Batch report ============================
+
+type BatchReportData struct {
+	ShopName, Symbol, Days string
+	Rows                   []stock.Batch
+	TotalValue             decimal.Decimal
+}
+
+templ BatchReport(d BatchReportData) {
+	@layouts.Report("Batches & Expiry", d.ShopName) {
+		<form method="get" action="/admin/reports/batches" class="no-print flex items-end gap-3 mb-5">
+			<div>
+				<label class="block text-xs text-slate-500 mb-1">Expiring within (days, blank = all)</label>
+				<input type="number" min="0" name="days" value={ d.Days } class="border rounded-lg px-3 py-1.5 w-44"/>
+			</div>
+			<button class="px-4 py-1.5 rounded-lg bg-slate-800 text-white text-sm">Apply</button>
+		</form>
+		<table class="w-full text-sm">
+			<thead class="text-left text-slate-500 border-b">
+				<tr><th class="py-1.5">Product</th><th class="py-1.5">Batch</th><th class="py-1.5">Expiry</th><th class="py-1.5 text-right">Remaining</th><th class="py-1.5 text-right">Cost</th><th class="py-1.5 text-right">Value</th></tr>
+			</thead>
+			<tbody>
+				for _, b := range d.Rows {
+					<tr class="border-b last:border-0">
+						<td class="py-1.5 font-medium">{ b.ProductName }</td>
+						<td class="py-1.5 text-slate-500">{ strOrEmpty(b.BatchNo) }</td>
+						<td class="py-1.5">
+							if b.ExpiryDate != nil {
+								{ b.ExpiryDate.Format("2006-01-02") }
+							} else {
+								—
+							}
+						</td>
+						<td class="py-1.5 text-right">{ money.Display(b.QtyRemaining) } { b.UnitAbbr }</td>
+						<td class="py-1.5 text-right">{ money.Display(b.CostPrice) }</td>
+						<td class="py-1.5 text-right">{ money.Format(d.Symbol, b.QtyRemaining.Mul(b.CostPrice)) }</td>
+					</tr>
+				}
+				if len(d.Rows) == 0 {
+					<tr><td colspan="6" class="py-6 text-center text-slate-400">No batches.</td></tr>
+				}
+			</tbody>
+			<tfoot class="border-t-2 font-semibold">
+				<tr><td class="py-2" colspan="5">Total batch value</td><td class="py-2 text-right">{ money.Format(d.Symbol, d.TotalValue) }</td></tr>
+			</tfoot>
+		</table>
+	}
+}

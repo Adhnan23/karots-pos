@@ -1,0 +1,96 @@
+package adminpages
+
+import (
+	"strconv"
+
+	"karots-pos/internal/features/categories"
+	"karots-pos/templates/layouts"
+)
+
+type CategoriesData struct {
+	UserName string
+	Rows     []categories.TreeNode
+}
+
+templ CategoriesPage(d CategoriesData) {
+	@layouts.Admin("Categories", d.UserName, "categories-mgmt") {
+		<div class="flex items-center justify-between mb-6">
+			<h1 class="text-2xl font-bold">Categories</h1>
+			<button class="px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium"
+				hx-get="/admin/categories/form" hx-target="#modal-container" hx-swap="innerHTML">+ New Category</button>
+		</div>
+		<div class="bg-white rounded-2xl shadow-sm p-6">
+			<table class="w-full text-sm">
+				<thead class="text-left text-slate-500 border-b">
+					<tr><th class="py-2 px-3">Name</th><th class="py-2 px-3">Parent</th><th class="py-2 px-3"></th></tr>
+				</thead>
+				<tbody id="category-tbody" hx-get="/admin/categories/table" hx-trigger="reload-categories from:body" hx-target="#category-tbody" hx-swap="innerHTML">
+					@CategoryRows(d.Rows)
+				</tbody>
+			</table>
+		</div>
+	}
+}
+
+templ CategoryRows(rows []categories.TreeNode) {
+	if len(rows) == 0 {
+		<tr><td colspan="3" class="py-6 text-center text-slate-500">No categories yet.</td></tr>
+	} else {
+		for _, c := range rows {
+			<tr class="border-b last:border-0">
+				<td class="py-2 px-3 font-medium">
+					<span class="text-slate-300">{ indent(c.Depth) }</span>{ c.Name }
+				</td>
+				<td class="py-2 px-3 text-slate-500">{ strOrEmpty(c.ParentName) }</td>
+				<td class="py-2 px-3 text-right whitespace-nowrap">
+					<button class="text-indigo-600 hover:underline" hx-get={ "/admin/categories/form/" + strconv.FormatInt(c.ID, 10) } hx-target="#modal-container" hx-swap="innerHTML">Edit</button>
+					<button class="text-red-600 hover:underline ml-3" hx-delete={ "/admin/categories/" + strconv.FormatInt(c.ID, 10) } hx-swap="none" hx-confirm={ "Delete category " + c.Name + "?" }>Delete</button>
+				</td>
+			</tr>
+		}
+	}
+}
+
+templ CategoryForm(all []categories.Category, cur *categories.Category) {
+	@modalShell(ternary(cur == nil, "New Category", "Edit Category")) {
+		<form class="p-6 space-y-4"
+			if cur == nil {
+				hx-post="/admin/categories"
+			} else {
+				hx-put={ "/admin/categories/" + strconv.FormatInt(cur.ID, 10) }
+			}
+			hx-swap="none">
+			<div>
+				<label class="block text-sm font-medium mb-1">Name</label>
+				<input name="name" required value={ catName(cur) } class="w-full border rounded-lg px-3 py-2"/>
+			</div>
+			<div>
+				<label class="block text-sm font-medium mb-1">Parent (optional)</label>
+				<select name="parent_id" class="w-full border rounded-lg px-3 py-2">
+					<option value="">— none (top level) —</option>
+					for _, c := range all {
+						if cur == nil || c.ID != cur.ID {
+							@catOption(c, cur)
+						}
+					}
+				</select>
+			</div>
+			@modalButtons()
+		</form>
+	}
+}
+
+templ catOption(c categories.Category, cur *categories.Category) {
+	if cur != nil && cur.ParentID != nil && *cur.ParentID == c.ID {
+		<option value={ strconv.FormatInt(c.ID, 10) } selected>{ c.Name }</option>
+	} else {
+		<option value={ strconv.FormatInt(c.ID, 10) }>{ c.Name }</option>
+	}
+}
+
+func catName(c *categories.Category) string {
+	if c == nil {
+		return ""
+	}
+	return c.Name
+}

@@ -1,0 +1,172 @@
+package adminpages
+
+import (
+	"strconv"
+
+	"karots-pos/internal/features/sales"
+	"karots-pos/internal/money"
+	"karots-pos/templates/layouts"
+)
+
+type SalesData struct {
+	UserName string
+	Symbol   string
+	Rows     []sales.Sale
+	From     string
+	To       string
+	Status   string
+	Page     int
+	HasNext  bool
+}
+
+templ SalesPage(d SalesData) {
+	@layouts.Admin("Sales", d.UserName, "sales") {
+		<h1 class="text-2xl font-bold mb-6">Sales</h1>
+
+		<form
+			id="sales-filter-form"
+			class="flex flex-wrap items-end gap-3 mb-6 bg-white rounded-2xl shadow-sm p-4"
+			hx-get="/admin/sales/table"
+			hx-target="#sales-list"
+			hx-swap="innerHTML"
+			hx-trigger="submit, change"
+		>
+			<div>
+				<label class="block text-xs text-slate-500 mb-1">From</label>
+				<input type="date" name="from" value={ d.From } class="border rounded-lg px-3 py-2"/>
+			</div>
+			<div>
+				<label class="block text-xs text-slate-500 mb-1">To</label>
+				<input type="date" name="to" value={ d.To } class="border rounded-lg px-3 py-2"/>
+			</div>
+			<div>
+				<label class="block text-xs text-slate-500 mb-1">Status</label>
+				<select name="status" class="border rounded-lg px-3 py-2">
+					@salesStatusOption("", "All", d.Status)
+					@salesStatusOption("completed", "Completed", d.Status)
+					@salesStatusOption("credit", "Credit", d.Status)
+					@salesStatusOption("returned", "Returned", d.Status)
+				</select>
+			</div>
+			<button class="px-4 py-2 rounded-lg bg-slate-800 text-white">Filter</button>
+		</form>
+
+		<div class="bg-white rounded-2xl shadow-sm p-6">
+			<div id="sales-list" hx-get="/admin/sales/table" hx-trigger="reload-sales from:body" hx-include="#sales-filter-form" hx-swap="innerHTML">
+				@SalesList(d)
+			</div>
+		</div>
+	}
+}
+
+// SalesList is the swappable region (table + pager).
+templ SalesList(d SalesData) {
+	<table class="w-full text-sm">
+		<thead class="text-left text-slate-500 border-b">
+			<tr>
+				<th class="py-2 px-3">Receipt</th>
+				<th class="py-2 px-3">When</th>
+				<th class="py-2 px-3">Cashier</th>
+				<th class="py-2 px-3">Customer</th>
+				<th class="py-2 px-3">Type</th>
+				<th class="py-2 px-3 text-right">Total</th>
+				<th class="py-2 px-3 text-right">Paid</th>
+				<th class="py-2 px-3 text-center">Status</th>
+				<th class="py-2 px-3"></th>
+			</tr>
+		</thead>
+		<tbody>
+			@SalesRows(d.Rows, d.Symbol)
+		</tbody>
+	</table>
+	@pager(d.Page, d.HasNext, "/admin/sales/table", "#sales-list", "#sales-filter-form")
+}
+
+templ SalesRows(rows []sales.Sale, symbol string) {
+	if len(rows) == 0 {
+		<tr><td colspan="9" class="py-6 text-center text-slate-500">No sales in this range.</td></tr>
+	} else {
+		for _, s := range rows {
+			<tr class="border-b last:border-0">
+				<td class="py-2 px-3 font-medium">
+					<a class="text-indigo-600 hover:underline" href={ templ.SafeURL("/cashier/receipt/" + strconv.FormatInt(s.ID, 10)) } target="_blank">{ s.ReceiptNo }</a>
+				</td>
+				<td class="py-2 px-3 text-slate-500">{ s.CreatedAt.Format("2006-01-02 15:04") }</td>
+				<td class="py-2 px-3">{ s.CashierName }</td>
+				<td class="py-2 px-3">{ customerOrWalkIn(s.CustomerName) }</td>
+				<td class="py-2 px-3 capitalize">{ s.SaleType }</td>
+				<td class="py-2 px-3 text-right">{ money.Format(symbol, s.Total) }</td>
+				<td class="py-2 px-3 text-right">{ money.Format(symbol, s.PaidAmount) }</td>
+				<td class="py-2 px-3 text-center">@statusBadge(s.Status)</td>
+				<td class="py-2 px-3 text-right whitespace-nowrap">
+					if s.Status != "returned" {
+						<button
+							class="text-rose-600 hover:underline"
+							hx-get={ "/admin/sales/return/" + strconv.FormatInt(s.ID, 10) }
+							hx-target="#modal-container"
+							hx-swap="innerHTML"
+						>Return</button>
+					}
+				</td>
+			</tr>
+		}
+	}
+}
+
+templ salesStatusOption(value, label, selected string) {
+	if value == selected {
+		<option value={ value } selected>{ label }</option>
+	} else {
+		<option value={ value }>{ label }</option>
+	}
+}
+
+// SaleReturnForm is the per-line partial-return modal. The Alpine saleReturn()
+// component (app.js) collects quantities and posts to the API.
+templ SaleReturnForm(d sales.Detail) {
+	@modalShell("Return — " + d.Sale.ReceiptNo) {
+		<form class="p-6 space-y-4" x-data={ "saleReturn(" + strconv.FormatInt(d.Sale.ID, 10) + ")" } x-on:submit.prevent="submit()">
+			<p class="text-sm text-slate-500">Enter the quantity to return for each line (max = remaining).</p>
+			<table class="w-full text-sm">
+				<thead class="text-left text-slate-500 border-b">
+					<tr><th class="py-1">Product</th><th class="py-1 text-right">Sold</th><th class="py-1 text-right">Returnable</th><th class="py-1 text-right w-28">Return qty</th></tr>
+				</thead>
+				<tbody>
+					for _, it := range d.Items {
+						if it.ReturnableQty().IsPositive() {
+							<tr class="border-b last:border-0">
+								<td class="py-1">{ it.ProductName }</td>
+								<td class="py-1 text-right">{ money.Display(it.Quantity) } { it.UnitAbbr }</td>
+								<td class="py-1 text-right">{ money.Display(it.ReturnableQty()) }</td>
+								<td class="py-1 text-right">
+									<input
+										type="number" step="0.001" min="0"
+										max={ it.ReturnableQty().String() }
+										value="0"
+										class="w-24 border rounded px-2 py-1 text-right"
+										x-on:input={ "setQty(" + strconv.FormatInt(it.ID, 10) + ", $event.target.value, " + it.ReturnableQty().String() + ")" }
+									/>
+								</td>
+							</tr>
+						}
+					}
+				</tbody>
+			</table>
+			<div>
+				<label class="block text-sm font-medium mb-1">Reason (optional)</label>
+				<input x-model="reason" class="w-full border rounded-lg px-3 py-2" placeholder="damaged, wrong item…"/>
+			</div>
+			<div class="flex justify-end gap-3 pt-2">
+				<button type="button" class="px-4 py-2 rounded-lg border" x-on:click="$dispatch('close-modal')">Cancel</button>
+				<button type="submit" x-bind:disabled="busy" class="px-4 py-2 rounded-lg bg-rose-600 text-white disabled:opacity-40">Process Return</button>
+			</div>
+		</form>
+	}
+}
+
+func customerOrWalkIn(name *string) string {
+	if name == nil {
+		return "Walk-in"
+	}
+	return *name
+}

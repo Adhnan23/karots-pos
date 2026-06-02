@@ -1,0 +1,144 @@
+package adminfragments
+
+import (
+	"strconv"
+
+	"karots-pos/internal/features/categories"
+	"karots-pos/internal/features/products"
+	"karots-pos/internal/features/units"
+	"karots-pos/internal/money"
+)
+
+// ProductTable renders the <tbody> contents; it is the HTMX swap target.
+templ ProductTable(rows []products.Product, symbol string) {
+	if len(rows) == 0 {
+		<tr><td colspan="6" class="py-6 text-center text-slate-500">No products found.</td></tr>
+	} else {
+		for _, p := range rows {
+			@ProductRow(p, symbol)
+		}
+	}
+}
+
+templ ProductRow(p products.Product, symbol string) {
+	<tr class="border-b last:border-0 hover:bg-slate-50">
+		<td class="py-2 px-3">
+			<div class="font-medium">{ p.Name }</div>
+			if p.Barcode != nil {
+				<div class="text-xs text-slate-400">{ *p.Barcode }</div>
+			}
+		</td>
+		<td class="py-2 px-3 text-slate-600">{ p.CategoryName }</td>
+		<td class="py-2 px-3 text-right">{ money.Format(symbol, p.SellingPrice) }</td>
+		<td class="py-2 px-3 text-right">
+			<span>{ money.Display(p.StockQty) } { p.UnitAbbr }</span>
+		</td>
+		<td class="py-2 px-3 text-center">
+			if p.IsLowStock() {
+				<span class="px-2 py-0.5 rounded-full text-xs bg-amber-100 text-amber-700">low</span>
+			} else {
+				<span class="px-2 py-0.5 rounded-full text-xs bg-emerald-100 text-emerald-700">ok</span>
+			}
+		</td>
+		<td class="py-2 px-3 text-right whitespace-nowrap">
+			<button
+				class="text-indigo-600 hover:underline text-sm"
+				hx-get={ "/admin/products/form/" + strconv.FormatInt(p.ID, 10) }
+				hx-target="#modal-container"
+				hx-swap="innerHTML"
+			>Edit</button>
+			<button
+				class="text-red-600 hover:underline text-sm ml-3"
+				hx-delete={ "/admin/products/" + strconv.FormatInt(p.ID, 10) }
+				hx-swap="none"
+				hx-confirm={ "Delete " + p.Name + "?" }
+			>Delete</button>
+		</td>
+	</tr>
+}
+
+// ProductForm is the create/edit modal. A nil product means "create".
+templ ProductForm(p *products.Product, cats []categories.Category, us []units.Unit) {
+	<div
+		class="fixed inset-0 bg-black/40 flex items-center justify-center z-40 p-4"
+		x-data
+		x-on:click.self="$dispatch('close-modal')"
+	>
+		<div class="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-full overflow-auto">
+			<div class="flex items-center justify-between px-6 py-4 border-b">
+				<h3 class="text-lg font-semibold">
+					if p == nil {
+						New Product
+					} else {
+						Edit Product
+					}
+				</h3>
+				<button class="text-slate-400 hover:text-slate-600" x-on:click="$dispatch('close-modal')">✕</button>
+			</div>
+			<form
+				class="p-6 space-y-4"
+				if p == nil {
+					hx-post="/admin/products"
+				} else {
+					hx-put={ "/admin/products/" + strconv.FormatInt(p.ID, 10) }
+				}
+				hx-swap="none"
+			>
+				<div>
+					<label class="block text-sm font-medium mb-1">Name</label>
+					<input name="name" required value={ valOf(p, fName) } class="w-full border rounded-lg px-3 py-2"/>
+				</div>
+				<div class="grid grid-cols-2 gap-4">
+					<div>
+						<label class="block text-sm font-medium mb-1">Category</label>
+						<select name="category_id" required class="w-full border rounded-lg px-3 py-2">
+							for _, c := range cats {
+								<option value={ strconv.FormatInt(c.ID, 10) } selected?={ p != nil && p.CategoryID == c.ID }>{ c.Name }</option>
+							}
+						</select>
+					</div>
+					<div>
+						<label class="block text-sm font-medium mb-1">Unit</label>
+						<select name="unit_id" required class="w-full border rounded-lg px-3 py-2">
+							for _, u := range us {
+								<option value={ strconv.FormatInt(u.ID, 10) } selected?={ p != nil && p.UnitID == u.ID }>{ u.Name } ({ u.Abbreviation })</option>
+							}
+						</select>
+					</div>
+				</div>
+				<div>
+					<label class="block text-sm font-medium mb-1">Barcode</label>
+					<input name="barcode" value={ valOf(p, fBarcode) } class="w-full border rounded-lg px-3 py-2"/>
+				</div>
+				<div class="grid grid-cols-3 gap-4">
+					<div>
+						<label class="block text-sm font-medium mb-1">Cost</label>
+						<input name="cost_price" type="number" step="0.01" min="0" value={ valOf(p, fCost) } class="w-full border rounded-lg px-3 py-2"/>
+					</div>
+					<div>
+						<label class="block text-sm font-medium mb-1">Selling</label>
+						<input name="selling_price" type="number" step="0.01" min="0" value={ valOf(p, fSelling) } class="w-full border rounded-lg px-3 py-2"/>
+					</div>
+					<div>
+						<label class="block text-sm font-medium mb-1">Wholesale</label>
+						<input name="wholesale_price" type="number" step="0.01" min="0" value={ valOf(p, fWholesale) } class="w-full border rounded-lg px-3 py-2"/>
+					</div>
+				</div>
+				<div class="grid grid-cols-2 gap-4">
+					<div>
+						<label class="block text-sm font-medium mb-1">Tax %</label>
+						<input name="tax_rate" type="number" step="0.01" min="0" value={ valOf(p, fTax) } class="w-full border rounded-lg px-3 py-2"/>
+					</div>
+					<div>
+						<label class="block text-sm font-medium mb-1">Reorder Level</label>
+						<input name="reorder_level" type="number" min="0" value={ valOf(p, fReorder) } class="w-full border rounded-lg px-3 py-2"/>
+					</div>
+				</div>
+				<div class="flex justify-end gap-3 pt-2">
+					<button type="button" class="px-4 py-2 rounded-lg border" x-on:click="$dispatch('close-modal')">Cancel</button>
+					<button type="submit" class="px-4 py-2 rounded-lg bg-indigo-600 text-white">Save</button>
+				</div>
+			</form>
+		</div>
+	</div>
+}

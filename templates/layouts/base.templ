@@ -1,0 +1,52 @@
+package layouts
+
+// Base is the bare HTML shell: head assets, a global toast host, and a modal
+// container that HTMX swaps fragments into. Pages with chrome (admin sidebar,
+// cashier topbar) compose this via Admin()/Cashier() below.
+templ Base(title string) {
+	<!DOCTYPE html>
+	<html lang="en" class="h-full">
+		<head>
+			<meta charset="UTF-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<title>{ title } — POS</title>
+			<script src="/static/vendor/htmx.min.js"></script>
+			<script src="/static/js/app.js"></script>
+			<script defer src="/static/vendor/alpine.min.js"></script>
+			<script src="/static/vendor/tailwind.js"></script>
+			<link rel="stylesheet" href="/static/css/app.css"/>
+		</head>
+		<body class="h-full bg-slate-100 text-slate-800">
+			{ children... }
+			@ToastHost()
+			@ModalHost()
+		</body>
+	</html>
+}
+
+// ToastHost listens for HX-Trigger "show-toast" events and renders transient
+// toasts. The toastHost() Alpine component lives in /static/js/app.js.
+templ ToastHost() {
+	<div
+		x-data="toastHost()"
+		x-on:show-toast.window="push($event.detail)"
+		class="fixed top-4 right-4 z-50 flex flex-col gap-2 w-80"
+	>
+		<template x-for="t in toasts" x-bind:key="t.id">
+			<div
+				class="px-4 py-3 rounded-lg shadow-lg text-white text-sm"
+				x-bind:class="t.level==='error' ? 'bg-red-600' : (t.level==='success' ? 'bg-emerald-600' : 'bg-slate-800')"
+				x-text="t.message"
+			></div>
+		</template>
+	</div>
+}
+
+// ModalHost is the swap target for form fragments; "close-modal" empties it.
+templ ModalHost() {
+	<div
+		id="modal-container"
+		x-data
+		x-on:close-modal.window="$el.innerHTML=''"
+	></div>
+}

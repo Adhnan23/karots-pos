@@ -1,0 +1,245 @@
+package cashierpages
+
+import "karots-pos/templates/layouts"
+
+type POSData struct {
+	CashierName     string
+	Role            string
+	Symbol          string
+	DefaultSaleType string
+}
+
+// POS is the cashier terminal. Almost all interactivity is driven by the pos()
+// Alpine component (in /static/js/app.js): product search, barcode scan, cart
+// math (a preview — the server recomputes authoritatively), checkout, and the
+// cash-drawer session.
+templ POS(d POSData) {
+	@layouts.Cashier("Cashier", d.CashierName, d.Role, "pos") {
+		<div
+			class="h-full"
+			x-data={ "pos('" + d.Symbol + "', '" + d.DefaultSaleType + "')" }
+			x-init="init()"
+		>
+			<!-- Register closed overlay: count the opening float by denomination -->
+			<div x-show="!session" x-cloak class="absolute inset-0 bg-slate-100/95 z-30 flex items-center justify-center p-4 overflow-auto">
+				<div class="bg-white rounded-2xl shadow p-6 w-full max-w-md max-h-full overflow-auto">
+					<h2 class="text-xl font-bold mb-1">Open Register</h2>
+					<p class="text-sm text-slate-500 mb-3">Count the cash in the drawer — how many of each note and coin.</p>
+
+					<!-- Reopen options: continue with last close, or start fresh -->
+					<div x-show="lastClosing !== null" class="flex flex-wrap gap-2 mb-3 text-sm">
+						<button type="button" x-on:click="useLastCounts()" class="px-3 py-1.5 rounded-lg bg-indigo-50 text-indigo-700 font-medium">
+							Continue last (<span x-text="sym + ' ' + money(lastClosing)"></span>)
+						</button>
+						<button type="button" x-on:click="clearCounts('openCounts')" class="px-3 py-1.5 rounded-lg border text-slate-600">Count fresh</button>
+					</div>
+
+					<div class="space-y-1.5 max-h-72 overflow-auto pr-1">
+						<template x-for="d in denoms" x-bind:key="d.id">
+							<div class="flex items-center gap-3">
+								<div class="w-24 text-sm" x-text="sym + ' ' + money(d.value)"></div>
+								<span class="text-slate-400">×</span>
+								<input type="number" min="0" step="1" x-model.number="openCounts[d.value]" class="w-20 border rounded px-2 py-1 text-right"/>
+								<div class="flex-1 text-right text-sm text-slate-600" x-text="sym + ' ' + money((Number(openCounts[d.value])||0) * Number(d.value))"></div>
+							</div>
+						</template>
+						<template x-if="denoms.length === 0">
+							<p class="text-sm text-slate-400 py-2">No denominations set up. Ask an admin to add notes/coins.</p>
+						</template>
+					</div>
+
+					<div class="flex justify-between items-center border-t mt-3 pt-3">
+						<span class="font-medium">Opening float</span>
+						<span class="text-xl font-bold" x-text="sym + ' ' + money(countTotal(openCounts))"></span>
+					</div>
+					<button x-on:click="openRegister()" class="w-full mt-3 py-2.5 rounded-lg bg-indigo-600 text-white font-medium">Open Register</button>
+				</div>
+			</div>
+
+			<div class="h-full grid grid-cols-1 lg:grid-cols-5 gap-0">
+				<!-- Catalog / lookup -->
+				<section class="lg:col-span-3 p-5 overflow-auto h-full">
+					<div class="flex gap-3 mb-4">
+						<input
+							type="text"
+							x-model="scan"
+							x-on:keydown.enter.prevent="scanBarcode()"
+							placeholder="Scan barcode + Enter"
+							class="flex-1 border rounded-lg px-3 py-2.5"
+							autofocus
+						/>
+						<input
+							type="search"
+							x-model="search"
+							x-on:input.debounce.300ms="loadProducts()"
+							placeholder="Search products…"
+							class="flex-1 border rounded-lg px-3 py-2.5"
+						/>
+					</div>
+					<div class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3">
+						<template x-for="p in products" x-bind:key="p.id">
+							<button
+								x-on:click="addToCart(p)"
+								class="text-left p-3 rounded-xl bg-white shadow-sm hover:ring-2 hover:ring-indigo-400 disabled:opacity-40"
+								x-bind:disabled="Number(p.stock_qty) <= 0"
+							>
+								<div class="font-medium text-sm leading-tight" x-text="p.name"></div>
+								<div class="text-indigo-600 font-semibold mt-1" x-text="sym + ' ' + money(p.selling_price)"></div>
+								<div class="text-xs text-slate-400 mt-0.5">
+									<span x-text="'Stock: ' + money3(p.stock_qty)"></span>
+									<span x-text="p.unit_abbr"></span>
+								</div>
+							</button>
+						</template>
+						<template x-if="products.length === 0">
+							<div class="col-span-full text-center text-slate-400 py-10">No products found.</div>
+						</template>
+					</div>
+				</section>
+
+				<!-- Cart -->
+				<aside class="lg:col-span-2 bg-white border-l flex flex-col h-full">
+					<div class="p-4 border-b flex items-center gap-3">
+						<select x-model="saleType" class="border rounded-lg px-2 py-1.5 text-sm">
+							<option value="retail">Retail</option>
+							<option value="wholesale">Wholesale</option>
+							<option value="credit">Credit</option>
+						</select>
+						<select x-model="customerId" class="flex-1 border rounded-lg px-2 py-1.5 text-sm">
+							<option value="">Walk-in</option>
+							<template x-for="c in customers" x-bind:key="c.id">
+								<option x-bind:value="c.id" x-text="c.name"></option>
+							</template>
+						</select>
+					</div>
+
+					<div class="flex-1 overflow-auto p-4 space-y-2">
+						<template x-for="(it, idx) in cart" x-bind:key="it.id">
+							<div class="flex items-center gap-2">
+								<div class="flex-1 min-w-0">
+									<div class="text-sm font-medium truncate" x-text="it.name"></div>
+									<div class="text-xs text-slate-400" x-text="sym + ' ' + money(it.unit_price) + ' × '"></div>
+								</div>
+								<input type="number" step="0.001" min="0" x-model.number="it.qty" x-on:input="clampQty(it)" class="w-20 border rounded px-2 py-1 text-right text-sm"/>
+								<div class="w-24 text-right text-sm font-medium" x-text="sym + ' ' + money(lineTotal(it))"></div>
+								<button x-on:click="removeItem(idx)" class="text-red-500 px-1">✕</button>
+							</div>
+						</template>
+						<template x-if="cart.length === 0">
+							<div class="text-center text-slate-400 py-10">Cart is empty</div>
+						</template>
+					</div>
+
+					<div class="border-t p-4 space-y-2">
+						<div class="flex justify-between text-sm">
+							<span>Subtotal</span><span x-text="sym + ' ' + money(subtotal())"></span>
+						</div>
+						<div class="flex justify-between text-sm items-center">
+							<span>Discount</span>
+							<input type="number" step="0.01" min="0" x-model.number="discount" class="w-28 border rounded px-2 py-1 text-right"/>
+						</div>
+						<div class="flex justify-between text-lg font-bold">
+							<span>Total</span><span x-text="sym + ' ' + money(total())"></span>
+						</div>
+						<div class="flex justify-between text-sm items-center">
+							<span>Cash</span>
+							<input type="number" step="0.01" min="0" x-model.number="cash" class="w-28 border rounded px-2 py-1 text-right"/>
+						</div>
+						<div class="flex justify-between text-sm" x-show="cash > 0">
+							<span>Change</span><span x-text="sym + ' ' + money(Math.max(0, cash - total()))"></span>
+						</div>
+						<button
+							x-on:click="checkout()"
+							x-bind:disabled="cart.length === 0 || busy"
+							class="w-full py-3 rounded-lg bg-emerald-600 text-white font-semibold disabled:opacity-40"
+						>Complete Sale</button>
+						<div x-show="summary && summary.expected !== undefined" class="flex justify-between text-xs text-slate-500 pt-1">
+							<span>Expected in drawer</span>
+							<span x-text="summary ? (sym + ' ' + money(summary.expected)) : ''"></span>
+						</div>
+						<div class="flex gap-2">
+							<button x-on:click="showWithdraw = true" class="flex-1 py-2 rounded-lg border text-sm text-slate-600">Withdraw</button>
+							<button x-on:click="startClose()" class="flex-1 py-2 rounded-lg border text-sm text-slate-600">Close Register</button>
+						</div>
+					</div>
+				</aside>
+			</div>
+
+			<!-- Withdraw modal -->
+			<div x-show="showWithdraw" x-cloak class="fixed inset-0 bg-black/40 z-40 flex items-center justify-center p-4">
+				<div class="bg-white rounded-2xl shadow-xl w-80 p-6">
+					<h3 class="text-lg font-semibold mb-1">Withdraw Cash</h3>
+					<p class="text-sm text-slate-500 mb-4">Take cash out of the drawer (banked, paid out, etc.).</p>
+					<label class="block text-sm font-medium mb-1">Amount</label>
+					<input type="number" step="0.01" min="0" x-model.number="withdrawAmount" class="w-full border rounded-lg px-3 py-2 mb-3"/>
+					<label class="block text-sm font-medium mb-1">Reason</label>
+					<input x-model="withdrawReason" class="w-full border rounded-lg px-3 py-2 mb-4" placeholder="banked, supplier paid…"/>
+					<div class="flex gap-2">
+						<button x-on:click="showWithdraw = false" class="flex-1 py-2 rounded-lg border">Cancel</button>
+						<button x-on:click="withdraw()" class="flex-1 py-2 rounded-lg bg-rose-600 text-white font-medium">Withdraw</button>
+					</div>
+				</div>
+			</div>
+
+			<!-- Close register modal: count the drawer, then show reconciliation -->
+			<div x-show="showClose" x-cloak class="fixed inset-0 bg-black/40 z-40 flex items-center justify-center p-4 overflow-auto">
+				<div class="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-full overflow-auto p-6">
+					<template x-if="!closeResult">
+						<div>
+							<h3 class="text-lg font-semibold mb-1">Close Register</h3>
+							<p class="text-sm text-slate-500 mb-3">Count the drawer to close the session.</p>
+							<div class="space-y-1.5 max-h-72 overflow-auto pr-1">
+								<template x-for="d in denoms" x-bind:key="d.id">
+									<div class="flex items-center gap-3">
+										<div class="w-24 text-sm" x-text="sym + ' ' + money(d.value)"></div>
+										<span class="text-slate-400">×</span>
+										<input type="number" min="0" step="1" x-model.number="closeCounts[d.value]" class="w-20 border rounded px-2 py-1 text-right"/>
+										<div class="flex-1 text-right text-sm text-slate-600" x-text="sym + ' ' + money((Number(closeCounts[d.value])||0) * Number(d.value))"></div>
+									</div>
+								</template>
+							</div>
+							<div class="flex justify-between items-center border-t mt-3 pt-3">
+								<span class="font-medium">Counted</span>
+								<span class="text-xl font-bold" x-text="sym + ' ' + money(countTotal(closeCounts))"></span>
+							</div>
+							<div class="flex gap-2 mt-3">
+								<button x-on:click="showClose = false" class="flex-1 py-2 rounded-lg border">Cancel</button>
+								<button x-on:click="submitClose()" class="flex-1 py-2 rounded-lg bg-slate-800 text-white font-medium">Close &amp; Reconcile</button>
+							</div>
+						</div>
+					</template>
+					<template x-if="closeResult">
+						<div class="text-center">
+							<h3 class="text-lg font-semibold mb-3">Session Closed</h3>
+							<div class="text-sm space-y-1 text-left bg-slate-50 rounded-lg p-4">
+								<div class="flex justify-between"><span>Cash sales</span><span x-text="sym + ' ' + money(closeResult.cash_sales)"></span></div>
+								<div class="flex justify-between"><span>Expected</span><span x-text="sym + ' ' + money(closeResult.expected_cash)"></span></div>
+								<div class="flex justify-between"><span>Counted</span><span x-text="sym + ' ' + money(closeResult.session.closing_cash)"></span></div>
+								<div class="flex justify-between font-semibold border-t pt-1" x-bind:class="Number(closeResult.difference) < 0 ? 'text-rose-600' : 'text-emerald-600'">
+									<span>Over / Short</span><span x-text="sym + ' ' + money(closeResult.difference)"></span>
+								</div>
+							</div>
+							<button x-on:click="showClose = false; closeResult = null" class="w-full mt-4 py-2.5 rounded-lg bg-indigo-600 text-white font-medium">Done</button>
+						</div>
+					</template>
+				</div>
+			</div>
+
+			<!-- Receipt modal -->
+			<div x-show="receipt" x-cloak class="fixed inset-0 bg-black/40 z-40 flex items-center justify-center p-4">
+				<div class="bg-white rounded-2xl shadow-xl w-80 max-h-full overflow-auto">
+					<div class="p-5 text-center">
+						<div class="text-lg font-bold">Sale Complete</div>
+						<div class="text-sm text-slate-500" x-text="receipt && receipt.sale.receipt_no"></div>
+						<div class="text-3xl font-bold my-3" x-text="receipt && (sym + ' ' + money(receipt.sale.total))"></div>
+						<div class="text-sm" x-show="receipt && Number(receipt.sale.change_given) > 0">
+							Change: <span x-text="receipt && (sym + ' ' + money(receipt.sale.change_given))"></span>
+						</div>
+						<button x-on:click="printReceipt()" class="w-full mt-4 py-2.5 rounded-lg bg-slate-800 text-white font-medium">🧾 Print Bill</button>
+						<button x-on:click="newSale()" class="w-full mt-2 py-2.5 rounded-lg bg-indigo-600 text-white font-medium">New Sale</button>
+					</div>
+				</div>
+			</div>
+		</div>
+	}
+}

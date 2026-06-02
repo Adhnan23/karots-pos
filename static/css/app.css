@@ -1,0 +1,90 @@
+/* Minimal supplemental styles. Tailwind utility classes come from the CDN. */
+[x-cloak] {
+  display: none !important;
+}
+
+/* ---------------- Thermal receipt (80mm / 58mm) ---------------- */
+.receipt-body {
+  background: #f1f5f9;
+  margin: 0;
+  font-family: "Courier New", ui-monospace, monospace;
+  color: #000;
+}
+.receipt {
+  width: 80mm;
+  box-sizing: border-box;
+  margin: 8px auto;
+  padding: 6px 8px;
+  background: #fff;
+  font-size: 12px;
+  line-height: 1.35;
+}
+.receipt.narrow { width: 58mm; }
+.r-logo { max-height: 56px; max-width: 90%; object-fit: contain; margin: 0 auto 4px; }
+.r-center { text-align: center; }
+.r-right { text-align: right; }
+.r-cap { text-transform: capitalize; }
+.r-shop { font-size: 15px; font-weight: 700; }
+.r-small { font-size: 11px; }
+.r-hr { border-top: 1px dashed #000; margin: 4px 0; }
+.r-row { display: flex; justify-content: space-between; gap: 8px; }
+.r-total { font-weight: 700; font-size: 14px; margin: 2px 0; }
+.r-items { width: 100%; border-collapse: collapse; }
+.r-items td { padding: 0; vertical-align: top; }
+.r-item-name td { padding-top: 3px; font-weight: 600; }
+.r-print-btn { text-align: center; margin-top: 10px; }
+.r-print-btn button {
+  padding: 8px 18px;
+  border: 0;
+  border-radius: 8px;
+  background: #4f46e5;
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+@media print {
+  .receipt-body { background: #fff; }
+  .receipt { width: 80mm; margin: 0; padding: 0 2mm; }
+  .receipt.narrow { width: 58mm; }
+  .r-print-btn { display: none !important; }
+  @page { margin: 0; }
+}
+
+/* ---------------- Barcode label sheet ---------------- */
+.label-body { background: #f1f5f9; margin: 0; font-family: system-ui, sans-serif; color: #000; }
+.label-toolbar {
+  position: sticky; top: 0; display: flex; align-items: center; gap: 12px;
+  padding: 10px 16px; background: #fff; border-bottom: 1px solid #e2e8f0;
+}
+.label-toolbar button {
+  padding: 6px 16px; border: 0; border-radius: 8px; background: #4f46e5; color: #fff; cursor: pointer;
+}
+.label-sheet {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 4mm;
+  padding: 6mm; max-width: 210mm; margin: 0 auto;
+}
+.label {
+  border: 1px dashed #cbd5e1; border-radius: 4px; padding: 4px 6px;
+  text-align: center; background: #fff; break-inside: avoid;
+}
+.label-shop { font-size: 9px; color: #64748b; }
+.label-name { font-size: 11px; font-weight: 600; margin: 1px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.label .barcode { width: 100%; height: 40px; }
+.label-price { font-size: 13px; font-weight: 700; }
+
+@media print {
+  .label-body { background: #fff; }
+  .label-toolbar { display: none !important; }
+  .label-sheet { padding: 0; gap: 2mm; }
+  .label { border: none; }
+  @page { margin: 6mm; }
+}
+
+/* Management reports: print as a clean full-width sheet. */
+@media print {
+  .no-print { display: none !important; }
+  .report-body { background: #fff !important; }
+  .report-sheet { max-width: none !important; margin: 0 !important; padding: 0 !important; box-shadow: none !important; border-radius: 0 !important; }
+  @page { margin: 12mm; }
+}

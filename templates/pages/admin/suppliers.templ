@@ -1,0 +1,114 @@
+package adminpages
+
+import (
+	"strconv"
+
+	"karots-pos/internal/features/suppliers"
+	"karots-pos/internal/money"
+	"karots-pos/templates/layouts"
+)
+
+type SuppliersData struct {
+	UserName string
+	Symbol   string
+	Rows     []suppliers.Supplier
+}
+
+templ SuppliersPage(d SuppliersData) {
+	@layouts.Admin("Suppliers", d.UserName, "suppliers") {
+		<div class="flex items-center justify-between mb-6">
+			<h1 class="text-2xl font-bold">Suppliers</h1>
+			<button class="px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium"
+				hx-get="/admin/suppliers/form" hx-target="#modal-container" hx-swap="innerHTML">+ New Supplier</button>
+		</div>
+		<div class="bg-white rounded-2xl shadow-sm p-6">
+			<table class="w-full text-sm">
+				<thead class="text-left text-slate-500 border-b">
+					<tr>
+						<th class="py-2 px-3">Name</th>
+						<th class="py-2 px-3">Contact</th>
+						<th class="py-2 px-3">Phone</th>
+						<th class="py-2 px-3 text-center">Credit Days</th>
+						<th class="py-2 px-3 text-right">Payable</th>
+						<th class="py-2 px-3"></th>
+					</tr>
+				</thead>
+				<tbody id="supplier-tbody" hx-get="/admin/suppliers/table" hx-trigger="reload-suppliers from:body" hx-target="#supplier-tbody" hx-swap="innerHTML">
+					@SupplierRows(d.Rows, d.Symbol)
+				</tbody>
+			</table>
+		</div>
+	}
+}
+
+templ SupplierRows(rows []suppliers.Supplier, symbol string) {
+	if len(rows) == 0 {
+		<tr><td colspan="6" class="py-6 text-center text-slate-500">No suppliers yet.</td></tr>
+	} else {
+		for _, s := range rows {
+			<tr class="border-b last:border-0">
+				<td class="py-2 px-3 font-medium">{ s.Name }</td>
+				<td class="py-2 px-3">{ strOrEmpty(s.ContactPerson) }</td>
+				<td class="py-2 px-3">{ strOrEmpty(s.Phone) }</td>
+				<td class="py-2 px-3 text-center">{ strconv.Itoa(s.CreditDays) }</td>
+				<td class="py-2 px-3 text-right">{ money.Format(symbol, s.OutstandingBalance) }</td>
+				<td class="py-2 px-3 text-right whitespace-nowrap">
+					<button class="text-indigo-600 hover:underline" hx-get={ "/admin/suppliers/form/" + strconv.FormatInt(s.ID, 10) } hx-target="#modal-container" hx-swap="innerHTML">Edit</button>
+					<button class="text-emerald-600 hover:underline ml-3" hx-get={ "/admin/suppliers/pay/" + strconv.FormatInt(s.ID, 10) } hx-target="#modal-container" hx-swap="innerHTML">Pay</button>
+					<button class="text-red-600 hover:underline ml-3" hx-delete={ "/admin/suppliers/" + strconv.FormatInt(s.ID, 10) } hx-swap="none" hx-confirm={ "Remove supplier " + s.Name + "?" }>Delete</button>
+				</td>
+			</tr>
+		}
+	}
+}
+
+templ SupplierForm(s *suppliers.Supplier) {
+	@modalShell(ternary(s == nil, "New Supplier", "Edit Supplier")) {
+		<form class="p-6 space-y-4"
+			if s == nil {
+				hx-post="/admin/suppliers"
+			} else {
+				hx-put={ "/admin/suppliers/" + strconv.FormatInt(s.ID, 10) }
+			}
+			hx-swap="none">
+			<div>
+				<label class="block text-sm font-medium mb-1">Name</label>
+				<input name="name" required value={ supVal(s, "name") } class="w-full border rounded-lg px-3 py-2"/>
+			</div>
+			<div class="grid grid-cols-2 gap-4">
+				<div>
+					<label class="block text-sm font-medium mb-1">Contact Person</label>
+					<input name="contact_person" value={ supVal(s, "contact") } class="w-full border rounded-lg px-3 py-2"/>
+				</div>
+				<div>
+					<label class="block text-sm font-medium mb-1">Phone</label>
+					<input name="phone" value={ supVal(s, "phone") } class="w-full border rounded-lg px-3 py-2"/>
+				</div>
+			</div>
+			<div class="grid grid-cols-2 gap-4">
+				<div>
+					<label class="block text-sm font-medium mb-1">Credit Days</label>
+					<input name="credit_days" type="number" min="0" value={ supVal(s, "credit_days") } class="w-full border rounded-lg px-3 py-2"/>
+				</div>
+			</div>
+			<div>
+				<label class="block text-sm font-medium mb-1">Address</label>
+				<input name="address" value={ supVal(s, "address") } class="w-full border rounded-lg px-3 py-2"/>
+			</div>
+			@modalButtons()
+		</form>
+	}
+}
+
+templ SupplierPaymentForm(s suppliers.Supplier, symbol string) {
+	@modalShell("Pay Supplier") {
+		<form class="p-6 space-y-4" hx-post={ "/admin/suppliers/" + strconv.FormatInt(s.ID, 10) + "/payment" } hx-swap="none">
+			<p class="text-sm text-slate-600">{ s.Name } — currently owed <span class="font-semibold">{ money.Format(symbol, s.OutstandingBalance) }</span></p>
+			<div>
+				<label class="block text-sm font-medium mb-1">Payment Amount</label>
+				<input name="amount" type="number" step="0.01" min="0" required class="w-full border rounded-lg px-3 py-2"/>
+			</div>
+			@modalButtons()
+		</form>
+	}
+}

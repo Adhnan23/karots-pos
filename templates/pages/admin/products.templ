@@ -1,0 +1,123 @@
+package adminpages
+
+import (
+	"strconv"
+
+	"karots-pos/internal/features/categories"
+	"karots-pos/internal/features/products"
+	adminfragments "karots-pos/templates/fragments/admin"
+	"karots-pos/templates/layouts"
+)
+
+type ProductsData struct {
+	UserName   string
+	Symbol     string
+	Rows       []products.Product
+	Categories []categories.TreeNode
+	Page       int
+	HasNext    bool
+	Search     string
+	CategoryID string
+}
+
+templ ProductsPage(d ProductsData) {
+	@layouts.Admin("Products", d.UserName, "products") {
+		<div class="flex items-center justify-between mb-6">
+			<h1 class="text-2xl font-bold">Products</h1>
+			<button
+				class="px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium"
+				hx-get="/admin/products/form"
+				hx-target="#modal-container"
+				hx-swap="innerHTML"
+			>+ New Product</button>
+		</div>
+
+		<div class="bg-white rounded-2xl shadow-sm p-6">
+			<form
+				id="product-filter-form"
+				class="flex flex-wrap gap-3 mb-4"
+				hx-get="/admin/products/table"
+				hx-trigger="input changed delay:300ms from:input[name='search'], change from:select, reload-products from:body"
+				hx-target="#product-list"
+				hx-swap="innerHTML"
+			>
+				<input
+					type="search"
+					name="search"
+					value={ d.Search }
+					placeholder="Search by name or barcode…"
+					class="flex-1 min-w-[14rem] max-w-sm border rounded-lg px-3 py-2"
+				/>
+				<select name="category_id" class="border rounded-lg px-3 py-2">
+					<option value="">All categories</option>
+					for _, c := range d.Categories {
+						@categoryFilterOption(c, d.CategoryID)
+					}
+				</select>
+			</form>
+			<div id="product-list">
+				@ProductList(d)
+			</div>
+		</div>
+	}
+}
+
+// ProductList is the swappable region: the table plus the pager. Returned both on
+// first paint and by the /admin/products/table fragment endpoint.
+templ ProductList(d ProductsData) {
+	<table class="w-full text-sm">
+		<thead class="text-left text-slate-500 border-b">
+			<tr>
+				<th class="py-2 px-3">Product</th>
+				<th class="py-2 px-3">Category</th>
+				<th class="py-2 px-3 text-right">Price</th>
+				<th class="py-2 px-3 text-right">Stock</th>
+				<th class="py-2 px-3 text-center">Status</th>
+				<th class="py-2 px-3"></th>
+			</tr>
+		</thead>
+		<tbody>
+			@adminfragments.ProductTable(d.Rows, d.Symbol)
+		</tbody>
+	</table>
+	@pager(d.Page, d.HasNext, "/admin/products/table", "#product-list", "#product-filter-form")
+}
+
+templ categoryFilterOption(c categories.TreeNode, selected string) {
+	if strconv.FormatInt(c.ID, 10) == selected {
+		<option value={ strconv.FormatInt(c.ID, 10) } selected>{ indent(c.Depth) }{ c.Name }</option>
+	} else {
+		<option value={ strconv.FormatInt(c.ID, 10) }>{ indent(c.Depth) }{ c.Name }</option>
+	}
+}
+
+// pager renders Prev/Next that reload `target` from `endpoint`, carrying the
+// current filters via hx-include and the page number in the URL.
+templ pager(page int, hasNext bool, endpoint, target, include string) {
+	if page > 1 || hasNext {
+		<div class="flex items-center justify-end gap-2 mt-4 text-sm">
+			if page > 1 {
+				<button class="px-3 py-1.5 rounded-lg border hover:bg-slate-50"
+					hx-get={ endpoint + "?page=" + strconv.Itoa(page-1) }
+					hx-include={ include } hx-target={ target } hx-swap="innerHTML">← Prev</button>
+			}
+			<span class="text-slate-500">Page { strconv.Itoa(page) }</span>
+			if hasNext {
+				<button class="px-3 py-1.5 rounded-lg border hover:bg-slate-50"
+					hx-get={ endpoint + "?page=" + strconv.Itoa(page+1) }
+					hx-include={ include } hx-target={ target } hx-swap="innerHTML">Next →</button>
+			}
+		</div>
+	}
+}
+
+func indent(depth int) string {
+	s := ""
+	for i := 0; i < depth; i++ {
+		s += "   "
+	}
+	if depth > 0 {
+		s += "↳ "
+	}
+	return s
+}

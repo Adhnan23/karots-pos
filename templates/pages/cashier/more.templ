@@ -1,0 +1,259 @@
+package cashierpages
+
+import (
+	"strconv"
+
+	"karots-pos/internal/features/customers"
+	"karots-pos/internal/features/products"
+	"karots-pos/internal/features/sales"
+	"karots-pos/internal/money"
+	"karots-pos/templates/layouts"
+)
+
+// cashierModal mirrors the admin modalShell so cashier fragments can be swapped
+// into #modal-container and dismissed with the "close-modal" event.
+templ cashierModal(title string) {
+	<div class="fixed inset-0 bg-black/40 flex items-center justify-center z-40 p-4" x-data x-on:click.self="$dispatch('close-modal')">
+		<div class="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-full overflow-auto">
+			<div class="flex items-center justify-between px-6 py-4 border-b">
+				<h3 class="text-lg font-semibold">{ title }</h3>
+				<button class="text-slate-400 hover:text-slate-600" x-on:click="$dispatch('close-modal')">✕</button>
+			</div>
+			{ children... }
+		</div>
+	</div>
+}
+
+// ====================== Returns ======================
+
+type ReturnsData struct {
+	CashierName string
+	Role        string
+	Symbol      string
+	Sales       []sales.Sale
+}
+
+templ Returns(d ReturnsData) {
+	@layouts.Cashier("Returns", d.CashierName, d.Role, "returns") {
+		<div class="h-full overflow-auto p-6">
+			<div class="max-w-4xl mx-auto">
+				<h1 class="text-xl font-bold mb-1">Returns &amp; Refunds</h1>
+				<p class="text-sm text-slate-500 mb-4">Find a recent sale and return individual items. Stock is added back and the refund/credit is reversed.</p>
+				<div id="csales" hx-get="/cashier/returns/table" hx-trigger="reload-csales from:body" hx-swap="innerHTML">
+					@ReturnsTable(d)
+				</div>
+			</div>
+		</div>
+	}
+}
+
+templ ReturnsTable(d ReturnsData) {
+	<div class="bg-white rounded-xl shadow-sm overflow-hidden">
+		<table class="w-full text-sm">
+			<thead class="text-left text-slate-500 border-b bg-slate-50">
+				<tr>
+					<th class="py-2 px-3">Receipt</th>
+					<th class="py-2 px-3">Type</th>
+					<th class="py-2 px-3 text-right">Total</th>
+					<th class="py-2 px-3 text-center">Status</th>
+					<th class="py-2 px-3"></th>
+				</tr>
+			</thead>
+			<tbody>
+				for _, s := range d.Sales {
+					<tr class="border-b last:border-0">
+						<td class="py-2 px-3 font-medium">{ s.ReceiptNo }</td>
+						<td class="py-2 px-3 capitalize text-slate-500">{ s.SaleType }</td>
+						<td class="py-2 px-3 text-right">{ money.Format(d.Symbol, s.Total) }</td>
+						<td class="py-2 px-3 text-center">
+							<span class="text-xs px-2 py-0.5 rounded-full bg-slate-100 capitalize">{ statusLabel(s.Status) }</span>
+						</td>
+						<td class="py-2 px-3 text-right whitespace-nowrap">
+							<a href={ templ.SafeURL("/cashier/receipt/" + strconv.FormatInt(s.ID, 10) + "?print=1") } target="_blank" class="text-indigo-600 hover:underline mr-3">Receipt</a>
+							if s.Status != "returned" {
+								<button
+									hx-get={ "/cashier/returns/" + strconv.FormatInt(s.ID, 10) }
+									hx-target="#modal-container"
+									class="text-rose-600 hover:underline"
+								>Return</button>
+							}
+						</td>
+					</tr>
+				}
+				if len(d.Sales) == 0 {
+					<tr><td colspan="5" class="text-center text-slate-400 py-8">No recent sales.</td></tr>
+				}
+			</tbody>
+		</table>
+	</div>
+}
+
+func statusLabel(s string) string {
+	switch s {
+	case "partially_returned":
+		return "partly returned"
+	default:
+		return s
+	}
+}
+
+// CashierReturnForm is the per-line return modal; it posts to the cashier
+// endpoint (accessible to all roles) rather than the admin-only API.
+templ CashierReturnForm(d sales.Detail) {
+	@cashierModal("Return — " + d.Sale.ReceiptNo) {
+		<form class="p-6 space-y-4" x-data={ "saleReturn(" + strconv.FormatInt(d.Sale.ID, 10) + ", {endpoint:'/cashier/sales/" + strconv.FormatInt(d.Sale.ID, 10) + "/partial-return', reload:'reload-csales'})" } x-on:submit.prevent="submit()">
+			<p class="text-sm text-slate-500">Enter the quantity to return for each line (max = remaining).</p>
+			<table class="w-full text-sm">
+				<thead class="text-left text-slate-500 border-b">
+					<tr><th class="py-1">Product</th><th class="py-1 text-right">Sold</th><th class="py-1 text-right">Returnable</th><th class="py-1 text-right w-28">Return qty</th></tr>
+				</thead>
+				<tbody>
+					for _, it := range d.Items {
+						if it.ReturnableQty().IsPositive() {
+							<tr class="border-b last:border-0">
+								<td class="py-1">{ it.ProductName }</td>
+								<td class="py-1 text-right">{ money.Display(it.Quantity) } { it.UnitAbbr }</td>
+								<td class="py-1 text-right">{ money.Display(it.ReturnableQty()) }</td>
+								<td class="py-1 text-right">
+									<input
+										type="number" step="0.001" min="0"
+										max={ it.ReturnableQty().String() }
+										value="0"
+										class="w-24 border rounded px-2 py-1 text-right"
+										x-on:input={ "setQty(" + strconv.FormatInt(it.ID, 10) + ", $event.target.value, " + it.ReturnableQty().String() + ")" }
+									/>
+								</td>
+							</tr>
+						}
+					}
+				</tbody>
+			</table>
+			<div>
+				<label class="block text-sm font-medium mb-1">Reason (optional)</label>
+				<input x-model="reason" class="w-full border rounded-lg px-3 py-2" placeholder="damaged, wrong item…"/>
+			</div>
+			<div class="flex justify-end gap-3 pt-2">
+				<button type="button" class="px-4 py-2 rounded-lg border" x-on:click="$dispatch('close-modal')">Cancel</button>
+				<button type="submit" x-bind:disabled="busy" class="px-4 py-2 rounded-lg bg-rose-600 text-white disabled:opacity-40">Process Return</button>
+			</div>
+		</form>
+	}
+}
+
+// ====================== Damage / write-off ======================
+
+type DamageData struct {
+	CashierName string
+	Role        string
+	Products    []products.Product
+}
+
+templ Damage(d DamageData) {
+	@layouts.Cashier("Damage", d.CashierName, d.Role, "damage") {
+		<div class="h-full overflow-auto p-6">
+			<div class="max-w-md mx-auto bg-white rounded-xl shadow-sm p-6">
+				<h1 class="text-xl font-bold mb-1">Record Damage / Write-off</h1>
+				<p class="text-sm text-slate-500 mb-4">Remove spoiled, broken or expired stock from inventory.</p>
+				<form class="space-y-4" hx-post="/cashier/damage" hx-swap="none" x-data x-on:reload-stock.window="$el.reset()">
+					<div>
+						<label class="block text-sm font-medium mb-1">Product</label>
+						<select name="product_id" required class="w-full border rounded-lg px-3 py-2">
+							for _, p := range d.Products {
+								<option value={ strconv.FormatInt(p.ID, 10) }>{ p.Name } (on hand { money.Display(p.StockQty) } { p.UnitAbbr })</option>
+							}
+						</select>
+					</div>
+					<div>
+						<label class="block text-sm font-medium mb-1">Quantity to write off</label>
+						<input name="quantity" type="number" step="0.001" min="0" required class="w-full border rounded-lg px-3 py-2"/>
+					</div>
+					<div>
+						<label class="block text-sm font-medium mb-1">Reason</label>
+						<input name="note" class="w-full border rounded-lg px-3 py-2" placeholder="spoilage, breakage, expiry…"/>
+					</div>
+					<button type="submit" class="w-full py-2.5 rounded-lg bg-rose-600 text-white font-medium">Write Off</button>
+				</form>
+			</div>
+		</div>
+	}
+}
+
+// ====================== Credit collection ======================
+
+type CreditData struct {
+	CashierName string
+	Role        string
+	Symbol      string
+	Customers   []customers.Customer
+}
+
+templ Credit(d CreditData) {
+	@layouts.Cashier("Credit", d.CashierName, d.Role, "credit") {
+		<div class="h-full overflow-auto p-6">
+			<div class="max-w-3xl mx-auto">
+				<h1 class="text-xl font-bold mb-1">Credit Collection</h1>
+				<p class="text-sm text-slate-500 mb-4">Customers who owe money. Collect a repayment against their balance.</p>
+				<div id="ccredit" hx-get="/cashier/credit/table" hx-trigger="reload-ccredit from:body" hx-swap="innerHTML">
+					@CreditTable(d)
+				</div>
+			</div>
+		</div>
+	}
+}
+
+templ CreditTable(d CreditData) {
+	<div class="bg-white rounded-xl shadow-sm overflow-hidden">
+		<table class="w-full text-sm">
+			<thead class="text-left text-slate-500 border-b bg-slate-50">
+				<tr>
+					<th class="py-2 px-3">Customer</th>
+					<th class="py-2 px-3">Phone</th>
+					<th class="py-2 px-3 text-right">Outstanding</th>
+					<th class="py-2 px-3"></th>
+				</tr>
+			</thead>
+			<tbody>
+				for _, c := range d.Customers {
+					<tr class="border-b last:border-0">
+						<td class="py-2 px-3 font-medium">{ c.Name }</td>
+						<td class="py-2 px-3 text-slate-500">{ strOrDash(c.Phone) }</td>
+						<td class="py-2 px-3 text-right font-medium text-rose-600">{ money.Format(d.Symbol, c.OutstandingBalance) }</td>
+						<td class="py-2 px-3 text-right">
+							<button
+								hx-get={ "/cashier/credit/pay/" + strconv.FormatInt(c.ID, 10) }
+								hx-target="#modal-container"
+								class="text-emerald-600 hover:underline"
+							>Collect</button>
+						</td>
+					</tr>
+				}
+				if len(d.Customers) == 0 {
+					<tr><td colspan="4" class="text-center text-slate-400 py-8">No outstanding balances. 🎉</td></tr>
+				}
+			</tbody>
+		</table>
+	</div>
+}
+
+templ CreditPayForm(c customers.Customer, symbol string) {
+	@cashierModal("Collect Payment") {
+		<form class="p-6 space-y-4" hx-post={ "/cashier/credit/" + strconv.FormatInt(c.ID, 10) + "/payment" } hx-swap="none">
+			<p class="text-sm text-slate-600">{ c.Name } — outstanding <span class="font-semibold">{ money.Format(symbol, c.OutstandingBalance) }</span></p>
+			<div>
+				<label class="block text-sm font-medium mb-1">Payment Amount</label>
+				<input name="amount" type="number" step="0.01" min="0" required class="w-full border rounded-lg px-3 py-2"/>
+			</div>
+			<div class="flex justify-end gap-3 pt-2">
+				<button type="button" class="px-4 py-2 rounded-lg border" x-on:click="$dispatch('close-modal')">Cancel</button>
+				<button type="submit" class="px-4 py-2 rounded-lg bg-emerald-600 text-white">Collect</button>
+			</div>
+		</form>
+	}
+}
+
+func strOrDash(s *string) string {
+	if s == nil || *s == "" {
+		return "—"
+	}
+	return *s
+}

@@ -1,0 +1,95 @@
+package adminpages
+
+import (
+	"strconv"
+
+	"karots-pos/internal/features/sales"
+	"karots-pos/internal/money"
+	"karots-pos/templates/layouts"
+
+	"github.com/shopspring/decimal"
+)
+
+// DashboardData is the view model for the admin home.
+type DashboardData struct {
+	UserName       string
+	Symbol         string
+	TodayCount     int
+	TodayTotal     decimal.Decimal
+	LowStockCount  int
+	ExpiringCount  int
+	OutstandingDue decimal.Decimal
+	Recent         []sales.Sale
+}
+
+templ Dashboard(d DashboardData) {
+	@layouts.Admin("Dashboard", d.UserName, "dashboard") {
+		<h1 class="text-2xl font-bold mb-6">Dashboard</h1>
+		<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
+			@statCard("Today's Sales", strconv.Itoa(d.TodayCount), "indigo")
+			@statCard("Today's Revenue", money.Format(d.Symbol, d.TodayTotal), "emerald")
+			@statCardLink("Low Stock Items", strconv.Itoa(d.LowStockCount), "amber", "/admin/reports/low-stock")
+			@statCardLink("Expiring Soon", strconv.Itoa(d.ExpiringCount), "rose", "/admin/reports/expiring")
+			@statCard("Customer Dues", money.Format(d.Symbol, d.OutstandingDue), "rose")
+		</div>
+
+		<div class="bg-white rounded-2xl shadow-sm p-6">
+			<h2 class="text-lg font-semibold mb-4">Recent Sales</h2>
+			if len(d.Recent) == 0 {
+				<p class="text-slate-500">No sales yet today.</p>
+			} else {
+				<table class="w-full text-sm">
+					<thead class="text-left text-slate-500 border-b">
+						<tr>
+							<th class="py-2">Receipt</th>
+							<th class="py-2">Cashier</th>
+							<th class="py-2">Type</th>
+							<th class="py-2 text-right">Total</th>
+							<th class="py-2">Status</th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, s := range d.Recent {
+							<tr class="border-b last:border-0">
+								<td class="py-2 font-medium">{ s.ReceiptNo }</td>
+								<td class="py-2">{ s.CashierName }</td>
+								<td class="py-2 capitalize">{ s.SaleType }</td>
+								<td class="py-2 text-right">{ money.Format(d.Symbol, s.Total) }</td>
+								<td class="py-2">@statusBadge(s.Status)</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		</div>
+	}
+}
+
+templ statCard(label, value, color string) {
+	<div class="bg-white rounded-2xl shadow-sm p-5">
+		<div class="text-sm text-slate-500">{ label }</div>
+		<div class={ "text-2xl font-bold mt-1 text-" + color + "-600" }>{ value }</div>
+	</div>
+}
+
+templ statCardLink(label, value, color, href string) {
+	<a href={ templ.SafeURL(href) } class="block bg-white rounded-2xl shadow-sm p-5 hover:ring-2 hover:ring-indigo-300 transition">
+		<div class="text-sm text-slate-500">{ label }</div>
+		<div class={ "text-2xl font-bold mt-1 text-" + color + "-600" }>{ value }</div>
+	</a>
+}
+
+templ statusBadge(status string) {
+	switch status {
+		case "completed":
+			<span class="px-2 py-0.5 rounded-full text-xs bg-emerald-100 text-emerald-700">completed</span>
+		case "credit":
+			<span class="px-2 py-0.5 rounded-full text-xs bg-amber-100 text-amber-700">credit</span>
+		case "returned":
+			<span class="px-2 py-0.5 rounded-full text-xs bg-slate-200 text-slate-700">returned</span>
+		case "partially_returned":
+			<span class="px-2 py-0.5 rounded-full text-xs bg-orange-100 text-orange-700">part. returned</span>
+		default:
+			<span class="px-2 py-0.5 rounded-full text-xs bg-slate-200 text-slate-700">{ status }</span>
+	}
+}

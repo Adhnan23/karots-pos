@@ -1,0 +1,107 @@
+package cashierpages
+
+import (
+	"strconv"
+
+	"karots-pos/internal/features/sales"
+	"karots-pos/internal/features/settings"
+	"karots-pos/internal/money"
+)
+
+type ReceiptData struct {
+	Detail    sales.Detail
+	Settings  settings.Settings
+	AutoPrint bool
+	Narrow    bool // 58mm paper when true, otherwise 80mm
+}
+
+// Receipt is a self-contained thermal bill (80mm default, also fits 58mm). It
+// deliberately does NOT use the cashier chrome — it is its own minimal page so
+// it prints cleanly. The print styling lives in /static/css/app.css.
+templ Receipt(d ReceiptData) {
+	<!DOCTYPE html>
+	<html lang="en">
+		<head>
+			<meta charset="UTF-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<title>Receipt { d.Detail.Sale.ReceiptNo }</title>
+			<link rel="stylesheet" href="/static/css/app.css"/>
+			if d.AutoPrint {
+				<script>window.addEventListener('load', function(){ window.print(); });</script>
+			}
+		</head>
+		<body class="receipt-body">
+			<div class={ "receipt", templ.KV("narrow", d.Narrow) } id="receipt">
+				if d.Settings.LogoURL != nil && *d.Settings.LogoURL != "" {
+					<div class="r-center"><img class="r-logo" src={ *d.Settings.LogoURL } alt="logo"/></div>
+				}
+				<div class="r-center r-shop">{ d.Settings.ShopName }</div>
+				if d.Settings.ShopNameSi != nil && *d.Settings.ShopNameSi != "" {
+					<div class="r-center r-small">{ *d.Settings.ShopNameSi }</div>
+				}
+				if d.Settings.Address != nil && *d.Settings.Address != "" {
+					<div class="r-center r-small">{ *d.Settings.Address }</div>
+				}
+				if d.Settings.Phone != nil && *d.Settings.Phone != "" {
+					<div class="r-center r-small">Tel: { *d.Settings.Phone }</div>
+				}
+				if d.Settings.TaxRegistered && d.Settings.TaxRegNo != nil {
+					<div class="r-center r-small">VAT: { *d.Settings.TaxRegNo }</div>
+				}
+				<div class="r-hr"></div>
+				<div class="r-row r-small"><span>Receipt:</span><span>{ d.Detail.Sale.ReceiptNo }</span></div>
+				<div class="r-row r-small"><span>Date:</span><span>{ d.Detail.Sale.CreatedAt.Format("2006-01-02 15:04") }</span></div>
+				<div class="r-row r-small"><span>Cashier:</span><span>{ d.Detail.Sale.CashierName }</span></div>
+				if d.Detail.Sale.CustomerName != nil {
+					<div class="r-row r-small"><span>Customer:</span><span>{ *d.Detail.Sale.CustomerName }</span></div>
+				}
+				<div class="r-hr"></div>
+				<table class="r-items">
+					<tbody>
+						for _, it := range d.Detail.Items {
+							<tr class="r-item-name"><td colspan="3">{ it.ProductName }</td></tr>
+							<tr class="r-item-line">
+								<td>{ money.Display(it.Quantity) } { it.UnitAbbr } × { money.Display(it.UnitPrice) }</td>
+								<td></td>
+								<td class="r-right">{ money.Display(it.Subtotal) }</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+				<div class="r-hr"></div>
+				<div class="r-row"><span>Subtotal</span><span>{ money.Format(d.Settings.CurrencySymbol, d.Detail.Sale.Subtotal) }</span></div>
+				if d.Detail.Sale.Discount.IsPositive() {
+					<div class="r-row"><span>Discount</span><span>-{ money.Format(d.Settings.CurrencySymbol, d.Detail.Sale.Discount) }</span></div>
+				}
+				if d.Detail.Sale.Tax.IsPositive() {
+					<div class="r-row"><span>Tax</span><span>{ money.Format(d.Settings.CurrencySymbol, d.Detail.Sale.Tax) }</span></div>
+				}
+				<div class="r-row r-total"><span>TOTAL</span><span>{ money.Format(d.Settings.CurrencySymbol, d.Detail.Sale.Total) }</span></div>
+				<div class="r-row"><span>Paid</span><span>{ money.Format(d.Settings.CurrencySymbol, d.Detail.Sale.PaidAmount) }</span></div>
+				if d.Detail.Sale.ChangeGiven.IsPositive() {
+					<div class="r-row"><span>Change</span><span>{ money.Format(d.Settings.CurrencySymbol, d.Detail.Sale.ChangeGiven) }</span></div>
+				}
+				for _, p := range d.Detail.Payments {
+					<div class="r-row r-small"><span class="r-cap">{ p.Method }</span><span>{ money.Format(d.Settings.CurrencySymbol, p.Amount) }</span></div>
+				}
+				if d.Detail.Sale.Status == "credit" {
+					<div class="r-hr"></div>
+					<div class="r-center r-small">*** CREDIT SALE — BALANCE DUE ***</div>
+				}
+				<div class="r-hr"></div>
+				if d.Settings.ReceiptFooter != nil && *d.Settings.ReceiptFooter != "" {
+					<div class="r-center r-small">{ *d.Settings.ReceiptFooter }</div>
+				}
+				<div class="r-center r-small">Thank you! Come again.</div>
+				<div class="r-print-btn">
+					<button onclick="window.print()">Print</button>
+					if d.Narrow {
+						<a href={ templ.SafeURL("/cashier/receipt/" + strconv.FormatInt(d.Detail.Sale.ID, 10)) }>Switch to 80mm</a>
+					} else {
+						<a href={ templ.SafeURL("/cashier/receipt/" + strconv.FormatInt(d.Detail.Sale.ID, 10) + "?size=58") }>Switch to 58mm</a>
+					}
+				</div>
+			</div>
+		</body>
+	</html>
+}

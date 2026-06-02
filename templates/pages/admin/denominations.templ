@@ -1,0 +1,108 @@
+package adminpages
+
+import (
+	"strconv"
+
+	"karots-pos/internal/features/denominations"
+	"karots-pos/internal/money"
+	"karots-pos/templates/layouts"
+)
+
+type DenominationsData struct {
+	UserName string
+	Symbol   string
+	Rows     []denominations.Denomination
+}
+
+templ DenominationsPage(d DenominationsData) {
+	@layouts.Admin("Denominations", d.UserName, "denoms") {
+		<div class="flex items-center justify-between mb-6">
+			<div>
+				<h1 class="text-2xl font-bold">Notes &amp; Coins</h1>
+				<p class="text-sm text-slate-500">The denominations cashiers count when opening and closing the drawer. Add new notes as they're issued.</p>
+			</div>
+			<button class="px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium"
+				hx-get="/admin/denominations/form" hx-target="#modal-container" hx-swap="innerHTML">+ New Denomination</button>
+		</div>
+		<div class="bg-white rounded-2xl shadow-sm p-6">
+			<table class="w-full text-sm">
+				<thead class="text-left text-slate-500 border-b">
+					<tr><th class="py-2 px-3">Value</th><th class="py-2 px-3">Kind</th><th class="py-2 px-3 text-center">In circulation</th><th class="py-2 px-3"></th></tr>
+				</thead>
+				<tbody id="denom-tbody" hx-get="/admin/denominations/table" hx-trigger="reload-denoms from:body" hx-target="#denom-tbody" hx-swap="innerHTML">
+					@DenominationRows(d.Rows, d.Symbol)
+				</tbody>
+			</table>
+		</div>
+	}
+}
+
+templ DenominationRows(rows []denominations.Denomination, symbol string) {
+	if len(rows) == 0 {
+		<tr><td colspan="4" class="py-6 text-center text-slate-500">No denominations yet.</td></tr>
+	} else {
+		for _, dn := range rows {
+			<tr class="border-b last:border-0">
+				<td class="py-2 px-3 font-medium">{ money.Format(symbol, dn.Value) }</td>
+				<td class="py-2 px-3">
+					if dn.IsNote {
+						Note
+					} else {
+						Coin
+					}
+				</td>
+				<td class="py-2 px-3 text-center">
+					if dn.IsActive {
+						<span class="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">Active</span>
+					} else {
+						<span class="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">Retired</span>
+					}
+				</td>
+				<td class="py-2 px-3 text-right whitespace-nowrap">
+					<button class="text-indigo-600 hover:underline" hx-get={ "/admin/denominations/form/" + strconv.FormatInt(dn.ID, 10) } hx-target="#modal-container" hx-swap="innerHTML">Edit</button>
+					<button class="text-red-600 hover:underline ml-3" hx-delete={ "/admin/denominations/" + strconv.FormatInt(dn.ID, 10) } hx-swap="none" hx-confirm="Remove this denomination?">Delete</button>
+				</td>
+			</tr>
+		}
+	}
+}
+
+templ DenominationForm(cur *denominations.Denomination) {
+	@modalShell(ternary(cur == nil, "New Denomination", "Edit Denomination")) {
+		<form class="p-6 space-y-4"
+			if cur == nil {
+				hx-post="/admin/denominations"
+			} else {
+				hx-put={ "/admin/denominations/" + strconv.FormatInt(cur.ID, 10) }
+			}
+			hx-swap="none">
+			<div>
+				<label class="block text-sm font-medium mb-1">Value</label>
+				<input name="value" type="number" step="0.01" min="0" required value={ denomValue(cur) } class="w-full border rounded-lg px-3 py-2" placeholder="100"/>
+			</div>
+			<label class="flex items-center gap-2 text-sm">
+				<input type="checkbox" name="is_note" value="true" checked?={ denomIsNote(cur) }/>
+				This is a note (uncheck for a coin)
+			</label>
+			<label class="flex items-center gap-2 text-sm">
+				<input type="checkbox" name="is_active" value="true" checked?={ cur == nil || cur.IsActive }/>
+				In circulation (shown to cashiers)
+			</label>
+			@modalButtons()
+		</form>
+	}
+}
+
+func denomValue(d *denominations.Denomination) string {
+	if d == nil {
+		return ""
+	}
+	return d.Value.String()
+}
+
+func denomIsNote(d *denominations.Denomination) bool {
+	if d == nil {
+		return true
+	}
+	return d.IsNote
+}

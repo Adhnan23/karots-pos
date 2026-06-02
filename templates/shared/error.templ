@@ -1,0 +1,32 @@
+package shared
+
+import "strconv"
+
+// ErrorPage is rendered for full-page navigations that fail (not HTMX, not API).
+templ ErrorPage(code int, message string) {
+	<!DOCTYPE html>
+	<html lang="en" class="h-full">
+		<head>
+			<meta charset="UTF-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<title>{ strconv.Itoa(code) } — POS</title>
+			<script src="https://cdn.tailwindcss.com"></script>
+		</head>
+		<body class="h-full bg-slate-100 flex items-center justify-center">
+			<div class="text-center p-10 bg-white rounded-2xl shadow-sm max-w-md">
+				<div class="text-6xl font-bold text-slate-300">{ strconv.Itoa(code) }</div>
+				<p class="mt-4 text-lg text-slate-700">{ message }</p>
+				<a href="/" class="inline-block mt-6 px-5 py-2.5 rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700">
+					Back to home
+				</a>
+			</div>
+		</body>
+	</html>
+}
+
+// FieldError renders an inline validation message inside a form.
+templ FieldError(message string) {
+	if message != "" {
+		<p class="text-sm text-red-600 mt-1">{ message }</p>
+	}
+}

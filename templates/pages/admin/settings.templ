@@ -1,0 +1,87 @@
+package adminpages
+
+import (
+	"karots-pos/internal/features/settings"
+	"karots-pos/templates/layouts"
+)
+
+type SettingsData struct {
+	UserName string
+	S        settings.Settings
+}
+
+templ SettingsPage(d SettingsData) {
+	@layouts.Admin("Settings", d.UserName, "settings") {
+		<h1 class="text-2xl font-bold mb-6">Shop Settings</h1>
+		<div class="bg-white rounded-2xl shadow-sm p-6 max-w-2xl">
+			<form hx-put="/admin/settings" hx-swap="none" class="space-y-4">
+				<div class="grid grid-cols-2 gap-4">
+					<div>
+						<label class="block text-sm font-medium mb-1">Shop Name</label>
+						<input name="shop_name" required value={ d.S.ShopName } class="w-full border rounded-lg px-3 py-2"/>
+					</div>
+					<div>
+						<label class="block text-sm font-medium mb-1">Shop Name (your language)</label>
+						<input name="shop_name_si" value={ strOrEmpty(d.S.ShopNameSi) } placeholder="e.g. கடை / කඩේ / مَتجر" class="w-full border rounded-lg px-3 py-2"/>
+					</div>
+				</div>
+				<div>
+					<label class="block text-sm font-medium mb-1">Address</label>
+					<input name="address" value={ strOrEmpty(d.S.Address) } class="w-full border rounded-lg px-3 py-2"/>
+				</div>
+				<div>
+					<label class="block text-sm font-medium mb-1">Logo URL (shown on receipts)</label>
+					<input name="logo_url" value={ strOrEmpty(d.S.LogoURL) } placeholder="https://… or /static/logo.png" class="w-full border rounded-lg px-3 py-2"/>
+					if d.S.LogoURL != nil && *d.S.LogoURL != "" {
+						<img src={ *d.S.LogoURL } alt="logo preview" class="mt-2 h-12 object-contain"/>
+					}
+				</div>
+				<div class="grid grid-cols-3 gap-4">
+					<div>
+						<label class="block text-sm font-medium mb-1">Phone</label>
+						<input name="phone" value={ strOrEmpty(d.S.Phone) } class="w-full border rounded-lg px-3 py-2"/>
+					</div>
+					<div>
+						<label class="block text-sm font-medium mb-1">Currency Code</label>
+						<input name="currency_code" required value={ d.S.CurrencyCode } class="w-full border rounded-lg px-3 py-2"/>
+					</div>
+					<div>
+						<label class="block text-sm font-medium mb-1">Currency Symbol</label>
+						<input name="currency_symbol" required value={ d.S.CurrencySymbol } class="w-full border rounded-lg px-3 py-2"/>
+					</div>
+				</div>
+				<div>
+					<label class="block text-sm font-medium mb-1">Receipt Footer</label>
+					<input name="receipt_footer" value={ strOrEmpty(d.S.ReceiptFooter) } class="w-full border rounded-lg px-3 py-2"/>
+				</div>
+				<div class="grid grid-cols-2 gap-4">
+					<div>
+						<label class="block text-sm font-medium mb-1">Default Sale Type</label>
+						<select name="default_sale_type" class="w-full border rounded-lg px-3 py-2">
+							@saleTypeOption("retail", d.S.DefaultSaleType)
+							@saleTypeOption("wholesale", d.S.DefaultSaleType)
+							@saleTypeOption("credit", d.S.DefaultSaleType)
+						</select>
+					</div>
+					<div class="flex items-end gap-4">
+						<label class="flex items-center gap-2">
+							<input type="checkbox" name="tax_registered" value="true" checked?={ d.S.TaxRegistered }/>
+							<span class="text-sm">Tax registered</span>
+						</label>
+						<label class="flex items-center gap-2">
+							<input type="checkbox" name="low_stock_alerts" value="true" checked?={ d.S.LowStockAlerts }/>
+							<span class="text-sm">Low-stock alerts</span>
+						</label>
+					</div>
+				</div>
+				<div class="pt-2">
+					<button type="submit" class="px-5 py-2.5 rounded-lg bg-indigo-600 text-white font-medium">Save Settings</button>
+				</div>
+			</form>
+		</div>
+	}
+}
+
+templ saleTypeOption(value, selected string) {
+	<option value={ value } selected?={ value == selected }>{ value }</option>
+}

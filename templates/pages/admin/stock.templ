@@ -1,0 +1,227 @@
+package adminpages
+
+import (
+	"strconv"
+
+	"karots-pos/internal/features/products"
+	"karots-pos/internal/features/stock"
+	"karots-pos/internal/money"
+	"karots-pos/templates/layouts"
+)
+
+type StockData struct {
+	UserName  string
+	Products  []products.Product
+	Movements []stock.Movement
+	MoveType  string
+}
+
+templ StockPage(d StockData) {
+	@layouts.Admin("Inventory", d.UserName, "stock") {
+		<div class="flex items-center justify-between mb-6">
+			<h1 class="text-2xl font-bold">Inventory</h1>
+			<div class="flex gap-2">
+				<button
+					class="px-4 py-2 rounded-lg bg-rose-600 text-white font-medium"
+					hx-get="/admin/stock/damage"
+					hx-target="#modal-container"
+					hx-swap="innerHTML"
+				>Record Damage</button>
+				<button
+					class="px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium"
+					hx-get="/admin/stock/form"
+					hx-target="#modal-container"
+					hx-swap="innerHTML"
+				>Adjust Stock</button>
+			</div>
+		</div>
+
+		<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+			<div class="bg-white rounded-2xl shadow-sm p-6">
+				<h2 class="text-lg font-semibold mb-4">Stock Levels</h2>
+				<table class="w-full text-sm">
+					<thead class="text-left text-slate-500 border-b">
+						<tr><th class="py-2">Product</th><th class="py-2 text-right">On hand</th><th class="py-2 text-center">Status</th><th class="py-2"></th></tr>
+					</thead>
+					<tbody>
+						for _, p := range d.Products {
+							<tr class="border-b last:border-0">
+								<td class="py-2">{ p.Name }</td>
+								<td class="py-2 text-right">{ money.Display(p.StockQty) } { p.UnitAbbr }</td>
+								<td class="py-2 text-center">
+									if p.IsLowStock() {
+										<span class="px-2 py-0.5 rounded-full text-xs bg-amber-100 text-amber-700">low</span>
+									} else {
+										<span class="px-2 py-0.5 rounded-full text-xs bg-emerald-100 text-emerald-700">ok</span>
+									}
+								</td>
+								<td class="py-2 text-right">
+									<button class="text-indigo-600 hover:underline text-xs"
+										hx-get={ "/admin/stock/batches/" + strconv.FormatInt(p.ID, 10) }
+										hx-target="#modal-container" hx-swap="innerHTML">Batches</button>
+								</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			</div>
+
+			<div class="bg-white rounded-2xl shadow-sm p-6">
+				<div class="flex items-center justify-between mb-4">
+					<h2 class="text-lg font-semibold">Recent Movements</h2>
+					<select
+						class="border rounded-lg px-2 py-1 text-sm"
+						name="type"
+						hx-get="/admin/stock/table"
+						hx-target="#movement-tbody"
+						hx-swap="innerHTML"
+						hx-trigger="change"
+					>
+						@moveTypeOption("", "All types", d.MoveType)
+						@moveTypeOption("purchase", "Purchase", d.MoveType)
+						@moveTypeOption("sale", "Sale", d.MoveType)
+						@moveTypeOption("adjust", "Adjustment", d.MoveType)
+						@moveTypeOption("return", "Return", d.MoveType)
+						@moveTypeOption("damage", "Damage", d.MoveType)
+					</select>
+				</div>
+				<table class="w-full text-sm">
+					<thead class="text-left text-slate-500 border-b">
+						<tr><th class="py-2">When</th><th class="py-2">Product</th><th class="py-2">Type</th><th class="py-2 text-right">Qty</th></tr>
+					</thead>
+					<tbody id="movement-tbody"
+						hx-get="/admin/stock/table"
+						hx-trigger="reload-stock from:body"
+						hx-target="#movement-tbody"
+						hx-swap="innerHTML"
+					>
+						@MovementRows(d.Movements)
+					</tbody>
+				</table>
+			</div>
+		</div>
+	}
+}
+
+templ MovementRows(rows []stock.Movement) {
+	if len(rows) == 0 {
+		<tr><td colspan="4" class="py-6 text-center text-slate-500">No movements yet.</td></tr>
+	} else {
+		for _, m := range rows {
+			<tr class="border-b last:border-0">
+				<td class="py-2 text-slate-500">{ m.CreatedAt.Format("01-02 15:04") }</td>
+				<td class="py-2">{ m.ProductName }</td>
+				<td class="py-2 capitalize">{ m.Type }</td>
+				<td class="py-2 text-right">{ money.Display(m.Quantity) }</td>
+			</tr>
+		}
+	}
+}
+
+// BatchesModal shows a product's live lots (FEFO order) with expiry, qty and cost.
+templ BatchesModal(p products.Product, batches []stock.Batch, symbol string) {
+	@modalShell("Batches — " + p.Name) {
+		<div class="p-6">
+			if len(batches) == 0 {
+				<p class="text-slate-500 text-sm">No live batches. On hand: { money.Display(p.StockQty) } { p.UnitAbbr }.</p>
+			} else {
+				<table class="w-full text-sm">
+					<thead class="text-left text-slate-500 border-b">
+						<tr>
+							<th class="py-2 pr-3">Expiry</th>
+							<th class="py-2 pr-3">Source</th>
+							<th class="py-2 pr-3 text-right">Remaining</th>
+							<th class="py-2 pr-3 text-right">Cost</th>
+							<th class="py-2 text-right">Received</th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, b := range batches {
+							<tr class="border-b last:border-0">
+								<td class="py-2 pr-3">
+									if b.ExpiryDate != nil {
+										{ b.ExpiryDate.Format("2006-01-02") }
+									} else {
+										<span class="text-slate-400">—</span>
+									}
+								</td>
+								<td class="py-2 pr-3 capitalize text-slate-500">{ b.Source }</td>
+								<td class="py-2 pr-3 text-right">{ money.Display(b.QtyRemaining) } { b.UnitAbbr }</td>
+								<td class="py-2 pr-3 text-right">{ money.Format(symbol, b.CostPrice) }</td>
+								<td class="py-2 text-right text-slate-500">{ b.CreatedAt.Format("2006-01-02") }</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+			<div class="flex justify-end pt-4">
+				<button type="button" class="px-4 py-2 rounded-lg border" x-on:click="$dispatch('close-modal')">Close</button>
+			</div>
+		</div>
+	}
+}
+
+templ moveTypeOption(value, label, selected string) {
+	if value == selected {
+		<option value={ value } selected>{ label }</option>
+	} else {
+		<option value={ value }>{ label }</option>
+	}
+}
+
+templ DamageForm(prods []products.Product) {
+	@modalShell("Record Damage / Write-off") {
+		<form class="p-6 space-y-4" hx-post="/admin/stock/damage" hx-swap="none">
+			<div>
+				<label class="block text-sm font-medium mb-1">Product</label>
+				<select name="product_id" required class="w-full border rounded-lg px-3 py-2">
+					for _, p := range prods {
+						<option value={ strconv.FormatInt(p.ID, 10) }>{ p.Name } (on hand { money.Display(p.StockQty) } { p.UnitAbbr })</option>
+					}
+				</select>
+			</div>
+			<div>
+				<label class="block text-sm font-medium mb-1">Quantity to write off</label>
+				<input name="quantity" type="number" step="0.001" min="0" required class="w-full border rounded-lg px-3 py-2"/>
+			</div>
+			<div>
+				<label class="block text-sm font-medium mb-1">Reason</label>
+				<input name="note" class="w-full border rounded-lg px-3 py-2" placeholder="spoilage, breakage, expiry…"/>
+			</div>
+			@modalButtons()
+		</form>
+	}
+}
+
+templ StockForm(prods []products.Product) {
+	<div class="fixed inset-0 bg-black/40 flex items-center justify-center z-40 p-4" x-data x-on:click.self="$dispatch('close-modal')">
+		<div class="bg-white rounded-2xl shadow-xl w-full max-w-md">
+			<div class="flex items-center justify-between px-6 py-4 border-b">
+				<h3 class="text-lg font-semibold">Adjust Stock</h3>
+				<button class="text-slate-400" x-on:click="$dispatch('close-modal')">✕</button>
+			</div>
+			<form class="p-6 space-y-4" hx-post="/admin/stock/adjust" hx-swap="none">
+				<div>
+					<label class="block text-sm font-medium mb-1">Product</label>
+					<select name="product_id" required class="w-full border rounded-lg px-3 py-2">
+						for _, p := range prods {
+							<option value={ strconv.FormatInt(p.ID, 10) }>{ p.Name } (on hand { money.Display(p.StockQty) } { p.UnitAbbr })</option>
+						}
+					</select>
+				</div>
+				<div>
+					<label class="block text-sm font-medium mb-1">New Quantity (absolute)</label>
+					<input name="new_quantity" type="number" step="0.001" min="0" required class="w-full border rounded-lg px-3 py-2"/>
+				</div>
+				<div>
+					<label class="block text-sm font-medium mb-1">Note</label>
+					<input name="note" class="w-full border rounded-lg px-3 py-2" placeholder="reason for adjustment"/>
+				</div>
+				<div class="flex justify-end gap-3 pt-2">
+					<button type="button" class="px-4 py-2 rounded-lg border" x-on:click="$dispatch('close-modal')">Cancel</button>
+					<button type="submit" class="px-4 py-2 rounded-lg bg-indigo-600 text-white">Save</button>
+				</div>
+			</form>
+		</div>
+	</div>
+}

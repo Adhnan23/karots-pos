@@ -1,0 +1,103 @@
+package adminpages
+
+import (
+	"karots-pos/internal/features/reports"
+	"karots-pos/internal/money"
+	"karots-pos/templates/layouts"
+)
+
+type FinanceData struct {
+	UserName string
+	Symbol   string
+	From     string
+	To       string
+	PL       reports.PL
+}
+
+templ FinancePage(d FinanceData) {
+	@layouts.Admin("Finance", d.UserName, "finance") {
+		<h1 class="text-2xl font-bold mb-6">Finance & Profit</h1>
+
+		<form method="get" action="/admin/finance" class="flex items-end gap-3 mb-6 bg-white rounded-2xl shadow-sm p-4">
+			<div>
+				<label class="block text-xs text-slate-500 mb-1">From</label>
+				<input type="date" name="from" value={ d.From } class="border rounded-lg px-3 py-2"/>
+			</div>
+			<div>
+				<label class="block text-xs text-slate-500 mb-1">To</label>
+				<input type="date" name="to" value={ d.To } class="border rounded-lg px-3 py-2"/>
+			</div>
+			<button class="px-4 py-2 rounded-lg bg-slate-800 text-white">Apply</button>
+		</form>
+
+		<div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+			@statCard("Revenue", money.Format(d.Symbol, d.PL.Revenue), "indigo")
+			@statCard("COGS", money.Format(d.Symbol, d.PL.COGS), "slate")
+			@statCard("Gross Profit", money.Format(d.Symbol, d.PL.GrossProfit), "emerald")
+			@statCard("Expenses", money.Format(d.Symbol, d.PL.Expenses), "rose")
+		</div>
+		<div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+			@statCard("Net Profit", money.Format(d.Symbol, d.PL.NetProfit), profitColor(d.PL.NetProfit.IsNegative()))
+			@statCard("Cash Received", money.Format(d.Symbol, d.PL.Received), "indigo")
+			@statCard("Receivables (dues)", money.Format(d.Symbol, d.PL.Receivables), "amber")
+			@statCard("Payables (suppliers)", money.Format(d.Symbol, d.PL.Payables), "amber")
+		</div>
+
+		<div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+			@statCard("Cash Withdrawn (drawer)", money.Format(d.Symbol, d.PL.CashWithdrawn), "slate")
+			@statCard("Register Over/Short", money.Format(d.Symbol, d.PL.RegisterDiff), profitColor(d.PL.RegisterDiff.IsNegative()))
+		</div>
+
+		<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+			<div class="bg-white rounded-2xl shadow-sm p-6">
+				<h2 class="text-lg font-semibold mb-4">Top Products</h2>
+				<table class="w-full text-sm">
+					<thead class="text-left text-slate-500 border-b">
+						<tr><th class="py-2">Product</th><th class="py-2 text-right">Qty</th><th class="py-2 text-right">Revenue</th><th class="py-2 text-right">Profit</th></tr>
+					</thead>
+					<tbody>
+						if len(d.PL.TopProducts) == 0 {
+							<tr><td colspan="4" class="py-6 text-center text-slate-500">No sales in range.</td></tr>
+						} else {
+							for _, p := range d.PL.TopProducts {
+								<tr class="border-b last:border-0">
+									<td class="py-2">{ p.ProductName }</td>
+									<td class="py-2 text-right">{ money.Display(p.Qty) }</td>
+									<td class="py-2 text-right">{ money.Format(d.Symbol, p.Revenue) }</td>
+									<td class="py-2 text-right">{ money.Format(d.Symbol, p.Profit) }</td>
+								</tr>
+							}
+						}
+					</tbody>
+				</table>
+			</div>
+			<div class="bg-white rounded-2xl shadow-sm p-6">
+				<h2 class="text-lg font-semibold mb-4">Payments by Method</h2>
+				<table class="w-full text-sm">
+					<thead class="text-left text-slate-500 border-b">
+						<tr><th class="py-2">Method</th><th class="py-2 text-right">Total</th></tr>
+					</thead>
+					<tbody>
+						if len(d.PL.ByPayment) == 0 {
+							<tr><td colspan="2" class="py-6 text-center text-slate-500">No payments in range.</td></tr>
+						} else {
+							for _, m := range d.PL.ByPayment {
+								<tr class="border-b last:border-0">
+									<td class="py-2 capitalize">{ m.Method }</td>
+									<td class="py-2 text-right">{ money.Format(d.Symbol, m.Total) }</td>
+								</tr>
+							}
+						}
+					</tbody>
+				</table>
+			</div>
+		</div>
+	}
+}
+
+func profitColor(negative bool) string {
+	if negative {
+		return "rose"
+	}
+	return "emerald"
+}

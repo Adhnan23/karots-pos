@@ -1,0 +1,30 @@
+package layouts
+
+// Report is the print-optimized shell for management reports. The toolbar and
+// any element marked .no-print are hidden when printing; the body prints as a
+// clean A4 sheet. Users "Save as PDF" from the browser's print dialog.
+templ Report(title, shopName string) {
+	@Base(title) {
+		<div class="report-body min-h-full bg-slate-100">
+			<div class="no-print sticky top-0 z-10 bg-slate-900 text-white px-6 py-3 flex items-center justify-between">
+				<a href="/admin/reports" class="text-sm text-slate-300 hover:text-white">← Reports</a>
+				<div class="flex items-center gap-3">
+					<button onclick="window.print()" class="px-4 py-1.5 rounded-lg bg-indigo-600 text-white text-sm font-medium">🖨 Print / Save PDF</button>
+				</div>
+			</div>
+			<div class="report-sheet bg-white max-w-4xl mx-auto my-6 p-8 shadow-sm rounded-lg">
+				<div class="flex items-start justify-between border-b pb-4 mb-5">
+					<div>
+						<div class="text-lg font-bold">{ shopName }</div>
+						<div class="text-xl font-semibold mt-0.5">{ title }</div>
+					</div>
+					<div class="text-right text-xs text-slate-500">
+						<div>Generated</div>
+						<div x-data x-text="new Date().toLocaleString()"></div>
+					</div>
+				</div>
+				{ children... }
+			</div>
+		</div>
+	}
+}

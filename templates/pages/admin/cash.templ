@@ -1,0 +1,228 @@
+package adminpages
+
+import (
+	"encoding/json"
+	"sort"
+	"strconv"
+
+	"karots-pos/internal/features/cashregister"
+	"karots-pos/internal/money"
+	"karots-pos/templates/layouts"
+
+	"github.com/shopspring/decimal"
+)
+
+type CashSessionsData struct {
+	UserName string
+	Symbol   string
+	Rows     []cashregister.SessionRow
+}
+
+templ CashSessionsPage(d CashSessionsData) {
+	@layouts.Admin("Cash Register", d.UserName, "cash-register") {
+		<div class="mb-6">
+			<h1 class="text-2xl font-bold">Cash Register Sessions</h1>
+			<p class="text-sm text-slate-500">Every drawer session with its opening float, expected vs counted cash, and over/short.</p>
+		</div>
+		<div class="bg-white rounded-2xl shadow-sm p-6">
+			<table class="w-full text-sm">
+				<thead class="text-left text-slate-500 border-b">
+					<tr>
+						<th class="py-2 px-3">Cashier</th>
+						<th class="py-2 px-3">Opened</th>
+						<th class="py-2 px-3">Closed</th>
+						<th class="py-2 px-3 text-right">Opening</th>
+						<th class="py-2 px-3 text-right">Expected</th>
+						<th class="py-2 px-3 text-right">Counted</th>
+						<th class="py-2 px-3 text-right">Over/Short</th>
+						<th class="py-2 px-3"></th>
+					</tr>
+				</thead>
+				<tbody>
+					if len(d.Rows) == 0 {
+						<tr><td colspan="8" class="py-6 text-center text-slate-500">No sessions yet.</td></tr>
+					} else {
+						for _, s := range d.Rows {
+							<tr class="border-b last:border-0">
+								<td class="py-2 px-3 font-medium">{ s.UserName }</td>
+								<td class="py-2 px-3 text-slate-500">{ s.OpenedAt.Format("2006-01-02 15:04") }</td>
+								<td class="py-2 px-3 text-slate-500">
+									if s.ClosedAt != nil {
+										{ s.ClosedAt.Format("2006-01-02 15:04") }
+									} else {
+										<span class="text-emerald-600">open</span>
+									}
+								</td>
+								<td class="py-2 px-3 text-right">{ money.Format(d.Symbol, s.OpeningCash) }</td>
+								<td class="py-2 px-3 text-right">{ optMoney(d.Symbol, s.ExpectedCash) }</td>
+								<td class="py-2 px-3 text-right">{ optMoney(d.Symbol, s.ClosingCash) }</td>
+								<td class={ "py-2 px-3 text-right font-medium " + diffClass(s.Difference) }>{ optMoney(d.Symbol, s.Difference) }</td>
+								<td class="py-2 px-3 text-right">
+									<a class="text-indigo-600 hover:underline" href={ templ.SafeURL("/admin/cash-register/" + strconv.FormatInt(s.ID, 10)) }>View</a>
+								</td>
+							</tr>
+						}
+					}
+				</tbody>
+			</table>
+		</div>
+	}
+}
+
+type CashSessionDetailData struct {
+	UserName  string
+	Symbol    string
+	Session   cashregister.SessionRow
+	Movements []cashregister.Movement
+}
+
+templ CashSessionDetailPage(d CashSessionDetailData) {
+	@layouts.Admin("Session", d.UserName, "cash-register") {
+		<div class="mb-6 flex items-center justify-between">
+			<div>
+				<h1 class="text-2xl font-bold">Session #{ strconv.FormatInt(d.Session.ID, 10) } — { d.Session.UserName }</h1>
+				<p class="text-sm text-slate-500">
+					Opened { d.Session.OpenedAt.Format("2006-01-02 15:04") }
+					if d.Session.ClosedAt != nil {
+						· Closed { d.Session.ClosedAt.Format("2006-01-02 15:04") }
+					} else {
+						· <span class="text-emerald-600">still open</span>
+					}
+				</p>
+			</div>
+			<a href="/admin/cash-register" class="text-sm text-slate-500 hover:underline">← All sessions</a>
+		</div>
+
+		<div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+			@statCard("Opening float", money.Format(d.Symbol, d.Session.OpeningCash), "slate")
+			@statCard("Expected", optMoney(d.Symbol, d.Session.ExpectedCash), "slate")
+			@statCard("Counted", optMoney(d.Symbol, d.Session.ClosingCash), "indigo")
+			@statCard("Over / Short", optMoney(d.Symbol, d.Session.Difference), diffColor(d.Session.Difference))
+		</div>
+
+		<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+			<div class="bg-white rounded-2xl shadow-sm p-6">
+				<h2 class="font-semibold mb-3">Cash movements</h2>
+				<table class="w-full text-sm">
+					<thead class="text-left text-slate-500 border-b">
+						<tr><th class="py-1">Time</th><th class="py-1">Type</th><th class="py-1">Reason</th><th class="py-1 text-right">Amount</th></tr>
+					</thead>
+					<tbody>
+						for _, m := range d.Movements {
+							<tr class="border-b last:border-0">
+								<td class="py-1 text-slate-500">{ m.CreatedAt.Format("15:04") }</td>
+								<td class="py-1 capitalize">{ moveLabel(m.Type) }</td>
+								<td class="py-1 text-slate-500">{ strOrEmpty(m.Reason) }</td>
+								<td class={ "py-1 text-right font-medium " + amountClass(m.Amount) }>{ money.Format(d.Symbol, m.Amount) }</td>
+							</tr>
+						}
+						if len(d.Movements) == 0 {
+							<tr><td colspan="4" class="py-4 text-center text-slate-400">No movements.</td></tr>
+						}
+					</tbody>
+				</table>
+			</div>
+			<div class="bg-white rounded-2xl shadow-sm p-6">
+				<h2 class="font-semibold mb-3">Drawer counts</h2>
+				<div class="grid grid-cols-2 gap-6">
+					<div>
+						<div class="text-xs font-semibold uppercase text-slate-400 mb-2">Opening</div>
+						@breakdownList(d.Session.OpeningBreakdown, d.Symbol)
+					</div>
+					<div>
+						<div class="text-xs font-semibold uppercase text-slate-400 mb-2">Closing</div>
+						@breakdownList(d.Session.ClosingBreakdown, d.Symbol)
+					</div>
+				</div>
+			</div>
+		</div>
+	}
+}
+
+templ breakdownList(raw []byte, symbol string) {
+	if counts := parseBreakdown(raw); len(counts) > 0 {
+		<table class="w-full text-sm">
+			<tbody>
+				for _, c := range counts {
+					<tr class="border-b last:border-0">
+						<td class="py-1">{ money.Format(symbol, c.Value) }</td>
+						<td class="py-1 text-center text-slate-500">× { strconv.Itoa(c.Qty) }</td>
+						<td class="py-1 text-right">{ money.Format(symbol, c.Value.Mul(decimal.NewFromInt(int64(c.Qty)))) }</td>
+					</tr>
+				}
+			</tbody>
+		</table>
+	} else {
+		<p class="text-sm text-slate-400">Not counted by denomination.</p>
+	}
+}
+
+type denomCount struct {
+	Value decimal.Decimal
+	Qty   int
+}
+
+func parseBreakdown(raw []byte) []denomCount {
+	if len(raw) == 0 {
+		return nil
+	}
+	m := map[string]int{}
+	if json.Unmarshal(raw, &m) != nil {
+		return nil
+	}
+	out := make([]denomCount, 0, len(m))
+	for k, qty := range m {
+		v, err := decimal.NewFromString(k)
+		if err != nil || qty <= 0 {
+			continue
+		}
+		out = append(out, denomCount{Value: v, Qty: qty})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Value.GreaterThan(out[j].Value) })
+	return out
+}
+
+func optMoney(symbol string, d *decimal.Decimal) string {
+	if d == nil {
+		return "—"
+	}
+	return money.Format(symbol, *d)
+}
+
+func diffClass(d *decimal.Decimal) string {
+	if d == nil || d.IsZero() {
+		return "text-slate-600"
+	}
+	if d.IsNegative() {
+		return "text-rose-600"
+	}
+	return "text-emerald-600"
+}
+
+func amountClass(d decimal.Decimal) string {
+	if d.IsNegative() {
+		return "text-rose-600"
+	}
+	return "text-emerald-600"
+}
+
+func moveLabel(t string) string {
+	switch t {
+	case "credit_payment":
+		return "credit collected"
+	case "pay_in":
+		return "pay-in"
+	default:
+		return t
+	}
+}
+
+func diffColor(d *decimal.Decimal) string {
+	if d == nil || d.IsZero() {
+		return "slate"
+	}
+	if d.IsNegative() {
+		return "rose"
+	}
+	return "emerald"
+}

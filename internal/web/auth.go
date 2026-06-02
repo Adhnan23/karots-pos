@@ -1,0 +1,88 @@
+package web
+
+import (
+	"net/http"
+	"time"
+
+	"karots-pos/internal/apperr"
+	"karots-pos/internal/features/auth"
+	"karots-pos/internal/middleware"
+	"karots-pos/internal/response"
+	authpages "karots-pos/templates/pages/auth"
+
+	"github.com/labstack/echo/v4"
+)
+
+// CookieConfig controls how the UI session cookie is written.
+type CookieConfig struct {
+	Secure bool
+	MaxAge time.Duration
+}
+
+// authUI renders the login screen and manages the session cookie. It lives in
+// the web layer (not the auth feature) so the auth package never imports
+// templates — that mutual import would be a cycle.
+type authUI struct {
+	svc    *auth.Service
+	cookie CookieConfig
+}
+
+func (h *authUI) ShowLogin(c echo.Context) error {
+	return response.RenderPage(c, authpages.LoginPage(""))
+}
+
+// Login is a full-page form POST. Errors re-render the login page inline rather
+// than bouncing through the global toast handler.
+func (h *authUI) Login(c echo.Context) error {
+	var in auth.LoginInput
+	if err := c.Bind(&in); err != nil {
+		return h.loginError(c, "Please enter your phone number and PIN")
+	}
+	if err := c.Validate(&in); err != nil {
+		return h.loginError(c, "Please enter a valid phone number and PIN")
+	}
+	pair, err := h.svc.Login(c.Request().Context(), in)
+	if err != nil {
+		if ae, ok := apperr.As(err); ok {
+			return h.loginError(c, ae.Message)
+		}
+		return err
+	}
+	h.setCookie(c, pair.AccessToken)
+	return c.Redirect(http.StatusSeeOther, auth.HomePath(pair.User.Role))
+}
+
+func (h *authUI) Logout(c echo.Context) error {
+	h.clearCookie(c)
+	return c.Redirect(http.StatusSeeOther, "/login")
+}
+
+func (h *authUI) loginError(c echo.Context, msg string) error {
+	c.Response().Header().Set(echo.HeaderContentType, echo.MIMETextHTMLCharsetUTF8)
+	c.Response().WriteHeader(http.StatusUnauthorized)
+	return authpages.LoginPage(msg).Render(c.Request().Context(), c.Response().Writer)
+}
+
+func (h *authUI) setCookie(c echo.Context, token string) {
+	c.SetCookie(&http.Cookie{
+		Name:     middleware.CookieName,
+		Value:    token,
+		Path:     "/",
+		MaxAge:   int(h.cookie.MaxAge.Seconds()),
+		HttpOnly: true,
+		Secure:   h.cookie.Secure,
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+func (h *authUI) clearCookie(c echo.Context) {
+	c.SetCookie(&http.Cookie{
+		Name:     middleware.CookieName,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		Secure:   h.cookie.Secure,
+		SameSite: http.SameSiteLaxMode,
+	})
+}

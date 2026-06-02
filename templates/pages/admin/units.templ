@@ -1,0 +1,86 @@
+package adminpages
+
+import (
+	"strconv"
+
+	"karots-pos/internal/features/units"
+	"karots-pos/templates/layouts"
+)
+
+type UnitsData struct {
+	UserName string
+	Rows     []units.Unit
+}
+
+templ UnitsPage(d UnitsData) {
+	@layouts.Admin("Units", d.UserName, "units-mgmt") {
+		<div class="flex items-center justify-between mb-6">
+			<h1 class="text-2xl font-bold">Units of Measure</h1>
+			<button class="px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium"
+				hx-get="/admin/units/form" hx-target="#modal-container" hx-swap="innerHTML">+ New Unit</button>
+		</div>
+		<div class="bg-white rounded-2xl shadow-sm p-6">
+			<table class="w-full text-sm">
+				<thead class="text-left text-slate-500 border-b">
+					<tr><th class="py-2 px-3">Name</th><th class="py-2 px-3">Abbreviation</th><th class="py-2 px-3"></th></tr>
+				</thead>
+				<tbody id="unit-tbody" hx-get="/admin/units/table" hx-trigger="reload-units-mgmt from:body" hx-target="#unit-tbody" hx-swap="innerHTML">
+					@UnitRows(d.Rows)
+				</tbody>
+			</table>
+		</div>
+	}
+}
+
+templ UnitRows(rows []units.Unit) {
+	if len(rows) == 0 {
+		<tr><td colspan="3" class="py-6 text-center text-slate-500">No units yet.</td></tr>
+	} else {
+		for _, u := range rows {
+			<tr class="border-b last:border-0">
+				<td class="py-2 px-3 font-medium">{ u.Name }</td>
+				<td class="py-2 px-3">{ u.Abbreviation }</td>
+				<td class="py-2 px-3 text-right whitespace-nowrap">
+					<button class="text-indigo-600 hover:underline" hx-get={ "/admin/units/form/" + strconv.FormatInt(u.ID, 10) } hx-target="#modal-container" hx-swap="innerHTML">Edit</button>
+					<button class="text-red-600 hover:underline ml-3" hx-delete={ "/admin/units/" + strconv.FormatInt(u.ID, 10) } hx-swap="none" hx-confirm={ "Delete unit " + u.Name + "?" }>Delete</button>
+				</td>
+			</tr>
+		}
+	}
+}
+
+templ UnitForm(cur *units.Unit) {
+	@modalShell(ternary(cur == nil, "New Unit", "Edit Unit")) {
+		<form class="p-6 space-y-4"
+			if cur == nil {
+				hx-post="/admin/units"
+			} else {
+				hx-put={ "/admin/units/" + strconv.FormatInt(cur.ID, 10) }
+			}
+			hx-swap="none">
+			<div>
+				<label class="block text-sm font-medium mb-1">Name</label>
+				<input name="name" required value={ unitName(cur) } class="w-full border rounded-lg px-3 py-2" placeholder="Kilogram"/>
+			</div>
+			<div>
+				<label class="block text-sm font-medium mb-1">Abbreviation</label>
+				<input name="abbreviation" required value={ unitAbbr(cur) } class="w-full border rounded-lg px-3 py-2" placeholder="kg"/>
+			</div>
+			@modalButtons()
+		</form>
+	}
+}
+
+func unitName(u *units.Unit) string {
+	if u == nil {
+		return ""
+	}
+	return u.Name
+}
+
+func unitAbbr(u *units.Unit) string {
+	if u == nil {
+		return ""
+	}
+	return u.Abbreviation
+}

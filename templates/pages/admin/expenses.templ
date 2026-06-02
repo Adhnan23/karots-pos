@@ -1,0 +1,113 @@
+package adminpages
+
+import (
+	"strconv"
+
+	"karots-pos/internal/features/expenses"
+	"karots-pos/internal/money"
+	"karots-pos/templates/layouts"
+
+	"github.com/shopspring/decimal"
+)
+
+type ExpensesData struct {
+	UserName string
+	Symbol   string
+	Rows     []expenses.Expense
+	From     string
+	To       string
+	Total    decimal.Decimal
+}
+
+templ ExpensesPage(d ExpensesData) {
+	@layouts.Admin("Expenses", d.UserName, "expenses") {
+		<div class="flex items-center justify-between mb-6">
+			<h1 class="text-2xl font-bold">Expenses</h1>
+			<button class="px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium"
+				hx-get="/admin/expenses/form" hx-target="#modal-container" hx-swap="innerHTML">+ New Expense</button>
+		</div>
+
+		<form method="get" action="/admin/expenses" class="flex items-end gap-3 mb-4 bg-white rounded-2xl shadow-sm p-4">
+			<div>
+				<label class="block text-xs text-slate-500 mb-1">From</label>
+				<input type="date" name="from" value={ d.From } class="border rounded-lg px-3 py-2"/>
+			</div>
+			<div>
+				<label class="block text-xs text-slate-500 mb-1">To</label>
+				<input type="date" name="to" value={ d.To } class="border rounded-lg px-3 py-2"/>
+			</div>
+			<button class="px-4 py-2 rounded-lg bg-slate-800 text-white">Filter</button>
+			<div class="ml-auto text-right">
+				<div class="text-xs text-slate-500">Total in range</div>
+				<div class="text-xl font-bold text-rose-600">{ money.Format(d.Symbol, d.Total) }</div>
+			</div>
+		</form>
+
+		<div class="bg-white rounded-2xl shadow-sm p-6">
+			<table class="w-full text-sm">
+				<thead class="text-left text-slate-500 border-b">
+					<tr>
+						<th class="py-2 px-3">Date</th>
+						<th class="py-2 px-3">Category</th>
+						<th class="py-2 px-3">Description</th>
+						<th class="py-2 px-3">By</th>
+						<th class="py-2 px-3 text-right">Amount</th>
+						<th class="py-2 px-3"></th>
+					</tr>
+				</thead>
+				<tbody>
+					if len(d.Rows) == 0 {
+						<tr><td colspan="6" class="py-6 text-center text-slate-500">No expenses in this range.</td></tr>
+					} else {
+						for _, e := range d.Rows {
+							<tr class="border-b last:border-0">
+								<td class="py-2 px-3 text-slate-500">{ e.ExpenseDate.Format("2006-01-02") }</td>
+								<td class="py-2 px-3 font-medium">{ e.Category }</td>
+								<td class="py-2 px-3">{ strOrEmpty(e.Description) }</td>
+								<td class="py-2 px-3">{ strOrEmpty(e.PaidByName) }</td>
+								<td class="py-2 px-3 text-right">{ money.Format(d.Symbol, e.Amount) }</td>
+								<td class="py-2 px-3 text-right">
+									<button class="text-red-600 hover:underline" hx-delete={ "/admin/expenses/" + strconv.FormatInt(e.ID, 10) } hx-swap="none" hx-confirm="Delete this expense?">Delete</button>
+								</td>
+							</tr>
+						}
+					}
+				</tbody>
+			</table>
+		</div>
+	}
+}
+
+templ ExpenseForm() {
+	@modalShell("New Expense") {
+		<form class="p-6 space-y-4" hx-post="/admin/expenses" hx-swap="none">
+			<div class="grid grid-cols-2 gap-4">
+				<div>
+					<label class="block text-sm font-medium mb-1">Category</label>
+					<input name="category" required list="expense-cats" class="w-full border rounded-lg px-3 py-2"/>
+					<datalist id="expense-cats">
+						<option value="Rent"></option>
+						<option value="Electricity"></option>
+						<option value="Salary"></option>
+						<option value="Transport"></option>
+						<option value="Water"></option>
+						<option value="Maintenance"></option>
+					</datalist>
+				</div>
+				<div>
+					<label class="block text-sm font-medium mb-1">Amount</label>
+					<input name="amount" type="number" step="0.01" min="0" required class="w-full border rounded-lg px-3 py-2"/>
+				</div>
+			</div>
+			<div>
+				<label class="block text-sm font-medium mb-1">Date</label>
+				<input name="expense_date" type="date" class="w-full border rounded-lg px-3 py-2"/>
+			</div>
+			<div>
+				<label class="block text-sm font-medium mb-1">Description</label>
+				<input name="description" class="w-full border rounded-lg px-3 py-2"/>
+			</div>
+			@modalButtons()
+		</form>
+	}
+}

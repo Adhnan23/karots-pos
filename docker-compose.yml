@@ -1,0 +1,39 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: pos_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: pos_db
+      POSTGRES_USER: pos_user
+      POSTGRES_PASSWORD: pos_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pos_user -d pos_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  server:
+    build: .
+    container_name: pos_server
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      APP_ENV: production
+      DATABASE_URL: postgres://pos_user:pos_password@postgres:5432/pos_db?sslmode=disable
+      SERVER_PORT: "3000"
+      JWT_SECRET: ${JWT_SECRET:-change-this-to-a-random-32-plus-char-string-please}
+      JWT_EXPIRES_IN: 12h
+      JWT_REFRESH_EXPIRES_IN: 168h
+      CORS_ORIGINS: http://localhost:3000
+    ports:
+      - "3000:3000"
+
+volumes:
+  postgres_data:

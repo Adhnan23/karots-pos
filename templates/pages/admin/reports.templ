@@ -1,0 +1,140 @@
+package adminpages
+
+import (
+	"strconv"
+	"time"
+
+	"karots-pos/internal/features/products"
+	"karots-pos/internal/features/stock"
+	"karots-pos/internal/money"
+	"karots-pos/templates/layouts"
+)
+
+// ---------------- Expiring stock ----------------
+
+type ExpiringData struct {
+	UserName string
+	Symbol   string
+	Days     int
+	Rows     []stock.Batch
+}
+
+templ ExpiringPage(d ExpiringData) {
+	@layouts.Admin("Expiring Stock", d.UserName, "expiring") {
+		<div class="flex items-center justify-between mb-6">
+			<h1 class="text-2xl font-bold">Expiring Stock</h1>
+			<form method="get" action="/admin/reports/expiring" class="flex items-end gap-2">
+				<div>
+					<label class="block text-xs text-slate-500 mb-1">Within (days)</label>
+					<input type="number" name="days" min="0" value={ strconv.Itoa(d.Days) } class="border rounded-lg px-3 py-2 w-28"/>
+				</div>
+				<button class="px-4 py-2 rounded-lg bg-slate-800 text-white">Show</button>
+			</form>
+		</div>
+		<div class="bg-white rounded-2xl shadow-sm p-6">
+			<table class="w-full text-sm">
+				<thead class="text-left text-slate-500 border-b">
+					<tr>
+						<th class="py-2 px-3">Product</th>
+						<th class="py-2 px-3">Batch</th>
+						<th class="py-2 px-3">Expiry</th>
+						<th class="py-2 px-3 text-center">Days left</th>
+						<th class="py-2 px-3 text-right">On hand</th>
+						<th class="py-2 px-3 text-right">Cost value</th>
+					</tr>
+				</thead>
+				<tbody>
+					if len(d.Rows) == 0 {
+						<tr><td colspan="6" class="py-6 text-center text-slate-500">Nothing expiring in this window. 🎉</td></tr>
+					} else {
+						for _, b := range d.Rows {
+							<tr class="border-b last:border-0">
+								<td class="py-2 px-3 font-medium">{ b.ProductName }</td>
+								<td class="py-2 px-3 text-slate-500">{ strOrEmpty(b.BatchNo) }</td>
+								<td class="py-2 px-3">
+									if b.ExpiryDate != nil {
+										{ b.ExpiryDate.Format("2006-01-02") }
+									}
+								</td>
+								<td class="py-2 px-3 text-center">@daysLeftBadge(b.ExpiryDate)</td>
+								<td class="py-2 px-3 text-right">{ money.Display(b.QtyRemaining) } { b.UnitAbbr }</td>
+								<td class="py-2 px-3 text-right">{ money.Format(d.Symbol, b.QtyRemaining.Mul(b.CostPrice)) }</td>
+							</tr>
+						}
+					}
+				</tbody>
+			</table>
+		</div>
+	}
+}
+
+templ daysLeftBadge(expiry *time.Time) {
+	if expiry == nil {
+		<span>—</span>
+	} else {
+		{{ days := int(time.Until(*expiry).Hours() / 24) }}
+		if days < 0 {
+			<span class="px-2 py-0.5 rounded-full text-xs bg-red-100 text-red-700">expired</span>
+		} else if days <= 7 {
+			<span class="px-2 py-0.5 rounded-full text-xs bg-amber-100 text-amber-700">{ strconv.Itoa(days) }d</span>
+		} else {
+			<span class="px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-600">{ strconv.Itoa(days) }d</span>
+		}
+	}
+}
+
+// ---------------- Low stock / reorder ----------------
+
+type LowStockData struct {
+	UserName string
+	Symbol   string
+	Rows     []products.Product
+}
+
+templ LowStockPage(d LowStockData) {
+	@layouts.Admin("Low Stock", d.UserName, "low-stock") {
+		<div class="flex items-center justify-between mb-6">
+			<h1 class="text-2xl font-bold">Low Stock / Reorder</h1>
+			<a href="/admin/purchases/new" class="px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium">+ Create Purchase</a>
+		</div>
+		<div class="bg-white rounded-2xl shadow-sm p-6">
+			<table class="w-full text-sm">
+				<thead class="text-left text-slate-500 border-b">
+					<tr>
+						<th class="py-2 px-3">Product</th>
+						<th class="py-2 px-3">Category</th>
+						<th class="py-2 px-3 text-right">On hand</th>
+						<th class="py-2 px-3 text-right">Reorder level</th>
+						<th class="py-2 px-3 text-right">Suggested order</th>
+					</tr>
+				</thead>
+				<tbody>
+					if len(d.Rows) == 0 {
+						<tr><td colspan="5" class="py-6 text-center text-slate-500">All products are above their reorder level. 🎉</td></tr>
+					} else {
+						for _, p := range d.Rows {
+							<tr class="border-b last:border-0">
+								<td class="py-2 px-3 font-medium">{ p.Name }</td>
+								<td class="py-2 px-3 text-slate-500">{ p.CategoryName }</td>
+								<td class="py-2 px-3 text-right">{ money.Display(p.StockQty) } { p.UnitAbbr }</td>
+								<td class="py-2 px-3 text-right">{ strconv.Itoa(p.ReorderLevel) }</td>
+								<td class="py-2 px-3 text-right font-semibold text-indigo-600">{ suggestedOrder(p) }</td>
+							</tr>
+						}
+					}
+				</tbody>
+			</table>
+		</div>
+	}
+}
+
+// suggestedOrder proposes a quantity that brings stock back to roughly twice the
+// reorder level (a simple, predictable reorder rule).
+func suggestedOrder(p products.Product) string {
+	target := decimalFromInt(p.ReorderLevel * 2)
+	need := target.Sub(p.StockQty)
+	if need.IsNegative() {
+		return "0"
+	}
+	return money.Display(need.Ceil())
+}

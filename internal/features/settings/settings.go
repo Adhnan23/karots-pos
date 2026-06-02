@@ -1,0 +1,139 @@
+// Package settings manages the single-row shop configuration (id is always 1).
+package settings
+
+import (
+	"context"
+	"time"
+
+	"karots-pos/internal/apperr"
+	"karots-pos/internal/config"
+	"karots-pos/internal/db"
+	"karots-pos/internal/middleware"
+	"karots-pos/internal/response"
+
+	"github.com/jmoiron/sqlx"
+	"github.com/labstack/echo/v4"
+)
+
+type Settings struct {
+	ID              int       `db:"id"                json:"id"`
+	ShopName        string    `db:"shop_name"         json:"shop_name"`
+	ShopNameSi      *string   `db:"shop_name_si"      json:"shop_name_si,omitempty"`
+	Address         *string   `db:"address"           json:"address,omitempty"`
+	Phone           *string   `db:"phone"             json:"phone,omitempty"`
+	CurrencyCode    string    `db:"currency_code"     json:"currency_code"`
+	CurrencySymbol  string    `db:"currency_symbol"   json:"currency_symbol"`
+	ReceiptFooter   *string   `db:"receipt_footer"    json:"receipt_footer,omitempty"`
+	LogoURL         *string   `db:"logo_url"          json:"logo_url,omitempty"`
+	TaxRegistered   bool      `db:"tax_registered"    json:"tax_registered"`
+	TaxRegNo        *string   `db:"tax_reg_no"        json:"tax_reg_no,omitempty"`
+	LowStockAlerts  bool      `db:"low_stock_alerts"  json:"low_stock_alerts"`
+	DefaultSaleType string    `db:"default_sale_type" json:"default_sale_type"`
+	UpdatedAt       time.Time `db:"updated_at"        json:"updated_at"`
+}
+
+type UpdateInput struct {
+	ShopName        string  `json:"shop_name"         form:"shop_name"         validate:"required,min=1,max=150"`
+	ShopNameSi      *string `json:"shop_name_si"      form:"shop_name_si"`
+	Address         *string `json:"address"           form:"address"`
+	Phone           *string `json:"phone"             form:"phone"             validate:"omitempty,max=15"`
+	CurrencyCode    string  `json:"currency_code"     form:"currency_code"     validate:"required,max=10"`
+	CurrencySymbol  string  `json:"currency_symbol"   form:"currency_symbol"   validate:"required,max=5"`
+	LogoURL         *string `json:"logo_url"          form:"logo_url"`
+	ReceiptFooter   *string `json:"receipt_footer"    form:"receipt_footer"`
+	TaxRegistered   bool    `json:"tax_registered"    form:"tax_registered"`
+	TaxRegNo        *string `json:"tax_reg_no"        form:"tax_reg_no"`
+	LowStockAlerts  bool    `json:"low_stock_alerts"  form:"low_stock_alerts"`
+	DefaultSaleType string  `json:"default_sale_type" form:"default_sale_type" validate:"required,oneof=retail wholesale credit"`
+}
+
+// nilIfEmptyStr normalizes a blank optional text input to NULL.
+func nilIfEmptyStr(s *string) *string {
+	if s == nil || *s == "" {
+		return nil
+	}
+	return s
+}
+
+type Repository struct{ db db.Queryer }
+
+func NewRepository(q db.Queryer) *Repository { return &Repository{db: q} }
+
+func (r *Repository) Get(ctx context.Context) (*Settings, error) {
+	var s Settings
+	err := r.db.GetContext(ctx, &s, `SELECT * FROM settings WHERE id = 1`)
+	if err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
+
+func (r *Repository) Update(ctx context.Context, in UpdateInput) error {
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE settings SET
+			shop_name=$1, shop_name_si=$2, address=$3, phone=$4,
+			currency_code=$5, currency_symbol=$6, receipt_footer=$7,
+			tax_registered=$8, tax_reg_no=$9, low_stock_alerts=$10, default_sale_type=$11,
+			logo_url=$12
+		WHERE id = 1`,
+		in.ShopName, in.ShopNameSi, in.Address, in.Phone,
+		in.CurrencyCode, in.CurrencySymbol, in.ReceiptFooter,
+		in.TaxRegistered, in.TaxRegNo, in.LowStockAlerts, in.DefaultSaleType,
+		nilIfEmptyStr(in.LogoURL))
+	return err
+}
+
+type Service struct{ repo *Repository }
+
+func NewService(q db.Queryer) *Service { return &Service{repo: NewRepository(q)} }
+
+func (s *Service) Get(ctx context.Context) (*Settings, error) {
+	cfg, err := s.repo.Get(ctx)
+	if err != nil {
+		return nil, apperr.Internal("failed to load settings", err)
+	}
+	return cfg, nil
+}
+
+func (s *Service) Update(ctx context.Context, in UpdateInput) (*Settings, error) {
+	if err := s.repo.Update(ctx, in); err != nil {
+		return nil, apperr.Internal("failed to update settings", err)
+	}
+	return s.Get(ctx)
+}
+
+type APIHandler struct{ svc *Service }
+
+func NewAPIHandler(svc *Service) *APIHandler { return &APIHandler{svc: svc} }
+
+func (h *APIHandler) Get(c echo.Context) error {
+	s, err := h.svc.Get(c.Request().Context())
+	if err != nil {
+		return err
+	}
+	return response.OK(c, s)
+}
+
+func (h *APIHandler) Update(c echo.Context) error {
+	var in UpdateInput
+	if err := c.Bind(&in); err != nil {
+		return apperr.BadRequest("invalid request body")
+	}
+	if err := c.Validate(&in); err != nil {
+		return err
+	}
+	s, err := h.svc.Update(c.Request().Context(), in)
+	if err != nil {
+		return err
+	}
+	return response.OK(c, s)
+}
+
+func RegisterAPI(e *echo.Echo, db *sqlx.DB, cfg *config.Config) *Service {
+	svc := NewService(db)
+	api := NewAPIHandler(svc)
+	g := e.Group("/api/settings", middleware.JWTAuth(cfg.JWTSecret))
+	g.GET("", api.Get)
+	g.PUT("", api.Update, middleware.RequireRole("admin"))
+	return svc
+}

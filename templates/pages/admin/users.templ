@@ -1,0 +1,86 @@
+package adminpages
+
+import (
+	"strconv"
+
+	"karots-pos/internal/features/auth"
+	"karots-pos/templates/layouts"
+)
+
+type UsersData struct {
+	UserName string
+	Rows     []auth.User
+}
+
+templ UsersPage(d UsersData) {
+	@layouts.Admin("Users", d.UserName, "users") {
+		<div class="flex items-center justify-between mb-6">
+			<h1 class="text-2xl font-bold">Staff Users</h1>
+			<button class="px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium"
+				hx-get="/admin/users/form" hx-target="#modal-container" hx-swap="innerHTML">+ New User</button>
+		</div>
+		<div class="bg-white rounded-2xl shadow-sm p-6">
+			<table class="w-full text-sm">
+				<thead class="text-left text-slate-500 border-b">
+					<tr><th class="py-2 px-3">Name</th><th class="py-2 px-3">Role</th><th class="py-2 px-3">Phone</th><th class="py-2 px-3 text-center">Status</th><th class="py-2 px-3"></th></tr>
+				</thead>
+				<tbody id="user-tbody" hx-get="/admin/users/table" hx-trigger="reload-users from:body" hx-target="#user-tbody" hx-swap="innerHTML">
+					@UserRows(d.Rows)
+				</tbody>
+			</table>
+		</div>
+	}
+}
+
+templ UserRows(rows []auth.User) {
+	for _, u := range rows {
+		<tr class="border-b last:border-0">
+			<td class="py-2 px-3 font-medium">{ u.Name }</td>
+			<td class="py-2 px-3 capitalize">{ u.Role }</td>
+			<td class="py-2 px-3">{ strOrEmpty(u.Phone) }</td>
+			<td class="py-2 px-3 text-center">
+				if u.IsActive {
+					<span class="px-2 py-0.5 rounded-full text-xs bg-emerald-100 text-emerald-700">active</span>
+				} else {
+					<span class="px-2 py-0.5 rounded-full text-xs bg-slate-200 text-slate-600">disabled</span>
+				}
+			</td>
+			<td class="py-2 px-3 text-right">
+				if u.IsActive {
+					<button class="text-red-600 hover:underline" hx-delete={ "/admin/users/" + strconv.FormatInt(u.ID, 10) } hx-swap="none" hx-confirm={ "Deactivate " + u.Name + "?" }>Deactivate</button>
+				}
+			</td>
+		</tr>
+	}
+}
+
+templ UserForm() {
+	@modalShell("New User") {
+		<form class="p-6 space-y-4" hx-post="/admin/users" hx-swap="none">
+			<div>
+				<label class="block text-sm font-medium mb-1">Name</label>
+				<input name="name" required class="w-full border rounded-lg px-3 py-2"/>
+			</div>
+			<div class="grid grid-cols-2 gap-4">
+				<div>
+					<label class="block text-sm font-medium mb-1">Role</label>
+					<select name="role" class="w-full border rounded-lg px-3 py-2">
+						<option value="cashier">Cashier</option>
+						<option value="manager">Manager</option>
+						<option value="admin">Admin</option>
+					</select>
+				</div>
+				<div>
+					<label class="block text-sm font-medium mb-1">Phone (login)</label>
+					<input name="phone" required class="w-full border rounded-lg px-3 py-2" placeholder="07XXXXXXXX"/>
+				</div>
+			</div>
+			<p class="text-xs text-slate-500">The user signs in with this phone number + PIN.</p>
+			<div>
+				<label class="block text-sm font-medium mb-1">PIN (4–6 digits)</label>
+				<input name="pin" type="password" inputmode="numeric" required minlength="4" maxlength="6" class="w-full border rounded-lg px-3 py-2"/>
+			</div>
+			@modalButtons()
+		</form>
+	}
+}
