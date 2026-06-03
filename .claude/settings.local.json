@@ -59,7 +59,20 @@
       "Bash(pkill -f \"exe/server\")",
       "Bash(kill 38143)",
       "Bash(zcat /tmp/pos.json.gz)",
-      "Bash(python3 -c ' *)"
+      "Bash(python3 -c ' *)",
+      "Bash(/usr/bin/curl -s -c /tmp/pos_cookies.txt -X POST http://localhost:3000/login -d 'phone=0771234567&pin=1234' -w '%{http_code}' -o /dev/null)",
+      "Bash(/usr/bin/curl -s -b /tmp/pos_cookies.txt http://localhost:3000/admin/products -o /tmp/admin_products.html -w 'products http: %{http_code}\\\\n')",
+      "Bash(/usr/bin/curl -s -b /tmp/pos_cookies.txt http://localhost:3000/cashier -o /tmp/cashier.html -w 'cashier http: %{http_code}\\\\n')",
+      "Bash(/usr/bin/curl -s -b /tmp/c.txt http://localhost:3000/admin/users/form)",
+      "Bash(npx --version)",
+      "Bash(npx -y tailwindcss@3 -c tailwind.config.js -i static/css/tailwind.input.css -o static/css/tailwind.css --minify)",
+      "Bash(echo \"=== exit: $? ===\")",
+      "Bash(git check-ignore *)",
+      "Bash(git add *)",
+      "Bash(git reset *)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(gh auth *)"
     ]
   }
 }
