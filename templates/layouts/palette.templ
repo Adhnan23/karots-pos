@@ -1,0 +1,107 @@
+package layouts
+
+import (
+	"encoding/json"
+)
+
+// navItem is one destination shown in a nav group and in the command palette.
+type navItem struct {
+	Href, Label, Key string
+}
+
+// navGroup is a labelled, collapsible cluster of nav items.
+type navGroup struct {
+	Label string
+	Items []navItem
+}
+
+// paletteEntry is a flattened, JSON-serialised palette destination.
+type paletteEntry struct {
+	Href  string `json:"href"`
+	Label string `json:"label"`
+	Group string `json:"group"`
+}
+
+// paletteJSON marshals palette destinations to a JS array literal for x-data.
+func paletteJSON(entries []paletteEntry) string {
+	b, err := json.Marshal(entries)
+	if err != nil {
+		return "[]"
+	}
+	return string(b)
+}
+
+// activeGroupFor returns the label of the group that owns the active key, so the
+// sidebar can auto-expand it on load.
+func activeGroupFor(groups []navGroup, active string) string {
+	for _, g := range groups {
+		for _, it := range g.Items {
+			if it.Key == active {
+				return g.Label
+			}
+		}
+	}
+	return ""
+}
+
+// groupHasActive reports whether a group owns the active page — used to render
+// that group expanded on first paint (before Alpine hydrates) so there's no
+// flash of a collapsed current section.
+func groupHasActive(g navGroup, active string) bool {
+	for _, it := range g.Items {
+		if it.Key == active {
+			return true
+		}
+	}
+	return false
+}
+
+// CommandPalette is the global keyboard-first "jump to any page" overlay.
+// `entries` is JSON from paletteJSON(...). It opens on Cmd/Ctrl+K or on the
+// "open-palette" window event (dispatched by the sidebar search button).
+templ CommandPalette(entries string) {
+	<div
+		x-data={ "cmdPalette(" + entries + ")" }
+		x-on:keydown.window.cmd.k.prevent="open()"
+		x-on:keydown.window.ctrl.k.prevent="open()"
+		x-on:keydown.window="onSlash($event)"
+		x-on:open-palette.window="open()"
+		x-on:keydown.window.escape="close()"
+	>
+		<div
+			x-show="show"
+			x-cloak
+			class="fixed inset-0 z-[60] flex items-start justify-center pt-24 px-4 bg-black/40"
+			x-on:click.self="close()"
+		>
+			<div class="w-full max-w-lg bg-white rounded-xl shadow-2xl overflow-hidden">
+				<input
+					x-ref="input"
+					x-model="q"
+					type="text"
+					placeholder="Search pages…   / or ⌘K to open · ↑↓ move · Enter go · Esc close"
+					class="w-full px-4 py-3.5 text-base border-b outline-none"
+					x-on:keydown.down.prevent="move(1)"
+					x-on:keydown.up.prevent="move(-1)"
+					x-on:keydown.enter.prevent="go()"
+				/>
+				<ul class="max-h-80 overflow-auto py-1">
+					<template x-for="(it, i) in filtered" x-bind:key="it.href">
+						<li>
+							<a
+								x-bind:href="it.href"
+								x-on:mouseenter="sel=i"
+								x-bind:class="i===sel ? 'bg-indigo-600 text-white' : 'text-slate-700 hover:bg-slate-100'"
+								class="flex items-center justify-between gap-4 px-4 py-2.5 text-sm"
+							>
+								<span x-text="it.label"></span>
+								<span class="text-xs opacity-60" x-text="it.group"></span>
+							</a>
+						</li>
+					</template>
+					<li x-show="filtered.length===0" class="px-4 py-6 text-center text-sm text-slate-400">No matching pages.</li>
+				</ul>
+			</div>
+		</div>
+	</div>
+}

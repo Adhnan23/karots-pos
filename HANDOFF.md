@@ -214,9 +214,121 @@ struct field in the same change.
 - Run locally: `docker compose up -d postgres`, then
   `set -a && . ./.env && set +a && go run ./cmd/server`.
 
-## ⬜ NEXT UP — full UI revamp (planned, not started)
+## ✅ DONE — full UI revamp (Phases 1–4 all shipped)
 
-Big upcoming piece. **Do not start until we pick it up together.** Three goals:
+### ✅ Phase 1 (done) — admin nav declutter + global affordances
+- **Collapsible grouped admin sidebar.** The flat wall of ~20 links is now
+  Dashboard (standalone) + six collapsible groups: **Sell · Inventory ·
+  Purchasing · Cash · Reports · Setup**. Open/closed state per group is saved to
+  `localStorage` (`adminNavOpen`) so it survives the full page reloads; the group
+  that owns the current page is always force-opened. See `adminGroups()` /
+  `navGroupBlock` in `templates/layouts/admin.templ` and `adminNav()` in
+  `static/js/app.js`.
+- **Command palette (⌘K / Ctrl+K).** Global "jump to any page" overlay in *both*
+  shells — type to filter, ↑/↓ to move, Enter to open, Esc to close. Also opened
+  by the "Search / jump…" button (admin sidebar) / 🔍 button (cashier topbar),
+  which dispatch an `open-palette` window event. Built from `CommandPalette` +
+  `paletteJSON()` in `templates/layouts/palette.templ` (shared `navItem`/
+  `navGroup`/`paletteEntry` types live there) and `cmdPalette()` in `app.js`.
+  Destination lists: `adminPalette()` (admin.templ), `cashierPalette(role)`
+  (cashier.templ — Admin entry only for admin/manager).
+- **Global touch + keyboard CSS** in `static/css/app.css`: strong always-visible
+  `:focus-visible` ring everywhere, and `@media (pointer: coarse)` bumps buttons/
+  selects/inputs/textarea to a ≥44px tap target (and 16px font to stop mobile
+  zoom) — touch devices only, desktop layout untouched.
+
+### ✅ Phase 2 (done) — cashier touch + keyboard polish
+- **Cashier keyboard shortcuts.** A `keydown.window="onKey($event)"` handler on
+  the POS root (`pos()` in `static/js/app.js`): **F2** focus search · **F3** focus
+  scan · **F9** focus discount · **F4** hold sale · **F10** complete sale · **Esc**
+  close the open modal (or blur the focused field) · **Enter** on the receipt
+  screen starts a New Sale. Yields to the command palette while it's open (palette
+  toggles a `palette-open` body class). Inputs carry `x-ref` (`searchInput`,
+  `scanInput`, `discountInput`) and the placeholders show their F-key.
+- **Touch qty steppers.** Each cart line now has −/＋ buttons around the qty input
+  (`incQty`/`decQty`) plus larger remove/✕ hit areas — finger-usable without a
+  keyboard.
+- **Shortcut legend.** A muted keycap legend (desktop only) under the cart actions
+  listing F2/F3/F9/F4/F10/Esc/⌘K; `kbd` styled in `static/css/app.css`.
+- **Global Esc-to-close on admin modals.** `ModalHost` in
+  `templates/layouts/base.templ` now clears the modal container on
+  `keydown.escape.window`, so every HTMX form modal closes with Esc.
+
+### ✅ Phase 3 (done) — admin data-entry touch + keyboard polish
+- **GRN & purchase-return entry screens** (`grn()` / `pret()` in `app.js`,
+  `purchases.templ` / `purchasereturns.templ`): `keydown.window="onKey($event)"`
+  on the root — **F4** add line · **F10** submit (Receive Goods / Return to
+  Supplier); the buttons show those hints. Each qty cell now has −/＋ steppers
+  (`incLine`/`decLine`), qty column widened to `w-32`. Yields to the palette via
+  the `palette-open` body class.
+- **Modal autofocus.** A `DOMContentLoaded` listener in `app.js` hooks
+  `htmx:afterSwap` on `#modal-container` and focuses the first non-hidden
+  input/select/textarea — so every HTMX form modal is ready to type into (and Esc
+  closes it, from Phase 2). Enter-to-submit already works via each form's submit
+  button.
+- The cash-register denomination-counting inputs (open/close/withdraw on the
+  cashier page) are covered by the Phase-1 `@media (pointer: coarse)` 44px tap
+  targets; no per-field change needed.
+
+### ✅ Phase 4 (done) — nav animation + global jump-anywhere
+- **Smooth nav collapse animation.** The admin nav groups now animate open/closed
+  via the pure-CSS grid `0fr→1fr` trick (`transition-[grid-template-rows]`, inner
+  `overflow-hidden`) — no Alpine plugin added. The group that owns the current
+  page is server-rendered already-open (`grid-template-rows:1fr` inline) so there
+  is no flash before Alpine hydrates; `groupHasActive()` in `palette.templ` drives
+  that. See `navGroupBlock` in `templates/layouts/admin.templ`.
+- **"/" opens the palette from anywhere.** `cmdPalette.onSlash()` (in `app.js`,
+  wired via `keydown.window` on `CommandPalette`) opens the jump-to-page overlay
+  on "/" unless the user is typing in an input/select/textarea/contenteditable —
+  so keyboard navigation works on every screen, including plain list pages with
+  no other shortcuts. ⌘K / Ctrl+K and the sidebar/topbar buttons still work too.
+
+### ✅ Phase 5 (done) — light / dark theme toggle
+- **Toggle** in the admin sidebar footer ("🌙 Dark mode" / "☀️ Light mode") and
+  the cashier topbar (icon button). Both use the `themeToggle()` Alpine component
+  in `app.js`, which flips a `dark` class on `<html>` and stores the choice in
+  `localStorage.theme`.
+- **No flash:** an inline script in `Base` (`templates/layouts/base.templ`,
+  `@templ.Raw`) applies the saved theme — or the OS `prefers-color-scheme` on
+  first visit — before paint.
+- **Implementation:** rather than adding `dark:` variants across every template,
+  dark mode is a set of `html.dark` overrides in `static/css/app.css` that remap
+  the dominant surface/text/border utilities (`bg-white`, `bg-slate-50/100/200`,
+  `text-slate-400…800`, `border*`, `hover:bg-slate-*`, inputs, `kbd`). The page
+  body rule is specificity-bumped (`html.dark body.bg-slate-100`) to outrank the
+  `.bg-slate-100` remap. Print sheets (`.receipt-/.label-/.report-`) are left
+  light on purpose so bills/labels still print correctly.
+
+### ✅ Phase 6 (done) — UX polish: built CSS, styled confirms, loading feedback
+- **Built stylesheet replaces the Tailwind Play CDN.** `static/css/tailwind.css`
+  (~20 KB minified, vs the ~450 KB runtime CDN) is compiled by `make css`
+  (`npx -y tailwindcss@3 -c tailwind.config.js -i static/css/tailwind.input.css
+  -o static/css/tailwind.css --minify`). `build`/`run`/`dev` now depend on `css`.
+  Node/npx is a **build-time** requirement only — the runtime binary is still
+  self-contained, and the no-styling-flash from the CDN is gone. The vendored
+  `static/vendor/tailwind.js` was deleted; the `error.templ` page no longer pulls
+  from `cdn.tailwindcss.com` (worked-offline fix). `tailwind.config.js` scans
+  `.templ` + `templates/**/*.go` (for Go-helper class strings) + `static/js`, and
+  **safelists** `text-{amber,emerald,indigo,rose,slate}-600` (built dynamically by
+  `statCard` in `dashboard.templ` via string concat — Tailwind can't see those).
+  ⚠️ If you add a new dynamically-concatenated class, add it to the safelist or it
+  won't be generated. `tailwind.css` is committed (like the generated `_templ.go`)
+  so a plain `go build` finds the embedded file.
+- **Styled confirm dialog replaces native `confirm()`.** A global `htmx:confirm`
+  hook (app.js) routes every `hx-confirm` (20 of them) to a themed, dark-aware,
+  touch-friendly modal — `ConfirmHost` in `base.templ` + `confirmHost()` in
+  app.js (dispatched via an `app-confirm` event; Yes → `issueRequest(true)`).
+- **Global loading feedback.** A thin top progress bar (`#app-loading-bar` in
+  `base.templ`) driven by `loadingStart/Stop` — hooked to `htmx:beforeRequest/
+  afterRequest` *and* wrapped around `apiFetch()` so every request (HTMX or the
+  cashier's fetch calls) shows progress. Plus `.htmx-request` dims the triggering
+  element, and a `prefers-reduced-motion` block neutralises transitions.
+
+Decision: **section-hub landing pages were intentionally skipped** — the
+collapsible grouped sidebar + command palette already solve "find the page"
+without an extra layer of hub pages to maintain. Revisit only if asked.
+
+Original goals — all three fully delivered across Phases 1–4:
 
 1. **Touch-screen friendly.** The whole app (cashier terminal *and* admin) should
    be comfortable on a touch monitor/tablet: large tap targets (≥44px), bigger
@@ -251,4 +363,4 @@ lean.
 - Partial / line-level **returns** (currently whole-sale return only).
 - Receipt: optional 58mm toggle (CSS var) and shop logo.
 - Pagination on the sales/movements lists (currently capped at 100–200 rows).
-- Replace Tailwind Play CDN with a built stylesheet for production.
+- ~~Replace Tailwind Play CDN with a built stylesheet for production.~~ ✅ done (Phase 6).

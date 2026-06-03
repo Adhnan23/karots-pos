@@ -10,16 +10,20 @@ templ Base(title string) {
 			<meta charset="UTF-8"/>
 			<meta name="viewport" content="width=device-width, initial-scale=1"/>
 			<title>{ title } — POS</title>
+			<!-- Apply the saved (or system) theme before paint to avoid a flash. -->
+			@templ.Raw(`<script>try{var t=localStorage.getItem('theme');if(t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme: dark)').matches)){document.documentElement.classList.add('dark');}}catch(e){}</script>`)
 			<script src="/static/vendor/htmx.min.js"></script>
 			<script src="/static/js/app.js"></script>
 			<script defer src="/static/vendor/alpine.min.js"></script>
-			<script src="/static/vendor/tailwind.js"></script>
+			<link rel="stylesheet" href="/static/css/tailwind.css"/>
 			<link rel="stylesheet" href="/static/css/app.css"/>
 		</head>
 		<body class="h-full bg-slate-100 text-slate-800">
+			<div id="app-loading-bar" class="fixed top-0 left-0 h-0.5 bg-indigo-500 z-[70] transition-all duration-200" style="width:0;opacity:0"></div>
 			{ children... }
 			@ToastHost()
 			@ModalHost()
+			@ConfirmHost()
 		</body>
 	</html>
 }
@@ -48,5 +52,27 @@ templ ModalHost() {
 		id="modal-container"
 		x-data
 		x-on:close-modal.window="$el.innerHTML=''"
+		x-on:keydown.escape.window="$el.innerHTML=''"
 	></div>
+}
+
+// ConfirmHost is the styled replacement for the browser confirm() dialog. The
+// global htmx:confirm hook (in app.js) routes every hx-confirm here via an
+// "app-confirm" event; the confirmHost() Alpine component runs the prompt.
+templ ConfirmHost() {
+	<div
+		x-data="confirmHost()"
+		x-on:app-confirm.window="open($event.detail)"
+		x-on:keydown.escape.window="no()"
+	>
+		<div x-show="show" x-cloak class="fixed inset-0 z-[65] flex items-center justify-center p-4 bg-black/40" x-on:click.self="no()">
+			<div class="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6">
+				<div class="text-base text-slate-800" x-text="question"></div>
+				<div class="flex justify-end gap-2 mt-6">
+					<button type="button" x-on:click="no()" class="px-4 py-2 rounded-lg border text-slate-600">Cancel</button>
+					<button type="button" x-ref="yes" x-on:click="yes()" class="px-4 py-2 rounded-lg bg-rose-600 text-white font-medium">Confirm</button>
+				</div>
+			</div>
+		</div>
+	</div>
 }

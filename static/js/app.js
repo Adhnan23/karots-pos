@@ -1,6 +1,40 @@
 // Global Alpine components and HTMX glue. Loaded before Alpine so the
 // component factory functions exist when Alpine initializes.
 
+// Keyboard affordance: when HTMX swaps a form into the modal container, focus
+// its first field so keyboard users can type immediately (Esc closes it — see
+// ModalHost). Harmless on touch.
+document.addEventListener("DOMContentLoaded", function () {
+  document.body.addEventListener("htmx:afterSwap", function (e) {
+    if (e.target && e.target.id === "modal-container") {
+      const el = e.target.querySelector(
+        "input:not([type=hidden]):not([type=checkbox]):not([type=radio]), select, textarea",
+      );
+      if (el) el.focus();
+    }
+  });
+
+  // Loading bar for every HTMX request.
+  document.body.addEventListener("htmx:beforeRequest", loadingStart);
+  document.body.addEventListener("htmx:afterRequest", loadingStop);
+
+  // Replace the native confirm() for hx-confirm with our styled modal.
+  document.body.addEventListener("htmx:confirm", function (e) {
+    if (!e.detail.question) return; // no hx-confirm on this element → proceed
+    e.preventDefault();
+    window.dispatchEvent(
+      new CustomEvent("app-confirm", {
+        detail: {
+          question: e.detail.question,
+          onYes: function () {
+            e.detail.issueRequest(true);
+          },
+        },
+      }),
+    );
+  });
+});
+
 // toastHost: renders transient notifications fired via the "show-toast" event
 // (emitted by the server as an HX-Trigger header, or dispatched client-side).
 function toastHost() {
@@ -29,7 +63,13 @@ async function apiFetch(method, url, body) {
     opts.headers["Content-Type"] = "application/json";
     opts.body = JSON.stringify(body);
   }
-  const res = await fetch(url, opts);
+  loadingStart();
+  let res;
+  try {
+    res = await fetch(url, opts);
+  } finally {
+    loadingStop();
+  }
   let json = null;
   try {
     json = await res.json();
@@ -44,6 +84,65 @@ async function apiFetch(method, url, body) {
     throw new Error(msg);
   }
   return json;
+}
+
+// --- Global top loading bar -----------------------------------------------
+// A thin progress bar driven by both HTMX requests and apiFetch() calls, so
+// every request gives visible feedback. Counter-based so concurrent requests
+// don't end the bar early.
+let loadingPending = 0;
+let loadingTimer = null;
+function loadingBarEl() {
+  return document.getElementById("app-loading-bar");
+}
+function loadingStart() {
+  loadingPending++;
+  const b = loadingBarEl();
+  if (!b) return;
+  b.style.opacity = "1";
+  b.style.width = "35%";
+  clearTimeout(loadingTimer);
+  loadingTimer = setTimeout(() => {
+    if (loadingPending > 0 && loadingBarEl()) loadingBarEl().style.width = "75%";
+  }, 300);
+}
+function loadingStop() {
+  loadingPending = Math.max(0, loadingPending - 1);
+  const b = loadingBarEl();
+  if (!b || loadingPending > 0) return;
+  clearTimeout(loadingTimer);
+  b.style.width = "100%";
+  setTimeout(() => {
+    b.style.opacity = "0";
+    b.style.width = "0";
+  }, 200);
+}
+
+// confirmHost: a styled replacement for the browser's confirm() dialog. Driven
+// by the global htmx:confirm hook below (and dispatched "app-confirm" events),
+// so every hx-confirm gets a themed, touch-friendly prompt for free.
+function confirmHost() {
+  return {
+    show: false,
+    question: "",
+    onYes: null,
+    open(d) {
+      this.question = (d && d.question) || "Are you sure?";
+      this.onYes = (d && d.onYes) || null;
+      this.show = true;
+      this.$nextTick(() => this.$refs.yes && this.$refs.yes.focus());
+    },
+    yes() {
+      this.show = false;
+      const fn = this.onYes;
+      this.onYes = null;
+      if (fn) fn();
+    },
+    no() {
+      this.show = false;
+      this.onYes = null;
+    },
+  };
 }
 
 function toast(message, level) {
@@ -98,6 +197,72 @@ function pos(symbol, defaultType) {
     money3(v) {
       const n = Number(v) || 0;
       return n.toLocaleString(undefined, { maximumFractionDigits: 3 });
+    },
+
+    // --- keyboard shortcuts (touch + keyboard revamp) ---
+    // F2 search · F3 scan · F9 discount · F4 hold · F10 pay · Esc close/blur.
+    focusEl(ref) {
+      const el = this.$refs[ref];
+      if (!el) return;
+      el.focus();
+      if (el.select) el.select();
+    },
+    anyModalOpen() {
+      return this.showHolds || this.showWithdraw || this.showClose || !!this.receipt;
+    },
+    closeModals() {
+      this.showHolds = false;
+      this.showWithdraw = false;
+      this.showClose = false;
+      this.closeResult = null;
+      this.receipt = null;
+    },
+    onKey(e) {
+      // Let the global command palette own the keyboard while it's open.
+      if (document.body.classList.contains("palette-open")) return;
+      switch (e.key) {
+        case "Escape":
+          if (this.anyModalOpen()) {
+            e.preventDefault();
+            this.closeModals();
+          } else if (document.activeElement && document.activeElement.blur) {
+            document.activeElement.blur();
+          }
+          return;
+        case "Enter":
+          if (this.receipt) {
+            e.preventDefault();
+            this.newSale();
+          }
+          return;
+        case "F2":
+          e.preventDefault();
+          this.focusEl("searchInput");
+          return;
+        case "F3":
+          e.preventDefault();
+          this.focusEl("scanInput");
+          return;
+        case "F9":
+          e.preventDefault();
+          this.focusEl("discountInput");
+          return;
+        case "F4":
+          e.preventDefault();
+          if (!this.anyModalOpen()) this.holdSale();
+          return;
+        case "F10":
+          e.preventDefault();
+          if (!this.anyModalOpen()) this.checkout();
+          return;
+      }
+    },
+    // Touch-friendly qty steppers for cart lines.
+    incQty(it) {
+      it.qty = (Number(it.qty) || 0) + 1;
+    },
+    decQty(it) {
+      it.qty = Math.max(0, (Number(it.qty) || 0) - 1);
     },
 
     async loadProducts() {
@@ -408,6 +573,23 @@ function grn(symbol) {
       this.lines.splice(i, 1);
       if (this.lines.length === 0) this.addLine();
     },
+    // F4 add line · F10 receive. Touch steppers on the qty column.
+    onKey(e) {
+      if (document.body.classList.contains("palette-open")) return;
+      if (e.key === "F4") {
+        e.preventDefault();
+        this.addLine();
+      } else if (e.key === "F10") {
+        e.preventDefault();
+        this.submit();
+      }
+    },
+    incLine(l) {
+      l.quantity = (Number(l.quantity) || 0) + 1;
+    },
+    decLine(l) {
+      l.quantity = Math.max(0, (Number(l.quantity) || 0) - 1);
+    },
     lineSub(l) {
       return (Number(l.quantity) || 0) * (Number(l.cost_price) || 0);
     },
@@ -477,6 +659,23 @@ function pret(symbol) {
     removeLine(i) {
       this.lines.splice(i, 1);
       if (this.lines.length === 0) this.addLine();
+    },
+    // F4 add line · F10 submit return. Touch steppers on the qty column.
+    onKey(e) {
+      if (document.body.classList.contains("palette-open")) return;
+      if (e.key === "F4") {
+        e.preventDefault();
+        this.addLine();
+      } else if (e.key === "F10") {
+        e.preventDefault();
+        this.submit();
+      }
+    },
+    incLine(l) {
+      l.quantity = (Number(l.quantity) || 0) + 1;
+    },
+    decLine(l) {
+      l.quantity = Math.max(0, (Number(l.quantity) || 0) - 1);
     },
     lineSub(l) {
       return (Number(l.quantity) || 0) * (Number(l.cost_price) || 0);
@@ -624,6 +823,103 @@ function login() {
     },
     back() {
       this.pin = this.pin.slice(0, -1);
+    },
+  };
+}
+
+// themeToggle: light ⇄ dark switch. The class lives on <html> (set pre-paint by
+// the inline script in Base); we just flip it and remember the choice.
+function themeToggle() {
+  return {
+    dark: document.documentElement.classList.contains("dark"),
+    toggle() {
+      this.dark = !this.dark;
+      document.documentElement.classList.toggle("dark", this.dark);
+      try {
+        localStorage.setItem("theme", this.dark ? "dark" : "light");
+      } catch (e) {
+        /* storage unavailable */
+      }
+    },
+  };
+}
+
+// adminNav: collapsible grouped sidebar. Open/closed state per group is kept in
+// localStorage so it survives full page reloads (every page is server-rendered);
+// the group containing the current page is always forced open.
+function adminNav(activeGroup) {
+  return {
+    open: {},
+    init() {
+      try {
+        this.open = JSON.parse(localStorage.getItem("adminNavOpen") || "{}");
+      } catch (_) {
+        this.open = {};
+      }
+      if (activeGroup) this.open[activeGroup] = true;
+    },
+    toggle(g) {
+      this.open[g] = !this.open[g];
+      localStorage.setItem("adminNavOpen", JSON.stringify(this.open));
+    },
+    isOpen(g) {
+      return !!this.open[g];
+    },
+  };
+}
+
+// cmdPalette: keyboard-first "jump to any page" overlay (Cmd/Ctrl+K, or the
+// search button). Type to filter, ↑/↓ to move, Enter to go, Esc to close.
+function cmdPalette(items) {
+  return {
+    show: false,
+    q: "",
+    sel: 0,
+    items: items || [],
+    open() {
+      this.show = true;
+      this.q = "";
+      this.sel = 0;
+      document.body.classList.add("palette-open");
+      this.$nextTick(() => this.$refs.input && this.$refs.input.focus());
+    },
+    close() {
+      this.show = false;
+      document.body.classList.remove("palette-open");
+    },
+    // "/" opens the palette from anywhere — but only when not typing into a field.
+    onSlash(e) {
+      if (e.key !== "/" || this.show) return;
+      const t = e.target;
+      const tag = t && t.tagName;
+      if (
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        tag === "SELECT" ||
+        (t && t.isContentEditable)
+      ) {
+        return;
+      }
+      e.preventDefault();
+      this.open();
+    },
+    get filtered() {
+      const q = this.q.trim().toLowerCase();
+      if (!q) return this.items;
+      return this.items.filter(
+        (i) =>
+          i.label.toLowerCase().includes(q) ||
+          (i.group || "").toLowerCase().includes(q),
+      );
+    },
+    move(d) {
+      const n = this.filtered.length;
+      if (!n) return;
+      this.sel = (this.sel + d + n) % n;
+    },
+    go() {
+      const it = this.filtered[this.sel];
+      if (it) window.location.href = it.href;
     },
   };
 }

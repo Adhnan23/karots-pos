@@ -3,6 +3,111 @@
   display: none !important;
 }
 
+/* ---------------- Accessibility / input affordances ----------------
+   Part of the touch + keyboard revamp: a strong, always-visible focus ring for
+   keyboard users, and larger tap targets on touch devices only (coarse pointer)
+   so the desktop layout is left untouched. */
+*:focus-visible {
+  outline: 2px solid #4f46e5;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@media (pointer: coarse) {
+  button,
+  [role="button"],
+  select,
+  textarea,
+  input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]) {
+    min-height: 44px;
+  }
+  button,
+  select {
+    font-size: 16px; /* keeps iOS/Android from zooming on focus */
+  }
+}
+
+/* In-flight feedback: dim + progress cursor on the element making an HTMX
+   request (complements the global top loading bar). */
+.htmx-request {
+  cursor: progress;
+}
+button.htmx-request,
+.htmx-request button[type="submit"] {
+  opacity: 0.7;
+}
+
+/* Respect users who prefer less motion: drop the non-essential transitions
+   (nav collapse, loading bar, etc.). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
+
+/* Keyboard-shortcut keycaps in the cashier legend. (Tailwind utility classes,
+   being class selectors, still override this element rule where they're used —
+   e.g. the styled ⌘K chips in the nav bars.) */
+kbd {
+  font-family: inherit;
+  font-size: 0.95em;
+  padding: 0 4px;
+  border: 1px solid #cbd5e1;
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: #f8fafc;
+  color: #475569;
+}
+
+/* ---------------- Dark mode ----------------
+   The app's markup uses light Tailwind utilities throughout, so dark mode is
+   implemented by remapping the handful of dominant surface/text/border utilities
+   under `html.dark` rather than sprinkling `dark:` variants across every
+   template. !important is needed to beat Tailwind's same-specificity utilities
+   (and the Play-CDN styles injected at runtime). Print sheets use their own
+   `.receipt-/.label-/.report-` classes and are deliberately left light. */
+/* Body carries `bg-slate-100`; this selector outranks the `.bg-slate-100` remap
+   below so the page itself goes near-black while slate-100 buttons go mid-slate. */
+html.dark body.bg-slate-100 { background-color: #0b1120 !important; color: #e2e8f0 !important; }
+
+.dark .bg-white { background-color: #1e293b !important; }
+.dark .bg-slate-50 { background-color: #1e293b !important; }
+.dark .bg-slate-100 { background-color: #334155 !important; }
+.dark .bg-slate-200 { background-color: #475569 !important; }
+
+.dark .text-slate-800,
+.dark .text-slate-700 { color: #e2e8f0 !important; }
+.dark .text-slate-600 { color: #cbd5e1 !important; }
+.dark .text-slate-500,
+.dark .text-slate-400 { color: #94a3b8 !important; }
+
+.dark .border,
+.dark .border-t,
+.dark .border-b,
+.dark .border-l,
+.dark .border-r,
+.dark .border-x,
+.dark .border-y { border-color: #334155 !important; }
+
+.dark .hover\:bg-slate-50:hover { background-color: #334155 !important; }
+.dark .hover\:bg-slate-100:hover { background-color: #334155 !important; }
+.dark .hover\:bg-slate-200:hover { background-color: #475569 !important; }
+
+.dark input,
+.dark select,
+.dark textarea {
+  background-color: #0f172a;
+  color: #e2e8f0;
+  border-color: #334155;
+}
+.dark input::placeholder,
+.dark textarea::placeholder { color: #64748b; }
+
+.dark kbd { background: #1e293b; border-color: #475569; color: #cbd5e1; }
+
 /* ---------------- Thermal receipt (80mm / 58mm) ---------------- */
 .receipt-body {
   background: #f1f5f9;

@@ -2,6 +2,22 @@ package layouts
 
 import "karots-pos/internal/features/auth"
 
+// cashierPalette is the command-palette destination list for the terminal. The
+// Admin entry is only meaningful for admins/managers, but it's harmless to list.
+func cashierPalette(role string) []paletteEntry {
+	out := []paletteEntry{
+		{"/cashier", "Sell", "Terminal"},
+		{"/cashier/returns", "Returns", "Terminal"},
+		{"/cashier/damage", "Damage", "Terminal"},
+		{"/cashier/credit", "Credit", "Terminal"},
+		{"/cashier/receipts", "Receipts", "Terminal"},
+	}
+	if role == auth.RoleAdmin || role == auth.RoleManager {
+		out = append(out, paletteEntry{"/admin", "Admin", "Go"})
+	}
+	return out
+}
+
 // Cashier is the terminal shell: a slim topbar with the terminal sections plus a
 // full-height work area. `active` highlights the current section; `role` decides
 // whether the Admin link is shown (cashiers don't get it).
@@ -18,8 +34,20 @@ templ Cashier(title, userName, role, active string) {
 						@cashierTab("/cashier/credit", "Credit", active == "credit")
 						@cashierTab("/cashier/receipts", "Receipts", active == "receipts")
 					</nav>
+					<button
+						type="button"
+						onclick="window.dispatchEvent(new CustomEvent('open-palette'))"
+						title="Search / jump (Ctrl+K)"
+						class="flex items-center gap-2 px-3 py-1.5 rounded-lg text-slate-300 hover:bg-white/10 hover:text-white text-sm"
+					>
+						<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"></circle><path d="M21 21l-4.3-4.3"></path></svg>
+						<kbd class="text-[10px] px-1.5 py-0.5 rounded bg-white/10">⌘K</kbd>
+					</button>
 				</div>
 				<div class="flex items-center gap-4 text-sm">
+					<button type="button" x-data="themeToggle()" x-on:click="toggle()" title="Toggle light / dark" class="text-slate-300 hover:text-white text-base leading-none">
+						<span x-text="dark ? '☀️' : '🌙'">🌙</span>
+					</button>
 					<span class="text-slate-300">{ userName }</span>
 					if role == auth.RoleAdmin || role == auth.RoleManager {
 						<a href="/admin" class="text-slate-300 hover:text-white">Admin</a>
@@ -32,6 +60,7 @@ templ Cashier(title, userName, role, active string) {
 			<div class="flex-1 min-h-0">
 				{ children... }
 			</div>
+			@CommandPalette(paletteJSON(cashierPalette(role)))
 		</div>
 	}
 }

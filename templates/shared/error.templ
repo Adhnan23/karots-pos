@@ -10,7 +10,7 @@ templ ErrorPage(code int, message string) {
 			<meta charset="UTF-8"/>
 			<meta name="viewport" content="width=device-width, initial-scale=1"/>
 			<title>{ strconv.Itoa(code) } — POS</title>
-			<script src="https://cdn.tailwindcss.com"></script>
+			<link rel="stylesheet" href="/static/css/tailwind.css"/>
 		</head>
 		<body class="h-full bg-slate-100 flex items-center justify-center">
 			<div class="text-center p-10 bg-white rounded-2xl shadow-sm max-w-md">

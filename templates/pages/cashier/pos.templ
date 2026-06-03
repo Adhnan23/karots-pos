@@ -19,6 +19,7 @@ templ POS(d POSData) {
 			class="h-full"
 			x-data={ "pos('" + d.Symbol + "', '" + d.DefaultSaleType + "')" }
 			x-init="init()"
+			x-on:keydown.window="onKey($event)"
 		>
 			<!-- Register closed overlay: count the opening float by denomination -->
 			<div x-show="!session" x-cloak class="absolute inset-0 bg-slate-100/95 z-30 flex items-center justify-center p-4 overflow-auto">
@@ -62,17 +63,19 @@ templ POS(d POSData) {
 					<div class="flex gap-3 mb-4">
 						<input
 							type="text"
+							x-ref="scanInput"
 							x-model="scan"
 							x-on:keydown.enter.prevent="scanBarcode()"
-							placeholder="Scan barcode + Enter"
+							placeholder="Scan barcode + Enter  (F3)"
 							class="flex-1 border rounded-lg px-3 py-2.5"
 							autofocus
 						/>
 						<input
 							type="search"
+							x-ref="searchInput"
 							x-model="search"
 							x-on:input.debounce.300ms="loadProducts()"
-							placeholder="Search products…"
+							placeholder="Search products…  (F2)"
 							class="flex-1 border rounded-lg px-3 py-2.5"
 						/>
 					</div>
@@ -120,9 +123,13 @@ templ POS(d POSData) {
 									<div class="text-sm font-medium truncate" x-text="it.name"></div>
 									<div class="text-xs text-slate-400" x-text="sym + ' ' + money(it.unit_price) + ' × '"></div>
 								</div>
-								<input type="number" step="0.001" min="0" x-model.number="it.qty" x-on:input="clampQty(it)" class="w-20 border rounded px-2 py-1 text-right text-sm"/>
+								<div class="flex items-center rounded border">
+									<button type="button" x-on:click="decQty(it)" class="px-2.5 py-1 text-lg leading-none text-slate-500 hover:bg-slate-100" aria-label="Decrease quantity">−</button>
+									<input type="number" step="0.001" min="0" x-model.number="it.qty" x-on:input="clampQty(it)" class="w-14 border-x px-1 py-1 text-center text-sm"/>
+									<button type="button" x-on:click="incQty(it)" class="px-2.5 py-1 text-lg leading-none text-slate-500 hover:bg-slate-100" aria-label="Increase quantity">+</button>
+								</div>
 								<div class="w-24 text-right text-sm font-medium" x-text="sym + ' ' + money(lineTotal(it))"></div>
-								<button x-on:click="removeItem(idx)" class="text-red-500 px-1">✕</button>
+								<button x-on:click="removeItem(idx)" class="text-red-500 px-2 py-1" aria-label="Remove line">✕</button>
 							</div>
 						</template>
 						<template x-if="cart.length === 0">
@@ -136,7 +143,7 @@ templ POS(d POSData) {
 						</div>
 						<div class="flex justify-between text-sm items-center">
 							<span>Discount</span>
-							<input type="number" step="0.01" min="0" x-model.number="discount" class="w-28 border rounded px-2 py-1 text-right"/>
+							<input type="number" step="0.01" min="0" x-ref="discountInput" x-model.number="discount" class="w-28 border rounded px-2 py-1 text-right"/>
 						</div>
 						<div class="flex justify-between text-lg font-bold">
 							<span>Total</span><span x-text="sym + ' ' + money(total())"></span>
@@ -185,6 +192,16 @@ templ POS(d POSData) {
 						<div class="flex gap-2">
 							<button x-on:click="showWithdraw = true" class="flex-1 py-2 rounded-lg border text-sm text-slate-600">Withdraw</button>
 							<button x-on:click="startClose()" class="flex-1 py-2 rounded-lg border text-sm text-slate-600">Close Register</button>
+						</div>
+						<!-- Keyboard shortcut legend (desktop only) -->
+						<div class="hidden lg:flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-400 pt-1">
+							<span><kbd>F2</kbd> Search</span>
+							<span><kbd>F3</kbd> Scan</span>
+							<span><kbd>F9</kbd> Discount</span>
+							<span><kbd>F4</kbd> Hold</span>
+							<span><kbd>F10</kbd> Pay</span>
+							<span><kbd>Esc</kbd> Close</span>
+							<span><kbd>⌘K</kbd> Jump</span>
 						</div>
 					</div>
 				</aside>

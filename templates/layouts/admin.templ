@@ -1,5 +1,58 @@
 package layouts
 
+// adminGroups is the grouped admin navigation. Dashboard is rendered standalone
+// above the groups; everything else lives in a collapsible cluster.
+func adminGroups() []navGroup {
+	return []navGroup{
+		{"Sell", []navItem{
+			{"/admin/sales", "Sales", "sales"},
+			{"/admin/customers", "Customers", "customers"},
+		}},
+		{"Inventory", []navItem{
+			{"/admin/products", "Products", "products"},
+			{"/admin/stock", "Stock & Movements", "stock"},
+			{"/admin/conversions", "Conversions", "conversions"},
+			{"/admin/labels", "Barcode Labels", "labels"},
+			{"/admin/categories", "Categories", "categories-mgmt"},
+			{"/admin/units", "Units", "units-mgmt"},
+		}},
+		{"Purchasing", []navItem{
+			{"/admin/purchases", "Purchases", "purchases"},
+			{"/admin/purchase-returns", "Purchase Returns", "purchase-returns"},
+			{"/admin/suppliers", "Suppliers", "suppliers"},
+		}},
+		{"Cash", []navItem{
+			{"/admin/cash-register", "Cash Register", "cash-register"},
+			{"/admin/denominations", "Denominations", "denoms"},
+		}},
+		{"Reports", []navItem{
+			{"/admin/reports", "All Reports (print)", "reports-hub"},
+			{"/admin/finance", "Finance & Profit", "finance"},
+			{"/admin/reports/low-stock", "Low Stock", "low-stock"},
+			{"/admin/reports/expiring", "Expiring Stock", "expiring"},
+			{"/admin/expenses", "Expenses", "expenses"},
+		}},
+		{"Setup", []navItem{
+			{"/admin/users", "Users", "users"},
+			{"/admin/audit", "Audit Log", "audit"},
+			{"/admin/settings", "Settings", "settings"},
+		}},
+	}
+}
+
+// adminPalette flattens every admin destination (plus the cashier hand-off) into
+// the command-palette list.
+func adminPalette() []paletteEntry {
+	out := []paletteEntry{{"/admin", "Dashboard", ""}}
+	for _, g := range adminGroups() {
+		for _, it := range g.Items {
+			out = append(out, paletteEntry{it.Href, it.Label, g.Label})
+		}
+	}
+	out = append(out, paletteEntry{"/cashier", "Open Cashier", "Go"})
+	return out
+}
+
 // Admin is the management shell: a fixed sidebar plus a content area. `active`
 // is the nav key of the current page so the link can be highlighted.
 templ Admin(title, userName, active string) {
@@ -10,37 +63,30 @@ templ Admin(title, userName, active string) {
 					<div class="text-lg font-bold text-white">POS Admin</div>
 					<div class="text-xs text-slate-400">{ userName }</div>
 				</div>
-				<nav class="flex-1 px-3 py-4 space-y-1 text-sm overflow-auto">
+				<div class="px-3 pt-3">
+					<button
+						type="button"
+						onclick="window.dispatchEvent(new CustomEvent('open-palette'))"
+						class="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-slate-800/70 text-slate-300 hover:bg-slate-800 text-sm"
+					>
+						<span class="flex items-center gap-2">
+							<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"></circle><path d="M21 21l-4.3-4.3"></path></svg>
+							Search / jump…
+						</span>
+						<kbd class="text-[10px] px-1.5 py-0.5 rounded bg-slate-700 text-slate-300">⌘K</kbd>
+					</button>
+				</div>
+				<nav class="flex-1 px-3 py-3 space-y-1 text-sm overflow-auto" x-data={ "adminNav('" + activeGroupFor(adminGroups(), active) + "')" }>
 					@navLink("/admin", "Dashboard", active == "dashboard")
-					@navSection("Sell")
-					@navLink("/admin/sales", "Sales", active == "sales")
-					@navLink("/admin/customers", "Customers", active == "customers")
-					@navSection("Inventory")
-					@navLink("/admin/products", "Products", active == "products")
-					@navLink("/admin/stock", "Stock & Movements", active == "stock")
-					@navLink("/admin/conversions", "Conversions", active == "conversions")
-					@navLink("/admin/labels", "Barcode Labels", active == "labels")
-					@navLink("/admin/categories", "Categories", active == "categories-mgmt")
-					@navLink("/admin/units", "Units", active == "units-mgmt")
-					@navSection("Purchasing")
-					@navLink("/admin/purchases", "Purchases", active == "purchases")
-					@navLink("/admin/purchase-returns", "Purchase Returns", active == "purchase-returns")
-					@navLink("/admin/suppliers", "Suppliers", active == "suppliers")
-					@navSection("Cash")
-					@navLink("/admin/cash-register", "Cash Register", active == "cash-register")
-					@navLink("/admin/denominations", "Denominations", active == "denoms")
-					@navSection("Reports")
-					@navLink("/admin/reports", "All Reports (print)", active == "reports-hub")
-					@navLink("/admin/finance", "Finance & Profit", active == "finance")
-					@navLink("/admin/reports/low-stock", "Low Stock", active == "low-stock")
-					@navLink("/admin/reports/expiring", "Expiring Stock", active == "expiring")
-					@navLink("/admin/expenses", "Expenses", active == "expenses")
-					@navSection("Admin")
-					@navLink("/admin/users", "Users", active == "users")
-					@navLink("/admin/audit", "Audit Log", active == "audit")
-					@navLink("/admin/settings", "Settings", active == "settings")
+					for _, g := range adminGroups() {
+						@navGroupBlock(g, active)
+					}
 				</nav>
 				<div class="px-3 py-4 border-t border-slate-800 space-y-1 text-sm">
+					<button type="button" x-data="themeToggle()" x-on:click="toggle()" class="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-slate-800">
+						<span x-text="dark ? '☀️' : '🌙'"></span>
+						<span x-text="dark ? 'Light mode' : 'Dark mode'">Dark mode</span>
+					</button>
 					<a href="/cashier" class="block px-3 py-2 rounded-lg hover:bg-slate-800">Open Cashier →</a>
 					<form method="post" action="/logout">
 						<button type="submit" class="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-800 text-red-300">Log out</button>
@@ -51,11 +97,49 @@ templ Admin(title, userName, active string) {
 				{ children... }
 			</main>
 		</div>
+		@CommandPalette(paletteJSON(adminPalette()))
 	}
 }
 
-templ navSection(label string) {
-	<div class="px-3 pt-4 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">{ label }</div>
+// navGroupBlock renders one collapsible group header plus its links. The body
+// uses the CSS grid 0fr→1fr trick for a smooth height collapse (no plugin); the
+// initial inline grid-template-rows matches the server-known open state so the
+// current section doesn't flash before Alpine hydrates.
+templ navGroupBlock(g navGroup, active string) {
+	<div>
+		<button
+			type="button"
+			x-on:click={ "toggle('" + g.Label + "')" }
+			class="w-full flex items-center justify-between px-3 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500 hover:text-slate-300"
+		>
+			<span>{ g.Label }</span>
+			<svg
+				class="w-3 h-3 transition-transform"
+				x-bind:class={ "isOpen('" + g.Label + "') ? 'rotate-90' : ''" }
+				fill="none"
+				stroke="currentColor"
+				stroke-width="2.5"
+				viewBox="0 0 24 24"
+			><path d="M9 18l6-6-6-6"></path></svg>
+		</button>
+		<div
+			class="grid transition-[grid-template-rows] duration-200 ease-out"
+			if groupHasActive(g, active) {
+				style="grid-template-rows:1fr"
+			} else {
+				style="grid-template-rows:0fr"
+			}
+			x-bind:style={ "isOpen('" + g.Label + "') ? 'grid-template-rows:1fr' : 'grid-template-rows:0fr'" }
+		>
+			<div class="overflow-hidden">
+				<div class="space-y-1 pb-1">
+					for _, it := range g.Items {
+						@navLink(it.Href, it.Label, active == it.Key)
+					}
+				</div>
+			</div>
+		</div>
+	</div>
 }
 
 templ navLink(href, label string, active bool) {
