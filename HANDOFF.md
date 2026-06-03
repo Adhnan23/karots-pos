@@ -1,9 +1,40 @@
 # 📋 Handoff — status
 
 **Everything compiles** (`go build ./...` clean, `go vet ./...` clean,
-`templ generate` clean). Phases 2–7 are wired, routed, and **smoke-tested live
-over HTTP** (incl. through the final static binary). DB is at migration **11** and
-seeded. Go module is **`karots-pos`**.
+`templ generate` clean). Phases 2–8 are wired, routed, and **smoke-tested live
+over HTTP** (incl. through the final 15M static binary). DB is at migration **13**
+and seeded. Go module is **`karots-pos`**.
+
+## ✅ Phase 8 — owner-requested add-ons (migrations 0012–0013, all live-tested)
+
+Seven features the owner picked after the Phase-7 review:
+
+| Feature | Where | Verified |
+|---|---|---|
+| **Split-tender payments** (cash/card/online + ref) | `pos()` sends `payments[]`; `pos.templ` payment rows | sale 400 → cash 200 + card 200 (ref stored) |
+| **Cashier receipt reprint** | `/cashier/receipts` (`sales.ListFilter.Receipt`) | found S-00015 + Reprint link |
+| **Hold / park sale** | feature `heldsales`, `/api/held-sales`, Held(n) modal | hold→list→resume→delete (cart JSON round-trips) |
+| **Z-report (day-end)** | `sales.PeriodSummary`, `cashierpages.ZReport`, `/cashier/z/:id` + `/admin/cash-register/:id/z` | 200, sections render, by-method totals |
+| **Audit log** | feature `audit`, `Server.logAudit`, `/admin/audit` | product update → `Admin / update / product` row |
+| **Customer dues report** | `customers.Owing`, `/admin/reports/customer-dues` | owing customer listed + total receivable |
+| **Backup / restore** | `internal/backup` (pure Go) + `internal/web/admin_backup.go`, Settings card | full round-trip: backup→mutate→restore reverts, sequences intact |
+
+**Notes:** held-sale carts are JSONB round-tripped with `json.RawMessage` (JSON
+passes through, never base64). Audit recording is best-effort
+(`audit.Service.Record` logs+swallows errors — never fails a mutation); cash
+withdraw/close are audited inside `cashregister` via `.WithAudit(...)`.
+
+**Backup/restore is pure Go over the existing DB connection** (`internal/backup`),
+NOT pg_dump/psql and NOT docker exec — so it works identically whether Postgres
+is a local container or a remote VPS, with nothing to install. It dumps DATA only
+(schema is owned by the embedded migrations that run on startup) as a gzipped
+JSON archive: every column is read with `::text` and re-inserted as a text
+parameter, so Postgres' own I/O functions handle numeric/timestamptz/jsonb/enum
+exactly, driver-independently. Restore runs in one tx: `SET LOCAL
+session_replication_role='replica'` (disable FK — needs a privileged role; true
+for the standard docker Postgres user), `TRUNCATE … RESTART IDENTITY CASCADE`,
+reload, then `setval` each serial sequence. Verified: backup→add sale/customer→
+restore reverts counts and a subsequent insert gets a fresh non-colliding id.
 
 ## ✅ Phase 7 — Management reports (printable / PDF, all live-tested)
 
@@ -182,6 +213,36 @@ struct field in the same change.
 - Dev users: **Admin / 1234**, **Cashier / 1111**. Change before any real deploy.
 - Run locally: `docker compose up -d postgres`, then
   `set -a && . ./.env && set +a && go run ./cmd/server`.
+
+## ⬜ NEXT UP — full UI revamp (planned, not started)
+
+Big upcoming piece. **Do not start until we pick it up together.** Three goals:
+
+1. **Touch-screen friendly.** The whole app (cashier terminal *and* admin) should
+   be comfortable on a touch monitor/tablet: large tap targets (≥44px), bigger
+   number inputs / qty steppers, on-screen friendly controls, no reliance on
+   hover, generous spacing, swipe/scroll where it helps. The cashier flow
+   especially (cart, payments, denomination counting, hold/resume) should be
+   fully usable with fingers only.
+2. **Keyboard-only friendly.** Equally usable with no mouse: logical tab order,
+   visible focus rings, Enter-to-submit, shortcut keys for the common cashier
+   actions (search focus, add/remove line, pay, hold, complete sale), and an
+   Esc-to-close on every modal. The two modes (touch + keyboard) must coexist.
+3. **Admin nav is overwhelming.** The sidebar currently lists *every* section
+   flat (Dashboard, Sales, Customers, Products, Stock, Conversions, Labels,
+   Categories, Units, Purchases, Purchase Returns, Suppliers, Cash Register,
+   Denominations, Reports×4, Expenses, Users, Audit, Settings) — it reads as a
+   wall of links and is visually paralyzing. Rework the information architecture:
+   group/collapse into a smaller set of top-level areas (e.g. Sell · Inventory ·
+   Purchasing · Cash · Reports · Setup) with collapsible sub-menus or landing
+   "section hub" pages, a cleaner visual hierarchy, and maybe a command/search
+   palette so power users jump straight to a page.
+
+Scope note: this is a presentation-layer rework (`templates/layouts/*`,
+`templates/pages/*`, `static/css/app.css`, `static/js/app.js`) — the
+handlers/services/routes should mostly stay as-is. Likely also the moment to swap
+the Tailwind Play CDN for a built stylesheet (see below) so the new design ships
+lean.
 
 ## ⬜ Optional future polish (nothing blocking)
 - Purchase **detail view** (`/admin/purchases/:id`) — API `GET /api/purchases/:id`

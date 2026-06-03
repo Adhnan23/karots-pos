@@ -79,6 +79,27 @@ templ SettingsPage(d SettingsData) {
 				</div>
 			</form>
 		</div>
+		<!-- Backup & restore -->
+		<div class="bg-white rounded-2xl shadow-sm p-6 max-w-2xl mt-6">
+			<h2 class="text-lg font-semibold">Backup &amp; Restore</h2>
+			<p class="text-sm text-slate-500 mt-1 mb-4">Download a full copy of your data, or restore from a previous backup. Keep backups somewhere safe.</p>
+			<a href="/admin/backup" class="inline-block px-5 py-2.5 rounded-lg bg-emerald-600 text-white font-medium">⬇ Download backup</a>
+			<form
+				hx-post="/admin/restore"
+				hx-encoding="multipart/form-data"
+				hx-swap="none"
+				hx-confirm="Restore will REPLACE all current data with the backup file. This cannot be undone. Continue?"
+				hx-on::after-request="if(event.detail.successful){setTimeout(()=>location.reload(),1200)}"
+				class="mt-5 border-t pt-5"
+			>
+				<label class="block text-sm font-medium mb-1">Restore from a backup file</label>
+				<div class="flex flex-wrap items-center gap-3">
+					<input type="file" name="backup" accept=".gz,.json,.json.gz" required class="text-sm"/>
+					<button type="submit" class="px-5 py-2.5 rounded-lg bg-rose-600 text-white font-medium">⚠ Restore (replaces data)</button>
+				</div>
+				<p class="text-xs text-slate-400 mt-2">Runs over the database connection — works whether Postgres is in Docker or on a VPS, with nothing extra to install.</p>
+			</form>
+		</div>
 	}
 }
 

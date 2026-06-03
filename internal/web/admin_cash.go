@@ -4,6 +4,7 @@ import (
 	"strconv"
 
 	"karots-pos/internal/apperr"
+	"karots-pos/internal/features/audit"
 	"karots-pos/internal/features/denominations"
 	"karots-pos/internal/middleware"
 	"karots-pos/internal/response"
@@ -60,6 +61,7 @@ func (a *adminUI) DenominationCreate(c echo.Context) error {
 	if _, err := a.s.denominations.Create(c.Request().Context(), in); err != nil {
 		return err
 	}
+	a.s.logAudit(c, audit.ActionCreate, "denomination", "", "added "+in.Value)
 	return htmxDone(c, "Denomination added", "reload-denoms")
 }
 
@@ -78,6 +80,7 @@ func (a *adminUI) DenominationUpdate(c echo.Context) error {
 	if err := a.s.denominations.Update(c.Request().Context(), id, in); err != nil {
 		return err
 	}
+	a.s.logAudit(c, audit.ActionUpdate, "denomination", strconv.FormatInt(id, 10), "updated "+in.Value)
 	return htmxDone(c, "Denomination updated", "reload-denoms")
 }
 
@@ -89,6 +92,7 @@ func (a *adminUI) DenominationDelete(c echo.Context) error {
 	if err := a.s.denominations.Delete(c.Request().Context(), id); err != nil {
 		return err
 	}
+	a.s.logAudit(c, audit.ActionDelete, "denomination", strconv.FormatInt(id, 10), "")
 	return htmxReload(c, "Denomination removed", "reload-denoms")
 }
 

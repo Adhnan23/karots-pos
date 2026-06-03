@@ -22,6 +22,7 @@ import (
 	"karots-pos/internal/apperr"
 	"karots-pos/internal/config"
 	appdb "karots-pos/internal/db"
+	"karots-pos/internal/features/audit"
 	"karots-pos/internal/features/sales"
 	"karots-pos/internal/middleware"
 	"karots-pos/internal/money"
@@ -220,10 +221,24 @@ type Service struct {
 	db    *sqlx.DB
 	repo  *Repository
 	sales *sales.Service
+	audit *audit.Service // optional; nil = no audit recording
 }
 
 func NewService(db *sqlx.DB, salesSvc *sales.Service) *Service {
 	return &Service{db: db, repo: NewRepository(db), sales: salesSvc}
+}
+
+// WithAudit attaches an audit recorder so drawer withdrawals and closes are
+// logged. Returns the service for chaining.
+func (s *Service) WithAudit(a *audit.Service) *Service {
+	s.audit = a
+	return s
+}
+
+func (s *Service) recordAudit(ctx context.Context, userID int64, action, detail string) {
+	if s.audit != nil {
+		s.audit.Record(ctx, userID, action, "cash", "", detail)
+	}
 }
 
 // Current returns the cashier's open session, or nil if none is open.
@@ -335,6 +350,8 @@ func (s *Service) Close(ctx context.Context, userID int64, in CloseInput) (*Clos
 	sess.ClosingCash = &closing
 	sess.ExpectedCash = &expected
 	sess.Difference = &diff
+	s.recordAudit(ctx, userID, audit.ActionClose,
+		"closed register: counted "+money.Display(closing)+", expected "+money.Display(expected)+", over/short "+money.Display(diff))
 	return &CloseResult{Session: *sess, CashSales: cashSales, ExpectedCash: expected, Difference: diff}, nil
 }
 
@@ -367,6 +384,10 @@ func (s *Service) adjust(ctx context.Context, userID int64, in MovementInput, mt
 	}
 	if err := s.repo.AddMovement(ctx, sess.ID, userID, mtype, signed, in.Reason, nil); err != nil {
 		return nil, apperr.Internal("failed to record cash movement", err)
+	}
+	if mtype == MoveWithdrawal {
+		s.recordAudit(ctx, userID, audit.ActionWithdraw,
+			"withdrew "+money.Display(amt)+" — "+in.Reason)
 	}
 	return s.Summary(ctx, userID)
 }
@@ -490,8 +511,8 @@ func (h *APIHandler) PayIn(c echo.Context) error {
 	return response.OK(c, sum)
 }
 
-func RegisterAPI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, salesSvc *sales.Service) *Service {
-	svc := NewService(db, salesSvc)
+func RegisterAPI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, salesSvc *sales.Service, auditSvc *audit.Service) *Service {
+	svc := NewService(db, salesSvc).WithAudit(auditSvc)
 	api := NewAPIHandler(svc)
 	g := e.Group("/api/cash-register", middleware.JWTAuth(cfg.JWTSecret))
 	g.GET("/current", api.Current)

@@ -134,6 +134,13 @@ func (s *Service) DeactivateUser(ctx context.Context, id int64) error {
 	return nil
 }
 
+func (s *Service) ReactivateUser(ctx context.Context, id int64) error {
+	if err := s.repo.Activate(ctx, id); err != nil {
+		return apperr.Internal("could not reactivate user", err)
+	}
+	return nil
+}
+
 func (s *Service) issuePair(ctx context.Context, u *User) (*TokenPair, error) {
 	pair, err := s.issuePairTx(ctx, s.repo, u)
 	if err != nil {

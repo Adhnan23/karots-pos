@@ -474,6 +474,57 @@ func (s *Service) List(ctx context.Context, f ListFilter) ([]Sale, error) {
 	return rows, nil
 }
 
+// MethodTotal is the money taken via one payment method in a period.
+type MethodTotal struct {
+	Method string          `db:"method" json:"method"`
+	Amount decimal.Decimal `db:"amount" json:"amount"`
+}
+
+// PeriodSummary aggregates a cashier's sales within a time window, for the
+// day-end (Z) report.
+type PeriodSummary struct {
+	Count    int             `json:"count"`
+	Gross    decimal.Decimal `json:"gross"`
+	Discount decimal.Decimal `json:"discount"`
+	Net      decimal.Decimal `json:"net"`
+	ByMethod []MethodTotal   `json:"by_method"`
+}
+
+// PeriodSummary totals a cashier's non-void sales between [from,to] and breaks
+// payments down by method.
+func (s *Service) PeriodSummary(ctx context.Context, cashierID int64, from, to time.Time) (*PeriodSummary, error) {
+	out := &PeriodSummary{}
+	var agg struct {
+		Count    int             `db:"count"`
+		Gross    decimal.Decimal `db:"gross"`
+		Discount decimal.Decimal `db:"discount"`
+		Net      decimal.Decimal `db:"net"`
+	}
+	err := s.db.GetContext(ctx, &agg, `
+		SELECT COUNT(*) AS count,
+		       COALESCE(SUM(subtotal),0) AS gross,
+		       COALESCE(SUM(discount),0) AS discount,
+		       COALESCE(SUM(total),0)    AS net
+		FROM sales
+		WHERE cashier_id = $1 AND created_at >= $2 AND created_at <= $3 AND status <> 'void'`,
+		cashierID, from, to)
+	if err != nil {
+		return nil, apperr.Internal("failed to summarize sales", err)
+	}
+	out.Count, out.Gross, out.Discount, out.Net = agg.Count, agg.Gross, agg.Discount, agg.Net
+
+	err = s.db.SelectContext(ctx, &out.ByMethod, `
+		SELECT pmt.method AS method, COALESCE(SUM(pmt.amount),0) AS amount
+		FROM payments pmt JOIN sales s ON s.id = pmt.sale_id
+		WHERE s.cashier_id = $1 AND s.created_at >= $2 AND s.created_at <= $3 AND s.status <> 'void'
+		GROUP BY pmt.method ORDER BY pmt.method`,
+		cashierID, from, to)
+	if err != nil {
+		return nil, apperr.Internal("failed to summarize payments", err)
+	}
+	return out, nil
+}
+
 // CashCollectedSince totals cash payments taken by a cashier since a time,
 // used to compute the expected drawer cash at register close.
 // CashCollectedSince is the NET cash a cashier put in the drawer since `since`:

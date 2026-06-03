@@ -1,0 +1,120 @@
+package cashierpages
+
+import (
+	"karots-pos/internal/features/cashregister"
+	"karots-pos/internal/features/sales"
+	"karots-pos/internal/money"
+	"karots-pos/templates/layouts"
+
+	"github.com/shopspring/decimal"
+)
+
+type ZReportData struct {
+	ShopName, Symbol string
+	Session          cashregister.SessionRow
+	Movements        []cashregister.Movement
+	Sales            *sales.PeriodSummary
+}
+
+// ZReport is the printable end-of-day (Z) summary for a single drawer session:
+// sales totals, payments by method, the cash movement ledger, and the
+// expected-vs-counted reconciliation. Reuses the print-optimized Report shell.
+templ ZReport(d ZReportData) {
+	@layouts.Report("Z-Report — Day End", d.ShopName) {
+		<div class="grid grid-cols-2 gap-4 text-sm mb-5">
+			<div><span class="text-slate-500">Cashier:</span> <span class="font-medium">{ d.Session.UserName }</span></div>
+			<div><span class="text-slate-500">Session:</span> <span class="font-medium">#{ itoa64(d.Session.ID) }</span></div>
+			<div><span class="text-slate-500">Opened:</span> { d.Session.OpenedAt.Format("2006-01-02 15:04") }</div>
+			<div>
+				<span class="text-slate-500">Closed:</span>
+				if d.Session.ClosedAt != nil {
+					{ d.Session.ClosedAt.Format("2006-01-02 15:04") }
+				} else {
+					<span class="text-amber-600 font-medium">still open</span>
+				}
+			</div>
+		</div>
+
+		<h3 class="font-semibold mb-2">Sales</h3>
+		<table class="w-full text-sm mb-5">
+			<tbody>
+				@zRow("Sales count", itoa(d.Sales.Count))
+				@zMoney(d.Symbol, "Gross", d.Sales.Gross)
+				@zMoney(d.Symbol, "Discounts", d.Sales.Discount)
+				@zMoney(d.Symbol, "Net sales", d.Sales.Net)
+			</tbody>
+		</table>
+
+		<h3 class="font-semibold mb-2">Payments by method</h3>
+		<table class="w-full text-sm mb-5">
+			<tbody>
+				for _, m := range d.Sales.ByMethod {
+					@zMoneyCap(d.Symbol, m.Method, m.Amount)
+				}
+				if len(d.Sales.ByMethod) == 0 {
+					<tr><td class="py-1.5 text-slate-400" colspan="2">No payments recorded.</td></tr>
+				}
+			</tbody>
+		</table>
+
+		<h3 class="font-semibold mb-2">Cash reconciliation</h3>
+		<table class="w-full text-sm mb-5">
+			<tbody>
+				@zMoney(d.Symbol, "Opening float", d.Session.OpeningCash)
+				@zMoneyOpt(d.Symbol, "Expected in drawer", d.Session.ExpectedCash)
+				@zMoneyOpt(d.Symbol, "Counted at close", d.Session.ClosingCash)
+				if d.Session.Difference != nil {
+					<tr class="border-t-2 font-semibold">
+						<td class="py-2">Over / Short</td>
+						<td class={ "py-2 text-right " + overShortClass(d.Session.Difference) }>{ money.Format(d.Symbol, *d.Session.Difference) }</td>
+					</tr>
+				}
+			</tbody>
+		</table>
+
+		<h3 class="font-semibold mb-2">Cash movements</h3>
+		<table class="w-full text-sm">
+			<thead class="text-left text-slate-500 border-b">
+				<tr><th class="py-1.5">Time</th><th class="py-1.5">Type</th><th class="py-1.5">Reason</th><th class="py-1.5 text-right">Amount</th></tr>
+			</thead>
+			<tbody>
+				for _, m := range d.Movements {
+					<tr class="border-b last:border-0">
+						<td class="py-1.5 text-slate-500">{ m.CreatedAt.Format("15:04") }</td>
+						<td class="py-1.5 capitalize">{ zMoveLabel(m.Type) }</td>
+						<td class="py-1.5 text-slate-500">{ strOrDash(m.Reason) }</td>
+						<td class="py-1.5 text-right">{ money.Format(d.Symbol, m.Amount) }</td>
+					</tr>
+				}
+				if len(d.Movements) == 0 {
+					<tr><td colspan="4" class="py-6 text-center text-slate-400">No movements.</td></tr>
+				}
+			</tbody>
+		</table>
+	}
+}
+
+templ zRow(label, value string) {
+	<tr class="border-b last:border-0"><td class="py-1.5">{ label }</td><td class="py-1.5 text-right font-medium">{ value }</td></tr>
+}
+
+templ zMoney(symbol, label string, v decimal.Decimal) {
+	<tr class="border-b last:border-0"><td class="py-1.5">{ label }</td><td class="py-1.5 text-right font-medium">{ money.Format(symbol, v) }</td></tr>
+}
+
+templ zMoneyCap(symbol, label string, v decimal.Decimal) {
+	<tr class="border-b last:border-0"><td class="py-1.5 capitalize">{ label }</td><td class="py-1.5 text-right font-medium">{ money.Format(symbol, v) }</td></tr>
+}
+
+templ zMoneyOpt(symbol, label string, v *decimal.Decimal) {
+	<tr class="border-b last:border-0">
+		<td class="py-1.5">{ label }</td>
+		<td class="py-1.5 text-right font-medium">
+			if v != nil {
+				{ money.Format(symbol, *v) }
+			} else {
+				—
+			}
+		</td>
+	</tr>
+}

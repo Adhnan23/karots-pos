@@ -54,8 +54,8 @@ docker compose run --rm server -seed                # one-time seed
 
 | Surface | Path | Who | Does |
 |---|---|---|---|
-| **Cashier terminal** | `/cashier` | all roles | barcode scan, product search, live cart, retail/wholesale/credit checkout, **count-by-denomination drawer open/close**, **mid-shift withdrawals**, thermal receipt (80mm/58mm), **returns/refunds**, **damage write-off**, **credit collection** |
-| **Admin panel** | `/admin` | admin, manager | dashboard + alerts, products, inventory & **FEFO batches**, sales + **partial returns**, purchasing (GRN) + **supplier returns**, suppliers, customers & credit, expenses, **finance/profit**, reports, **cash register sessions & denominations**, **categories (nested)**, units, **conversions**, **barcode labels**, users, settings |
+| **Cashier terminal** | `/cashier` | all roles | barcode scan, product search, live cart, retail/wholesale/credit checkout, **split-tender payments (cash/card/online)**, **hold/park & resume sales**, **count-by-denomination drawer open/close**, **mid-shift withdrawals**, **day-end Z-report**, thermal receipt (80mm/58mm) + **reprint**, **returns/refunds**, **damage write-off**, **credit collection** |
+| **Admin panel** | `/admin` | admin, manager | dashboard + alerts, products, inventory & **FEFO batches**, sales + **partial returns**, purchasing (GRN) + **supplier returns**, suppliers, customers & credit, expenses, **finance/profit**, reports (incl. **customer dues**), **cash register sessions & denominations**, **categories (nested)**, units, **conversions**, **barcode labels**, users, **audit log**, settings + **backup/restore** |
 
 Both call the **same services**. The cashier UI talks to the JSON API
 (`/api/*`); the admin panel is server-rendered HTML with HTMX partials.
@@ -72,6 +72,22 @@ reports (plus dashboard badges) read straight off this ledger.
 
 ### Feature highlights
 
+- **Split-tender checkout** — one bill across cash + card + online (with a
+  reference per non-cash line); underpayment rolls onto customer credit.
+- **Hold / park sale** — suspend the current cart to serve the next customer,
+  then resume it from the **Held** list (survives reloads — stored server-side).
+- **Cashier receipt reprint** — find a past sale by receipt number and reprint
+  the thermal bill from the terminal (`/cashier/receipts`).
+- **Z-report (day-end)** — a printable per-session summary: sales totals,
+  payments by method, the cash ledger, and expected-vs-counted over/short.
+- **Audit log** — who did what (voids, edits, deletes, payments, withdrawals,
+  closes, settings, backup/restore), filterable at `/admin/audit`.
+- **Customer dues report** — printable receivables/aging snapshot of who owes
+  you money, mirroring the supplier-payables report.
+- **Backup & restore** — one-click backup download and restore-from-file in
+  Settings. Runs **entirely over the database connection** (pure Go, gzipped
+  data snapshot) — no `pg_dump`/`psql`, no Docker CLI, nothing to install. Works
+  the same whether Postgres is in a container or on a remote VPS.
 - **Partial sale returns** — return any quantity of any line; restocks, splits
   refund vs credit, flows `completed → partially_returned → returned`.
 - **Purchase returns (debit notes)** — send goods back to a supplier; FEFO

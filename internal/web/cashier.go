@@ -3,8 +3,11 @@ package web
 import (
 	"context"
 	"strconv"
+	"time"
 
 	"karots-pos/internal/apperr"
+	"karots-pos/internal/features/audit"
+	"karots-pos/internal/features/auth"
 	"karots-pos/internal/features/customers"
 	"karots-pos/internal/features/products"
 	"karots-pos/internal/features/sales"
@@ -25,6 +28,46 @@ func (h *cashierUI) cashierSymbol(ctx context.Context) string {
 		return cfg.CurrencySymbol
 	}
 	return "Rs."
+}
+
+func (h *cashierUI) cashierShopName(ctx context.Context) string {
+	if cfg, err := h.s.settings.Get(ctx); err == nil && cfg.ShopName != "" {
+		return cfg.ShopName
+	}
+	return "Shop"
+}
+
+// ZReport renders the printable day-end (Z) summary for a drawer session. A
+// cashier may only view their own session; admins/managers may view any.
+func (h *cashierUI) ZReport(c echo.Context) error {
+	ctx := c.Request().Context()
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	sess, moves, err := h.s.cashRegister.SessionDetail(ctx, id)
+	if err != nil {
+		return err
+	}
+	role := middleware.CurrentRole(c)
+	if role != auth.RoleAdmin && role != auth.RoleManager && sess.UserID != middleware.CurrentUserID(c) {
+		return apperr.Forbidden("you can only print your own session")
+	}
+	to := time.Now()
+	if sess.ClosedAt != nil {
+		to = *sess.ClosedAt
+	}
+	sum, err := h.s.sales.PeriodSummary(ctx, sess.UserID, sess.OpenedAt, to)
+	if err != nil {
+		return err
+	}
+	return response.RenderPage(c, cashierpages.ZReport(cashierpages.ZReportData{
+		ShopName:  h.cashierShopName(ctx),
+		Symbol:    h.cashierSymbol(ctx),
+		Session:   *sess,
+		Movements: moves,
+		Sales:     sum,
+	}))
 }
 
 func (h *cashierUI) POS(c echo.Context) error {
@@ -63,6 +106,24 @@ func (h *cashierUI) Receipt(c echo.Context) error {
 		Settings:  *cfg,
 		AutoPrint: c.QueryParam("print") == "1",
 		Narrow:    c.QueryParam("size") == "58",
+	}))
+}
+
+// Receipts lists recent sales (optionally filtered by receipt number) so the
+// cashier can reprint a bill from the terminal.
+func (h *cashierUI) Receipts(c echo.Context) error {
+	ctx := c.Request().Context()
+	q := c.QueryParam("q")
+	rows, err := h.s.sales.List(ctx, sales.ListFilter{Receipt: q, Limit: 50})
+	if err != nil {
+		return err
+	}
+	return response.RenderPage(c, cashierpages.Receipts(cashierpages.ReceiptsData{
+		CashierName: middleware.CurrentUserName(c),
+		Role:        middleware.CurrentRole(c),
+		Symbol:      h.cashierSymbol(ctx),
+		Query:       q,
+		Sales:       rows,
 	}))
 }
 
@@ -130,6 +191,7 @@ func (h *cashierUI) ReturnSubmit(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	h.s.logAudit(c, audit.ActionReturn, "sale", strconv.FormatInt(id, 10), "partial return")
 	return response.OK(c, detail)
 }
 
@@ -158,6 +220,7 @@ func (h *cashierUI) DamageRecord(c echo.Context) error {
 	if err := h.s.stock.Damage(c.Request().Context(), in, middleware.CurrentUserID(c)); err != nil {
 		return err
 	}
+	h.s.logAudit(c, audit.ActionUpdate, "product", strconv.FormatInt(in.ProductID, 10), "damage write-off")
 	return htmxDone(c, "Damage written off", "reload-stock")
 }
 
@@ -235,5 +298,6 @@ func (h *cashierUI) CreditPay(c echo.Context) error {
 	if amt, perr := money.Parse(in.Amount); perr == nil {
 		h.s.cashRegister.RecordCreditCash(c.Request().Context(), middleware.CurrentUserID(c), amt, "credit collected: "+cust.Name)
 	}
+	h.s.logAudit(c, audit.ActionPayment, "customer", strconv.FormatInt(id, 10), "credit collected "+in.Amount+" from "+cust.Name)
 	return htmxDone(c, "Payment recorded", "reload-ccredit")
 }

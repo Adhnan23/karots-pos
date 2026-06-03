@@ -2,11 +2,22 @@ package adminpages
 
 import (
 	"strconv"
+	"time"
 
 	"karots-pos/internal/features/suppliers"
 
 	"github.com/shopspring/decimal"
 )
+
+// daysSince renders the whole-days elapsed since t (em-dash when t is nil), used
+// for the customer-dues aging column.
+func daysSince(t *time.Time) string {
+	if t == nil {
+		return "—"
+	}
+	d := max(int(time.Since(*t).Hours()/24), 0)
+	return strconv.Itoa(d)
+}
 
 func decimalFromInt(n int) decimal.Decimal { return decimal.NewFromInt(int64(n)) }
 

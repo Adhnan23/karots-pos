@@ -1,0 +1,82 @@
+package adminpages
+
+import (
+	"karots-pos/internal/features/audit"
+	"karots-pos/templates/layouts"
+)
+
+type AuditData struct {
+	UserName       string
+	From, To       string
+	Entity         string
+	Rows           []audit.Entry
+}
+
+templ AuditPage(d AuditData) {
+	@layouts.Admin("Audit Log", d.UserName, "audit") {
+		<div class="mb-6">
+			<h1 class="text-2xl font-bold">Audit Log</h1>
+			<p class="text-sm text-slate-500">Who did what — voids, edits, deletes, payments, withdrawals and more.</p>
+		</div>
+		<form method="get" action="/admin/audit" class="flex flex-wrap items-end gap-3 mb-5">
+			<div>
+				<label class="block text-xs text-slate-500 mb-1">From</label>
+				<input type="date" name="from" value={ d.From } class="border rounded-lg px-3 py-1.5"/>
+			</div>
+			<div>
+				<label class="block text-xs text-slate-500 mb-1">To</label>
+				<input type="date" name="to" value={ d.To } class="border rounded-lg px-3 py-1.5"/>
+			</div>
+			<div>
+				<label class="block text-xs text-slate-500 mb-1">Entity</label>
+				<select name="entity" class="border rounded-lg px-3 py-1.5">
+					@auditEntityOpt("", "All", d.Entity)
+					@auditEntityOpt("product", "Products", d.Entity)
+					@auditEntityOpt("customer", "Customers", d.Entity)
+					@auditEntityOpt("supplier", "Suppliers", d.Entity)
+					@auditEntityOpt("sale", "Sales", d.Entity)
+					@auditEntityOpt("denomination", "Denominations", d.Entity)
+					@auditEntityOpt("cash", "Cash drawer", d.Entity)
+					@auditEntityOpt("user", "Users", d.Entity)
+					@auditEntityOpt("settings", "Settings", d.Entity)
+					@auditEntityOpt("system", "System", d.Entity)
+				</select>
+			</div>
+			<button class="px-4 py-1.5 rounded-lg bg-slate-800 text-white text-sm">Apply</button>
+		</form>
+		<div class="bg-white rounded-2xl shadow-sm overflow-hidden">
+			<table class="w-full text-sm">
+				<thead class="text-left text-slate-500 border-b bg-slate-50">
+					<tr><th class="px-4 py-2">Time</th><th class="px-4 py-2">User</th><th class="px-4 py-2">Action</th><th class="px-4 py-2">Entity</th><th class="px-4 py-2">Detail</th></tr>
+				</thead>
+				<tbody>
+					for _, e := range d.Rows {
+						<tr class="border-b last:border-0">
+							<td class="px-4 py-2 text-slate-500 whitespace-nowrap">{ e.CreatedAt.Format("2006-01-02 15:04") }</td>
+							<td class="px-4 py-2">{ e.UserName }</td>
+							<td class="px-4 py-2"><span class="px-2 py-0.5 rounded-full text-xs bg-slate-100 capitalize">{ e.Action }</span></td>
+							<td class="px-4 py-2 capitalize">
+								{ e.Entity }
+								if e.EntityID != nil {
+									<span class="text-slate-400">#{ *e.EntityID }</span>
+								}
+							</td>
+							<td class="px-4 py-2 text-slate-600">{ strOrEmpty(e.Detail) }</td>
+						</tr>
+					}
+					if len(d.Rows) == 0 {
+						<tr><td colspan="5" class="px-4 py-8 text-center text-slate-400">No activity in this period.</td></tr>
+					}
+				</tbody>
+			</table>
+		</div>
+	}
+}
+
+templ auditEntityOpt(val, label, cur string) {
+	if val == cur {
+		<option value={ val } selected>{ label }</option>
+	} else {
+		<option value={ val }>{ label }</option>
+	}
+}

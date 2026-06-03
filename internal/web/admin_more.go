@@ -2,9 +2,11 @@ package web
 
 import (
 	"strconv"
+	"strings"
 	"time"
 
 	"karots-pos/internal/apperr"
+	"karots-pos/internal/features/audit"
 	"karots-pos/internal/features/auth"
 	"karots-pos/internal/features/categories"
 	"karots-pos/internal/features/conversions"
@@ -116,6 +118,7 @@ func (a *adminUI) SupplierDelete(c echo.Context) error {
 	if err := a.s.suppliers.Delete(c.Request().Context(), id); err != nil {
 		return err
 	}
+	a.s.logAudit(c, audit.ActionDelete, "supplier", strconv.FormatInt(id, 10), "")
 	return htmxReload(c, "Supplier removed", "reload-suppliers")
 }
 
@@ -127,6 +130,7 @@ func (a *adminUI) SupplierPay(c echo.Context) error {
 	if err := a.s.suppliers.RecordPayment(c.Request().Context(), id, c.FormValue("amount")); err != nil {
 		return err
 	}
+	a.s.logAudit(c, audit.ActionPayment, "supplier", strconv.FormatInt(id, 10), "paid "+c.FormValue("amount"))
 	return htmxDone(c, "Payment recorded", "reload-suppliers")
 }
 
@@ -408,6 +412,42 @@ func (a *adminUI) Labels(c echo.Context) error {
 
 func (a *adminUI) LabelsPrint(c echo.Context) error {
 	ctx := c.Request().Context()
+	cfg, err := a.s.settings.Get(ctx)
+	if err != nil {
+		return err
+	}
+	count := 12
+	if n, err := strconv.Atoi(c.QueryParam("qty")); err == nil && n > 0 {
+		count = min(n, 200)
+	}
+	showPrice := c.QueryParam("show_price") == "1"
+
+	// Custom barcode: an arbitrary value typed by the user (no product record).
+	if c.QueryParam("custom") == "1" {
+		code := strings.TrimSpace(c.QueryParam("code"))
+		if code == "" {
+			return apperr.BadRequest("enter a barcode value")
+		}
+		format := strings.TrimSpace(c.QueryParam("format"))
+		if format == "" {
+			format = "CODE128"
+		}
+		priceText := ""
+		if p := strings.TrimSpace(c.QueryParam("price")); p != "" {
+			priceText = cfg.CurrencySymbol + " " + p
+		}
+		return response.RenderPage(c, adminpages.LabelSheet(adminpages.LabelSheetData{
+			ShopName:  cfg.ShopName,
+			Name:      strings.TrimSpace(c.QueryParam("text")),
+			Code:      code,
+			PriceText: priceText,
+			ShowPrice: showPrice && priceText != "",
+			Count:     count,
+			Format:    format,
+		}))
+	}
+
+	// From a product.
 	id, err := strconv.ParseInt(c.QueryParam("product_id"), 10, 64)
 	if err != nil {
 		return apperr.BadRequest("select a product")
@@ -416,22 +456,18 @@ func (a *adminUI) LabelsPrint(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	count := 12
-	if n, err := strconv.Atoi(c.QueryParam("qty")); err == nil && n > 0 {
-		if n > 200 {
-			n = 200
-		}
-		count = n
-	}
-	cfg, err := a.s.settings.Get(ctx)
-	if err != nil {
-		return err
+	code := "SKU" + strconv.FormatInt(p.ID, 10)
+	if p.Barcode != nil && *p.Barcode != "" {
+		code = *p.Barcode
 	}
 	return response.RenderPage(c, adminpages.LabelSheet(adminpages.LabelSheetData{
-		Product:   *p,
-		Settings:  *cfg,
+		ShopName:  cfg.ShopName,
+		Name:      p.Name,
+		Code:      code,
+		PriceText: money.Format(cfg.CurrencySymbol, p.SellingPrice),
+		ShowPrice: showPrice,
 		Count:     count,
-		ShowPrice: c.QueryParam("show_price") == "1",
+		Format:    "CODE128",
 	}))
 }
 
@@ -690,6 +726,7 @@ func (a *adminUI) UserCreate(c echo.Context) error {
 	if _, err := a.s.auth.CreateUser(c.Request().Context(), in); err != nil {
 		return err
 	}
+	a.s.logAudit(c, audit.ActionCreate, "user", "", "created user "+in.Name+" ("+in.Role+")")
 	return htmxDone(c, "User created", "reload-users")
 }
 
@@ -701,7 +738,20 @@ func (a *adminUI) UserDeactivate(c echo.Context) error {
 	if err := a.s.auth.DeactivateUser(c.Request().Context(), id); err != nil {
 		return err
 	}
+	a.s.logAudit(c, audit.ActionDelete, "user", strconv.FormatInt(id, 10), "deactivated user")
 	return htmxReload(c, "User deactivated", "reload-users")
+}
+
+func (a *adminUI) UserReactivate(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	if err := a.s.auth.ReactivateUser(c.Request().Context(), id); err != nil {
+		return err
+	}
+	a.s.logAudit(c, audit.ActionUpdate, "user", strconv.FormatInt(id, 10), "reactivated user")
+	return htmxReload(c, "User reactivated", "reload-users")
 }
 
 // ============================ Damage write-off ============================
@@ -787,6 +837,7 @@ func (a *adminUI) CustomerPay(c echo.Context) error {
 	if err := a.s.customers.RecordPayment(c.Request().Context(), id, in); err != nil {
 		return err
 	}
+	a.s.logAudit(c, audit.ActionPayment, "customer", strconv.FormatInt(id, 10), "credit payment "+in.Amount)
 	return htmxDone(c, "Payment recorded", "reload-customers")
 }
 
@@ -800,6 +851,7 @@ func (a *adminUI) SaleReturn(c echo.Context) error {
 	if _, err := a.s.sales.Return(c.Request().Context(), id, middleware.CurrentUserID(c)); err != nil {
 		return err
 	}
+	a.s.logAudit(c, audit.ActionReturn, "sale", strconv.FormatInt(id, 10), "full return")
 	return htmxReload(c, "Sale returned & restocked", "reload-sales")
 }
 

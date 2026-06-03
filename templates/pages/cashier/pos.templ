@@ -141,12 +141,37 @@ templ POS(d POSData) {
 						<div class="flex justify-between text-lg font-bold">
 							<span>Total</span><span x-text="sym + ' ' + money(total())"></span>
 						</div>
-						<div class="flex justify-between text-sm items-center">
-							<span>Cash</span>
-							<input type="number" step="0.01" min="0" x-model.number="cash" class="w-28 border rounded px-2 py-1 text-right"/>
+						<!-- Split tender: cash / card / online lines -->
+						<div class="space-y-1.5">
+							<template x-for="(p, idx) in payments" x-bind:key="idx">
+								<div class="flex items-center gap-1.5">
+									<select x-model="p.method" class="border rounded px-1.5 py-1 text-sm">
+										<option value="cash">Cash</option>
+										<option value="card">Card</option>
+										<option value="online">Online</option>
+									</select>
+									<input type="number" step="0.01" min="0" x-model.number="p.amount" class="w-24 border rounded px-2 py-1 text-right text-sm" placeholder="0.00"/>
+									<button type="button" x-on:click="fillRemaining(idx)" class="px-1.5 py-1 text-xs rounded border text-slate-500" title="Fill remaining balance">=</button>
+									<input x-show="p.method !== 'cash'" x-model="p.reference" class="flex-1 min-w-0 border rounded px-2 py-1 text-sm" placeholder="ref / last 4"/>
+									<button type="button" x-on:click="removePayment(idx)" class="text-red-500 px-1" x-show="payments.length > 1">✕</button>
+								</div>
+							</template>
+							<button type="button" x-on:click="addPayment()" class="text-xs text-indigo-600 font-medium">+ Add payment</button>
 						</div>
-						<div class="flex justify-between text-sm" x-show="cash > 0">
-							<span>Change</span><span x-text="sym + ' ' + money(Math.max(0, cash - total()))"></span>
+						<div class="flex justify-between text-sm" x-show="paidTotal() > 0">
+							<span>Paid</span><span x-text="sym + ' ' + money(paidTotal())"></span>
+						</div>
+						<div class="flex justify-between text-sm text-emerald-700" x-show="changeDue() > 0">
+							<span>Change</span><span x-text="sym + ' ' + money(changeDue())"></span>
+						</div>
+						<div class="flex justify-between text-sm text-rose-600" x-show="balanceDue() > 0">
+							<span>Balance (credit)</span><span x-text="sym + ' ' + money(balanceDue())"></span>
+						</div>
+						<div class="flex gap-2">
+							<button type="button" x-on:click="holdSale()" class="flex-1 py-2 rounded-lg border text-sm text-slate-600">Hold</button>
+							<button type="button" x-on:click="showHolds = true" class="flex-1 py-2 rounded-lg border text-sm text-slate-600">
+								Held (<span x-text="holds.length"></span>)
+							</button>
 						</div>
 						<button
 							x-on:click="checkout()"
@@ -163,6 +188,35 @@ templ POS(d POSData) {
 						</div>
 					</div>
 				</aside>
+			</div>
+
+			<!-- Held sales modal -->
+			<div x-show="showHolds" x-cloak class="fixed inset-0 bg-black/40 z-40 flex items-center justify-center p-4">
+				<div class="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-full overflow-auto p-6">
+					<div class="flex items-center justify-between mb-3">
+						<h3 class="text-lg font-semibold">Held Sales</h3>
+						<button x-on:click="showHolds = false" class="text-slate-400">✕</button>
+					</div>
+					<div class="space-y-2">
+						<template x-for="h in holds" x-bind:key="h.id">
+							<div class="flex items-center gap-3 border rounded-lg p-3">
+								<div class="flex-1 min-w-0">
+									<div class="font-medium text-sm truncate" x-text="h.label || ('Sale #' + h.id)"></div>
+									<div class="text-xs text-slate-400">
+										<span x-text="h.item_count"></span> items ·
+										<span x-text="sym + ' ' + money(h.total)"></span> ·
+										<span class="capitalize" x-text="h.sale_type"></span>
+									</div>
+								</div>
+								<button x-on:click="resumeHold(h)" class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-sm font-medium">Resume</button>
+								<button x-on:click="deleteHold(h.id)" class="text-red-500 px-1">🗑</button>
+							</div>
+						</template>
+						<template x-if="holds.length === 0">
+							<p class="text-sm text-slate-400 py-6 text-center">No held sales.</p>
+						</template>
+					</div>
+				</div>
 			</div>
 
 			<!-- Withdraw modal -->
@@ -219,7 +273,8 @@ templ POS(d POSData) {
 									<span>Over / Short</span><span x-text="sym + ' ' + money(closeResult.difference)"></span>
 								</div>
 							</div>
-							<button x-on:click="showClose = false; closeResult = null" class="w-full mt-4 py-2.5 rounded-lg bg-indigo-600 text-white font-medium">Done</button>
+							<a x-bind:href="'/cashier/z/' + closeResult.session.id" target="_blank" class="block w-full mt-4 py-2.5 rounded-lg bg-slate-800 text-white font-medium">🖨 Print Day-End (Z)</a>
+							<button x-on:click="showClose = false; closeResult = null" class="w-full mt-2 py-2.5 rounded-lg bg-indigo-600 text-white font-medium">Done</button>
 						</div>
 					</template>
 				</div>

@@ -4,7 +4,6 @@ import (
 	"strconv"
 
 	"karots-pos/internal/features/products"
-	"karots-pos/internal/features/settings"
 	"karots-pos/internal/money"
 	"karots-pos/templates/layouts"
 )
@@ -18,41 +17,126 @@ type LabelsData struct {
 templ LabelsPage(d LabelsData) {
 	@layouts.Admin("Barcode Labels", d.UserName, "labels") {
 		<h1 class="text-2xl font-bold mb-6">Barcode Labels</h1>
-		<div class="bg-white rounded-2xl shadow-sm p-6 max-w-xl">
-			<p class="text-sm text-slate-500 mb-4">Pick a product and how many labels to print. The print sheet opens in a new tab.</p>
-			<form method="get" action="/admin/labels/print" target="_blank" class="space-y-4">
-				<div>
-					<label class="block text-sm font-medium mb-1">Product</label>
-					<select name="product_id" required class="w-full border rounded-lg px-3 py-2">
-						<option value="">Select…</option>
-						for _, p := range d.Products {
-							<option value={ strconv.FormatInt(p.ID, 10) }>{ p.Name } — { money.Format(d.Symbol, p.SellingPrice) }</option>
-						}
-					</select>
-				</div>
-				<div class="grid grid-cols-2 gap-4">
+		<!-- JsBarcode powers the live preview on this page (and the print sheet). -->
+		<script src="/static/vendor/jsbarcode.min.js"></script>
+		<div class="grid grid-cols-1 lg:grid-cols-2 gap-6" x-data={ "labels('" + d.Symbol + "')" }>
+			<!-- From a product -->
+			<div class="bg-white rounded-2xl shadow-sm p-6">
+				<h2 class="text-lg font-semibold mb-1">From a product</h2>
+				<p class="text-sm text-slate-500 mb-4">Pick a product, preview it, then print. The sheet opens in a new tab.</p>
+				<form method="get" action="/admin/labels/print" target="_blank" class="space-y-4">
 					<div>
-						<label class="block text-sm font-medium mb-1">Number of labels</label>
-						<input name="qty" type="number" min="1" max="200" value="12" class="w-full border rounded-lg px-3 py-2"/>
+						<label class="block text-sm font-medium mb-1">Product</label>
+						<select name="product_id" required class="w-full border rounded-lg px-3 py-2" x-on:change="onProduct($event)">
+							<option value="">Select…</option>
+							for _, p := range d.Products {
+								<option
+									value={ strconv.FormatInt(p.ID, 10) }
+									data-name={ p.Name }
+									data-code={ barcodeValue(p) }
+									data-price={ money.Format(d.Symbol, p.SellingPrice) }
+								>{ p.Name } — { money.Format(d.Symbol, p.SellingPrice) }</option>
+							}
+						</select>
 					</div>
-					<div class="flex items-end">
-						<label class="inline-flex items-center gap-2 text-sm">
-							<input type="checkbox" name="show_price" value="1" checked/> Show price
-						</label>
+					<div class="grid grid-cols-2 gap-4">
+						<div>
+							<label class="block text-sm font-medium mb-1">Number of labels</label>
+							<input name="qty" type="number" min="1" max="200" value="12" class="w-full border rounded-lg px-3 py-2"/>
+						</div>
+						<div class="flex items-end">
+							<label class="inline-flex items-center gap-2 text-sm">
+								<input type="checkbox" name="show_price" value="1" x-model="pShowPrice"/> Show price
+							</label>
+						</div>
 					</div>
-				</div>
-				<button class="px-5 py-2.5 rounded-lg bg-indigo-600 text-white font-semibold">Generate Labels →</button>
-			</form>
+					@labelPreview("pName", "preview-product", "pPrice", "pShowPrice", "pCode")
+					<button x-bind:disabled="!pCode" class="px-5 py-2.5 rounded-lg bg-indigo-600 text-white font-semibold disabled:opacity-40">Generate Labels →</button>
+				</form>
+			</div>
+
+			<!-- Custom barcode -->
+			<div class="bg-white rounded-2xl shadow-sm p-6">
+				<h2 class="text-lg font-semibold mb-1">Custom barcode</h2>
+				<p class="text-sm text-slate-500 mb-4">Type any barcode value (and optional label text) and print it — handy for items without a product record.</p>
+				<form method="get" action="/admin/labels/print" target="_blank" class="space-y-4">
+					<input type="hidden" name="custom" value="1"/>
+					<div>
+						<label class="block text-sm font-medium mb-1">Barcode value</label>
+						<input name="code" required x-model="cCode" x-on:input="renderCustom()" placeholder="e.g. 4001234567890" class="w-full border rounded-lg px-3 py-2"/>
+					</div>
+					<div class="grid grid-cols-2 gap-4">
+						<div>
+							<label class="block text-sm font-medium mb-1">Label text (optional)</label>
+							<input name="text" x-model="cText" placeholder="Item name" class="w-full border rounded-lg px-3 py-2"/>
+						</div>
+						<div>
+							<label class="block text-sm font-medium mb-1">Format</label>
+							<select name="format" x-model="cFormat" x-on:change="renderCustom()" class="w-full border rounded-lg px-3 py-2">
+								<option value="CODE128">CODE128 (any text/number)</option>
+								<option value="EAN13">EAN-13 (12–13 digits)</option>
+								<option value="EAN8">EAN-8 (7–8 digits)</option>
+								<option value="UPC">UPC-A (11–12 digits)</option>
+								<option value="CODE39">CODE39</option>
+							</select>
+						</div>
+					</div>
+					<div class="grid grid-cols-2 gap-4">
+						<div>
+							<label class="block text-sm font-medium mb-1">Price (optional)</label>
+							<input name="price" x-model="cPrice" placeholder="e.g. 250.00" class="w-full border rounded-lg px-3 py-2"/>
+						</div>
+						<div>
+							<label class="block text-sm font-medium mb-1">Number of labels</label>
+							<input name="qty" type="number" min="1" max="200" value="12" class="w-full border rounded-lg px-3 py-2"/>
+						</div>
+					</div>
+					<label class="inline-flex items-center gap-2 text-sm">
+						<input type="checkbox" name="show_price" value="1" x-model="cShowPrice"/> Show price on label
+					</label>
+					@labelPreviewCustom()
+					<button x-bind:disabled="!cCode" class="px-5 py-2.5 rounded-lg bg-indigo-600 text-white font-semibold disabled:opacity-40">Generate Labels →</button>
+				</form>
+			</div>
 		</div>
 	}
 }
 
-// LabelSheetData drives the standalone, printable label sheet.
+// labelPreview renders a single live preview label for the product form.
+templ labelPreview(nameVar, svgID, priceVar, showVar, codeVar string) {
+	<div class="border-t pt-4">
+		<div class="text-xs text-slate-400 mb-2">Preview</div>
+		<div class="inline-flex flex-col items-center gap-1 border rounded-lg px-4 py-3 min-w-[180px]" x-show={ codeVar } x-cloak>
+			<div class="text-sm font-medium" x-text={ nameVar }></div>
+			<svg id={ svgID }></svg>
+			<div class="text-sm font-semibold" x-show={ showVar } x-text={ priceVar }></div>
+		</div>
+		<div class="text-sm text-slate-400" x-show={ "!" + codeVar }>Select a product to preview.</div>
+	</div>
+}
+
+// labelPreviewCustom renders the live preview for the custom form.
+templ labelPreviewCustom() {
+	<div class="border-t pt-4">
+		<div class="text-xs text-slate-400 mb-2">Preview</div>
+		<div class="inline-flex flex-col items-center gap-1 border rounded-lg px-4 py-3 min-w-[180px]" x-show="cCode" x-cloak>
+			<div class="text-sm font-medium" x-text="cText"></div>
+			<svg id="preview-custom"></svg>
+			<div class="text-sm font-semibold" x-show="cShowPrice && cPrice" x-text="sym + ' ' + cPrice"></div>
+		</div>
+		<div class="text-sm text-slate-400" x-show="!cCode">Type a barcode value to preview.</div>
+	</div>
+}
+
+// LabelSheetData drives the standalone, printable label sheet (product or custom).
 type LabelSheetData struct {
-	Product   products.Product
-	Settings  settings.Settings
-	Count     int
+	ShopName  string
+	Name      string
+	Code      string
+	PriceText string
 	ShowPrice bool
+	Count     int
+	Format    string
 }
 
 templ LabelSheet(d LabelSheetData) {
@@ -60,23 +144,25 @@ templ LabelSheet(d LabelSheetData) {
 	<html lang="en">
 		<head>
 			<meta charset="UTF-8"/>
-			<title>Labels — { d.Product.Name }</title>
+			<title>Labels — { d.Name }</title>
 			<link rel="stylesheet" href="/static/css/app.css"/>
 			<script src="/static/vendor/jsbarcode.min.js"></script>
 		</head>
 		<body class="label-body">
 			<div class="label-toolbar">
 				<button onclick="window.print()">🖨 Print</button>
-				<span>{ d.Product.Name } — { strconv.Itoa(d.Count) } labels</span>
+				<span>{ d.Name } — { strconv.Itoa(d.Count) } labels</span>
 			</div>
 			<div class="label-sheet">
 				for i := 0; i < d.Count; i++ {
 					<div class="label">
-						<div class="label-shop">{ d.Settings.ShopName }</div>
-						<div class="label-name">{ d.Product.Name }</div>
-						<svg class="barcode" data-code={ barcodeValue(d.Product) }></svg>
-						if d.ShowPrice {
-							<div class="label-price">{ money.Format(d.Settings.CurrencySymbol, d.Product.SellingPrice) }</div>
+						<div class="label-shop">{ d.ShopName }</div>
+						if d.Name != "" {
+							<div class="label-name">{ d.Name }</div>
+						}
+						<svg class="barcode" data-code={ d.Code } data-format={ d.Format }></svg>
+						if d.ShowPrice && d.PriceText != "" {
+							<div class="label-price">{ d.PriceText }</div>
 						}
 					</div>
 				}
@@ -85,7 +171,8 @@ templ LabelSheet(d LabelSheetData) {
 				document.querySelectorAll('svg.barcode').forEach(function (el) {
 					try {
 						JsBarcode(el, el.getAttribute('data-code'), {
-							format: 'CODE128', displayValue: true, fontSize: 12, height: 38, margin: 2, width: 1.4,
+							format: el.getAttribute('data-format') || 'CODE128',
+							displayValue: true, fontSize: 12, height: 38, margin: 2, width: 1.4,
 						});
 					} catch (e) { /* ignore bad codes */ }
 				});

@@ -9,6 +9,7 @@ import (
 	"net/http"
 
 	"karots-pos/internal/config"
+	"karots-pos/internal/features/audit"
 	"karots-pos/internal/features/auth"
 	"karots-pos/internal/features/cashregister"
 	"karots-pos/internal/features/categories"
@@ -50,6 +51,7 @@ type Server struct {
 	reports    *reports.Service
 	denominations *denominations.Service
 	cashRegister  *cashregister.Service
+	audit         *audit.Service
 }
 
 // RegisterUI builds UI services and mounts all server-rendered routes. authSvc
@@ -72,8 +74,9 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 		expenses:   expenses.NewService(db),
 		reports:    reports.NewService(db),
 		denominations: denominations.NewService(db),
-		cashRegister:  cashregister.NewService(db, sales.NewService(db)),
+		audit:         audit.NewService(db),
 	}
+	s.cashRegister = cashregister.NewService(db, sales.NewService(db)).WithAudit(s.audit)
 	a := &authUI{svc: authSvc, cookie: CookieConfig{Secure: cfg.CookieSecure, MaxAge: cfg.JWTAccessTTL}}
 	admin := &adminUI{s: s, db: db}
 	cashier := &cashierUI{s: s}
@@ -95,6 +98,8 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	cg := e.Group("/cashier", jwt)
 	cg.GET("", cashier.POS)
 	cg.GET("/receipt/:id", cashier.Receipt)
+	cg.GET("/receipts", cashier.Receipts)
+	cg.GET("/z/:id", cashier.ZReport) // day-end (Z) report — own session
 
 	// Returns / refunds
 	cg.GET("/returns", cashier.Returns)
@@ -181,6 +186,7 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	ag.GET("/reports/cash-register", admin.CashRegisterReport)
 	ag.GET("/reports/purchases", admin.PurchasesReport)
 	ag.GET("/reports/suppliers", admin.SuppliersReport)
+	ag.GET("/reports/customer-dues", admin.CustomerDuesReport)
 	ag.GET("/reports/inventory", admin.InventoryReport)
 	ag.GET("/reports/batches", admin.BatchReport)
 	ag.GET("/reports/expiring", admin.ExpiringReport)
@@ -216,6 +222,7 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	// Cash register sessions (drawer audit + over/short)
 	ag.GET("/cash-register", admin.CashSessions)
 	ag.GET("/cash-register/:id", admin.CashSessionDetail)
+	ag.GET("/cash-register/:id/z", cashier.ZReport) // Z-report (admins may view any session)
 
 	// Barcode labels
 	ag.GET("/labels", admin.Labels)
@@ -236,7 +243,14 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	ag.GET("/users/form", admin.UserForm, middleware.RequireRole(auth.RoleAdmin))
 	ag.POST("/users", admin.UserCreate, middleware.RequireRole(auth.RoleAdmin))
 	ag.DELETE("/users/:id", admin.UserDeactivate, middleware.RequireRole(auth.RoleAdmin))
+	ag.POST("/users/:id/activate", admin.UserReactivate, middleware.RequireRole(auth.RoleAdmin))
+
+	ag.GET("/audit", admin.AuditLog, middleware.RequireRole(auth.RoleAdmin))
 
 	ag.GET("/settings", admin.Settings)
 	ag.PUT("/settings", admin.SettingsUpdate)
+
+	// Backup & restore (admin only — restore replaces all data).
+	ag.GET("/backup", admin.Backup, middleware.RequireRole(auth.RoleAdmin))
+	ag.POST("/restore", admin.Restore, middleware.RequireRole(auth.RoleAdmin))
 }

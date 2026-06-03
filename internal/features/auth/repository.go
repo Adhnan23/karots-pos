@@ -65,6 +65,12 @@ func (r *Repository) Deactivate(ctx context.Context, id int64) error {
 	return err
 }
 
+func (r *Repository) Activate(ctx context.Context, id int64) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE users SET is_active = true WHERE id = $1`, id)
+	return err
+}
+
 // --- refresh tokens ---
 
 func (r *Repository) StoreRefresh(ctx context.Context, userID int64, hash string, expiresAt time.Time) error {

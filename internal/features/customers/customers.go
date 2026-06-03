@@ -70,6 +70,27 @@ func (r *Repository) List(ctx context.Context, search string) ([]Customer, error
 	return rows, err
 }
 
+// OwingRow is a customer with an outstanding balance, plus the date of their
+// oldest unpaid credit sale (a proxy for aging — the system tracks an aggregate
+// balance, not per-invoice allocation).
+type OwingRow struct {
+	Customer
+	OldestCredit *time.Time `db:"oldest_credit" json:"oldest_credit,omitempty"`
+}
+
+// Owing lists active customers who currently owe money, biggest balance first.
+func (r *Repository) Owing(ctx context.Context) ([]OwingRow, error) {
+	var rows []OwingRow
+	err := r.q.SelectContext(ctx, &rows, `
+		SELECT c.*,
+		       (SELECT MIN(s.created_at) FROM sales s
+		         WHERE s.customer_id = c.id AND s.status = 'credit') AS oldest_credit
+		FROM customers c
+		WHERE c.is_active = true AND c.outstanding_balance > 0
+		ORDER BY c.outstanding_balance DESC`)
+	return rows, err
+}
+
 func (r *Repository) FindByID(ctx context.Context, id int64) (*Customer, error) {
 	var c Customer
 	err := r.q.GetContext(ctx, &c, `SELECT * FROM customers WHERE id = $1`, id)
@@ -123,6 +144,15 @@ func (s *Service) List(ctx context.Context, search string) ([]Customer, error) {
 	rows, err := s.repo.List(ctx, search)
 	if err != nil {
 		return nil, apperr.Internal("failed to list customers", err)
+	}
+	return rows, nil
+}
+
+// Owing lists customers with an outstanding balance (for the dues report).
+func (s *Service) Owing(ctx context.Context) ([]OwingRow, error) {
+	rows, err := s.repo.Owing(ctx)
+	if err != nil {
+		return nil, apperr.Internal("failed to list customer dues", err)
 	}
 	return rows, nil
 }

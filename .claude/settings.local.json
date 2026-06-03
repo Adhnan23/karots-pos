@@ -48,7 +48,18 @@
       "Bash(sed -n '/type Supplier struct/,/^}/p' internal/features/suppliers/suppliers.go)",
       "Bash(sed -n '/func \\(a \\\\*adminUI\\) ExpiringReport/,/^}/p;/func \\(a \\\\*adminUI\\) LowStockReport/,/^}/p' internal/web/admin_more.go)",
       "Bash(sed -n '/^type Product struct/,/^}/p' internal/features/products/products.go)",
-      "Bash(sed -n '/func ParseRange/,/^}/p' internal/features/reports/reports.go)"
+      "Bash(sed -n '/func ParseRange/,/^}/p' internal/features/reports/reports.go)",
+      "Bash(rg -n \"func .*symbol|func .*Settings|func .*SettingsUpdate\" internal/web/*.go)",
+      "Bash(rg -n \"func \\(itoa|strconv|FormatInt|func \\)\" templates/pages/cashier/*.templ templates/pages/cashier/*.go)",
+      "Bash(rg -n \"^func \\(Forbidden|NotFound|BadRequest|Conflict|Validation|Internal\\)\" internal/apperr/*.go)",
+      "Bash(rg -n \"ShopName\" internal/features/settings/*.go)",
+      "Bash(rg *)",
+      "Bash(grep -vE '^#|^$')",
+      "Bash(pkill -f \"go run ./cmd/server\")",
+      "Bash(pkill -f \"exe/server\")",
+      "Bash(kill 38143)",
+      "Bash(zcat /tmp/pos.json.gz)",
+      "Bash(python3 -c ' *)"
     ]
   }
 }

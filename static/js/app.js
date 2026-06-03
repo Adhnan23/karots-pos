@@ -63,7 +63,8 @@ function pos(symbol, defaultType) {
     saleType: defaultType || "retail",
     customerId: "",
     discount: 0,
-    cash: 0,
+    // Split tender: one or more payment lines (cash / card / online).
+    payments: [{ method: "cash", amount: 0, reference: "" }],
     busy: false,
     session: null,
     summary: null,
@@ -78,12 +79,16 @@ function pos(symbol, defaultType) {
     withdrawReason: "",
     closeResult: null,
     receipt: null,
+    // Parked carts (hold / resume).
+    holds: [],
+    showHolds: false,
 
     async init() {
       await this.loadDenoms();
       await this.loadSummary();
       await this.loadProducts();
       await this.loadCustomers();
+      await this.loadHolds();
     },
 
     money(v) {
@@ -194,6 +199,63 @@ function pos(symbol, defaultType) {
       toast("Cash withdrawn", "success");
     },
 
+    // --- hold / park sale ---
+    async loadHolds() {
+      try {
+        const json = await apiFetch("GET", "/api/held-sales");
+        this.holds = json.data || [];
+      } catch (_) {
+        this.holds = [];
+      }
+    },
+    async holdSale() {
+      if (this.cart.length === 0) {
+        toast("Cart is empty", "error");
+        return;
+      }
+      const label =
+        (this.customerId &&
+          (this.customers.find((c) => String(c.id) === String(this.customerId)) || {})
+            .name) ||
+        (this.cart[0] && this.cart[0].name) ||
+        "";
+      try {
+        await apiFetch("POST", "/api/held-sales", {
+          label: label,
+          sale_type: this.saleType,
+          customer_id: this.customerId ? Number(this.customerId) : null,
+          discount: String(this.discount || 0),
+          cart: this.cart,
+          item_count: this.cart.length,
+          total: String(this.total()),
+        });
+        toast("Sale held", "success");
+        this.newSale();
+        await this.loadHolds();
+      } catch (_) {
+        /* toast already shown */
+      }
+    },
+    async resumeHold(h) {
+      this.cart = Array.isArray(h.cart) ? h.cart : [];
+      this.saleType = h.sale_type || "retail";
+      this.customerId = h.customer_id ? String(h.customer_id) : "";
+      this.discount = Number(h.discount) || 0;
+      this.payments = [{ method: "cash", amount: 0, reference: "" }];
+      this.receipt = null;
+      this.showHolds = false;
+      await this.deleteHold(h.id, true);
+    },
+    async deleteHold(id, silent) {
+      try {
+        await apiFetch("DELETE", "/api/held-sales/" + id);
+        await this.loadHolds();
+        if (!silent) toast("Held sale removed", "success");
+      } catch (_) {
+        /* toast already shown */
+      }
+    },
+
     unitPriceFor(p) {
       if (this.saleType === "wholesale" && Number(p.wholesale_price) > 0) {
         return Number(p.wholesale_price);
@@ -245,6 +307,34 @@ function pos(symbol, defaultType) {
       return Math.max(0, this.subtotal() - (Number(this.discount) || 0) + this.taxTotal());
     },
 
+    // --- split-tender payments ---
+    addPayment() {
+      this.payments.push({ method: "card", amount: 0, reference: "" });
+    },
+    removePayment(idx) {
+      this.payments.splice(idx, 1);
+      if (this.payments.length === 0) {
+        this.payments.push({ method: "cash", amount: 0, reference: "" });
+      }
+    },
+    paidTotal() {
+      return this.payments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+    },
+    changeDue() {
+      return Math.max(0, this.paidTotal() - this.total());
+    },
+    balanceDue() {
+      return Math.max(0, this.total() - this.paidTotal());
+    },
+    // Fill a payment line with the still-unpaid balance (quick "exact" button).
+    fillRemaining(idx) {
+      const others = this.payments.reduce(
+        (s, p, i) => (i === idx ? s : s + (Number(p.amount) || 0)),
+        0
+      );
+      this.payments[idx].amount = Math.max(0, this.total() - others);
+    },
+
     async checkout() {
       if (this.cart.length === 0 || this.busy) return;
       this.busy = true;
@@ -258,10 +348,13 @@ function pos(symbol, defaultType) {
             quantity: String(it.qty),
             discount: "0",
           })),
-          payments:
-            Number(this.cash) > 0
-              ? [{ method: "cash", amount: String(this.cash) }]
-              : [],
+          payments: this.payments
+            .filter((p) => Number(p.amount) > 0)
+            .map((p) => ({
+              method: p.method,
+              amount: String(p.amount),
+              reference: p.reference ? String(p.reference) : null,
+            })),
         };
         const json = await apiFetch("POST", "/api/sales", payload);
         this.receipt = json.data;
@@ -281,7 +374,7 @@ function pos(symbol, defaultType) {
     newSale() {
       this.cart = [];
       this.discount = 0;
-      this.cash = 0;
+      this.payments = [{ method: "cash", amount: 0, reference: "" }];
       this.customerId = "";
       this.receipt = null;
     },
@@ -466,6 +559,56 @@ function saleReturn(saleId, opts) {
         /* toast already shown */
       } finally {
         this.busy = false;
+      }
+    },
+  };
+}
+
+// labels: live barcode preview for the Barcode Labels page (product + custom).
+function labels(sym) {
+  return {
+    sym: sym,
+    // product form
+    pName: "",
+    pCode: "",
+    pPrice: "",
+    pShowPrice: true,
+    // custom form
+    cCode: "",
+    cText: "",
+    cPrice: "",
+    cFormat: "CODE128",
+    cShowPrice: false,
+
+    onProduct(ev) {
+      const o = ev.target.selectedOptions[0];
+      this.pName = (o && o.dataset.name) || "";
+      this.pCode = (o && o.dataset.code) || "";
+      this.pPrice = (o && o.dataset.price) || "";
+      this.$nextTick(() => this.draw("preview-product", this.pCode, "CODE128"));
+    },
+    renderCustom() {
+      this.$nextTick(() => this.draw("preview-custom", this.cCode, this.cFormat));
+    },
+    draw(id, code, format) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      if (!code) {
+        el.innerHTML = "";
+        return;
+      }
+      try {
+        JsBarcode(el, code, {
+          format: format || "CODE128",
+          displayValue: true,
+          fontSize: 12,
+          height: 38,
+          margin: 2,
+          width: 1.4,
+        });
+      } catch (e) {
+        // invalid code for the chosen format — clear the preview
+        el.innerHTML = "";
       }
     },
   };

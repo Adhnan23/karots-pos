@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"karots-pos/internal/apperr"
+	"karots-pos/internal/features/audit"
 	"karots-pos/internal/features/customers"
 	"karots-pos/internal/features/products"
 	"karots-pos/internal/features/sales"
@@ -169,9 +170,11 @@ func (a *adminUI) ProductCreate(c echo.Context) error {
 	if err := c.Validate(&in); err != nil {
 		return err
 	}
-	if _, err := a.s.products.Create(c.Request().Context(), in); err != nil {
+	p, err := a.s.products.Create(c.Request().Context(), in)
+	if err != nil {
 		return err
 	}
+	a.s.logAudit(c, audit.ActionCreate, "product", strconv.FormatInt(p.ID, 10), "created "+in.Name)
 	return htmxDone(c, "Product created", "reload-products")
 }
 
@@ -190,6 +193,7 @@ func (a *adminUI) ProductUpdate(c echo.Context) error {
 	if _, err := a.s.products.Update(c.Request().Context(), id, in); err != nil {
 		return err
 	}
+	a.s.logAudit(c, audit.ActionUpdate, "product", strconv.FormatInt(id, 10), "updated "+in.Name)
 	return htmxDone(c, "Product updated", "reload-products")
 }
 
@@ -201,6 +205,7 @@ func (a *adminUI) ProductDelete(c echo.Context) error {
 	if err := a.s.products.Delete(c.Request().Context(), id); err != nil {
 		return err
 	}
+	a.s.logAudit(c, audit.ActionDelete, "product", strconv.FormatInt(id, 10), "")
 	return htmxReload(c, "Product deleted", "reload-products")
 }
 
@@ -362,6 +367,7 @@ func (a *adminUI) SettingsUpdate(c echo.Context) error {
 	if _, err := a.s.settings.Update(c.Request().Context(), in); err != nil {
 		return err
 	}
+	a.s.logAudit(c, audit.ActionSettings, "settings", "", "updated shop settings")
 	c.Response().Header().Set("HX-Trigger", response.Toast("Settings saved", "success"))
 	return c.NoContent(200)
 }

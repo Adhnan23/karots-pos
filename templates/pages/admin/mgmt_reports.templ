@@ -4,6 +4,7 @@ import (
 	"strconv"
 
 	"karots-pos/internal/features/cashregister"
+	"karots-pos/internal/features/customers"
 	"karots-pos/internal/features/products"
 	"karots-pos/internal/features/purchases"
 	"karots-pos/internal/features/reports"
@@ -34,6 +35,7 @@ templ ReportsHub(d ReportsHubData) {
 			@reportCard("/admin/reports/cash-register", "Cash Register", "Drawer sessions with over/short")
 			@reportCard("/admin/reports/purchases", "Purchases", "GRNs received in a period")
 			@reportCard("/admin/reports/suppliers", "Suppliers", "Outstanding payables snapshot")
+			@reportCard("/admin/reports/customer-dues", "Customer Dues", "Receivables — who owes you money")
 			@reportCard("/admin/reports/inventory", "Inventory Valuation", "Stock on hand at cost & retail")
 			@reportCard("/admin/reports/batches", "Batches / Expiry", "Live batches and expiry dates")
 			@reportCard("/admin/reports/low-stock", "Low Stock", "Items at or below reorder level")
@@ -323,6 +325,48 @@ templ SuppliersReport(d SuppliersReportData) {
 			</tbody>
 			<tfoot class="border-t-2 font-semibold">
 				<tr><td class="py-2" colspan="3">Total payable</td><td class="py-2 text-right">{ money.Format(d.Symbol, d.TotalPayable) }</td></tr>
+			</tfoot>
+		</table>
+	}
+}
+
+// ============================ Customer dues ============================
+
+type CustomerDuesData struct {
+	ShopName, Symbol string
+	Rows             []customers.OwingRow
+	TotalDue         decimal.Decimal
+}
+
+templ CustomerDuesReport(d CustomerDuesData) {
+	@layouts.Report("Customer Dues — Receivables", d.ShopName) {
+		<table class="w-full text-sm">
+			<thead class="text-left text-slate-500 border-b">
+				<tr><th class="py-1.5">Customer</th><th class="py-1.5">Phone</th><th class="py-1.5 text-right">Credit limit</th><th class="py-1.5 text-right">Outstanding</th><th class="py-1.5 text-right">Oldest credit</th><th class="py-1.5 text-right">Age (days)</th></tr>
+			</thead>
+			<tbody>
+				for _, c := range d.Rows {
+					<tr class="border-b last:border-0">
+						<td class="py-1.5 font-medium">{ c.Name }</td>
+						<td class="py-1.5 text-slate-500">{ strOrEmpty(c.Phone) }</td>
+						<td class="py-1.5 text-right">{ money.Display(c.CreditLimit) }</td>
+						<td class="py-1.5 text-right font-medium">{ money.Format(d.Symbol, c.OutstandingBalance) }</td>
+						<td class="py-1.5 text-right text-slate-500">
+							if c.OldestCredit != nil {
+								{ c.OldestCredit.Format("2006-01-02") }
+							} else {
+								—
+							}
+						</td>
+						<td class="py-1.5 text-right">{ daysSince(c.OldestCredit) }</td>
+					</tr>
+				}
+				if len(d.Rows) == 0 {
+					<tr><td colspan="6" class="py-6 text-center text-slate-400">No customers owe money. 🎉</td></tr>
+				}
+			</tbody>
+			<tfoot class="border-t-2 font-semibold">
+				<tr><td class="py-2" colspan="3">Total receivable</td><td class="py-2 text-right">{ money.Format(d.Symbol, d.TotalDue) }</td><td colspan="2"></td></tr>
 			</tfoot>
 		</table>
 	}

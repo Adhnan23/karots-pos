@@ -90,7 +90,10 @@ templ CashSessionDetailPage(d CashSessionDetailData) {
 					}
 				</p>
 			</div>
-			<a href="/admin/cash-register" class="text-sm text-slate-500 hover:underline">← All sessions</a>
+			<div class="flex items-center gap-4">
+				<a href={ templ.SafeURL("/admin/cash-register/" + strconv.FormatInt(d.Session.ID, 10) + "/z") } target="_blank" class="px-3 py-1.5 rounded-lg bg-slate-800 text-white text-sm font-medium">🖨 Z-Report</a>
+				<a href="/admin/cash-register" class="text-sm text-slate-500 hover:underline">← All sessions</a>
+			</div>
 		</div>
 
 		<div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
