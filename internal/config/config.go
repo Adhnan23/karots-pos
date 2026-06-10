@@ -20,6 +20,10 @@ type Config struct {
 	JWTRefreshTTL time.Duration
 	CORSOrigins   []string
 	CookieSecure  bool
+	// ReceiptPrinter is the CUPS queue name for thermal receipts. Empty means
+	// use the system default destination. The queue must be a raw queue so the
+	// ESC/POS bytes pass through unmodified.
+	ReceiptPrinter string
 }
 
 func Load() *Config {
@@ -31,6 +35,7 @@ func Load() *Config {
 		JWTAccessTTL:  mustDuration("JWT_EXPIRES_IN", 15*time.Minute),
 		JWTRefreshTTL: mustDuration("JWT_REFRESH_EXPIRES_IN", 7*24*time.Hour),
 		CORSOrigins:   strings.Split(getEnv("CORS_ORIGINS", "http://localhost:3000"), ","),
+		ReceiptPrinter: getEnv("RECEIPT_PRINTER", ""),
 	}
 	c.CookieSecure = c.Env == "production"
 	if len(c.JWTSecret) < 32 {

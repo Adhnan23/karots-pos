@@ -125,7 +125,7 @@ templ POS(d POSData) {
 								</div>
 								<div class="flex items-center rounded border">
 									<button type="button" x-on:click="decQty(it)" class="px-2.5 py-1 text-lg leading-none text-slate-500 hover:bg-slate-100" aria-label="Decrease quantity">−</button>
-									<input type="number" step="0.001" min="0" x-model.number="it.qty" x-on:input="clampQty(it)" class="w-14 border-x px-1 py-1 text-center text-sm"/>
+									<input type="number" x-bind:step="it.allowDecimal ? '0.001' : '1'" min="0" x-model.number="it.qty" x-on:change="clampQty(it)" class="w-16 border-x px-1 py-1 text-center text-sm"/>
 									<button type="button" x-on:click="incQty(it)" class="px-2.5 py-1 text-lg leading-none text-slate-500 hover:bg-slate-100" aria-label="Increase quantity">+</button>
 								</div>
 								<div class="w-24 text-right text-sm font-medium" x-text="sym + ' ' + money(lineTotal(it))"></div>

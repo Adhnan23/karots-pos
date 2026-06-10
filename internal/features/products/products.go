@@ -29,9 +29,10 @@ type Product struct {
 	IsActive       bool            `db:"is_active"       json:"is_active"`
 	CreatedAt      time.Time       `db:"created_at"      json:"created_at"`
 	// Joined, read-only:
-	CategoryName string          `db:"category_name" json:"category_name"`
-	UnitAbbr     string          `db:"unit_abbr"     json:"unit_abbr"`
-	StockQty     decimal.Decimal `db:"stock_qty"     json:"stock_qty"`
+	CategoryName     string          `db:"category_name"      json:"category_name"`
+	UnitAbbr         string          `db:"unit_abbr"          json:"unit_abbr"`
+	UnitAllowDecimal bool            `db:"unit_allow_decimal" json:"unit_allow_decimal"`
+	StockQty         decimal.Decimal `db:"stock_qty"          json:"stock_qty"`
 }
 
 // IsLowStock reports whether on-hand quantity is at or below the reorder level.
@@ -78,6 +79,7 @@ func (q ListQuery) offset() int { return (q.Page - 1) * q.Limit }
 
 const selectProduct = `
 	SELECT p.*, c.name AS category_name, u.abbreviation AS unit_abbr,
+	       u.allow_decimal AS unit_allow_decimal,
 	       COALESCE(s.quantity, 0) AS stock_qty
 	FROM products p
 	JOIN categories c ON c.id = p.category_id

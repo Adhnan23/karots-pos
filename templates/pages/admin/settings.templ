@@ -63,6 +63,13 @@ templ SettingsPage(d SettingsData) {
 							@saleTypeOption("credit", d.S.DefaultSaleType)
 						</select>
 					</div>
+					<div>
+						<label class="block text-sm font-medium mb-1">Receipt Paper Width</label>
+						<select name="receipt_width" class="w-full border rounded-lg px-3 py-2">
+							@paperOption("80", "80mm", d.S.ReceiptWidth)
+							@paperOption("58", "58mm", d.S.ReceiptWidth)
+						</select>
+					</div>
 					<div class="flex items-end gap-4">
 						<label class="flex items-center gap-2">
 							<input type="checkbox" name="tax_registered" value="true" checked?={ d.S.TaxRegistered }/>
@@ -105,4 +112,8 @@ templ SettingsPage(d SettingsData) {
 
 templ saleTypeOption(value, selected string) {
 	<option value={ value } selected?={ value == selected }>{ value }</option>
+}
+
+templ paperOption(value, label, selected string) {
+	<option value={ value } selected?={ value == selected }>{ label }</option>
 }

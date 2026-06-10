@@ -149,6 +149,18 @@ function toast(message, level) {
   window.dispatchEvent(new CustomEvent("show-toast", { detail: { message, level } }));
 }
 
+// printBill sends a sale to the thermal printer server-side (ESC/POS via CUPS).
+// This replaces opening the HTML receipt + window.print(), which a driverless
+// raw thermal queue mis-prints as PDF garbage. apiFetch toasts on failure.
+async function printBill(id) {
+  try {
+    await apiFetch("POST", "/cashier/print/" + id);
+    toast("Receipt sent to printer", "success");
+  } catch (_) {
+    /* apiFetch already surfaced the error */
+  }
+}
+
 // pos: the cashier terminal. Cart math here is a live preview only — the server
 // recomputes every amount authoritatively when the sale is posted.
 function pos(symbol, defaultType) {
@@ -440,6 +452,9 @@ function pos(symbol, defaultType) {
         tax_rate: Number(p.tax_rate) || 0,
         qty: 1,
         stock: Number(p.stock_qty),
+        // Weight/volume units (kg, g, ltr, ml) accept fractional quantities;
+        // everything else is whole-only.
+        allowDecimal: !!p.unit_allow_decimal,
       });
     },
     async scanBarcode() {
@@ -454,7 +469,11 @@ function pos(symbol, defaultType) {
       }
     },
     clampQty(it) {
-      if (Number(it.qty) < 0) it.qty = 0;
+      let q = Number(it.qty) || 0;
+      if (q < 0) q = 0;
+      // Whole-only units snap to integers; weighed units keep their decimals.
+      if (!it.allowDecimal) q = Math.round(q);
+      it.qty = q;
     },
     removeItem(idx) {
       this.cart.splice(idx, 1);
@@ -534,7 +553,7 @@ function pos(symbol, defaultType) {
     },
     printReceipt() {
       if (!this.receipt) return;
-      window.open("/cashier/receipt/" + this.receipt.sale.id + "?print=1", "_blank");
+      printBill(this.receipt.sale.id);
     },
     newSale() {
       this.cart = [];

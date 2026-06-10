@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"karots-pos/internal/apperr"
+	"karots-pos/internal/escpos"
 	"karots-pos/internal/features/audit"
 	"karots-pos/internal/features/auth"
 	"karots-pos/internal/features/customers"
@@ -101,12 +102,44 @@ func (h *cashierUI) Receipt(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	// Paper width defaults to the saved setting; an explicit ?size= overrides it
+	// (used by the "Switch to 58/80mm" links on the receipt page).
+	narrow := cfg.ReceiptWidth == "58"
+	if sz := c.QueryParam("size"); sz != "" {
+		narrow = sz == "58"
+	}
 	return response.RenderPage(c, cashierpages.Receipt(cashierpages.ReceiptData{
 		Detail:    *detail,
 		Settings:  *cfg,
 		AutoPrint: c.QueryParam("print") == "1",
-		Narrow:    c.QueryParam("size") == "58",
+		Narrow:    narrow,
 	}))
+}
+
+// PrintReceipt sends a sale straight to the thermal printer as ESC/POS bytes
+// (built-in font, sized to the receipt_width setting, with an auto-cut). This is
+// the reliable path for the Xprinter: it bypasses the browser/PDF route that a
+// driverless raw queue prints as garbage.
+func (h *cashierUI) PrintReceipt(c echo.Context) error {
+	ctx := c.Request().Context()
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	detail, err := h.s.sales.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	cfg, err := h.s.settings.Get(ctx)
+	if err != nil {
+		return err
+	}
+	if err := escpos.Send(ctx, h.s.cfg.ReceiptPrinter, escpos.Document(*detail, *cfg)); err != nil {
+		return apperr.Internal("could not print receipt", err)
+	}
+	// Feedback for the HTMX reprint button; the Alpine apiFetch path toasts itself.
+	c.Response().Header().Set("HX-Trigger", response.Toast("Receipt sent to printer", "success"))
+	return response.OK(c, map[string]bool{"ok": true})
 }
 
 // Receipts lists recent sales (optionally filtered by receipt number) so the

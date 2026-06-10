@@ -149,11 +149,13 @@ html.dark body.bg-slate-100 { background-color: #0b1120 !important; color: #e2e8
 }
 
 @media print {
+  /* Page size + margins are injected per-receipt in receipt.templ (pageStyle)
+     so @page matches the chosen 80/58mm roll with an auto height. */
   .receipt-body { background: #fff; }
+  html, body { height: auto; } /* avoid a trailing blank page */
   .receipt { width: 80mm; margin: 0; padding: 0 2mm; }
   .receipt.narrow { width: 58mm; }
   .r-print-btn { display: none !important; }
-  @page { margin: 0; }
 }
 
 /* ---------------- Barcode label sheet ---------------- */

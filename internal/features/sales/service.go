@@ -83,6 +83,11 @@ func (s *Service) Create(ctx context.Context, in CreateInput, cashierID int64) (
 			if err != nil || !qty.IsPositive() {
 				return apperr.Validation(fmt.Sprintf("quantity for %s must be greater than zero", p.Name))
 			}
+			// Whole-only units (pieces, packets…) reject fractional quantities;
+			// only units flagged allow_decimal (kg, g, ltr, ml) may be fractional.
+			if !p.UnitAllowDecimal && !qty.Equal(qty.Truncate(0)) {
+				return apperr.Validation(fmt.Sprintf("quantity for %s must be a whole number", p.Name))
+			}
 			disc, err := money.Parse(it.Discount)
 			if err != nil || disc.IsNegative() {
 				return apperr.Validation(fmt.Sprintf("discount for %s is invalid", p.Name))

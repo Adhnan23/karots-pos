@@ -24,6 +24,7 @@ type Settings struct {
 	CurrencyCode    string    `db:"currency_code"     json:"currency_code"`
 	CurrencySymbol  string    `db:"currency_symbol"   json:"currency_symbol"`
 	ReceiptFooter   *string   `db:"receipt_footer"    json:"receipt_footer,omitempty"`
+	ReceiptWidth    string    `db:"receipt_width"     json:"receipt_width"`
 	LogoURL         *string   `db:"logo_url"          json:"logo_url,omitempty"`
 	TaxRegistered   bool      `db:"tax_registered"    json:"tax_registered"`
 	TaxRegNo        *string   `db:"tax_reg_no"        json:"tax_reg_no,omitempty"`
@@ -41,6 +42,7 @@ type UpdateInput struct {
 	CurrencySymbol  string  `json:"currency_symbol"   form:"currency_symbol"   validate:"required,max=5"`
 	LogoURL         *string `json:"logo_url"          form:"logo_url"`
 	ReceiptFooter   *string `json:"receipt_footer"    form:"receipt_footer"`
+	ReceiptWidth    string  `json:"receipt_width"     form:"receipt_width"     validate:"required,oneof=80 58"`
 	TaxRegistered   bool    `json:"tax_registered"    form:"tax_registered"`
 	TaxRegNo        *string `json:"tax_reg_no"        form:"tax_reg_no"`
 	LowStockAlerts  bool    `json:"low_stock_alerts"  form:"low_stock_alerts"`
@@ -74,12 +76,12 @@ func (r *Repository) Update(ctx context.Context, in UpdateInput) error {
 			shop_name=$1, shop_name_si=$2, address=$3, phone=$4,
 			currency_code=$5, currency_symbol=$6, receipt_footer=$7,
 			tax_registered=$8, tax_reg_no=$9, low_stock_alerts=$10, default_sale_type=$11,
-			logo_url=$12
+			logo_url=$12, receipt_width=$13
 		WHERE id = 1`,
 		in.ShopName, in.ShopNameSi, in.Address, in.Phone,
 		in.CurrencyCode, in.CurrencySymbol, in.ReceiptFooter,
 		in.TaxRegistered, in.TaxRegNo, in.LowStockAlerts, in.DefaultSaleType,
-		nilIfEmptyStr(in.LogoURL))
+		nilIfEmptyStr(in.LogoURL), in.ReceiptWidth)
 	return err
 }
 

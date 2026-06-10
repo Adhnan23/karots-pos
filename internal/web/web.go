@@ -98,6 +98,7 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	cg := e.Group("/cashier", jwt)
 	cg.GET("", cashier.POS)
 	cg.GET("/receipt/:id", cashier.Receipt)
+	cg.POST("/print/:id", cashier.PrintReceipt)
 	cg.GET("/receipts", cashier.Receipts)
 	cg.GET("/z/:id", cashier.ZReport) // day-end (Z) report — own session
 

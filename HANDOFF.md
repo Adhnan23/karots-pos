@@ -364,3 +364,28 @@ lean.
 - Receipt: optional 58mm toggle (CSS var) and shop logo.
 - Pagination on the sales/movements lists (currently capped at 100–200 rows).
 - ~~Replace Tailwind Play CDN with a built stylesheet for production.~~ ✅ done (Phase 6).
+
+## ✅ Fractional / weighed quantities (done 2026-06-10, migration 0015)
+Some products are sold by weight/fraction — e.g. onions at **0.5, 1.5, 2.25 kg**.
+Implemented as a **per-unit** flag (decision: drive off the unit, not per-product):
+- `units.allow_decimal` BOOLEAN (migration 0015); seeded true for kg/g/ltr/ml.
+- Admin → Units form has an "Allow decimal quantities" checkbox + a table column.
+- `/api/products` exposes `unit_allow_decimal` (join on units); the POS cart carries
+  `allowDecimal` per line. The qty box uses `x-bind:step` (0.001 vs 1) and
+  `clampQty` snaps whole-only items to integers (`static/js/app.js`,
+  `templates/pages/cashier/pos.templ`).
+- Server enforces it in checkout: whole-only units reject fractional qty
+  (`internal/features/sales/service.go`). The +/− steppers stay ±1 (owner choice);
+  fractions are entered by typing. Stock/returns/receipt already decimal-clean.
+- Live E2E tested: kg 2.25 ✓, pcs 2.5 rejected (422) ✓, pcs 3 ✓, admin toggle ✓.
+
+## ✅ Thermal printing — server-side ESC/POS (done 2026-06-10)
+Browser printing to the Xprinter (POS-80, USB raw CUPS queue `POS80`) failed:
+Firefox sent a PDF to a driverless raw queue, so the printer printed the PDF
+source as text → CJK garbage + ~1m of paper. **Fixed**: the Go app builds the
+receipt as ESC/POS bytes (`internal/escpos`, 80/58mm from `settings.receipt_width`,
+built-in font, feed+cut) and sends them via `lp -o raw`
+(`POST /cashier/print/:id`). Print Bill + Reprint buttons use it; `RECEIPT_PRINTER`
+env selects the queue (default = system default). The CUPS queue must stay **raw**.
+Live-tested: job is ~1 KB vs the old ~19 KB PDF. See PRINTING.md. Unit tests in
+`internal/escpos/escpos_test.go`.

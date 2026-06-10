@@ -15,6 +15,17 @@ type ReceiptData struct {
 	Narrow    bool // 58mm paper when true, otherwise 80mm
 }
 
+// pageStyle builds the per-receipt print stylesheet so the printed page matches
+// the chosen thermal roll: a fixed width (80/58mm) and an `auto` height that grows
+// with the number of items (continuous roll) instead of the browser's A4 default.
+func pageStyle(narrow bool) string {
+	w := "80mm"
+	if narrow {
+		w = "58mm"
+	}
+	return "@media print{@page{size:" + w + " auto;margin:0}html,body{width:" + w + ";height:auto;margin:0}}"
+}
+
 // Receipt is a self-contained thermal bill (80mm default, also fits 58mm). It
 // deliberately does NOT use the cashier chrome — it is its own minimal page so
 // it prints cleanly. The print styling lives in /static/css/app.css.
@@ -26,8 +37,12 @@ templ Receipt(d ReceiptData) {
 			<meta name="viewport" content="width=device-width, initial-scale=1"/>
 			<title>Receipt { d.Detail.Sale.ReceiptNo }</title>
 			<link rel="stylesheet" href="/static/css/app.css"/>
+			@templ.Raw("<style>" + pageStyle(d.Narrow) + "</style>")
+			// Print server-side (ESC/POS) instead of window.print(): a browser
+			// print sends a PDF that a raw thermal queue mis-prints as garbage.
+			@templ.Raw("<script>function printThermal(){var m=document.getElementById('printmsg');if(m)m.textContent='Printing…';fetch('/cashier/print/" + strconv.FormatInt(d.Detail.Sale.ID, 10) + "',{method:'POST',credentials:'same-origin'}).then(function(r){if(m)m.textContent=r.ok?'✓ Sent to printer':'Print failed';}).catch(function(){if(m)m.textContent='Print failed';});}</script>")
 			if d.AutoPrint {
-				<script>window.addEventListener('load', function(){ window.print(); });</script>
+				@templ.Raw("<script>window.addEventListener('load',printThermal);</script>")
 			}
 		</head>
 		<body class="receipt-body">
@@ -94,7 +109,8 @@ templ Receipt(d ReceiptData) {
 				}
 				<div class="r-center r-small">Thank you! Come again.</div>
 				<div class="r-print-btn">
-					<button onclick="window.print()">Print</button>
+					<button onclick="printThermal()">🖨 Print</button>
+					<div id="printmsg" class="r-small r-center"></div>
 					if d.Narrow {
 						<a href={ templ.SafeURL("/cashier/receipt/" + strconv.FormatInt(d.Detail.Sale.ID, 10)) }>Switch to 80mm</a>
 					} else {

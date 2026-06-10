@@ -22,7 +22,7 @@ templ UnitsPage(d UnitsData) {
 		<div class="bg-white rounded-2xl shadow-sm p-6">
 			<table class="w-full text-sm">
 				<thead class="text-left text-slate-500 border-b">
-					<tr><th class="py-2 px-3">Name</th><th class="py-2 px-3">Abbreviation</th><th class="py-2 px-3"></th></tr>
+					<tr><th class="py-2 px-3">Name</th><th class="py-2 px-3">Abbreviation</th><th class="py-2 px-3">Decimal qty</th><th class="py-2 px-3"></th></tr>
 				</thead>
 				<tbody id="unit-tbody" hx-get="/admin/units/table" hx-trigger="reload-units-mgmt from:body" hx-target="#unit-tbody" hx-swap="innerHTML">
 					@UnitRows(d.Rows)
@@ -34,12 +34,19 @@ templ UnitsPage(d UnitsData) {
 
 templ UnitRows(rows []units.Unit) {
 	if len(rows) == 0 {
-		<tr><td colspan="3" class="py-6 text-center text-slate-500">No units yet.</td></tr>
+		<tr><td colspan="4" class="py-6 text-center text-slate-500">No units yet.</td></tr>
 	} else {
 		for _, u := range rows {
 			<tr class="border-b last:border-0">
 				<td class="py-2 px-3 font-medium">{ u.Name }</td>
 				<td class="py-2 px-3">{ u.Abbreviation }</td>
+				<td class="py-2 px-3">
+					if u.AllowDecimal {
+						<span class="text-emerald-600">✓ allowed</span>
+					} else {
+						<span class="text-slate-400">whole only</span>
+					}
+				</td>
 				<td class="py-2 px-3 text-right whitespace-nowrap">
 					<button class="text-indigo-600 hover:underline" hx-get={ "/admin/units/form/" + strconv.FormatInt(u.ID, 10) } hx-target="#modal-container" hx-swap="innerHTML">Edit</button>
 					<button class="text-red-600 hover:underline ml-3" hx-delete={ "/admin/units/" + strconv.FormatInt(u.ID, 10) } hx-swap="none" hx-confirm={ "Delete unit " + u.Name + "?" }>Delete</button>
@@ -66,6 +73,10 @@ templ UnitForm(cur *units.Unit) {
 				<label class="block text-sm font-medium mb-1">Abbreviation</label>
 				<input name="abbreviation" required value={ unitAbbr(cur) } class="w-full border rounded-lg px-3 py-2" placeholder="kg"/>
 			</div>
+			<label class="flex items-center gap-2">
+				<input type="checkbox" name="allow_decimal" value="true" checked?={ cur != nil && cur.AllowDecimal }/>
+				<span class="text-sm">Allow decimal quantities (sold by weight/volume, e.g. 2.25 kg)</span>
+			</label>
 			@modalButtons()
 		</form>
 	}
