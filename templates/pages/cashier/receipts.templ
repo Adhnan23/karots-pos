@@ -3,6 +3,7 @@ package cashierpages
 import (
 	"strconv"
 
+	"karots-pos/internal/datetime"
 	"karots-pos/internal/features/sales"
 	"karots-pos/internal/money"
 	"karots-pos/templates/layouts"
@@ -37,7 +38,7 @@ templ Receipts(d ReceiptsData) {
 							for _, s := range d.Sales {
 								<tr class="border-b last:border-0">
 									<td class="px-4 py-2 font-medium">{ s.ReceiptNo }</td>
-									<td class="px-4 py-2 text-slate-500">{ s.CreatedAt.Format("2006-01-02 15:04") }</td>
+									<td class="px-4 py-2 text-slate-500">{ datetime.DateTime(s.CreatedAt) }</td>
 									<td class="px-4 py-2 capitalize">{ s.SaleType }</td>
 									<td class="px-4 py-2 text-right">{ money.Format(d.Symbol, s.Total) }</td>
 									<td class="px-4 py-2 text-right">

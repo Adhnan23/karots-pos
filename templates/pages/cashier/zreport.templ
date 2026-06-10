@@ -1,6 +1,7 @@
 package cashierpages
 
 import (
+	"karots-pos/internal/datetime"
 	"karots-pos/internal/features/cashregister"
 	"karots-pos/internal/features/sales"
 	"karots-pos/internal/money"
@@ -24,11 +25,11 @@ templ ZReport(d ZReportData) {
 		<div class="grid grid-cols-2 gap-4 text-sm mb-5">
 			<div><span class="text-slate-500">Cashier:</span> <span class="font-medium">{ d.Session.UserName }</span></div>
 			<div><span class="text-slate-500">Session:</span> <span class="font-medium">#{ itoa64(d.Session.ID) }</span></div>
-			<div><span class="text-slate-500">Opened:</span> { d.Session.OpenedAt.Format("2006-01-02 15:04") }</div>
+			<div><span class="text-slate-500">Opened:</span> { datetime.DateTime(d.Session.OpenedAt) }</div>
 			<div>
 				<span class="text-slate-500">Closed:</span>
 				if d.Session.ClosedAt != nil {
-					{ d.Session.ClosedAt.Format("2006-01-02 15:04") }
+					{ datetime.DateTime(*d.Session.ClosedAt) }
 				} else {
 					<span class="text-amber-600 font-medium">still open</span>
 				}
@@ -80,7 +81,7 @@ templ ZReport(d ZReportData) {
 			<tbody>
 				for _, m := range d.Movements {
 					<tr class="border-b last:border-0">
-						<td class="py-1.5 text-slate-500">{ m.CreatedAt.Format("15:04") }</td>
+						<td class="py-1.5 text-slate-500">{ datetime.Clock(m.CreatedAt) }</td>
 						<td class="py-1.5 capitalize">{ zMoveLabel(m.Type) }</td>
 						<td class="py-1.5 text-slate-500">{ strOrDash(m.Reason) }</td>
 						<td class="py-1.5 text-right">{ money.Format(d.Symbol, m.Amount) }</td>

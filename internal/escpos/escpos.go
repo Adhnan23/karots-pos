@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"strings"
 
+	"karots-pos/internal/datetime"
 	"karots-pos/internal/features/sales"
 	"karots-pos/internal/features/settings"
 	"karots-pos/internal/money"
@@ -68,7 +69,7 @@ func Document(d sales.Detail, cfg settings.Settings) []byte {
 	b.Write([]byte{esc, 'a', 0}) // left
 	divider(&b, w)
 	line(&b, leftRight("Receipt:", d.Sale.ReceiptNo, w))
-	line(&b, leftRight("Date:", d.Sale.CreatedAt.Format("2006-01-02 15:04"), w))
+	line(&b, leftRight("Date:", datetime.DateTime(d.Sale.CreatedAt), w))
 	line(&b, leftRight("Cashier:", ascii(d.Sale.CashierName), w))
 	if d.Sale.CustomerName != nil && *d.Sale.CustomerName != "" {
 		line(&b, leftRight("Customer:", ascii(*d.Sale.CustomerName), w))

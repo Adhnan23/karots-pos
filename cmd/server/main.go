@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+	_ "time/tzdata" // embed the timezone database so local-time formatting works on any host
 
 	"karots-pos/internal/config"
 	"karots-pos/internal/db"

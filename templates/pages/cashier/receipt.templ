@@ -3,6 +3,7 @@ package cashierpages
 import (
 	"strconv"
 
+	"karots-pos/internal/datetime"
 	"karots-pos/internal/features/sales"
 	"karots-pos/internal/features/settings"
 	"karots-pos/internal/money"
@@ -65,7 +66,7 @@ templ Receipt(d ReceiptData) {
 				}
 				<div class="r-hr"></div>
 				<div class="r-row r-small"><span>Receipt:</span><span>{ d.Detail.Sale.ReceiptNo }</span></div>
-				<div class="r-row r-small"><span>Date:</span><span>{ d.Detail.Sale.CreatedAt.Format("2006-01-02 15:04") }</span></div>
+				<div class="r-row r-small"><span>Date:</span><span>{ datetime.DateTime(d.Detail.Sale.CreatedAt) }</span></div>
 				<div class="r-row r-small"><span>Cashier:</span><span>{ d.Detail.Sale.CashierName }</span></div>
 				if d.Detail.Sale.CustomerName != nil {
 					<div class="r-row r-small"><span>Customer:</span><span>{ *d.Detail.Sale.CustomerName }</span></div>
