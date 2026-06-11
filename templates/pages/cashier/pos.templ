@@ -118,18 +118,30 @@ templ POS(d POSData) {
 
 					<div class="flex-1 overflow-auto p-4 space-y-2">
 						<template x-for="(it, idx) in cart" x-bind:key="it.id">
-							<div class="flex items-center gap-2">
-								<div class="flex-1 min-w-0">
-									<div class="text-sm font-medium truncate" x-text="it.name"></div>
-									<div class="text-xs text-slate-400" x-text="sym + ' ' + money(it.unit_price) + ' × '"></div>
+							<div class="border rounded-lg p-2 space-y-1.5">
+								<div class="flex items-center gap-2">
+									<div class="flex-1 min-w-0">
+										<div class="text-sm font-medium truncate" x-text="it.name"></div>
+										<div class="text-xs text-slate-400" x-text="sym + ' ' + money(it.unit_price) + ' × '"></div>
+									</div>
+									<div class="flex items-center rounded border">
+										<button type="button" x-on:click="decQty(it)" class="px-2.5 py-1 text-lg leading-none text-slate-500 hover:bg-slate-100" aria-label="Decrease quantity">−</button>
+										<input type="number" x-bind:step="it.allowDecimal ? '0.001' : '1'" min="0" x-model.number="it.qty" x-on:change="clampQty(it)" class="w-16 border-x px-1 py-1 text-center text-sm"/>
+										<button type="button" x-on:click="incQty(it)" class="px-2.5 py-1 text-lg leading-none text-slate-500 hover:bg-slate-100" aria-label="Increase quantity">+</button>
+									</div>
+									<div class="w-24 text-right text-sm font-medium" x-text="sym + ' ' + money(lineTotal(it))"></div>
+									<button x-on:click="removeItem(idx)" class="text-red-500 px-2 py-1" aria-label="Remove line">✕</button>
 								</div>
-								<div class="flex items-center rounded border">
-									<button type="button" x-on:click="decQty(it)" class="px-2.5 py-1 text-lg leading-none text-slate-500 hover:bg-slate-100" aria-label="Decrease quantity">−</button>
-									<input type="number" x-bind:step="it.allowDecimal ? '0.001' : '1'" min="0" x-model.number="it.qty" x-on:change="clampQty(it)" class="w-16 border-x px-1 py-1 text-center text-sm"/>
-									<button type="button" x-on:click="incQty(it)" class="px-2.5 py-1 text-lg leading-none text-slate-500 hover:bg-slate-100" aria-label="Increase quantity">+</button>
+								<!-- Per-line discount: fixed is PER UNIT (× qty), percent is off the line. -->
+								<div class="flex items-center gap-1.5 justify-end">
+									<span class="text-xs text-slate-400">Disc</span>
+									<input type="number" step="0.01" min="0" x-model.number="it.discount" class="w-20 border rounded px-2 py-1 text-right text-sm"/>
+									<div class="flex rounded border text-xs overflow-hidden">
+										<button type="button" x-on:click="it.discountType = 'fixed'" x-bind:class="it.discountType === 'fixed' ? 'bg-indigo-600 text-white' : 'text-slate-500'" class="px-2 py-1" x-text="sym"></button>
+										<button type="button" x-on:click="it.discountType = 'percent'" x-bind:class="it.discountType === 'percent' ? 'bg-indigo-600 text-white' : 'text-slate-500'" class="px-2 py-1">%</button>
+									</div>
+									<span class="text-xs text-rose-500 w-20 text-right" x-show="lineDiscount(it) > 0" x-text="'-' + sym + ' ' + money(lineDiscount(it))"></span>
 								</div>
-								<div class="w-24 text-right text-sm font-medium" x-text="sym + ' ' + money(lineTotal(it))"></div>
-								<button x-on:click="removeItem(idx)" class="text-red-500 px-2 py-1" aria-label="Remove line">✕</button>
 							</div>
 						</template>
 						<template x-if="cart.length === 0">
@@ -141,9 +153,24 @@ templ POS(d POSData) {
 						<div class="flex justify-between text-sm">
 							<span>Subtotal</span><span x-text="sym + ' ' + money(subtotal())"></span>
 						</div>
+						<div class="flex justify-between text-sm text-rose-600" x-show="itemDiscountTotal() > 0">
+							<span>Item discounts</span><span x-text="'-' + sym + ' ' + money(itemDiscountTotal())"></span>
+						</div>
 						<div class="flex justify-between text-sm items-center">
-							<span>Discount</span>
-							<input type="number" step="0.01" min="0" x-ref="discountInput" x-model.number="discount" class="w-28 border rounded px-2 py-1 text-right"/>
+							<span>Bill discount</span>
+							<div class="flex items-center gap-1.5">
+								<input type="number" step="0.01" min="0" x-ref="discountInput" x-model.number="discount" class="w-24 border rounded px-2 py-1 text-right"/>
+								<div class="flex rounded border text-xs overflow-hidden">
+									<button type="button" x-on:click="discountType = 'fixed'" x-bind:class="discountType === 'fixed' ? 'bg-indigo-600 text-white' : 'text-slate-500'" class="px-2 py-1.5" x-text="sym"></button>
+									<button type="button" x-on:click="discountType = 'percent'" x-bind:class="discountType === 'percent' ? 'bg-indigo-600 text-white' : 'text-slate-500'" class="px-2 py-1.5">%</button>
+								</div>
+							</div>
+						</div>
+						<div class="flex justify-between text-xs text-rose-500" x-show="discountType === 'percent' && billDiscount() > 0">
+							<span></span><span x-text="'-' + sym + ' ' + money(billDiscount())"></span>
+						</div>
+						<div class="flex justify-between text-sm text-slate-500" x-show="taxTotal() > 0">
+							<span>Tax</span><span x-text="sym + ' ' + money(taxTotal())"></span>
 						</div>
 						<div class="flex justify-between text-lg font-bold">
 							<span>Total</span><span x-text="sym + ' ' + money(total())"></span>

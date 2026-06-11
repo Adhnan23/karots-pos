@@ -2,8 +2,43 @@
 
 **Everything compiles** (`go build ./...` clean, `go vet ./...` clean,
 `templ generate` clean). Phases 2–8 are wired, routed, and **smoke-tested live
-over HTTP** (incl. through the final 15M static binary). DB is at migration **13**
+over HTTP** (incl. through the final 15M static binary). DB is at migration **18**
 and seeded. Go module is **`karots-pos`**.
+
+## ✅ Discounts — fixed/% toggle + live per-item (migration 0018, live-tested)
+
+The bill discount and each cart line now take a **fixed (Rs) or percentage (%)**
+discount, toggled at the counter; per-item discount is no longer a dead path.
+
+- **Two discounts, both deducted before tax-after total:** per-item discount
+  (per line) **and** a global bill discount. **Per-item fixed is PER UNIT** and
+  multiplies by quantity (Rs 5 off × qty 3 = Rs 15 off the line); percent is % off
+  the line. Bill discount is fixed or % of the pre-tax net (after item discounts).
+  Per-item defaults to **0** — cashier sets it per line only.
+- **DB (migration 0018):** `sales` + `sale_items` get `discount_type VARCHAR(8)`
+  (`fixed|percent`) and `discount_value DECIMAL`. The existing `discount` columns
+  still store the **resolved amount** (`sales.discount` = item discounts + bill
+  discount), so totals/reports are unchanged; the new columns record intent so
+  receipts can print "(10%)".
+- **Server** (`internal/features/sales/service.go`): `normDiscountType`,
+  `resolveItemDiscount` (fixed×qty / % off line), `resolveBillDiscount` (flat / %),
+  all clamped to `[0, base]`. Tax is charged on the discounted line net; bill
+  discount applied after tax (rule unchanged, now explicit). Table tests in
+  `service_test.go`.
+- **POS** (`static/js/app.js` + `templates/pages/cashier/pos.templ`): per-line
+  discount input + Rs/% toggle, bill discount Rs/% toggle, "Item discounts" + tax
+  summary lines; the on-screen preview matches the server exactly.
+- **Receipts** (ESC/POS `internal/escpos/escpos.go` + HTML `receipt.templ`):
+  per-line discount under each item, then split **Item discounts** / **Bill
+  discount (10%)** totals (avoids double-counting the combined `sales.discount`).
+- **Live-tested** (sale S-00013): Coca-Cola ×2 @380 less Rs30/unit = −60; Mineral
+  Water ×3 @90 less 10% = −27; bill 10% off net = −94.30 → subtotal 1030, total
+  848.70, change 151.30. On-screen = API = HTML receipt = persisted DB columns. ✅
+
+**Next (planned, not started):** Phase 2 supplier per-invoice payments + history +
+cash impact + supplier-dues report; Phase 3 admin edit handlers (expenses/users/
+purchase returns) + stock-movement history. Plan:
+`.claude/plans/cached-meandering-tide.md`.
 
 ## ✅ Phase 8 — owner-requested add-ons (migrations 0012–0013, all live-tested)
 

@@ -13,6 +13,8 @@ import (
 	"karots-pos/internal/features/sales"
 	"karots-pos/internal/features/settings"
 	"karots-pos/internal/money"
+
+	"github.com/shopspring/decimal"
 )
 
 // ESC/POS control bytes.
@@ -98,19 +100,29 @@ func Document(d sales.Detail, cfg settings.Settings, opts Options) []byte {
 	divider(&b, w)
 
 	// --- Items ---
+	itemDisc := decimal.Zero
 	for _, it := range d.Items {
 		for _, ln := range wrap(ascii(it.ProductName), w) {
 			line(&b, ln)
 		}
 		qty := money.Display(it.Quantity) + " " + ascii(it.UnitAbbr) + " x " + money.Display(it.UnitPrice)
 		line(&b, leftRight("  "+qty, money.Display(it.Subtotal), w))
+		if it.Discount.IsPositive() {
+			itemDisc = itemDisc.Add(it.Discount)
+			line(&b, leftRight("  Discount"+discSuffix(it.DiscountType, it.DiscountValue), "-"+money.Display(it.Discount), w))
+		}
 	}
 	divider(&b, w)
 
 	// --- Totals ---
+	// Sale.Discount holds item discounts + bill discount; split them so the
+	// receipt mirrors the cashier screen (item discounts shown per line above).
 	line(&b, leftRight("Subtotal", money.Format(sym, d.Sale.Subtotal), w))
-	if d.Sale.Discount.IsPositive() {
-		line(&b, leftRight("Discount", "-"+money.Format(sym, d.Sale.Discount), w))
+	if itemDisc.IsPositive() {
+		line(&b, leftRight("Item discounts", "-"+money.Format(sym, itemDisc), w))
+	}
+	if billDisc := d.Sale.Discount.Sub(itemDisc); billDisc.IsPositive() {
+		line(&b, leftRight("Bill discount"+discSuffix(d.Sale.DiscountType, d.Sale.DiscountValue), "-"+money.Format(sym, billDisc), w))
 	}
 	if d.Sale.Tax.IsPositive() {
 		line(&b, leftRight("Tax", money.Format(sym, d.Sale.Tax), w))
@@ -217,6 +229,24 @@ func leftRight(l, r string, w int) string {
 		pad = 1
 	}
 	return l + strings.Repeat(" ", pad) + r
+}
+
+// pctLabel renders a percentage value without trailing zeros (10.00 -> "10%").
+func pctLabel(v decimal.Decimal) string {
+	s := v.String()
+	if strings.Contains(s, ".") {
+		s = strings.TrimRight(strings.TrimRight(s, "0"), ".")
+	}
+	return s + "%"
+}
+
+// discSuffix is the parenthetical shown next to a discount entered as a
+// percentage, e.g. " (10%)"; blank for a fixed amount.
+func discSuffix(dtype string, value decimal.Decimal) string {
+	if dtype == "percent" && value.IsPositive() {
+		return " (" + pctLabel(value) + ")"
+	}
+	return ""
 }
 
 func deref(p *string) string {

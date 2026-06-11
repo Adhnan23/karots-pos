@@ -174,6 +174,7 @@ function pos(symbol, defaultType) {
     saleType: defaultType || "retail",
     customerId: "",
     discount: 0,
+    discountType: "fixed", // bill-level discount: "fixed" (Rs) or "percent" (%)
     // Split tender: one or more payment lines (cash / card / online).
     payments: [{ method: "cash", amount: 0, reference: "" }],
     busy: false,
@@ -402,6 +403,7 @@ function pos(symbol, defaultType) {
           sale_type: this.saleType,
           customer_id: this.customerId ? Number(this.customerId) : null,
           discount: String(this.discount || 0),
+          discount_type: this.discountType,
           cart: this.cart,
           item_count: this.cart.length,
           total: String(this.total()),
@@ -418,6 +420,7 @@ function pos(symbol, defaultType) {
       this.saleType = h.sale_type || "retail";
       this.customerId = h.customer_id ? String(h.customer_id) : "";
       this.discount = Number(h.discount) || 0;
+      this.discountType = h.discount_type || "fixed";
       this.payments = [{ method: "cash", amount: 0, reference: "" }];
       this.receipt = null;
       this.showHolds = false;
@@ -455,6 +458,10 @@ function pos(symbol, defaultType) {
         // Weight/volume units (kg, g, ltr, ml) accept fractional quantities;
         // everything else is whole-only.
         allowDecimal: !!p.unit_allow_decimal,
+        // Per-item discount: defaults to 0; the cashier sets it per line at the
+        // counter. Fixed is PER UNIT (× qty); percent is off the line.
+        discount: 0,
+        discountType: "fixed",
       });
     },
     async scanBarcode() {
@@ -478,17 +485,51 @@ function pos(symbol, defaultType) {
     removeItem(idx) {
       this.cart.splice(idx, 1);
     },
-    lineTotal(it) {
+    // lineGross is qty × unit price (before any discount).
+    lineGross(it) {
       return (Number(it.qty) || 0) * (Number(it.unit_price) || 0);
     },
-    subtotal() {
-      return this.cart.reduce((s, it) => s + this.lineTotal(it), 0);
+    // lineDiscount mirrors the server: fixed is per-unit (× qty), percent is off
+    // the line gross; clamped to the line gross.
+    lineDiscount(it) {
+      const g = this.lineGross(it);
+      const v = Number(it.discount) || 0;
+      let d = it.discountType === "percent" ? (g * v) / 100 : v * (Number(it.qty) || 0);
+      if (d < 0) d = 0;
+      if (d > g) d = g;
+      return d;
     },
+    lineNet(it) {
+      return this.lineGross(it) - this.lineDiscount(it);
+    },
+    // lineTotal kept as the post-discount line value (used by the cart display).
+    lineTotal(it) {
+      return this.lineNet(it);
+    },
+    subtotal() {
+      return this.cart.reduce((s, it) => s + this.lineGross(it), 0);
+    },
+    itemDiscountTotal() {
+      return this.cart.reduce((s, it) => s + this.lineDiscount(it), 0);
+    },
+    // Bill discount resolved against the pre-tax net (after item discounts).
+    billDiscount() {
+      const base = this.subtotal() - this.itemDiscountTotal();
+      const v = Number(this.discount) || 0;
+      let d = this.discountType === "percent" ? (base * v) / 100 : v;
+      if (d < 0) d = 0;
+      if (d > base) d = base;
+      return d;
+    },
+    // Tax mirrors the server: charged on the discounted line net.
     taxTotal() {
-      return this.cart.reduce((s, it) => s + this.lineTotal(it) * (it.tax_rate / 100), 0);
+      return this.cart.reduce((s, it) => s + this.lineNet(it) * (it.tax_rate / 100), 0);
     },
     total() {
-      return Math.max(0, this.subtotal() - (Number(this.discount) || 0) + this.taxTotal());
+      return Math.max(
+        0,
+        this.subtotal() - this.itemDiscountTotal() - this.billDiscount() + this.taxTotal()
+      );
     },
 
     // --- split-tender payments ---
@@ -527,10 +568,12 @@ function pos(symbol, defaultType) {
           sale_type: this.saleType,
           customer_id: this.customerId ? Number(this.customerId) : null,
           discount: String(this.discount || 0),
+          discount_type: this.discountType,
           items: this.cart.map((it) => ({
             product_id: it.id,
             quantity: String(it.qty),
-            discount: "0",
+            discount: String(it.discount || 0),
+            discount_type: it.discountType || "fixed",
           })),
           payments: this.payments
             .filter((p) => Number(p.amount) > 0)
@@ -558,6 +601,7 @@ function pos(symbol, defaultType) {
     newSale() {
       this.cart = [];
       this.discount = 0;
+      this.discountType = "fixed";
       this.payments = [{ method: "cash", amount: 0, reference: "" }];
       this.customerId = "";
       this.receipt = null;

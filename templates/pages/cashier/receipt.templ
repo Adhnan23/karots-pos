@@ -2,12 +2,43 @@ package cashierpages
 
 import (
 	"strconv"
+	"strings"
 
 	"karots-pos/internal/datetime"
 	"karots-pos/internal/features/sales"
 	"karots-pos/internal/features/settings"
 	"karots-pos/internal/money"
+
+	"github.com/shopspring/decimal"
 )
+
+// pctLabel renders a percentage value without trailing zeros (10.00 → "10%").
+func pctLabel(v decimal.Decimal) string {
+	s := v.String()
+	if strings.Contains(s, ".") {
+		s = strings.TrimRight(strings.TrimRight(s, "0"), ".")
+	}
+	return s + "%"
+}
+
+// discSuffix is the parenthetical shown next to a discount when it was entered
+// as a percentage, e.g. " (10%)"; blank for a fixed amount.
+func discSuffix(dtype string, value decimal.Decimal) string {
+	if dtype == "percent" && value.IsPositive() {
+		return " (" + pctLabel(value) + ")"
+	}
+	return ""
+}
+
+// sumItemDiscounts totals the resolved per-line discounts. The bill-level
+// discount is then Sale.Discount minus this (Sale.Discount stores both).
+func sumItemDiscounts(items []sales.SaleItem) decimal.Decimal {
+	t := decimal.Zero
+	for _, it := range items {
+		t = t.Add(it.Discount)
+	}
+	return t
+}
 
 type ReceiptData struct {
 	Detail    sales.Detail
@@ -81,13 +112,25 @@ templ Receipt(d ReceiptData) {
 								<td></td>
 								<td class="r-right">{ money.Display(it.Subtotal) }</td>
 							</tr>
+							if it.Discount.IsPositive() {
+								<tr class="r-item-line r-small">
+									<td>{ "  Discount" + discSuffix(it.DiscountType, it.DiscountValue) }</td>
+									<td></td>
+									<td class="r-right">-{ money.Display(it.Discount) }</td>
+								</tr>
+							}
 						}
 					</tbody>
 				</table>
 				<div class="r-hr"></div>
 				<div class="r-row"><span>Subtotal</span><span>{ money.Format(d.Settings.CurrencySymbol, d.Detail.Sale.Subtotal) }</span></div>
-				if d.Detail.Sale.Discount.IsPositive() {
-					<div class="r-row"><span>Discount</span><span>-{ money.Format(d.Settings.CurrencySymbol, d.Detail.Sale.Discount) }</span></div>
+				{{ itemDisc := sumItemDiscounts(d.Detail.Items) }}
+				{{ billDisc := d.Detail.Sale.Discount.Sub(itemDisc) }}
+				if itemDisc.IsPositive() {
+					<div class="r-row"><span>Item discounts</span><span>-{ money.Format(d.Settings.CurrencySymbol, itemDisc) }</span></div>
+				}
+				if billDisc.IsPositive() {
+					<div class="r-row"><span>{ "Bill discount" + discSuffix(d.Detail.Sale.DiscountType, d.Detail.Sale.DiscountValue) }</span><span>-{ money.Format(d.Settings.CurrencySymbol, billDisc) }</span></div>
 				}
 				if d.Detail.Sale.Tax.IsPositive() {
 					<div class="r-row"><span>Tax</span><span>{ money.Format(d.Settings.CurrencySymbol, d.Detail.Sale.Tax) }</span></div>

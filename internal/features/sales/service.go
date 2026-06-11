@@ -26,9 +26,10 @@ type Service struct {
 func NewService(db *sqlx.DB) *Service { return &Service{db: db, repo: NewRepository(db)} }
 
 type ItemInput struct {
-	ProductID int64  `json:"product_id" validate:"required,gt=0"`
-	Quantity  string `json:"quantity"   validate:"required"`
-	Discount  string `json:"discount"`
+	ProductID    int64  `json:"product_id"    validate:"required,gt=0"`
+	Quantity     string `json:"quantity"      validate:"required"`
+	Discount     string `json:"discount"`
+	DiscountType string `json:"discount_type" validate:"omitempty,oneof=fixed percent"`
 }
 
 type PaymentInput struct {
@@ -38,24 +39,69 @@ type PaymentInput struct {
 }
 
 type CreateInput struct {
-	CustomerID *int64         `json:"customer_id"`
-	SaleType   string         `json:"sale_type" validate:"required,oneof=retail wholesale credit"`
-	Discount   string         `json:"discount"`
-	Notes      *string        `json:"notes"`
-	Items      []ItemInput    `json:"items"    validate:"required,min=1,dive"`
-	Payments   []PaymentInput `json:"payments" validate:"dive"`
+	CustomerID   *int64         `json:"customer_id"`
+	SaleType     string         `json:"sale_type"     validate:"required,oneof=retail wholesale credit"`
+	Discount     string         `json:"discount"`
+	DiscountType string         `json:"discount_type" validate:"omitempty,oneof=fixed percent"`
+	Notes        *string        `json:"notes"`
+	Items        []ItemInput    `json:"items"    validate:"required,min=1,dive"`
+	Payments     []PaymentInput `json:"payments" validate:"dive"`
 }
 
 var hundred = decimal.NewFromInt(100)
+
+// normDiscountType defaults a blank discount type to "fixed".
+func normDiscountType(t string) string {
+	if t == "percent" {
+		return "percent"
+	}
+	return "fixed"
+}
+
+// resolveBillDiscount turns the bill-level discount (a flat fixed amount, or a
+// percentage of base) into a concrete amount, clamped to [0, base].
+func resolveBillDiscount(dtype string, value, base decimal.Decimal) decimal.Decimal {
+	amt := value
+	if dtype == "percent" {
+		amt = base.Mul(value).Div(hundred).Round(2)
+	}
+	return clampDiscount(amt, base)
+}
+
+// resolveItemDiscount turns a per-item discount into a line amount. A fixed
+// value is PER UNIT and multiplies by quantity (Rs 5 off × 3 = Rs 15); a percent
+// is taken off the line gross (equivalent to % of the unit price). Clamped to
+// [0, lineGross].
+func resolveItemDiscount(dtype string, value, lineGross, qty decimal.Decimal) decimal.Decimal {
+	amt := value.Mul(qty).Round(2)
+	if dtype == "percent" {
+		amt = lineGross.Mul(value).Div(hundred).Round(2)
+	}
+	return clampDiscount(amt, lineGross)
+}
+
+func clampDiscount(amt, base decimal.Decimal) decimal.Decimal {
+	if amt.IsNegative() {
+		return decimal.Zero
+	}
+	if amt.GreaterThan(base) {
+		return base
+	}
+	return amt
+}
 
 // Create writes a sale atomically. The whole computation — pricing, stock
 // guard, audit, customer credit — happens inside one transaction so a failure
 // at any step rolls everything back.
 func (s *Service) Create(ctx context.Context, in CreateInput, cashierID int64) (*Detail, error) {
-	billDiscount, err := money.Parse(in.Discount)
-	if err != nil || billDiscount.IsNegative() {
+	// Bill-level discount: the cashier enters a value that is either a fixed
+	// amount or a percentage (resolved against the pre-tax net, after item
+	// discounts, once the lines are totalled below).
+	billDiscValue, err := money.Parse(in.Discount)
+	if err != nil || billDiscValue.IsNegative() {
 		return nil, apperr.Validation("discount must be a non-negative amount")
 	}
+	billDiscType := normDiscountType(in.DiscountType)
 
 	var detail *Detail
 	err = appdb.WithTx(ctx, s.db, func(tx *sqlx.Tx) error {
@@ -88,20 +134,21 @@ func (s *Service) Create(ctx context.Context, in CreateInput, cashierID int64) (
 			if !p.UnitAllowDecimal && !qty.Equal(qty.Truncate(0)) {
 				return apperr.Validation(fmt.Sprintf("quantity for %s must be a whole number", p.Name))
 			}
-			disc, err := money.Parse(it.Discount)
-			if err != nil || disc.IsNegative() {
+			discValue, err := money.Parse(it.Discount)
+			if err != nil || discValue.IsNegative() {
 				return apperr.Validation(fmt.Sprintf("discount for %s is invalid", p.Name))
 			}
+			discType := normDiscountType(it.DiscountType)
 
 			unitPrice := p.SellingPrice
 			if in.SaleType == "wholesale" && p.WholesalePrice.IsPositive() {
 				unitPrice = p.WholesalePrice
 			}
 			lineGross := qty.Mul(unitPrice).Round(2)
+			// Per-item discount: fixed is per-unit (× qty), percent is off the line.
+			// Clamped to [0, lineGross] so the net is never negative.
+			disc := resolveItemDiscount(discType, discValue, lineGross, qty)
 			lineNet := lineGross.Sub(disc)
-			if lineNet.IsNegative() {
-				return apperr.Validation(fmt.Sprintf("discount for %s exceeds line total", p.Name))
-			}
 			lineTax := lineNet.Mul(p.TaxRate).Div(hundred).Round(2)
 
 			subtotal = subtotal.Add(lineGross)
@@ -128,15 +175,19 @@ func (s *Service) Create(ctx context.Context, in CreateInput, cashierID int64) (
 			}
 
 			lines = append(lines, SaleItem{
-				ProductID: p.ID,
-				Quantity:  qty,
-				UnitPrice: unitPrice,
-				CostPrice: cost,
-				Discount:  disc,
-				Subtotal:  lineNet,
+				ProductID:     p.ID,
+				Quantity:      qty,
+				UnitPrice:     unitPrice,
+				CostPrice:     cost,
+				Discount:      disc,
+				DiscountType:  discType,
+				DiscountValue: discValue,
+				Subtotal:      lineNet,
 			})
 		}
 
+		// Resolve the bill discount against the pre-tax net (after item discounts).
+		billDiscount := resolveBillDiscount(billDiscType, billDiscValue, subtotal.Sub(itemDiscTotal))
 		discount := itemDiscTotal.Add(billDiscount)
 		total := subtotal.Sub(discount).Add(taxTotal).Round(2)
 		if total.IsNegative() {
@@ -184,10 +235,12 @@ func (s *Service) Create(ctx context.Context, in CreateInput, cashierID int64) (
 			ReceiptNo:   receiptNo,
 			CustomerID:  in.CustomerID,
 			SaleType:    in.SaleType,
-			Subtotal:    subtotal,
-			Discount:    discount,
-			Tax:         taxTotal,
-			Total:       total,
+			Subtotal:      subtotal,
+			Discount:      discount,
+			DiscountType:  billDiscType,
+			DiscountValue: billDiscValue,
+			Tax:           taxTotal,
+			Total:         total,
 			PaidAmount:  paid,
 			ChangeGiven: change,
 			Status:      status,

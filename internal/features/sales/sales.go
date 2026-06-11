@@ -18,9 +18,11 @@ type Sale struct {
 	ReceiptNo   string          `db:"receipt_no"   json:"receipt_no"`
 	CustomerID  *int64          `db:"customer_id"  json:"customer_id,omitempty"`
 	SaleType    string          `db:"sale_type"    json:"sale_type"`
-	Subtotal    decimal.Decimal `db:"subtotal"     json:"subtotal"`
-	Discount    decimal.Decimal `db:"discount"     json:"discount"`
-	Tax         decimal.Decimal `db:"tax"          json:"tax"`
+	Subtotal      decimal.Decimal `db:"subtotal"       json:"subtotal"`
+	Discount      decimal.Decimal `db:"discount"       json:"discount"`
+	DiscountType  string          `db:"discount_type"  json:"discount_type"`  // bill discount: fixed|percent
+	DiscountValue decimal.Decimal `db:"discount_value" json:"discount_value"` // entered value
+	Tax           decimal.Decimal `db:"tax"          json:"tax"`
 	Total       decimal.Decimal `db:"total"        json:"total"`
 	PaidAmount  decimal.Decimal `db:"paid_amount"  json:"paid_amount"`
 	ChangeGiven decimal.Decimal `db:"change_given" json:"change_given"`
@@ -40,7 +42,9 @@ type SaleItem struct {
 	Quantity    decimal.Decimal `db:"quantity"     json:"quantity"`
 	UnitPrice   decimal.Decimal `db:"unit_price"   json:"unit_price"`
 	CostPrice   decimal.Decimal `db:"cost_price"   json:"cost_price"`
-	Discount    decimal.Decimal `db:"discount"     json:"discount"`
+	Discount      decimal.Decimal `db:"discount"       json:"discount"`
+	DiscountType  string          `db:"discount_type"  json:"discount_type"`  // fixed|percent
+	DiscountValue decimal.Decimal `db:"discount_value" json:"discount_value"`
 	Subtotal    decimal.Decimal `db:"subtotal"     json:"subtotal"`
 	ReturnedQty decimal.Decimal `db:"returned_qty" json:"returned_qty"`
 	// joined
@@ -82,38 +86,40 @@ func (r *Repository) NextReceiptNo(ctx context.Context) (string, error) {
 }
 
 type saleRow struct {
-	ReceiptNo   string
-	CustomerID  *int64
-	SaleType    string
-	Subtotal    decimal.Decimal
-	Discount    decimal.Decimal
-	Tax         decimal.Decimal
-	Total       decimal.Decimal
-	PaidAmount  decimal.Decimal
-	ChangeGiven decimal.Decimal
-	Status      string
-	CashierID   int64
-	Notes       *string
+	ReceiptNo     string
+	CustomerID    *int64
+	SaleType      string
+	Subtotal      decimal.Decimal
+	Discount      decimal.Decimal
+	DiscountType  string
+	DiscountValue decimal.Decimal
+	Tax           decimal.Decimal
+	Total         decimal.Decimal
+	PaidAmount    decimal.Decimal
+	ChangeGiven   decimal.Decimal
+	Status        string
+	CashierID     int64
+	Notes         *string
 }
 
 func (r *Repository) InsertSale(ctx context.Context, s saleRow) (int64, error) {
 	var id int64
 	err := r.q.GetContext(ctx, &id, `
 		INSERT INTO sales
-			(receipt_no, customer_id, sale_type, subtotal, discount, tax, total,
-			 paid_amount, change_given, status, cashier_id, notes)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+			(receipt_no, customer_id, sale_type, subtotal, discount, discount_type, discount_value,
+			 tax, total, paid_amount, change_given, status, cashier_id, notes)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
 		RETURNING id`,
-		s.ReceiptNo, s.CustomerID, s.SaleType, s.Subtotal, s.Discount, s.Tax, s.Total,
-		s.PaidAmount, s.ChangeGiven, s.Status, s.CashierID, s.Notes)
+		s.ReceiptNo, s.CustomerID, s.SaleType, s.Subtotal, s.Discount, s.DiscountType, s.DiscountValue,
+		s.Tax, s.Total, s.PaidAmount, s.ChangeGiven, s.Status, s.CashierID, s.Notes)
 	return id, err
 }
 
 func (r *Repository) InsertItem(ctx context.Context, saleID int64, it SaleItem) error {
 	_, err := r.q.ExecContext(ctx, `
-		INSERT INTO sale_items (sale_id, product_id, quantity, unit_price, cost_price, discount, subtotal)
-		VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-		saleID, it.ProductID, it.Quantity, it.UnitPrice, it.CostPrice, it.Discount, it.Subtotal)
+		INSERT INTO sale_items (sale_id, product_id, quantity, unit_price, cost_price, discount, discount_type, discount_value, subtotal)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+		saleID, it.ProductID, it.Quantity, it.UnitPrice, it.CostPrice, it.Discount, it.DiscountType, it.DiscountValue, it.Subtotal)
 	return err
 }
 
