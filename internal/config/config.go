@@ -22,8 +22,12 @@ type Config struct {
 	CookieSecure  bool
 	// ReceiptPrinter is the CUPS queue name for thermal receipts. Empty means
 	// use the system default destination. The queue must be a raw queue so the
-	// ESC/POS bytes pass through unmodified.
+	// ESC/POS bytes pass through unmodified. Used as a fallback when the
+	// receipt_printer setting is blank.
 	ReceiptPrinter string
+	// LabelPrinter is the CUPS queue name for the barcode label printer, used as
+	// a fallback when the label_printer setting is blank. Must also be a raw queue.
+	LabelPrinter string
 }
 
 func Load() *Config {
@@ -36,6 +40,7 @@ func Load() *Config {
 		JWTRefreshTTL: mustDuration("JWT_REFRESH_EXPIRES_IN", 7*24*time.Hour),
 		CORSOrigins:   strings.Split(getEnv("CORS_ORIGINS", "http://localhost:3000"), ","),
 		ReceiptPrinter: getEnv("RECEIPT_PRINTER", ""),
+		LabelPrinter:   getEnv("LABEL_PRINTER", ""),
 	}
 	c.CookieSecure = c.Env == "production"
 	if len(c.JWTSecret) < 32 {

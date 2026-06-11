@@ -1,0 +1,176 @@
+package cashierpages
+
+import (
+	"strconv"
+
+	"karots-pos/internal/features/products"
+	"karots-pos/internal/money"
+	"karots-pos/templates/layouts"
+)
+
+type LabelsData struct {
+	CashierName string
+	Role        string
+	Symbol      string
+	Products    []products.Product
+}
+
+// Labels is the terminal barcode-label printer: pick a product (or type a custom
+// code), choose the sticker size, and print straight to the label printer.
+templ Labels(d LabelsData) {
+	@layouts.Cashier("Print Labels", d.CashierName, d.Role, "labels") {
+		<div class="h-full overflow-auto p-5">
+			<div class="max-w-3xl mx-auto">
+				<h1 class="text-xl font-bold mb-1">Print Labels</h1>
+				<p class="text-sm text-slate-500 mb-4">Print a barcode price label on the label printer.</p>
+				<script src="/static/vendor/jsbarcode.min.js"></script>
+				<div class="grid grid-cols-1 lg:grid-cols-2 gap-6" x-data={ "labels('" + d.Symbol + "')" }>
+					<!-- From a product -->
+					<div class="bg-white rounded-2xl shadow-sm p-6">
+						<h2 class="text-lg font-semibold mb-1">From a product</h2>
+						<p class="text-sm text-slate-500 mb-4">Pick a product, preview, then print.</p>
+						<form hx-post="/cashier/labels/send" hx-swap="none" class="space-y-4">
+							<div>
+								<label class="block text-sm font-medium mb-1">Product</label>
+								<select name="product_id" required class="w-full border rounded-lg px-3 py-2" x-on:change="onProduct($event)">
+									<option value="">Select…</option>
+									for _, p := range d.Products {
+										<option
+											value={ strconv.FormatInt(p.ID, 10) }
+											data-name={ p.Name }
+											data-code={ barcodeValue(p) }
+											data-price={ money.Format(d.Symbol, p.SellingPrice) }
+										>{ p.Name } — { money.Format(d.Symbol, p.SellingPrice) }</option>
+									}
+								</select>
+							</div>
+							<div class="grid grid-cols-2 gap-4">
+								<div>
+									<label class="block text-sm font-medium mb-1">Number of labels</label>
+									<input name="qty" type="number" min="1" max="200" value="1" class="w-full border rounded-lg px-3 py-2"/>
+								</div>
+								<div class="flex items-end">
+									<label class="inline-flex items-center gap-2 text-sm">
+										<input type="checkbox" name="show_price" value="1" x-model="pShowPrice"/> Show price
+									</label>
+								</div>
+							</div>
+							@labelSizePicker()
+							@labelPreview("pName", "preview-product", "pPrice", "pShowPrice", "pCode")
+							<button type="submit" x-bind:disabled="!pCode" class="px-5 py-2.5 rounded-lg bg-indigo-600 text-white font-semibold disabled:opacity-40">🖨 Print to label printer</button>
+						</form>
+					</div>
+
+					<!-- Custom barcode -->
+					<div class="bg-white rounded-2xl shadow-sm p-6">
+						<h2 class="text-lg font-semibold mb-1">Custom barcode</h2>
+						<p class="text-sm text-slate-500 mb-4">Type any barcode value (and optional text) and print it.</p>
+						<form hx-post="/cashier/labels/send" hx-swap="none" class="space-y-4">
+							<input type="hidden" name="custom" value="1"/>
+							<div>
+								<label class="block text-sm font-medium mb-1">Barcode value</label>
+								<input name="code" required x-model="cCode" x-on:input="renderCustom()" placeholder="e.g. 4001234567890" class="w-full border rounded-lg px-3 py-2"/>
+							</div>
+							<div class="grid grid-cols-2 gap-4">
+								<div>
+									<label class="block text-sm font-medium mb-1">Label text (optional)</label>
+									<input name="text" x-model="cText" placeholder="Item name" class="w-full border rounded-lg px-3 py-2"/>
+								</div>
+								<div>
+									<label class="block text-sm font-medium mb-1">Format</label>
+									<select name="format" x-model="cFormat" x-on:change="renderCustom()" class="w-full border rounded-lg px-3 py-2">
+										<option value="CODE128">CODE128 (any text/number)</option>
+										<option value="EAN13">EAN-13 (12–13 digits)</option>
+										<option value="EAN8">EAN-8 (7–8 digits)</option>
+										<option value="UPC">UPC-A (11–12 digits)</option>
+										<option value="CODE39">CODE39</option>
+									</select>
+								</div>
+							</div>
+							<div class="grid grid-cols-2 gap-4">
+								<div>
+									<label class="block text-sm font-medium mb-1">Price (optional)</label>
+									<input name="price" x-model="cPrice" placeholder="e.g. 250.00" class="w-full border rounded-lg px-3 py-2"/>
+								</div>
+								<div>
+									<label class="block text-sm font-medium mb-1">Number of labels</label>
+									<input name="qty" type="number" min="1" max="200" value="1" class="w-full border rounded-lg px-3 py-2"/>
+								</div>
+							</div>
+							<label class="inline-flex items-center gap-2 text-sm">
+								<input type="checkbox" name="show_price" value="1" x-model="cShowPrice"/> Show price on label
+							</label>
+							@labelSizePicker()
+							@labelPreviewCustom()
+							<button type="submit" x-bind:disabled="!cCode" class="px-5 py-2.5 rounded-lg bg-indigo-600 text-white font-semibold disabled:opacity-40">🖨 Print to label printer</button>
+						</form>
+					</div>
+				</div>
+			</div>
+		</div>
+	}
+}
+
+// barcodeValue uses the product barcode when set, else a stable SKU from its id.
+func barcodeValue(p products.Product) string {
+	if p.Barcode != nil && *p.Barcode != "" {
+		return *p.Barcode
+	}
+	return "SKU" + strconv.FormatInt(p.ID, 10)
+}
+
+// labelSizePicker mirrors the admin sticker-size picker (preset or custom).
+templ labelSizePicker() {
+	<div class="border-t pt-4" x-data="{ size: 'default' }">
+		<label class="block text-sm font-medium mb-1">Sticker size</label>
+		<select name="label_size" x-model="size" class="w-full border rounded-lg px-3 py-2">
+			<option value="default">Default (from Settings)</option>
+			<option value="50x25">50 × 25 mm</option>
+			<option value="50x30">50 × 30 mm</option>
+			<option value="40x30">40 × 30 mm</option>
+			<option value="38x25">38 × 25 mm</option>
+			<option value="100x50">100 × 50 mm</option>
+			<option value="custom">Custom…</option>
+		</select>
+		<div class="grid grid-cols-3 gap-3 mt-3" x-show="size === 'custom'" x-cloak>
+			<div>
+				<label class="block text-xs text-slate-500 mb-1">Width (mm)</label>
+				<input type="number" name="label_w" min="10" max="200" value="50" class="w-full border rounded-lg px-3 py-2"/>
+			</div>
+			<div>
+				<label class="block text-xs text-slate-500 mb-1">Height (mm)</label>
+				<input type="number" name="label_h" min="10" max="200" value="25" class="w-full border rounded-lg px-3 py-2"/>
+			</div>
+			<div>
+				<label class="block text-xs text-slate-500 mb-1">Gap (mm)</label>
+				<input type="number" name="label_gap" min="0" max="20" value="2" class="w-full border rounded-lg px-3 py-2"/>
+			</div>
+		</div>
+	</div>
+}
+
+// labelPreview renders a single live preview label for the product form.
+templ labelPreview(nameVar, svgID, priceVar, showVar, codeVar string) {
+	<div class="border-t pt-4">
+		<div class="text-xs text-slate-400 mb-2">Preview</div>
+		<div class="inline-flex flex-col items-center gap-1 border rounded-lg px-4 py-3 min-w-[180px]" x-show={ codeVar } x-cloak>
+			<div class="text-sm font-medium" x-text={ nameVar }></div>
+			<svg id={ svgID }></svg>
+			<div class="text-sm font-semibold" x-show={ showVar } x-text={ priceVar }></div>
+		</div>
+		<div class="text-sm text-slate-400" x-show={ "!" + codeVar }>Select a product to preview.</div>
+	</div>
+}
+
+// labelPreviewCustom renders the live preview for the custom form.
+templ labelPreviewCustom() {
+	<div class="border-t pt-4">
+		<div class="text-xs text-slate-400 mb-2">Preview</div>
+		<div class="inline-flex flex-col items-center gap-1 border rounded-lg px-4 py-3 min-w-[180px]" x-show="cCode" x-cloak>
+			<div class="text-sm font-medium" x-text="cText"></div>
+			<svg id="preview-custom"></svg>
+			<div class="text-sm font-semibold" x-show="cShowPrice && cPrice" x-text="sym + ' ' + cPrice"></div>
+		</div>
+		<div class="text-sm text-slate-400" x-show="!cCode">Type a barcode value to preview.</div>
+	</div>
+}

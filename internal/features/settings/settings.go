@@ -30,6 +30,11 @@ type Settings struct {
 	TaxRegNo        *string   `db:"tax_reg_no"        json:"tax_reg_no,omitempty"`
 	LowStockAlerts  bool      `db:"low_stock_alerts"  json:"low_stock_alerts"`
 	DefaultSaleType string    `db:"default_sale_type" json:"default_sale_type"`
+	ReceiptPrinter  string    `db:"receipt_printer"   json:"receipt_printer"`
+	LabelPrinter    string    `db:"label_printer"     json:"label_printer"`
+	LabelWidthMM    int       `db:"label_width_mm"    json:"label_width_mm"`
+	LabelHeightMM   int       `db:"label_height_mm"   json:"label_height_mm"`
+	LabelGapMM      int       `db:"label_gap_mm"      json:"label_gap_mm"`
 	UpdatedAt       time.Time `db:"updated_at"        json:"updated_at"`
 }
 
@@ -47,6 +52,11 @@ type UpdateInput struct {
 	TaxRegNo        *string `json:"tax_reg_no"        form:"tax_reg_no"`
 	LowStockAlerts  bool    `json:"low_stock_alerts"  form:"low_stock_alerts"`
 	DefaultSaleType string  `json:"default_sale_type" form:"default_sale_type" validate:"required,oneof=retail wholesale credit"`
+	ReceiptPrinter  string  `json:"receipt_printer"   form:"receipt_printer"   validate:"omitempty,max=100"`
+	LabelPrinter    string  `json:"label_printer"     form:"label_printer"     validate:"omitempty,max=100"`
+	LabelWidthMM    int     `json:"label_width_mm"    form:"label_width_mm"     validate:"omitempty,min=10,max=200"`
+	LabelHeightMM   int     `json:"label_height_mm"   form:"label_height_mm"    validate:"omitempty,min=10,max=200"`
+	LabelGapMM      int     `json:"label_gap_mm"      form:"label_gap_mm"       validate:"omitempty,min=0,max=20"`
 }
 
 // nilIfEmptyStr normalizes a blank optional text input to NULL.
@@ -71,17 +81,32 @@ func (r *Repository) Get(ctx context.Context) (*Settings, error) {
 }
 
 func (r *Repository) Update(ctx context.Context, in UpdateInput) error {
+	// Coalesce unset label dimensions to the standard 50x25mm sticker so a blank
+	// form never stores a zero size.
+	w, h, gap := in.LabelWidthMM, in.LabelHeightMM, in.LabelGapMM
+	if w <= 0 {
+		w = 50
+	}
+	if h <= 0 {
+		h = 25
+	}
+	if gap < 0 {
+		gap = 0
+	}
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE settings SET
 			shop_name=$1, shop_name_si=$2, address=$3, phone=$4,
 			currency_code=$5, currency_symbol=$6, receipt_footer=$7,
 			tax_registered=$8, tax_reg_no=$9, low_stock_alerts=$10, default_sale_type=$11,
-			logo_url=$12, receipt_width=$13
+			logo_url=$12, receipt_width=$13,
+			receipt_printer=$14, label_printer=$15,
+			label_width_mm=$16, label_height_mm=$17, label_gap_mm=$18
 		WHERE id = 1`,
 		in.ShopName, in.ShopNameSi, in.Address, in.Phone,
 		in.CurrencyCode, in.CurrencySymbol, in.ReceiptFooter,
 		in.TaxRegistered, in.TaxRegNo, in.LowStockAlerts, in.DefaultSaleType,
-		nilIfEmptyStr(in.LogoURL), in.ReceiptWidth)
+		nilIfEmptyStr(in.LogoURL), in.ReceiptWidth,
+		in.ReceiptPrinter, in.LabelPrinter, w, h, gap)
 	return err
 }
 

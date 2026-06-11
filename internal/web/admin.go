@@ -13,6 +13,7 @@ import (
 	"karots-pos/internal/features/settings"
 	"karots-pos/internal/features/stock"
 	"karots-pos/internal/middleware"
+	"karots-pos/internal/printing"
 	"karots-pos/internal/response"
 	adminfragments "karots-pos/templates/fragments/admin"
 	adminpages "karots-pos/templates/pages/admin"
@@ -353,6 +354,7 @@ func (a *adminUI) Settings(c echo.Context) error {
 	return response.RenderPage(c, adminpages.SettingsPage(adminpages.SettingsData{
 		UserName: middleware.CurrentUserName(c),
 		S:        *cfg,
+		Queues:   printing.Queues(ctx),
 	}))
 }
 

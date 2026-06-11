@@ -20,7 +20,9 @@ import (
 	"karots-pos/internal/features/units"
 	"karots-pos/internal/middleware"
 	"karots-pos/internal/money"
+	"karots-pos/internal/printing"
 	"karots-pos/internal/response"
+	"karots-pos/internal/tspl"
 	adminpages "karots-pos/templates/pages/admin"
 
 	"github.com/labstack/echo/v4"
@@ -410,66 +412,162 @@ func (a *adminUI) Labels(c echo.Context) error {
 	}))
 }
 
-func (a *adminUI) LabelsPrint(c echo.Context) error {
-	ctx := c.Request().Context()
-	cfg, err := a.s.settings.Get(ctx)
-	if err != nil {
-		return err
-	}
+// labelReq is the resolved label content shared by the browser sheet
+// (LabelsPrint) and the direct TSPL print (LabelsSend).
+type labelReq struct {
+	ShopName, Name, Code, Format, PriceText string
+	ShowPrice                               bool
+	Count                                   int
+}
+
+// parseLabelReq reads the label form (works for GET query params and POST form
+// bodies) and resolves it to a product label or a custom barcode label.
+func (s *Server) parseLabelReq(c echo.Context, shopName, symbol string) (labelReq, error) {
 	count := 12
-	if n, err := strconv.Atoi(c.QueryParam("qty")); err == nil && n > 0 {
+	if n, err := strconv.Atoi(c.FormValue("qty")); err == nil && n > 0 {
 		count = min(n, 200)
 	}
-	showPrice := c.QueryParam("show_price") == "1"
+	showPrice := c.FormValue("show_price") == "1"
 
 	// Custom barcode: an arbitrary value typed by the user (no product record).
-	if c.QueryParam("custom") == "1" {
-		code := strings.TrimSpace(c.QueryParam("code"))
+	if c.FormValue("custom") == "1" {
+		code := strings.TrimSpace(c.FormValue("code"))
 		if code == "" {
-			return apperr.BadRequest("enter a barcode value")
+			return labelReq{}, apperr.BadRequest("enter a barcode value")
 		}
-		format := strings.TrimSpace(c.QueryParam("format"))
+		format := strings.TrimSpace(c.FormValue("format"))
 		if format == "" {
 			format = "CODE128"
 		}
 		priceText := ""
-		if p := strings.TrimSpace(c.QueryParam("price")); p != "" {
-			priceText = cfg.CurrencySymbol + " " + p
+		if p := strings.TrimSpace(c.FormValue("price")); p != "" {
+			priceText = symbol + " " + p
 		}
-		return response.RenderPage(c, adminpages.LabelSheet(adminpages.LabelSheetData{
-			ShopName:  cfg.ShopName,
-			Name:      strings.TrimSpace(c.QueryParam("text")),
+		return labelReq{
+			ShopName:  shopName,
+			Name:      strings.TrimSpace(c.FormValue("text")),
 			Code:      code,
+			Format:    format,
 			PriceText: priceText,
 			ShowPrice: showPrice && priceText != "",
 			Count:     count,
-			Format:    format,
-		}))
+		}, nil
 	}
 
 	// From a product.
-	id, err := strconv.ParseInt(c.QueryParam("product_id"), 10, 64)
+	id, err := strconv.ParseInt(c.FormValue("product_id"), 10, 64)
 	if err != nil {
-		return apperr.BadRequest("select a product")
+		return labelReq{}, apperr.BadRequest("select a product")
 	}
-	p, err := a.s.products.Get(ctx, id)
+	p, err := s.products.Get(c.Request().Context(), id)
 	if err != nil {
-		return err
+		return labelReq{}, err
 	}
 	code := "SKU" + strconv.FormatInt(p.ID, 10)
 	if p.Barcode != nil && *p.Barcode != "" {
 		code = *p.Barcode
 	}
-	return response.RenderPage(c, adminpages.LabelSheet(adminpages.LabelSheetData{
-		ShopName:  cfg.ShopName,
+	return labelReq{
+		ShopName:  shopName,
 		Name:      p.Name,
 		Code:      code,
-		PriceText: money.Format(cfg.CurrencySymbol, p.SellingPrice),
+		Format:    "CODE128",
+		PriceText: money.Format(symbol, p.SellingPrice),
 		ShowPrice: showPrice,
 		Count:     count,
-		Format:    "CODE128",
+	}, nil
+}
+
+// resolveLabelSize picks the sticker dimensions for this print: a "WxH" preset,
+// a "custom" size from the label_w/label_h/label_gap inputs, or the shop's saved
+// default. All values are clamped to sane millimetre bounds.
+func resolveLabelSize(c echo.Context, defW, defH, defGap int) (w, h, gap int) {
+	w, h, gap = defW, defH, defGap
+	switch size := strings.TrimSpace(strings.ToLower(c.FormValue("label_size"))); size {
+	case "", "default":
+		// keep the saved default
+	case "custom":
+		if v, err := strconv.Atoi(c.FormValue("label_w")); err == nil && v > 0 {
+			w = v
+		}
+		if v, err := strconv.Atoi(c.FormValue("label_h")); err == nil && v > 0 {
+			h = v
+		}
+		if v, err := strconv.Atoi(c.FormValue("label_gap")); err == nil && v >= 0 {
+			gap = v
+		}
+	default: // "WxH" preset, e.g. "40x30"
+		if parts := strings.SplitN(size, "x", 2); len(parts) == 2 {
+			pw, e1 := strconv.Atoi(strings.TrimSpace(parts[0]))
+			ph, e2 := strconv.Atoi(strings.TrimSpace(parts[1]))
+			if e1 == nil && e2 == nil && pw > 0 && ph > 0 {
+				w, h = pw, ph
+			}
+		}
+	}
+	return min(max(w, 10), 200), min(max(h, 10), 200), min(max(gap, 0), 20)
+}
+
+func (a *adminUI) LabelsPrint(c echo.Context) error {
+	cfg, err := a.s.settings.Get(c.Request().Context())
+	if err != nil {
+		return err
+	}
+	req, err := a.s.parseLabelReq(c, cfg.ShopName, cfg.CurrencySymbol)
+	if err != nil {
+		return err
+	}
+	return response.RenderPage(c, adminpages.LabelSheet(adminpages.LabelSheetData{
+		ShopName:  req.ShopName,
+		Name:      req.Name,
+		Code:      req.Code,
+		PriceText: req.PriceText,
+		ShowPrice: req.ShowPrice,
+		Count:     req.Count,
+		Format:    req.Format,
 	}))
 }
+
+// sendLabel renders the label as TSPL and sends it raw to the configured label
+// printer — bypassing the browser PDF path that a raw thermal queue mis-prints.
+// Shared by the admin and cashier label printers. Mirrors cashier.PrintReceipt.
+func (s *Server) sendLabel(c echo.Context) error {
+	ctx := c.Request().Context()
+	cfg, err := s.settings.Get(ctx)
+	if err != nil {
+		return err
+	}
+	req, err := s.parseLabelReq(c, cfg.ShopName, cfg.CurrencySymbol)
+	if err != nil {
+		return err
+	}
+	w, h, gap := resolveLabelSize(c, cfg.LabelWidthMM, cfg.LabelHeightMM, cfg.LabelGapMM)
+
+	// Prefer the queue chosen in Settings; fall back to the LABEL_PRINTER env.
+	queue := cfg.LabelPrinter
+	if queue == "" {
+		queue = s.cfg.LabelPrinter
+	}
+	doc := tspl.Document(tspl.Input{
+		Name:      req.Name,
+		Code:      req.Code,
+		Format:    req.Format,
+		PriceText: req.PriceText,
+		ShowPrice: req.ShowPrice,
+		Count:     req.Count,
+		WidthMM:   w,
+		HeightMM:  h,
+		GapMM:     gap,
+	})
+	if err := printing.Raw(ctx, queue, doc); err != nil {
+		return apperr.Internal("could not print labels", err)
+	}
+	c.Response().Header().Set("HX-Trigger", response.Toast("Labels sent to printer", "success"))
+	return response.OK(c, map[string]bool{"ok": true})
+}
+
+// LabelsSend (admin) prints a label directly to the configured label printer.
+func (a *adminUI) LabelsSend(c echo.Context) error { return a.s.sendLabel(c) }
 
 // ============================ Conversions ============================
 

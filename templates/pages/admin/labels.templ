@@ -50,8 +50,12 @@ templ LabelsPage(d LabelsData) {
 							</label>
 						</div>
 					</div>
+					@labelSizePicker()
 					@labelPreview("pName", "preview-product", "pPrice", "pShowPrice", "pCode")
-					<button x-bind:disabled="!pCode" class="px-5 py-2.5 rounded-lg bg-indigo-600 text-white font-semibold disabled:opacity-40">Generate Labels →</button>
+					<div class="flex flex-wrap gap-2">
+						<button type="button" x-bind:disabled="!pCode" hx-post="/admin/labels/send" hx-swap="none" class="px-5 py-2.5 rounded-lg bg-indigo-600 text-white font-semibold disabled:opacity-40">🖨 Print to label printer</button>
+						<button type="submit" x-bind:disabled="!pCode" class="px-5 py-2.5 rounded-lg border text-slate-700 font-semibold disabled:opacity-40">Generate sheet ↗</button>
+					</div>
 				</form>
 			</div>
 
@@ -94,12 +98,48 @@ templ LabelsPage(d LabelsData) {
 					<label class="inline-flex items-center gap-2 text-sm">
 						<input type="checkbox" name="show_price" value="1" x-model="cShowPrice"/> Show price on label
 					</label>
+					@labelSizePicker()
 					@labelPreviewCustom()
-					<button x-bind:disabled="!cCode" class="px-5 py-2.5 rounded-lg bg-indigo-600 text-white font-semibold disabled:opacity-40">Generate Labels →</button>
+					<div class="flex flex-wrap gap-2">
+						<button type="button" x-bind:disabled="!cCode" hx-post="/admin/labels/send" hx-swap="none" class="px-5 py-2.5 rounded-lg bg-indigo-600 text-white font-semibold disabled:opacity-40">🖨 Print to label printer</button>
+						<button type="submit" x-bind:disabled="!cCode" class="px-5 py-2.5 rounded-lg border text-slate-700 font-semibold disabled:opacity-40">Generate sheet ↗</button>
+					</div>
 				</form>
 			</div>
 		</div>
 	}
+}
+
+// labelSizePicker lets the user choose the sticker size per print: a preset, or
+// a custom width/height/gap. "Default" uses the size saved in Settings. The
+// values are submitted as label_size / label_w / label_h / label_gap.
+templ labelSizePicker() {
+	<div class="border-t pt-4" x-data="{ size: 'default' }">
+		<label class="block text-sm font-medium mb-1">Sticker size</label>
+		<select name="label_size" x-model="size" class="w-full border rounded-lg px-3 py-2">
+			<option value="default">Default (from Settings)</option>
+			<option value="50x25">50 × 25 mm</option>
+			<option value="50x30">50 × 30 mm</option>
+			<option value="40x30">40 × 30 mm</option>
+			<option value="38x25">38 × 25 mm</option>
+			<option value="100x50">100 × 50 mm</option>
+			<option value="custom">Custom…</option>
+		</select>
+		<div class="grid grid-cols-3 gap-3 mt-3" x-show="size === 'custom'" x-cloak>
+			<div>
+				<label class="block text-xs text-slate-500 mb-1">Width (mm)</label>
+				<input type="number" name="label_w" min="10" max="200" value="50" class="w-full border rounded-lg px-3 py-2"/>
+			</div>
+			<div>
+				<label class="block text-xs text-slate-500 mb-1">Height (mm)</label>
+				<input type="number" name="label_h" min="10" max="200" value="25" class="w-full border rounded-lg px-3 py-2"/>
+			</div>
+			<div>
+				<label class="block text-xs text-slate-500 mb-1">Gap (mm)</label>
+				<input type="number" name="label_gap" min="0" max="20" value="2" class="w-full border rounded-lg px-3 py-2"/>
+			</div>
+		</div>
+	</div>
 }
 
 // labelPreview renders a single live preview label for the product form.

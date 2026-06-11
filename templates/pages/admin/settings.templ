@@ -1,6 +1,8 @@
 package adminpages
 
 import (
+	"strconv"
+
 	"karots-pos/internal/features/settings"
 	"karots-pos/templates/layouts"
 )
@@ -8,6 +10,7 @@ import (
 type SettingsData struct {
 	UserName string
 	S        settings.Settings
+	Queues   []string // CUPS print queues detected on the host
 }
 
 templ SettingsPage(d SettingsData) {
@@ -81,6 +84,43 @@ templ SettingsPage(d SettingsData) {
 						</label>
 					</div>
 				</div>
+				<!-- Printers & labels -->
+				<div class="border-t pt-5 mt-2">
+					<h2 class="text-lg font-semibold mb-1">Printers &amp; Labels</h2>
+					<p class="text-sm text-slate-500 mb-4">Map each job to a printer. Queues are read from the system (CUPS). The label size here is the default — you can change it per print on the Barcode Labels page.</p>
+					<div class="grid grid-cols-2 gap-4">
+						<div>
+							<label class="block text-sm font-medium mb-1">Receipt printer</label>
+							<select name="receipt_printer" class="w-full border rounded-lg px-3 py-2">
+								<option value="" selected?={ d.S.ReceiptPrinter == "" }>System default</option>
+								for _, q := range queueList(d.Queues, d.S.ReceiptPrinter) {
+									<option value={ q } selected?={ q == d.S.ReceiptPrinter }>{ q }</option>
+								}
+							</select>
+						</div>
+						<div>
+							<label class="block text-sm font-medium mb-1">Label printer</label>
+							<select name="label_printer" class="w-full border rounded-lg px-3 py-2">
+								<option value="" selected?={ d.S.LabelPrinter == "" }>System default</option>
+								for _, q := range queueList(d.Queues, d.S.LabelPrinter) {
+									<option value={ q } selected?={ q == d.S.LabelPrinter }>{ q }</option>
+								}
+							</select>
+						</div>
+						<div>
+							<label class="block text-sm font-medium mb-1">Default label width (mm)</label>
+							<input type="number" name="label_width_mm" min="10" max="200" value={ strconv.Itoa(labelDim(d.S.LabelWidthMM, 50)) } class="w-full border rounded-lg px-3 py-2"/>
+						</div>
+						<div>
+							<label class="block text-sm font-medium mb-1">Default label height (mm)</label>
+							<input type="number" name="label_height_mm" min="10" max="200" value={ strconv.Itoa(labelDim(d.S.LabelHeightMM, 25)) } class="w-full border rounded-lg px-3 py-2"/>
+						</div>
+						<div>
+							<label class="block text-sm font-medium mb-1">Label gap (mm)</label>
+							<input type="number" name="label_gap_mm" min="0" max="20" value={ strconv.Itoa(labelDim(d.S.LabelGapMM, 2)) } class="w-full border rounded-lg px-3 py-2"/>
+						</div>
+					</div>
+				</div>
 				<div class="pt-2">
 					<button type="submit" class="px-5 py-2.5 rounded-lg bg-indigo-600 text-white font-medium">Save Settings</button>
 				</div>
@@ -116,4 +156,28 @@ templ saleTypeOption(value, selected string) {
 
 templ paperOption(value, label, selected string) {
 	<option value={ value } selected?={ value == selected }>{ label }</option>
+}
+
+// queueList returns the detected CUPS queues, ensuring the currently-saved queue
+// is present even if it's offline/undetected right now (so saving doesn't
+// silently drop it).
+func queueList(queues []string, current string) []string {
+	if current == "" {
+		return queues
+	}
+	for _, q := range queues {
+		if q == current {
+			return queues
+		}
+	}
+	return append([]string{current}, queues...)
+}
+
+// labelDim returns v, or the fallback when v is unset (a fresh row before the
+// label columns were configured).
+func labelDim(v, fallback int) int {
+	if v <= 0 {
+		return fallback
+	}
+	return v
 }

@@ -134,7 +134,12 @@ func (h *cashierUI) PrintReceipt(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := escpos.Send(ctx, h.s.cfg.ReceiptPrinter, escpos.Document(*detail, *cfg)); err != nil {
+	// Prefer the queue chosen in Settings; fall back to the RECEIPT_PRINTER env.
+	queue := cfg.ReceiptPrinter
+	if queue == "" {
+		queue = h.s.cfg.ReceiptPrinter
+	}
+	if err := escpos.Send(ctx, queue, escpos.Document(*detail, *cfg)); err != nil {
 		return apperr.Internal("could not print receipt", err)
 	}
 	// Feedback for the HTMX reprint button; the Alpine apiFetch path toasts itself.
@@ -159,6 +164,28 @@ func (h *cashierUI) Receipts(c echo.Context) error {
 		Sales:       rows,
 	}))
 }
+
+// ============================ Barcode labels ============================
+
+// Labels is the terminal's barcode-label printer (product or custom code),
+// sending directly to the configured label printer.
+func (h *cashierUI) Labels(c echo.Context) error {
+	ctx := c.Request().Context()
+	prods, _, err := h.s.products.List(ctx, products.ListQuery{Limit: 500})
+	if err != nil {
+		return err
+	}
+	return response.RenderPage(c, cashierpages.Labels(cashierpages.LabelsData{
+		CashierName: middleware.CurrentUserName(c),
+		Role:        middleware.CurrentRole(c),
+		Symbol:      h.cashierSymbol(ctx),
+		Products:    prods,
+	}))
+}
+
+// LabelsSend prints a label directly to the configured label printer (shared
+// renderer with the admin labels page).
+func (h *cashierUI) LabelsSend(c echo.Context) error { return h.s.sendLabel(c) }
 
 // ============================ Returns ============================
 
