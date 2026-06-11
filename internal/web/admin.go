@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"io"
 	"strconv"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"karots-pos/internal/features/stock"
 	"karots-pos/internal/middleware"
 	"karots-pos/internal/printing"
+	"karots-pos/internal/receiptimg"
 	"karots-pos/internal/response"
 	adminfragments "karots-pos/templates/fragments/admin"
 	adminpages "karots-pos/templates/pages/admin"
@@ -356,6 +358,42 @@ func (a *adminUI) Settings(c echo.Context) error {
 		S:        *cfg,
 		Queues:   printing.Queues(ctx),
 	}))
+}
+
+// LogoUpload accepts an image file, downscales it, and stores it in the DB as a
+// self-contained data URI so the logo prints and previews fully offline.
+func (a *adminUI) LogoUpload(c echo.Context) error {
+	fh, err := c.FormFile("logo")
+	if err != nil {
+		return apperr.BadRequest("choose an image file")
+	}
+	f, err := fh.Open()
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, 8<<20))
+	if err != nil {
+		return err
+	}
+	uri, err := receiptimg.ToDataURI(data, 400)
+	if err != nil {
+		return apperr.BadRequest("that file is not a valid image")
+	}
+	if err := a.s.settings.SetLogo(c.Request().Context(), uri); err != nil {
+		return err
+	}
+	c.Response().Header().Set("HX-Trigger", response.Toast("Logo uploaded", "success"))
+	return response.OK(c, map[string]bool{"ok": true})
+}
+
+// LogoClear removes the uploaded logo.
+func (a *adminUI) LogoClear(c echo.Context) error {
+	if err := a.s.settings.SetLogo(c.Request().Context(), ""); err != nil {
+		return err
+	}
+	c.Response().Header().Set("HX-Trigger", response.Toast("Logo removed", "success"))
+	return response.OK(c, map[string]bool{"ok": true})
 }
 
 func (a *adminUI) SettingsUpdate(c echo.Context) error {

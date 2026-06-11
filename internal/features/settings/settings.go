@@ -26,6 +26,7 @@ type Settings struct {
 	ReceiptFooter   *string   `db:"receipt_footer"    json:"receipt_footer,omitempty"`
 	ReceiptWidth    string    `db:"receipt_width"     json:"receipt_width"`
 	LogoURL         *string   `db:"logo_url"          json:"logo_url,omitempty"`
+	LogoData        string    `db:"logo_data"         json:"logo_data,omitempty"`
 	TaxRegistered   bool      `db:"tax_registered"    json:"tax_registered"`
 	TaxRegNo        *string   `db:"tax_reg_no"        json:"tax_reg_no,omitempty"`
 	LowStockAlerts  bool      `db:"low_stock_alerts"  json:"low_stock_alerts"`
@@ -57,6 +58,18 @@ type UpdateInput struct {
 	LabelWidthMM    int     `json:"label_width_mm"    form:"label_width_mm"     validate:"omitempty,min=10,max=200"`
 	LabelHeightMM   int     `json:"label_height_mm"   form:"label_height_mm"    validate:"omitempty,min=10,max=200"`
 	LabelGapMM      int     `json:"label_gap_mm"      form:"label_gap_mm"       validate:"omitempty,min=0,max=20"`
+}
+
+// LogoSrc returns the logo to use: the uploaded, self-contained image (works
+// offline) when present, otherwise the URL. Empty means no logo.
+func (s Settings) LogoSrc() string {
+	if s.LogoData != "" {
+		return s.LogoData
+	}
+	if s.LogoURL != nil {
+		return *s.LogoURL
+	}
+	return ""
 }
 
 // nilIfEmptyStr normalizes a blank optional text input to NULL.
@@ -110,9 +123,24 @@ func (r *Repository) Update(ctx context.Context, in UpdateInput) error {
 	return err
 }
 
+// SetLogoData stores (or clears) the uploaded logo data URI without touching the
+// other settings. Used by the logo upload endpoint.
+func (r *Repository) SetLogoData(ctx context.Context, dataURI string) error {
+	_, err := r.db.ExecContext(ctx, `UPDATE settings SET logo_data=$1 WHERE id = 1`, dataURI)
+	return err
+}
+
 type Service struct{ repo *Repository }
 
 func NewService(q db.Queryer) *Service { return &Service{repo: NewRepository(q)} }
+
+// SetLogo saves an uploaded logo (data URI), or clears it when empty.
+func (s *Service) SetLogo(ctx context.Context, dataURI string) error {
+	if err := s.repo.SetLogoData(ctx, dataURI); err != nil {
+		return apperr.Internal("failed to save logo", err)
+	}
+	return nil
+}
 
 func (s *Service) Get(ctx context.Context) (*Settings, error) {
 	cfg, err := s.repo.Get(ctx)

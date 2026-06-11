@@ -46,7 +46,7 @@ func cfg(width string) settings.Settings {
 }
 
 func TestDocumentIsASCIIAndCut(t *testing.T) {
-	out := Document(sampleDetail(), cfg("80"))
+	out := Document(sampleDetail(), cfg("80"), Options{})
 
 	// init + cut markers present
 	if out[0] != esc || out[1] != '@' {

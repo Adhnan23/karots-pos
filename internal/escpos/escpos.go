@@ -34,8 +34,16 @@ func columns(width string) int {
 	return 48
 }
 
+// Options carries pre-rendered raster blocks (ESC/POS GS v 0) that the built-in
+// font can't produce: the shop logo and the secondary (non-Latin) shop name.
+// Both are optional; nil means "skip". They are produced by internal/receiptimg.
+type Options struct {
+	Logo    []byte // raster for the logo (top of the receipt)
+	SubName []byte // raster for the secondary shop name (under the main name)
+}
+
 // Document builds the ESC/POS byte stream for a completed sale.
-func Document(d sales.Detail, cfg settings.Settings) []byte {
+func Document(d sales.Detail, cfg settings.Settings, opts Options) []byte {
 	w := columns(cfg.ReceiptWidth)
 	sym := cfg.CurrencySymbol
 	if sym == "" {
@@ -47,14 +55,27 @@ func Document(d sales.Detail, cfg settings.Settings) []byte {
 	b.Write([]byte{esc, 't', 0}) // code page PC437 (Latin)
 
 	// --- Header (centered) ---
-	b.Write([]byte{esc, 'a', 1})    // center
-	b.Write([]byte{esc, 'E', 1})    // bold on
-	b.Write([]byte{gs, '!', 0x11})  // double width + height
+	b.Write([]byte{esc, 'a', 1}) // center
+	// Logo at the very top (rendered as a full-width raster, centered on canvas).
+	if len(opts.Logo) > 0 {
+		b.Write(opts.Logo)
+		line(&b, "")
+	}
+	b.Write([]byte{esc, 'E', 1})   // bold on
+	b.Write([]byte{gs, '!', 0x11}) // double width + height
 	line(&b, ascii(cfg.ShopName))
 	b.Write([]byte{gs, '!', 0x00})  // normal size
 	b.Write([]byte{esc, 'E', 0})    // bold off
+	// Secondary shop name (Sinhala/Tamil) is rendered as an image by the caller
+	// because the built-in font can't draw it; printed here if supplied.
+	if len(opts.SubName) > 0 {
+		b.Write(opts.SubName)
+	}
+	line(&b, "") // breathing room between the name and the address block
 	if s := deref(cfg.Address); s != "" {
-		line(&b, ascii(s))
+		for _, ln := range wrap(ascii(s), w) {
+			line(&b, ln)
+		}
 	}
 	if s := deref(cfg.Phone); s != "" {
 		line(&b, "Tel: "+ascii(s))
@@ -78,7 +99,9 @@ func Document(d sales.Detail, cfg settings.Settings) []byte {
 
 	// --- Items ---
 	for _, it := range d.Items {
-		line(&b, ascii(it.ProductName))
+		for _, ln := range wrap(ascii(it.ProductName), w) {
+			line(&b, ln)
+		}
 		qty := money.Display(it.Quantity) + " " + ascii(it.UnitAbbr) + " x " + money.Display(it.UnitPrice)
 		line(&b, leftRight("  "+qty, money.Display(it.Subtotal), w))
 	}
@@ -113,9 +136,18 @@ func Document(d sales.Detail, cfg settings.Settings) []byte {
 	// --- Footer (centered) ---
 	b.Write([]byte{esc, 'a', 1})
 	if s := deref(cfg.ReceiptFooter); s != "" {
-		line(&b, ascii(s))
+		for _, ln := range wrap(ascii(s), w) {
+			line(&b, ln)
+		}
 	}
 	line(&b, "Thank you! Come again.")
+
+	// Credit line in the small built-in font (Font B), centered.
+	line(&b, "")
+	b.Write([]byte{esc, 'M', 1}) // select Font B (smaller)
+	line(&b, "POS built by Adhnan")
+	line(&b, "adhnanmsa@gmail.com | 0769626396")
+	b.Write([]byte{esc, 'M', 0}) // back to Font A
 
 	// Feed past the head-to-cutter gap (plus a little margin) before cutting, so
 	// the last printed line clears the blade instead of being sheared at the end.
@@ -123,6 +155,42 @@ func Document(d sales.Detail, cfg settings.Settings) []byte {
 	b.Write([]byte{gs, 'V', 1})
 
 	return b.Bytes()
+}
+
+// wrap breaks s into lines of at most w characters, preferring to break at
+// spaces. A single word longer than w is hard-split so it never overflows.
+func wrap(s string, w int) []string {
+	if w <= 0 {
+		return []string{s}
+	}
+	var lines []string
+	cur := ""
+	for _, word := range strings.Fields(s) {
+		for len(word) > w { // word itself too long: hard-split
+			if cur != "" {
+				lines = append(lines, cur)
+				cur = ""
+			}
+			lines = append(lines, word[:w])
+			word = word[w:]
+		}
+		switch {
+		case cur == "":
+			cur = word
+		case len(cur)+1+len(word) <= w:
+			cur += " " + word
+		default:
+			lines = append(lines, cur)
+			cur = word
+		}
+	}
+	if cur != "" {
+		lines = append(lines, cur)
+	}
+	if len(lines) == 0 {
+		return []string{""}
+	}
+	return lines
 }
 
 func line(b *bytes.Buffer, s string) {

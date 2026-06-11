@@ -253,6 +253,8 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 
 	ag.GET("/settings", admin.Settings)
 	ag.PUT("/settings", admin.SettingsUpdate)
+	ag.POST("/settings/logo", admin.LogoUpload)
+	ag.POST("/settings/logo/clear", admin.LogoClear)
 
 	// Backup & restore (admin only — restore replaces all data).
 	ag.GET("/backup", admin.Backup, middleware.RequireRole(auth.RoleAdmin))

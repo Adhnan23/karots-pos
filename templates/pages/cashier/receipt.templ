@@ -48,8 +48,8 @@ templ Receipt(d ReceiptData) {
 		</head>
 		<body class="receipt-body">
 			<div class={ "receipt", templ.KV("narrow", d.Narrow) } id="receipt">
-				if d.Settings.LogoURL != nil && *d.Settings.LogoURL != "" {
-					<div class="r-center"><img class="r-logo" src={ *d.Settings.LogoURL } alt="logo"/></div>
+				if d.Settings.LogoSrc() != "" {
+					<div class="r-center"><img class="r-logo" src={ templ.SafeURL(d.Settings.LogoSrc()) } alt="logo"/></div>
 				}
 				<div class="r-center r-shop">{ d.Settings.ShopName }</div>
 				if d.Settings.ShopNameSi != nil && *d.Settings.ShopNameSi != "" {

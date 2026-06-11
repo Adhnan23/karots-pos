@@ -12,10 +12,13 @@ import (
 	"karots-pos/internal/features/customers"
 	"karots-pos/internal/features/products"
 	"karots-pos/internal/features/sales"
+	"karots-pos/internal/features/settings"
 	"karots-pos/internal/features/stock"
 	"karots-pos/internal/middleware"
 	"karots-pos/internal/money"
+	"karots-pos/internal/receiptimg"
 	"karots-pos/internal/response"
+	poststatic "karots-pos/static"
 	cashierpages "karots-pos/templates/pages/cashier"
 
 	"github.com/labstack/echo/v4"
@@ -120,6 +123,23 @@ func (h *cashierUI) Receipt(c echo.Context) error {
 // (built-in font, sized to the receipt_width setting, with an auto-cut). This is
 // the reliable path for the Xprinter: it bypasses the browser/PDF route that a
 // driverless raw queue prints as garbage.
+// receiptOptions renders the logo and secondary (non-Latin) shop name to ESC/POS
+// raster blocks for the printed receipt. Failures are non-fatal — the receipt
+// still prints without that element.
+func (h *cashierUI) receiptOptions(ctx context.Context, cfg *settings.Settings) escpos.Options {
+	var opts escpos.Options
+	dots := receiptimg.PrinterDots(cfg.ReceiptWidth)
+	if src := cfg.LogoSrc(); src != "" {
+		if img, err := receiptimg.LoadImage(ctx, src, poststatic.Files); err == nil {
+			opts.Logo = receiptimg.Logo(img, dots)
+		}
+	}
+	if cfg.ShopNameSi != nil && *cfg.ShopNameSi != "" {
+		opts.SubName = receiptimg.SubName(*cfg.ShopNameSi, dots, dots/14)
+	}
+	return opts
+}
+
 func (h *cashierUI) PrintReceipt(c echo.Context) error {
 	ctx := c.Request().Context()
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
@@ -139,7 +159,7 @@ func (h *cashierUI) PrintReceipt(c echo.Context) error {
 	if queue == "" {
 		queue = h.s.cfg.ReceiptPrinter
 	}
-	if err := escpos.Send(ctx, queue, escpos.Document(*detail, *cfg)); err != nil {
+	if err := escpos.Send(ctx, queue, escpos.Document(*detail, *cfg, h.receiptOptions(ctx, cfg))); err != nil {
 		return apperr.Internal("could not print receipt", err)
 	}
 	// Feedback for the HTMX reprint button; the Alpine apiFetch path toasts itself.
