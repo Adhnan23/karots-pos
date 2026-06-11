@@ -109,9 +109,9 @@ discount, toggled at the counter; per-item discount is no longer a dead path.
 
 ## ✅ Admin gaps & flaw fixes — edit handlers + stock audit trail (no migration, live-tested)
 
-Phase 3 of the plan (`.claude/plans/cached-meandering-tide.md`). No DB change —
-DB stays at migration **19**. Closes the create/delete-only gaps several admin
-features had.
+Phase 3 of the plan (`.claude/plans/cached-meandering-tide.md`). No migration of
+its own — it landed at migration **19** (a later audit fix added 0020, so the DB
+is now at 20). Closes the create/delete-only gaps several admin features had.
 
 - **Expense edit** (`/admin/expenses/form/:id` GET → modal, `PUT /admin/expenses/:id`):
   `expenses.Service.Get`/`Update` (parse amount/date like `Create`, `NotFound` on
@@ -235,7 +235,7 @@ UX in `static/js/app.js` (`pos()`) + `templates/pages/cashier/pos.templ`.
 
 | Area | What | Verified live |
 |---|---|---|
-| **Phone + PIN login** | login is now **phone number + PIN** (was a user-picker + PIN). Phone is unique per user; no staff list on the login screen. `auth.LoginInput{Phone,PIN}`, `Repository.FindByPhone`, migration **0010** (backfills seeded users, `UNIQUE` + `NOT NULL` on `users.phone`) | ✅ admin `0771234567/1234`→/admin, cashier `0771111111/1111`→/cashier, wrong PIN→401 |
+| **Phone + PIN login** | login is now **phone number + PIN** (was a user-picker + PIN). Phone is unique per user; no staff list on the login screen. `auth.LoginInput{Phone,PIN}`, `Repository.FindByPhone`, migration **0010** (backfills seeded users, sets `NOT NULL`; **note:** its `UNIQUE` index silently no-oped on the existing non-unique index name — uniqueness was only actually enforced later by migration **0020**, partial on active users) | ✅ admin `0771234567/1234`→/admin, cashier `0771111111/1111`→/cashier, wrong PIN→401 |
 | **Auto role routing** | no admin/cashier toggle — server redirects to `auth.HomePath(role)` after the PIN verifies | ✅ each role lands on its own surface |
 | **Required phone on user create** | `CreateUserInput.Phone` now `required`; admin Users form marks it required | ✅ no-phone create→422; with phone→200 and that user can log in |
 | **Cashier: Returns** | `/cashier/returns` lists recent sales with Receipt + per-line Return modal; posts to `POST /cashier/sales/:id/partial-return` (cashier-reachable; the `/api` one is admin-only) | ✅ sold 3, returned 2 → stock +2, status `partially_returned` |
@@ -262,7 +262,7 @@ optional `{endpoint, reload}` arg so admin and cashier reuse the same JS. The
 | **Settings** | relabeled "Shop name (your language)"; added **Logo URL** field | ✅ both render |
 | **Receipt** | optional **shop logo**, local-language name, **58mm** toggle (`?size=58`) alongside 80mm | ✅ logo + narrow class |
 | **Rename** | Go module `pos` → **`karots-pos`** (go.mod + all imports) | ✅ build clean |
-| **Self-contained static binary** | `static/` (CSS/JS + vendored htmx/Alpine/Tailwind/JsBarcode) embedded via `go:embed`; served from embedded FS. `CGO_ENABLED=0` → 14 MB static ELF | ✅ runs from /tmp with **no static/ dir**; all assets 200 |
+| **Self-contained static binary** | `static/` (CSS/JS + vendored htmx/Alpine/JsBarcode; Tailwind was a vendored JIT here, later swapped to a prebuilt stylesheet in Phase 6) embedded via `go:embed`; served from embedded FS. `CGO_ENABLED=0` → 14 MB static ELF | ✅ runs from /tmp with **no static/ dir**; all assets 200 |
 
 **Deploy = binary + `.env` + Postgres.** `make build` → `bin/karots-pos`.
 Migrations + templates + assets are all embedded. Dockerfile/Makefile/README/
@@ -340,16 +340,24 @@ struct field in the same change.
 - HTMX errors surface as toasts via the `HX-Trigger: show-toast` header (hyphenated
   on purpose). Success+close+reload via `response.ToastAnd(...)`. Expenses/finance
   use a plain `HX-Refresh: true` full-page reload (no list fragment).
-- **zsh shell traps** (this shell is zsh, not bash):
-  - Never name a loop var `path` or `status` — they're tied to `$PATH`/special and
+- **Non-bash interactive shell traps** (the shell here is now **fish**; earlier
+  sessions were zsh — both differ from bash):
+  - fish loops use `for i in (seq 1 30); …; end`, not bash `for ((…))`/`done`; the
+    `set -a; source .env` trick is bash-only, so run the server via
+    `bash -c 'set -a; source .env; set +a; …'` (or `make run`, which handles it).
+  - Avoid loop/var names like `path` or `status` — special in fish/zsh; they
     clobber the environment (then `curl` "command not found"). Use `p`, `hs`, etc.
-  - zsh does **not** word-split unquoted variables, so `CMD="curl -s"; $CMD` fails.
-    Inline the full command instead.
+  - Neither fish nor zsh word-splits unquoted variables, so `CMD="curl -s"; $CMD`
+    fails — inline the full command instead.
   - **Do not** pipe the dev server through `head` (`go run … | head -40`): once
     head closes, the server dies on SIGPIPE. Redirect to a file:
     `go run ./cmd/server > /tmp/pos_server.log 2>&1`.
   - `curl` is at `/usr/bin/curl`; DB is `docker exec pos_db psql -U pos_user -d pos_db`.
-- Dev users: **Admin / 1234**, **Cashier / 1111**. Change before any real deploy.
+- Dev users: **Admin / 1234**, **Manager / 2222**, **Cashier / 1111**. Change
+  before any real deploy. The seed (`cmd/server/seed.go`) is **entities only** —
+  staff, shop settings, nested categories, 8 products + stock, 3 suppliers, 3
+  customers; no sample transactions. It skips if any users exist; reseed wants a
+  fresh DB (`docker compose down -v && make db-up && make seed`).
 - Run locally: `docker compose up -d postgres`, then
   `set -a && . ./.env && set +a && go run ./cmd/server`.
 

@@ -5,9 +5,10 @@ scan, price/stock check) and an **admin panel** (manage catalog, inventory, sale
 purchasing, finances, settings). Built with Go · Echo · sqlx · Goose · Templ · HTMX
 · Alpine.js · Tailwind, backed by PostgreSQL 17.
 
-The whole app compiles to **one fully static binary** — templates, CSS/JS (incl.
-vendored htmx / Alpine / Tailwind / JsBarcode), and DB migrations are all embedded
-via `go:embed`. To deploy you ship **just the binary + a `.env`** (and a Postgres).
+The whole app compiles to **one fully static binary** — templates, CSS/JS (a
+prebuilt Tailwind stylesheet plus vendored htmx / Alpine / JsBarcode), and DB
+migrations are all embedded via `go:embed`. To deploy you ship **just the binary +
+a `.env`** (and a Postgres).
 
 ## Quick start (dev)
 
@@ -15,9 +16,15 @@ via `go:embed`. To deploy you ship **just the binary + a `.env`** (and a Postgre
 cp .env.example .env          # adjust JWT_SECRET (>= 32 chars)
 make db-up                    # start Postgres 17 in Docker
 make migrate                  # apply schema
-make seed                     # Admin & Cashier users + sample stock
+make seed                     # staff users, shop settings, catalog, suppliers, customers
 make run                      # http://localhost:3000
 ```
+
+The seed is **entities only** — staff users, the shop's identity, a nested
+category tree, 8 stocked products, suppliers and customers — so the dashboard and
+reports start from a clean, zero-transaction state. It's idempotent: it skips if
+any users already exist (so reseeding wants a fresh database — see
+[Reset the database](#reset-the-database)).
 
 Open <http://localhost:3000> and sign in with **phone number + PIN** — the server
 routes you to the admin panel or the cashier terminal automatically based on your
@@ -26,7 +33,18 @@ role (there is no admin/cashier toggle on the login screen):
 | Role | Phone | PIN |
 |---|---|---|
 | Admin | `0771234567` | `1234` |
+| Manager | `0772222222` | `2222` |
 | Cashier | `0771111111` | `1111` |
+
+### Reset the database
+
+The seed only runs on an empty database. To wipe everything and start fresh:
+
+```bash
+docker compose down -v        # drop the Postgres volume (all data gone)
+make db-up                    # fresh Postgres
+make seed                     # re-applies migrations on start, then seeds
+```
 
 ## Self-contained binary (deploy)
 
@@ -96,8 +114,16 @@ reports (plus dashboard badges) read straight off this ledger.
   rice → 25 kg loose), moving stock value across.
 - **Nested categories** — sub-categories; filtering by a parent includes all
   descendants.
-- **Barcode labels** — printable label sheets (JsBarcode), 80mm/58mm receipts
-  with optional shop logo.
+- **Discounts** — bill-level and per-item discounts, each toggleable between a
+  fixed amount (Rs) or a percentage (%); per-item fixed discounts apply per unit.
+- **Supplier payments** — record payments against a supplier and allocate them to
+  specific open purchase invoices (flipping each to `partial`/`paid`); cash
+  payments leave the drawer. A **supplier-dues** (payables aging) report mirrors
+  the customer-dues one.
+- **Barcode labels** — printed **server-side** straight to a label printer (TSPL,
+  e.g. Xprinter XP-365B) — no browser, no driver; an A4 sticker-sheet (JsBarcode)
+  is the fallback. Receipts print server-side as ESC/POS (80mm/58mm) with an
+  optional shop logo. See **[PRINTING.md](PRINTING.md)**.
 - **Management reports** — a Reports hub (`/admin/reports`) of filterable,
   **print/Save-as-PDF** reports: sales, finance/P&L, cash register, purchases,
   suppliers, inventory valuation, batches/expiry, low-stock, expiring. Each has a
@@ -159,15 +185,16 @@ change computed) → **oversell returns 409 with stock unchanged** → credit sa
 
 ## Notes for going further
 
-- **Offline-friendly:** htmx, Alpine, Tailwind (the in-browser JIT build) and
-  JsBarcode are vendored under `static/vendor/` and embedded — the UI works with
-  no internet. For a smaller payload in production you can swap Tailwind's JIT for
-  a prebuilt `app.css` (Tailwind CLI), but it's optional.
+- **Offline-friendly:** htmx, Alpine and JsBarcode are vendored under
+  `static/vendor/` and embedded; Tailwind is a **prebuilt, minified
+  `static/css/tailwind.css`** (compiled by `make css` — Node/npx is a *build-time*
+  dependency only, never needed at runtime). The UI works with no internet, and
+  there's no runtime CDN or in-browser JIT.
 - Refresh-token rotation is implemented for API clients; the cookie UI uses a
   shift-length access token (`JWT_EXPIRES_IN=12h`).
 - **Login is phone + PIN.** Each user's phone number is unique and is their login
   id; there is no user list on the login page (so staff aren't enumerable). The
   admin "Users" page sets each staff member's phone + PIN.
-- Change the seeded **Admin (0771234567 / 1234)** and **Cashier (0771111111 /
-  1111)** credentials before any real deployment.
+- Change the seeded **Admin (0771234567 / 1234)**, **Manager (0772222222 / 2222)**
+  and **Cashier (0771111111 / 1111)** credentials before any real deployment.
 ```

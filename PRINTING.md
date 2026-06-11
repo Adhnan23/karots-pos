@@ -81,12 +81,27 @@ The size is chosen **per print** on the Labels page — presets (50×25, 50×30,
 38×25, 100×50) or **Custom…** (width / height / gap in mm). "Default" uses the size
 saved in Settings (`settings.label_width_mm` / `label_height_mm` / `label_gap_mm`).
 
-## Non-ASCII text
+## Logo & non-Latin shop name (printed as images)
 
-The built-in font prints Latin/ASCII. Non-Latin shop text (e.g. Sinhala shop name)
-is replaced with `?` in the thermal output to avoid garbage; use the HTML receipt
-page if you need to display/print that. Receipt numbers, dates, and amounts are
-ASCII and print correctly.
+The receipt header can carry an image **logo** and a **secondary, non-Latin shop
+name** (e.g. Sinhala/Tamil) — both things the printer's built-in font can't draw.
+`internal/receiptimg` rasterizes them into ESC/POS raster blocks (`GS v 0`) using
+embedded **Noto Sans Sinhala/Tamil** fonts, so they print correctly **as images**
+at the top of the thermal receipt (no `?`, no garbage). The logo is stored offline
+in the DB as a data URI (`settings.logo_data`), so it needs no internet and keeps
+the binary self-contained.
+
+Set both in **Admin → Settings**: upload a logo and fill the **shop name (your
+language)** field (`settings.shop_name_si`).
+
+**Remaining limit — body text is built-in font only.** The receipt *body* (item
+names, quantities, totals, footer) is printed with the printer's built-in
+Latin/ASCII font for speed and crispness, so it is **not** rasterized: any
+non-Latin character there is replaced with `?` (the `ascii()` filter in
+`internal/escpos`) to avoid PC437 garbage. Only the header — logo + secondary shop
+name — renders as an image. Use the HTML receipt page (`/cashier/receipt/:id`) if
+you need non-Latin item names on paper. Receipt numbers, dates, and amounts are
+ASCII and always print correctly.
 
 ## Troubleshooting
 
