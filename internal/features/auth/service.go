@@ -123,6 +123,9 @@ func (s *Service) CreateUser(ctx context.Context, in CreateUserInput) (*User, er
 	}
 	u, err := s.repo.Create(ctx, in.Name, &in.Phone, in.Role, string(hash))
 	if err != nil {
+		if appdb.IsUniqueViolation(err) {
+			return nil, apperr.Conflict("that phone number is already used by another user")
+		}
 		return nil, apperr.Internal("could not create user", err)
 	}
 	return u, nil
@@ -146,6 +149,9 @@ func (s *Service) UpdateUser(ctx context.Context, id int64, in UpdateUserInput) 
 	err := s.repo.Update(ctx, id, in.Name, &in.Phone, in.Role)
 	if errors.Is(err, sql.ErrNoRows) {
 		return apperr.NotFound("user")
+	}
+	if appdb.IsUniqueViolation(err) {
+		return apperr.Conflict("that phone number is already used by another user")
 	}
 	if err != nil {
 		return apperr.Internal("could not update user", err)
@@ -172,6 +178,10 @@ func (s *Service) DeactivateUser(ctx context.Context, id int64) error {
 
 func (s *Service) ReactivateUser(ctx context.Context, id int64) error {
 	if err := s.repo.Activate(ctx, id); err != nil {
+		// phone is unique among active users — reactivating into a collision fails.
+		if appdb.IsUniqueViolation(err) {
+			return apperr.Conflict("another active user already uses that phone number")
+		}
 		return apperr.Internal("could not reactivate user", err)
 	}
 	return nil

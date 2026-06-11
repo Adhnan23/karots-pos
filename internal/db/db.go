@@ -4,12 +4,13 @@ package db
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"io/fs"
 	"time"
 
 	"github.com/jmoiron/sqlx"
-	_ "github.com/lib/pq"
+	"github.com/lib/pq"
 	"github.com/pressly/goose/v3"
 )
 
@@ -24,6 +25,17 @@ func Connect(dsn string) (*sqlx.DB, error) {
 	db.SetMaxIdleConns(5)
 	db.SetConnMaxLifetime(30 * time.Minute)
 	return db, nil
+}
+
+// IsUniqueViolation reports whether err is a Postgres unique-constraint
+// violation (SQLSTATE 23505) — lets services map a duplicate key to a friendly
+// 409 instead of a generic 500.
+func IsUniqueViolation(err error) bool {
+	var pqErr *pq.Error
+	if errors.As(err, &pqErr) {
+		return pqErr.Code == "23505"
+	}
+	return false
 }
 
 // RunMigrations applies all embedded migrations. The migration FS is injected

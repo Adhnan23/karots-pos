@@ -2,8 +2,41 @@
 
 **Everything compiles** (`go build ./...` clean, `go vet ./...` clean,
 `templ generate` clean). Phases 2–8 are wired, routed, and **smoke-tested live
-over HTTP** (incl. through the final 15M static binary). DB is at migration **19**
+over HTTP** (incl. through the final 15M static binary). DB is at migration **20**
 and seeded. Go module is **`karots-pos`**.
+
+## ✅ Audit fixes — return-credit guard + real phone uniqueness (migration 0020, live-tested)
+
+A "complete project check" found two genuine bugs (most other audit flags were
+false positives or documented design choices — see
+`.claude/plans/cached-meandering-tide.md`):
+
+- **Full sale `Return` after a partial return double-reduced customer credit.**
+  `PartialReturn` already drops the customer balance by the returned portion
+  (without touching `sale.Total`/`PaidAmount`); the full `Return` then removed the
+  whole original `owed` again → over-credit. Only reachable via the fallback
+  `POST /admin|api/sales/:id/return` (the UI always uses line returns). **Fix:**
+  `sales.Service.Return` now rejects a `partially_returned` sale with a 409
+  ("use line returns for the rest"), funnelling the remainder through the
+  credit-correct `PartialReturn`. Live-tested: credit sale → partial-return half
+  (balance halved) → full return → 409, balance unchanged.
+- **`users.phone` was never actually unique** — phone is the LOGIN key, so this
+  was a real data-integrity hole. Root cause: `0001` created a **non-unique**
+  `idx_users_phone`; `0010`'s `CREATE UNIQUE INDEX IF NOT EXISTS idx_users_phone`
+  was a **silent no-op** because the name already existed. Duplicate phones made
+  `FindByPhone` (a single-row `Get`) return an arbitrary active user. **Fix:**
+  migration **0020** drops the non-unique index and creates a **partial** unique
+  index `ON users(phone) WHERE is_active = true` (deactivating any pre-existing
+  active duplicates first, lowest id wins). Partial (active-only) so a retired
+  staffer's phone can be reused after deactivation while login stays unambiguous.
+  `db.IsUniqueViolation(err)` (new helper, SQLSTATE 23505 via `lib/pq`) maps the
+  collision in `auth.CreateUser`/`UpdateUser`/`ReactivateUser` to a friendly 409
+  ("that phone number is already used by another user") instead of a 500.
+  Live-tested: dup-active create/edit → friendly conflict; reuse-after-deactivate
+  → allowed.
+  ⚠️ **`CREATE UNIQUE INDEX IF NOT EXISTS` does NOT upgrade an existing same-named
+  non-unique index** — it no-ops. Drop-then-create (as 0020 does) to change an
+  index's uniqueness.
 
 ## ✅ Supplier payments — per-invoice + history + cash (migration 0019, live-tested)
 

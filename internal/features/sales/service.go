@@ -317,6 +317,13 @@ func (s *Service) Return(ctx context.Context, id int64, userID int64) (*Detail, 
 		if sale.Status == "returned" {
 			return apperr.Conflict("this sale has already been returned")
 		}
+		// A partial return already restocked some lines AND reduced the customer's
+		// credit by that portion. A full return here would remove the full original
+		// owed again, over-crediting the customer — so funnel the remainder through
+		// line-level returns (PartialReturn), which is credit-correct.
+		if sale.Status == "partially_returned" {
+			return apperr.Conflict("this sale was already partially returned — use line returns for the rest")
+		}
 
 		items, err := saleRepo.Items(ctx, id)
 		if err != nil {
