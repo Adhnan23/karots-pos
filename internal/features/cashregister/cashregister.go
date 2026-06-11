@@ -406,6 +406,21 @@ func (s *Service) RecordCreditCash(ctx context.Context, userID int64, amount dec
 	_ = s.repo.AddMovement(ctx, sess.ID, userID, MoveCreditPayment, amount, reason, nil)
 }
 
+// RecordSupplierCash logs cash paid out to a supplier from the cashier's open
+// drawer as a withdrawal (negative, lowering expected cash). Like
+// RecordCreditCash it is a no-op when no session is open, so the supplier-pay
+// page doesn't need to special-case the drawer.
+func (s *Service) RecordSupplierCash(ctx context.Context, userID int64, amount decimal.Decimal, reason string) {
+	if !amount.IsPositive() {
+		return
+	}
+	sess, err := s.repo.FindOpen(ctx, userID)
+	if err != nil {
+		return
+	}
+	_ = s.repo.AddMovement(ctx, sess.ID, userID, MoveWithdrawal, amount.Neg(), reason, nil)
+}
+
 func (s *Service) RecentSessions(ctx context.Context, limit int) ([]SessionRow, error) {
 	rows, err := s.repo.RecentSessions(ctx, limit)
 	if err != nil {

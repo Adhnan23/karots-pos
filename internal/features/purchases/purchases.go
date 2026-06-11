@@ -30,6 +30,9 @@ type Purchase struct {
 	ReceivedByName *string `db:"received_by_name" json:"received_by_name,omitempty"`
 }
 
+// Balance is the still-unpaid amount on this purchase.
+func (p Purchase) Balance() decimal.Decimal { return p.Total.Sub(p.PaidAmount) }
+
 type PurchaseItem struct {
 	ID           int64           `db:"id"            json:"id"`
 	PurchaseID   int64           `db:"purchase_id"   json:"purchase_id"`
@@ -129,6 +132,37 @@ func (r *Repository) Items(ctx context.Context, purchaseID int64) ([]PurchaseIte
 		JOIN products p ON p.id = pi.product_id
 		WHERE pi.purchase_id = $1 ORDER BY pi.id`, purchaseID)
 	return rows, err
+}
+
+// OpenBySupplier lists a supplier's purchases that still owe money (total >
+// paid_amount), oldest first — the queue for allocating a payment.
+func (r *Repository) OpenBySupplier(ctx context.Context, supplierID int64) ([]Purchase, error) {
+	var rows []Purchase
+	err := r.q.SelectContext(ctx, &rows, `
+		SELECT pu.*, s.name AS supplier_name, u.name AS received_by_name
+		FROM purchases pu
+		JOIN suppliers s ON s.id = pu.supplier_id
+		LEFT JOIN users u ON u.id = pu.received_by
+		WHERE pu.supplier_id = $1 AND pu.status <> 'draft' AND pu.total > pu.paid_amount
+		ORDER BY pu.created_at`, supplierID)
+	return rows, err
+}
+
+// ApplyPayment adds to a purchase's paid_amount and recomputes its status
+// (paid when fully settled, otherwise partial). Guarded so it never pays a
+// purchase beyond its total. Returns false if the row couldn't be advanced.
+func (r *Repository) ApplyPayment(ctx context.Context, purchaseID int64, amount decimal.Decimal) (bool, error) {
+	res, err := r.q.ExecContext(ctx, `
+		UPDATE purchases
+		SET paid_amount = paid_amount + $1,
+		    status = CASE WHEN paid_amount + $1 >= total THEN 'paid'::purchase_status
+		                  ELSE 'partial'::purchase_status END
+		WHERE id = $2 AND paid_amount + $1 <= total`, amount, purchaseID)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
 }
 
 func (r *Repository) List(ctx context.Context, limit int) ([]Purchase, error) {

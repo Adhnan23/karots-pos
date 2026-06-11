@@ -16,6 +16,7 @@ import (
 	"karots-pos/internal/features/reports"
 	"karots-pos/internal/features/sales"
 	"karots-pos/internal/features/stock"
+	"karots-pos/internal/features/supplierpay"
 	"karots-pos/internal/features/suppliers"
 	"karots-pos/internal/features/units"
 	"karots-pos/internal/middleware"
@@ -73,11 +74,25 @@ func (a *adminUI) SupplierPayForm(c echo.Context) error {
 	if err != nil {
 		return apperr.BadRequest("invalid id")
 	}
-	s, err := a.s.suppliers.Get(c.Request().Context(), id)
+	ctx := c.Request().Context()
+	s, err := a.s.suppliers.Get(ctx, id)
 	if err != nil {
 		return err
 	}
-	return response.RenderFragment(c, adminpages.SupplierPaymentForm(*s, a.symbol(c.Request().Context())))
+	invoices, err := a.s.supplierPay.OpenInvoices(ctx, id)
+	if err != nil {
+		return err
+	}
+	history, err := a.s.supplierPay.History(ctx, id)
+	if err != nil {
+		return err
+	}
+	return response.RenderFragment(c, adminpages.SupplierPaymentForm(adminpages.SupplierPayData{
+		Supplier: *s,
+		Invoices: invoices,
+		History:  history,
+		Symbol:   a.symbol(ctx),
+	}))
 }
 
 func (a *adminUI) SupplierCreate(c echo.Context) error {
@@ -129,10 +144,61 @@ func (a *adminUI) SupplierPay(c echo.Context) error {
 	if err != nil {
 		return apperr.BadRequest("invalid id")
 	}
-	if err := a.s.suppliers.RecordPayment(c.Request().Context(), id, c.FormValue("amount")); err != nil {
+	ctx := c.Request().Context()
+
+	invoices, err := a.s.supplierPay.OpenInvoices(ctx, id)
+	if err != nil {
 		return err
 	}
-	a.s.logAudit(c, audit.ActionPayment, "supplier", strconv.FormatInt(id, 10), "paid "+c.FormValue("amount"))
+
+	in := supplierpay.PayInput{
+		Method:    c.FormValue("method"),
+		Reference: strings.TrimSpace(c.FormValue("reference")),
+		Note:      strings.TrimSpace(c.FormValue("note")),
+	}
+	// Read the per-invoice allocation inputs the form rendered (alloc_<id>).
+	for _, pu := range invoices {
+		raw := strings.TrimSpace(c.FormValue("alloc_" + strconv.FormatInt(pu.ID, 10)))
+		if raw == "" {
+			continue
+		}
+		amt, perr := money.Parse(raw)
+		if perr != nil || amt.IsNegative() {
+			return apperr.Validation("invalid allocation amount")
+		}
+		if amt.IsZero() {
+			continue
+		}
+		in.Allocations = append(in.Allocations, supplierpay.Alloc{PurchaseID: pu.ID, Amount: amt})
+	}
+	// Fallback for a supplier carrying a balance with no open invoices: a plain
+	// unallocated amount that just reduces the payable.
+	if len(invoices) == 0 {
+		if raw := strings.TrimSpace(c.FormValue("amount")); raw != "" {
+			amt, perr := money.Parse(raw)
+			if perr != nil || amt.IsNegative() {
+				return apperr.Validation("invalid amount")
+			}
+			in.Unallocated = amt
+		}
+	}
+
+	res, err := a.s.supplierPay.Pay(ctx, id, in, middleware.CurrentUserID(c))
+	if err != nil {
+		return err
+	}
+
+	// Cash paid to a supplier leaves the cashier's drawer (no-op without an open
+	// session), mirroring how collected customer credit enters it.
+	if res.Method == "cash" {
+		name := ""
+		if sup, gerr := a.s.suppliers.Get(ctx, id); gerr == nil {
+			name = sup.Name
+		}
+		a.s.cashRegister.RecordSupplierCash(ctx, middleware.CurrentUserID(c), res.Total, "supplier paid: "+name)
+	}
+	a.s.logAudit(c, audit.ActionPayment, "supplier", strconv.FormatInt(id, 10),
+		"paid "+money.Display(res.Total)+" ("+res.Method+")")
 	return htmxDone(c, "Payment recorded", "reload-suppliers")
 }
 

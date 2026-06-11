@@ -13,7 +13,6 @@ import (
 	"karots-pos/internal/config"
 	"karots-pos/internal/db"
 	"karots-pos/internal/middleware"
-	"karots-pos/internal/money"
 	"karots-pos/internal/response"
 
 	"github.com/jmoiron/sqlx"
@@ -50,6 +49,26 @@ func NewRepository(q db.Queryer) *Repository { return &Repository{q: q} }
 func (r *Repository) List(ctx context.Context) ([]Supplier, error) {
 	var rows []Supplier
 	err := r.q.SelectContext(ctx, &rows, `SELECT * FROM suppliers WHERE is_active = true ORDER BY name`)
+	return rows, err
+}
+
+// OwingRow is a supplier we owe money, plus the date of their oldest unpaid
+// purchase (an aging proxy).
+type OwingRow struct {
+	Supplier
+	OldestUnpaid *time.Time `db:"oldest_unpaid" json:"oldest_unpaid,omitempty"`
+}
+
+// Owing lists active suppliers with an outstanding payable, biggest first.
+func (r *Repository) Owing(ctx context.Context) ([]OwingRow, error) {
+	var rows []OwingRow
+	err := r.q.SelectContext(ctx, &rows, `
+		SELECT s.*,
+		       (SELECT MIN(pu.created_at) FROM purchases pu
+		         WHERE pu.supplier_id = s.id AND pu.status <> 'draft' AND pu.total > pu.paid_amount) AS oldest_unpaid
+		FROM suppliers s
+		WHERE s.is_active = true AND s.outstanding_balance > 0
+		ORDER BY s.outstanding_balance DESC`)
 	return rows, err
 }
 
@@ -115,6 +134,15 @@ func (s *Service) List(ctx context.Context) ([]Supplier, error) {
 	return rows, nil
 }
 
+// Owing lists suppliers with an outstanding payable (for the dues report).
+func (s *Service) Owing(ctx context.Context) ([]OwingRow, error) {
+	rows, err := s.repo.Owing(ctx)
+	if err != nil {
+		return nil, apperr.Internal("failed to list supplier dues", err)
+	}
+	return rows, nil
+}
+
 func (s *Service) Get(ctx context.Context, id int64) (*Supplier, error) {
 	sup, err := s.repo.FindByID(ctx, id)
 	if err != nil {
@@ -149,18 +177,6 @@ func (s *Service) Update(ctx context.Context, id int64, in UpdateInput) error {
 func (s *Service) Delete(ctx context.Context, id int64) error {
 	if err := s.repo.Deactivate(ctx, id); err != nil {
 		return apperr.Internal("failed to remove supplier", err)
-	}
-	return nil
-}
-
-// RecordPayment reduces a supplier's outstanding payable.
-func (s *Service) RecordPayment(ctx context.Context, id int64, amountStr string) error {
-	amt, err := money.Parse(amountStr)
-	if err != nil || !amt.IsPositive() {
-		return apperr.Validation("payment amount must be greater than zero")
-	}
-	if err := s.repo.AddBalance(ctx, id, amt.Neg()); err != nil {
-		return apperr.Internal("failed to record payment", err)
 	}
 	return nil
 }

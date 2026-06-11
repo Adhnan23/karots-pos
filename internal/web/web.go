@@ -24,6 +24,7 @@ import (
 	"karots-pos/internal/features/sales"
 	"karots-pos/internal/features/settings"
 	"karots-pos/internal/features/stock"
+	"karots-pos/internal/features/supplierpay"
 	"karots-pos/internal/features/suppliers"
 	"karots-pos/internal/features/units"
 	"karots-pos/internal/middleware"
@@ -44,6 +45,7 @@ type Server struct {
 	customers  *customers.Service
 	stock      *stock.Service
 	suppliers  *suppliers.Service
+	supplierPay *supplierpay.Service
 	purchases  *purchases.Service
 	purchaseReturns *purchasereturns.Service
 	conversions *conversions.Service
@@ -68,6 +70,7 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 		customers:  customers.NewService(db),
 		stock:      stock.NewService(db),
 		suppliers:  suppliers.NewService(db),
+		supplierPay: supplierpay.NewService(db),
 		purchases:  purchases.NewService(db),
 		purchaseReturns: purchasereturns.NewService(db),
 		conversions: conversions.NewService(db),
@@ -190,6 +193,7 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	ag.GET("/reports/purchases", admin.PurchasesReport)
 	ag.GET("/reports/suppliers", admin.SuppliersReport)
 	ag.GET("/reports/customer-dues", admin.CustomerDuesReport)
+	ag.GET("/reports/supplier-dues", admin.SupplierDuesReport)
 	ag.GET("/reports/inventory", admin.InventoryReport)
 	ag.GET("/reports/batches", admin.BatchReport)
 	ag.GET("/reports/expiring", admin.ExpiringReport)

@@ -36,6 +36,7 @@ templ ReportsHub(d ReportsHubData) {
 			@reportCard("/admin/reports/purchases", "Purchases", "GRNs received in a period")
 			@reportCard("/admin/reports/suppliers", "Suppliers", "Outstanding payables snapshot")
 			@reportCard("/admin/reports/customer-dues", "Customer Dues", "Receivables — who owes you money")
+			@reportCard("/admin/reports/supplier-dues", "Supplier Dues", "Payables — who you owe money")
 			@reportCard("/admin/reports/inventory", "Inventory Valuation", "Stock on hand at cost & retail")
 			@reportCard("/admin/reports/batches", "Batches / Expiry", "Live batches and expiry dates")
 			@reportCard("/admin/reports/low-stock", "Low Stock", "Items at or below reorder level")
@@ -367,6 +368,46 @@ templ CustomerDuesReport(d CustomerDuesData) {
 			</tbody>
 			<tfoot class="border-t-2 font-semibold">
 				<tr><td class="py-2" colspan="3">Total receivable</td><td class="py-2 text-right">{ money.Format(d.Symbol, d.TotalDue) }</td><td colspan="2"></td></tr>
+			</tfoot>
+		</table>
+	}
+}
+
+type SupplierDuesData struct {
+	ShopName, Symbol string
+	Rows             []suppliers.OwingRow
+	TotalDue         decimal.Decimal
+}
+
+templ SupplierDuesReport(d SupplierDuesData) {
+	@layouts.Report("Supplier Dues — Payables", d.ShopName) {
+		<table class="w-full text-sm">
+			<thead class="text-left text-slate-500 border-b">
+				<tr><th class="py-1.5">Supplier</th><th class="py-1.5">Phone</th><th class="py-1.5 text-center">Credit days</th><th class="py-1.5 text-right">Outstanding</th><th class="py-1.5 text-right">Oldest unpaid</th><th class="py-1.5 text-right">Age (days)</th></tr>
+			</thead>
+			<tbody>
+				for _, s := range d.Rows {
+					<tr class="border-b last:border-0">
+						<td class="py-1.5 font-medium">{ s.Name }</td>
+						<td class="py-1.5 text-slate-500">{ strOrEmpty(s.Phone) }</td>
+						<td class="py-1.5 text-center">{ strconv.Itoa(s.CreditDays) }</td>
+						<td class="py-1.5 text-right font-medium">{ money.Format(d.Symbol, s.OutstandingBalance) }</td>
+						<td class="py-1.5 text-right text-slate-500">
+							if s.OldestUnpaid != nil {
+								{ s.OldestUnpaid.Format("2006-01-02") }
+							} else {
+								—
+							}
+						</td>
+						<td class="py-1.5 text-right">{ daysSince(s.OldestUnpaid) }</td>
+					</tr>
+				}
+				if len(d.Rows) == 0 {
+					<tr><td colspan="6" class="py-6 text-center text-slate-400">No suppliers to pay. 🎉</td></tr>
+				}
+			</tbody>
+			<tfoot class="border-t-2 font-semibold">
+				<tr><td class="py-2" colspan="3">Total payable</td><td class="py-2 text-right">{ money.Format(d.Symbol, d.TotalDue) }</td><td colspan="2"></td></tr>
 			</tfoot>
 		</table>
 	}

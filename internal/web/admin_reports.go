@@ -165,6 +165,19 @@ func (a *adminUI) CustomerDuesReport(c echo.Context) error {
 	return response.RenderPage(c, adminpages.CustomerDuesReport(d))
 }
 
+func (a *adminUI) SupplierDuesReport(c echo.Context) error {
+	ctx := c.Request().Context()
+	rows, err := a.s.suppliers.Owing(ctx)
+	if err != nil {
+		return err
+	}
+	d := adminpages.SupplierDuesData{ShopName: a.shopName(ctx), Symbol: a.symbol(ctx), Rows: rows}
+	for _, r := range rows {
+		d.TotalDue = d.TotalDue.Add(r.OutstandingBalance)
+	}
+	return response.RenderPage(c, adminpages.SupplierDuesReport(d))
+}
+
 func (a *adminUI) InventoryReport(c echo.Context) error {
 	ctx := c.Request().Context()
 	rows, _, err := a.s.products.List(ctx, products.ListQuery{Limit: 10000})

@@ -3,6 +3,9 @@ package adminpages
 import (
 	"strconv"
 
+	"karots-pos/internal/datetime"
+	"karots-pos/internal/features/purchases"
+	"karots-pos/internal/features/supplierpay"
 	"karots-pos/internal/features/suppliers"
 	"karots-pos/internal/money"
 	"karots-pos/templates/layouts"
@@ -100,15 +103,112 @@ templ SupplierForm(s *suppliers.Supplier) {
 	}
 }
 
-templ SupplierPaymentForm(s suppliers.Supplier, symbol string) {
+type SupplierPayData struct {
+	Supplier suppliers.Supplier
+	Invoices []purchases.Purchase  // open (unpaid/partial) invoices, oldest first
+	History  []supplierpay.Payment // recorded payments, newest first
+	Symbol   string
+}
+
+templ SupplierPaymentForm(d SupplierPayData) {
 	@modalShell("Pay Supplier") {
-		<form class="p-6 space-y-4" hx-post={ "/admin/suppliers/" + strconv.FormatInt(s.ID, 10) + "/payment" } hx-swap="none">
-			<p class="text-sm text-slate-600">{ s.Name } — currently owed <span class="font-semibold">{ money.Format(symbol, s.OutstandingBalance) }</span></p>
+		<form class="p-6 space-y-4" hx-post={ "/admin/suppliers/" + strconv.FormatInt(d.Supplier.ID, 10) + "/payment" } hx-swap="none">
+			<p class="text-sm text-slate-600">{ d.Supplier.Name } — currently owed <span class="font-semibold">{ money.Format(d.Symbol, d.Supplier.OutstandingBalance) }</span></p>
+			if len(d.Invoices) > 0 {
+				<div>
+					<label class="block text-sm font-medium mb-1">Pay invoices (oldest first)</label>
+					<p class="text-xs text-slate-500 mb-2">Each box is pre-filled with the invoice balance — edit or clear the ones you're not paying.</p>
+					<table class="w-full text-sm">
+						<thead class="text-left text-slate-500 border-b">
+							<tr>
+								<th class="py-1.5 pr-2">Invoice</th>
+								<th class="py-1.5 px-2">Date</th>
+								<th class="py-1.5 px-2 text-right">Total</th>
+								<th class="py-1.5 px-2 text-right">Balance</th>
+								<th class="py-1.5 pl-2 text-right">Pay</th>
+							</tr>
+						</thead>
+						<tbody>
+							for _, pu := range d.Invoices {
+								<tr class="border-b last:border-0">
+									<td class="py-1.5 pr-2 font-medium">{ invoiceNo(pu) }</td>
+									<td class="py-1.5 px-2 text-slate-500">{ datetime.Date(pu.CreatedAt) }</td>
+									<td class="py-1.5 px-2 text-right">{ money.Display(pu.Total) }</td>
+									<td class="py-1.5 px-2 text-right">{ money.Display(pu.Balance()) }</td>
+									<td class="py-1.5 pl-2 text-right">
+										<input
+											name={ "alloc_" + strconv.FormatInt(pu.ID, 10) }
+											type="number" step="0.01" min="0"
+											value={ money.Display(pu.Balance()) }
+											class="w-28 border rounded-lg px-2 py-1 text-right"
+										/>
+									</td>
+								</tr>
+							}
+						</tbody>
+					</table>
+				</div>
+			} else {
+				<div>
+					<label class="block text-sm font-medium mb-1">Payment Amount</label>
+					<p class="text-xs text-slate-500 mb-2">No open invoices — this payment just reduces the outstanding balance.</p>
+					<input name="amount" type="number" step="0.01" min="0" required class="w-full border rounded-lg px-3 py-2"/>
+				</div>
+			}
+			<div class="grid grid-cols-2 gap-4">
+				<div>
+					<label class="block text-sm font-medium mb-1">Method</label>
+					<select name="method" class="w-full border rounded-lg px-3 py-2">
+						<option value="cash">Cash</option>
+						<option value="card">Card</option>
+						<option value="online">Online</option>
+					</select>
+				</div>
+				<div>
+					<label class="block text-sm font-medium mb-1">Reference</label>
+					<input name="reference" class="w-full border rounded-lg px-3 py-2" placeholder="cheque / txn no"/>
+				</div>
+			</div>
 			<div>
-				<label class="block text-sm font-medium mb-1">Payment Amount</label>
-				<input name="amount" type="number" step="0.01" min="0" required class="w-full border rounded-lg px-3 py-2"/>
+				<label class="block text-sm font-medium mb-1">Note</label>
+				<input name="note" class="w-full border rounded-lg px-3 py-2"/>
 			</div>
 			@modalButtons()
 		</form>
+		if len(d.History) > 0 {
+			<div class="px-6 pb-6">
+				<h4 class="text-sm font-semibold text-slate-600 mb-2">Payment history</h4>
+				<table class="w-full text-sm">
+					<thead class="text-left text-slate-500 border-b">
+						<tr>
+							<th class="py-1.5 pr-2">Date</th>
+							<th class="py-1.5 px-2">Method</th>
+							<th class="py-1.5 px-2">Reference</th>
+							<th class="py-1.5 px-2">By</th>
+							<th class="py-1.5 pl-2 text-right">Amount</th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, p := range d.History {
+							<tr class="border-b last:border-0">
+								<td class="py-1.5 pr-2 text-slate-500">{ datetime.DateTime(p.CreatedAt) }</td>
+								<td class="py-1.5 px-2 capitalize">{ p.Method }</td>
+								<td class="py-1.5 px-2 text-slate-500">{ strOrEmpty(p.Reference) }</td>
+								<td class="py-1.5 px-2 text-slate-500">{ strOrEmpty(p.PaidByName) }</td>
+								<td class="py-1.5 pl-2 text-right font-medium">{ money.Format(d.Symbol, p.Amount) }</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			</div>
+		}
 	}
+}
+
+// invoiceNo is the displayable invoice label (its number, or #id when blank).
+func invoiceNo(p purchases.Purchase) string {
+	if p.InvoiceNo != nil && *p.InvoiceNo != "" {
+		return *p.InvoiceNo
+	}
+	return "#" + strconv.FormatInt(p.ID, 10)
 }

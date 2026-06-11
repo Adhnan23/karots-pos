@@ -2,8 +2,47 @@
 
 **Everything compiles** (`go build ./...` clean, `go vet ./...` clean,
 `templ generate` clean). Phases 2–8 are wired, routed, and **smoke-tested live
-over HTTP** (incl. through the final 15M static binary). DB is at migration **18**
+over HTTP** (incl. through the final 15M static binary). DB is at migration **19**
 and seeded. Go module is **`karots-pos`**.
+
+## ✅ Supplier payments — per-invoice + history + cash (migration 0019, live-tested)
+
+Supplier payables can now actually be **settled and reconciled**. Previously
+`suppliers.RecordPayment` only decremented the aggregate balance — purchases
+stayed `received` forever, with no history and no cash impact. Now a payment is
+allocated to the specific invoices it pays.
+
+- **DB (migration 0019):** `supplier_payments` (amount, method, reference, note,
+  paid_by, created_at) + `supplier_payment_allocations` (payment_id, purchase_id,
+  amount).
+- **New package `internal/features/supplierpay`** owns the cross-table flow (it
+  can't live in `suppliers` or `purchases` — `purchases` already imports
+  `suppliers`, so either would cycle). `Service.Pay` runs one tx: insert payment,
+  for each allocation advance the purchase's `paid_amount` and recompute `status`
+  (`paid` when fully settled else `partial`, guarded by
+  `purchases.ApplyPayment`'s `WHERE paid_amount+$ <= total` so overpay → 409 and
+  rolls back), then drop the supplier's aggregate balance by the total.
+  `OpenInvoices` (oldest first) and `History` round it out. Unit tests in
+  `supplierpay_test.go`.
+- **Cash impact (web layer, mirrors customer-credit):** when method == cash,
+  `cashregister.RecordSupplierCash` posts a **withdrawal** (negative) into the
+  cashier's open drawer — no-op without an open session. card/online don't touch
+  the drawer.
+- **UI:** the supplier **Pay** modal (`/admin/suppliers/pay/:id`) lists open
+  invoices (oldest first) with balances, each with a pre-filled allocation input
+  (edit/clear what you're paying), plus method/reference/note, and a **payment
+  history** panel below. Suppliers with a balance but no open invoices get a plain
+  amount box (unallocated). The purchases list/detail already show paid/balance/
+  status — now accurate. Handler: `admin_more.go` `SupplierPay`/`SupplierPayForm`.
+- **Report:** `/admin/reports/supplier-dues` (`SupplierDuesReport`, mirrors
+  customer dues) — suppliers with payable > 0 + oldest unpaid purchase date +
+  aging; linked from the reports hub. Query: `suppliers.Owing`.
+- **Live-tested:** 2 credit GRNs → payable 1500; partial pay Rs200 on inv → that
+  invoice `partial`, balance 1300, payment+allocation recorded; pay rest →
+  invoices `paid`, balance 0; history lists both; overpay an open invoice → 409 +
+  full rollback (paid/status/balance unchanged); cash pay → drawer −700 with
+  "supplier paid: …" movement, online pay → drawer unchanged; dues report shows
+  Rs.700 outstanding. ✅
 
 ## ✅ Discounts — fixed/% toggle + live per-item (migration 0018, live-tested)
 
