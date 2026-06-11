@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"database/sql"
 	"time"
 
 	"karots-pos/internal/db"
@@ -57,6 +58,25 @@ func (r *Repository) Create(ctx context.Context, name string, phone *string, rol
 		return nil, err
 	}
 	return &u, nil
+}
+
+func (r *Repository) Update(ctx context.Context, id int64, name string, phone *string, role string) error {
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE users SET name = $1, phone = $2, role = $3 WHERE id = $4`,
+		name, phone, role, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+// UpdatePin resets a user's PIN (the value is already bcrypt-hashed).
+func (r *Repository) UpdatePin(ctx context.Context, id int64, pinHash string) error {
+	_, err := r.db.ExecContext(ctx, `UPDATE users SET pin_hash = $1 WHERE id = $2`, pinHash, id)
+	return err
 }
 
 func (r *Repository) Deactivate(ctx context.Context, id int64) error {

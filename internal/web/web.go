@@ -135,6 +135,7 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	ag.DELETE("/products/:id", admin.ProductDelete)
 
 	ag.GET("/stock", admin.Stock)
+	ag.GET("/stock/movements", admin.StockMovements)
 	ag.GET("/stock/table", admin.StockTable)
 	ag.GET("/stock/form", admin.StockForm)
 	ag.POST("/stock/adjust", admin.StockAdjust)
@@ -175,11 +176,14 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	// Purchase returns (debit notes)
 	ag.GET("/purchase-returns", admin.PurchaseReturns)
 	ag.GET("/purchase-returns/new", admin.PurchaseReturnEntry)
+	ag.GET("/purchase-returns/:id", admin.PurchaseReturnDetail)
 
 	// Expenses
 	ag.GET("/expenses", admin.Expenses)
 	ag.GET("/expenses/form", admin.ExpenseForm)
+	ag.GET("/expenses/form/:id", admin.ExpenseEditForm)
 	ag.POST("/expenses", admin.ExpenseCreate)
+	ag.PUT("/expenses/:id", admin.ExpenseUpdate)
 	ag.DELETE("/expenses/:id", admin.ExpenseDelete)
 
 	// Finance / profit
@@ -249,7 +253,9 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	ag.GET("/users", admin.Users, middleware.RequireRole(auth.RoleAdmin))
 	ag.GET("/users/table", admin.UsersTable, middleware.RequireRole(auth.RoleAdmin))
 	ag.GET("/users/form", admin.UserForm, middleware.RequireRole(auth.RoleAdmin))
+	ag.GET("/users/form/:id", admin.UserEditForm, middleware.RequireRole(auth.RoleAdmin))
 	ag.POST("/users", admin.UserCreate, middleware.RequireRole(auth.RoleAdmin))
+	ag.PUT("/users/:id", admin.UserUpdate, middleware.RequireRole(auth.RoleAdmin))
 	ag.DELETE("/users/:id", admin.UserDeactivate, middleware.RequireRole(auth.RoleAdmin))
 	ag.POST("/users/:id/activate", admin.UserReactivate, middleware.RequireRole(auth.RoleAdmin))
 

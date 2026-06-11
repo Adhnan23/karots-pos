@@ -74,10 +74,42 @@ discount, toggled at the counter; per-item discount is no longer a dead path.
   Water ×3 @90 less 10% = −27; bill 10% off net = −94.30 → subtotal 1030, total
   848.70, change 151.30. On-screen = API = HTML receipt = persisted DB columns. ✅
 
-**Next (planned, not started):** Phase 2 supplier per-invoice payments + history +
-cash impact + supplier-dues report; Phase 3 admin edit handlers (expenses/users/
-purchase returns) + stock-movement history. Plan:
-`.claude/plans/cached-meandering-tide.md`.
+## ✅ Admin gaps & flaw fixes — edit handlers + stock audit trail (no migration, live-tested)
+
+Phase 3 of the plan (`.claude/plans/cached-meandering-tide.md`). No DB change —
+DB stays at migration **19**. Closes the create/delete-only gaps several admin
+features had.
+
+- **Expense edit** (`/admin/expenses/form/:id` GET → modal, `PUT /admin/expenses/:id`):
+  `expenses.Service.Get`/`Update` (parse amount/date like `Create`, `NotFound` on
+  missing). The edit modal reuses `ExpenseForm(e *expenses.Expense)` (nil = create).
+  ⚠️ The amount field prefills with `Amount.StringFixed(2)` **not** `money.Display`
+  — an `<input type="number">` rejects the thousands-separator comma and would
+  render empty. Audited, full-page `HX-Refresh: true`.
+- **User edit incl. PIN reset** (`/admin/users/form/:id` GET, `PUT /admin/users/:id`,
+  both admin-only): `auth.UpdateUserInput{Name,Phone,Role,PIN}` (PIN
+  `omitempty,min=4,max=6,numeric`). `auth.Service.UpdateUser` updates name/phone/
+  role, and **only when PIN is non-blank** bcrypts + `UpdatePin` + invalidates all
+  refresh tokens (`DeleteAllRefreshForUser`) so a reset PIN forces re-login. The
+  form labels the PIN "Reset PIN (leave blank to keep current)" on edit; `roleOption`
+  pre-selects the current role. Live-tested: role cashier→manager persisted, new
+  PIN logs in, old PIN → 401.
+- **Purchase-return detail** (`/admin/purchase-returns/:id`): `purchasereturns.Service.Get`
+  → `PurchaseReturnDetailPage` (stat cards + header + returned-items table with
+  total). View link on the list. **Edit/delete intentionally out of scope** — a
+  posted debit note already moved stock (FEFO) + decremented the payable in one tx;
+  the safe correction is a fresh opposing entry (a normal GRN/purchase), not
+  mutating a historical document. Missing id → 404.
+- **Stock-movement history** (`/admin/stock/movements`): the full audit trail
+  (`StockMovementsPage`) — every in/out with **who** (`user_name` join) and **why**
+  (`note`), filterable by product and type, limit 300. The existing
+  `/admin/stock` panel stays the at-a-glance recent-50 view; this is the
+  browsable/filterable ledger. Linked via a "Movement History" button on the
+  Inventory header. (Raised `stock.ListMovements`' limit cap from 200→500 to allow
+  the 300-row page.)
+
+**Next (planned, not started):** nothing outstanding from
+`.claude/plans/cached-meandering-tide.md` — all three phases shipped.
 
 ## ✅ Phase 8 — owner-requested add-ons (migrations 0012–0013, all live-tested)
 

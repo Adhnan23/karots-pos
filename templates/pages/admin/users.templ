@@ -45,9 +45,10 @@ templ UserRows(rows []auth.User) {
 					<span class="px-2 py-0.5 rounded-full text-xs bg-slate-200 text-slate-600">disabled</span>
 				}
 			</td>
-			<td class="py-2 px-3 text-right">
+			<td class="py-2 px-3 text-right whitespace-nowrap">
 				if u.IsActive {
-					<button class="text-red-600 hover:underline" hx-delete={ "/admin/users/" + strconv.FormatInt(u.ID, 10) } hx-swap="none" hx-confirm={ "Deactivate " + u.Name + "?" }>Deactivate</button>
+					<button class="text-indigo-600 hover:underline" hx-get={ "/admin/users/form/" + strconv.FormatInt(u.ID, 10) } hx-target="#modal-container" hx-swap="innerHTML">Edit</button>
+					<button class="text-red-600 hover:underline ml-3" hx-delete={ "/admin/users/" + strconv.FormatInt(u.ID, 10) } hx-swap="none" hx-confirm={ "Deactivate " + u.Name + "?" }>Deactivate</button>
 				} else {
 					<button class="text-emerald-600 hover:underline" hx-post={ "/admin/users/" + strconv.FormatInt(u.ID, 10) + "/activate" } hx-swap="none" hx-confirm={ "Reactivate " + u.Name + "?" }>Reactivate</button>
 				}
@@ -56,33 +57,67 @@ templ UserRows(rows []auth.User) {
 	}
 }
 
-templ UserForm() {
-	@modalShell("New User") {
-		<form class="p-6 space-y-4" hx-post="/admin/users" hx-swap="none">
+templ UserForm(u *auth.User) {
+	@modalShell(ternary(u == nil, "New User", "Edit User")) {
+		<form class="p-6 space-y-4"
+			if u == nil {
+				hx-post="/admin/users"
+			} else {
+				hx-put={ "/admin/users/" + strconv.FormatInt(u.ID, 10) }
+			}
+			hx-swap="none">
 			<div>
 				<label class="block text-sm font-medium mb-1">Name</label>
-				<input name="name" required class="w-full border rounded-lg px-3 py-2"/>
+				<input name="name" required value={ usrVal(u, "name") } class="w-full border rounded-lg px-3 py-2"/>
 			</div>
 			<div class="grid grid-cols-2 gap-4">
 				<div>
 					<label class="block text-sm font-medium mb-1">Role</label>
 					<select name="role" class="w-full border rounded-lg px-3 py-2">
-						<option value="cashier">Cashier</option>
-						<option value="manager">Manager</option>
-						<option value="admin">Admin</option>
+						@roleOption("cashier", "Cashier", u)
+						@roleOption("manager", "Manager", u)
+						@roleOption("admin", "Admin", u)
 					</select>
 				</div>
 				<div>
 					<label class="block text-sm font-medium mb-1">Phone (login)</label>
-					<input name="phone" required class="w-full border rounded-lg px-3 py-2" placeholder="07XXXXXXXX"/>
+					<input name="phone" required value={ usrVal(u, "phone") } class="w-full border rounded-lg px-3 py-2" placeholder="07XXXXXXXX"/>
 				</div>
 			</div>
 			<p class="text-xs text-slate-500">The user signs in with this phone number + PIN.</p>
 			<div>
-				<label class="block text-sm font-medium mb-1">PIN (4–6 digits)</label>
-				<input name="pin" type="password" inputmode="numeric" required minlength="4" maxlength="6" class="w-full border rounded-lg px-3 py-2"/>
+				if u == nil {
+					<label class="block text-sm font-medium mb-1">PIN (4–6 digits)</label>
+					<input name="pin" type="password" inputmode="numeric" required minlength="4" maxlength="6" class="w-full border rounded-lg px-3 py-2"/>
+				} else {
+					<label class="block text-sm font-medium mb-1">Reset PIN <span class="text-slate-400 font-normal">(leave blank to keep current)</span></label>
+					<input name="pin" type="password" inputmode="numeric" minlength="4" maxlength="6" class="w-full border rounded-lg px-3 py-2"/>
+				}
 			</div>
 			@modalButtons()
 		</form>
 	}
+}
+
+// roleOption renders a <select> option, pre-selecting the user's current role.
+templ roleOption(value, label string, u *auth.User) {
+	if u != nil && u.Role == value {
+		<option value={ value } selected>{ label }</option>
+	} else {
+		<option value={ value }>{ label }</option>
+	}
+}
+
+// usrVal returns a prefilled value for the user edit form (blank when creating).
+func usrVal(u *auth.User, field string) string {
+	if u == nil {
+		return ""
+	}
+	switch field {
+	case "name":
+		return u.Name
+	case "phone":
+		return strOrEmpty(u.Phone)
+	}
+	return ""
 }

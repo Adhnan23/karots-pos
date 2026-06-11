@@ -21,6 +21,10 @@ templ StockPage(d StockData) {
 		<div class="flex items-center justify-between mb-6">
 			<h1 class="text-2xl font-bold">Inventory</h1>
 			<div class="flex gap-2">
+				<a
+					class="px-4 py-2 rounded-lg border font-medium"
+					href="/admin/stock/movements"
+				>Movement History</a>
 				<button
 					class="px-4 py-2 rounded-lg bg-rose-600 text-white font-medium"
 					hx-get="/admin/stock/damage"
@@ -115,6 +119,85 @@ templ MovementRows(rows []stock.Movement) {
 				<td class="py-2 text-right">{ money.Display(m.Quantity) }</td>
 			</tr>
 		}
+	}
+}
+
+type StockMovementsData struct {
+	UserName  string
+	Products  []products.Product
+	Movements []stock.Movement
+	MoveType  string
+	ProductID string
+}
+
+// StockMovementsPage is the full audit trail of stock in/out: who, when, why.
+templ StockMovementsPage(d StockMovementsData) {
+	@layouts.Admin("Stock Movements", d.UserName, "stock") {
+		<div class="flex items-center justify-between mb-6">
+			<h1 class="text-2xl font-bold">Stock Movement History</h1>
+			<a href="/admin/stock" class="text-slate-500 hover:underline">← Back to Inventory</a>
+		</div>
+		<div class="bg-white rounded-2xl shadow-sm p-6">
+			<form class="flex flex-wrap items-end gap-3 mb-4" method="get" action="/admin/stock/movements">
+				<div>
+					<label class="block text-xs text-slate-500 mb-1">Product</label>
+					<select name="product_id" class="border rounded-lg px-2 py-1.5 text-sm">
+						@movProductOption("", "All products", d.ProductID)
+						for _, p := range d.Products {
+							@movProductOption(strconv.FormatInt(p.ID, 10), p.Name, d.ProductID)
+						}
+					</select>
+				</div>
+				<div>
+					<label class="block text-xs text-slate-500 mb-1">Type</label>
+					<select name="type" class="border rounded-lg px-2 py-1.5 text-sm">
+						@moveTypeOption("", "All types", d.MoveType)
+						@moveTypeOption("purchase", "Purchase", d.MoveType)
+						@moveTypeOption("sale", "Sale", d.MoveType)
+						@moveTypeOption("adjust", "Adjustment", d.MoveType)
+						@moveTypeOption("return", "Return", d.MoveType)
+						@moveTypeOption("damage", "Damage", d.MoveType)
+					</select>
+				</div>
+				<button type="submit" class="px-4 py-1.5 rounded-lg bg-indigo-600 text-white text-sm font-medium">Filter</button>
+			</form>
+			<table class="w-full text-sm">
+				<thead class="text-left text-slate-500 border-b">
+					<tr>
+						<th class="py-2 px-3">When</th>
+						<th class="py-2 px-3">Product</th>
+						<th class="py-2 px-3">Type</th>
+						<th class="py-2 px-3 text-right">Qty</th>
+						<th class="py-2 px-3">By</th>
+						<th class="py-2 px-3">Note</th>
+					</tr>
+				</thead>
+				<tbody>
+					if len(d.Movements) == 0 {
+						<tr><td colspan="6" class="py-6 text-center text-slate-500">No movements found.</td></tr>
+					} else {
+						for _, m := range d.Movements {
+							<tr class="border-b last:border-0">
+								<td class="py-2 px-3 text-slate-500 whitespace-nowrap">{ m.CreatedAt.Format("2006-01-02 15:04") }</td>
+								<td class="py-2 px-3">{ m.ProductName }</td>
+								<td class="py-2 px-3 capitalize">{ m.Type }</td>
+								<td class="py-2 px-3 text-right">{ money.Display(m.Quantity) }</td>
+								<td class="py-2 px-3 text-slate-500">{ m.UserName }</td>
+								<td class="py-2 px-3 text-slate-500">{ strOrEmpty(m.Note) }</td>
+							</tr>
+						}
+					}
+				</tbody>
+			</table>
+		</div>
+	}
+}
+
+templ movProductOption(value, label, selected string) {
+	if value == selected {
+		<option value={ value } selected>{ label }</option>
+	} else {
+		<option value={ value }>{ label }</option>
 	}
 }
 

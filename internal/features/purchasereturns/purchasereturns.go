@@ -5,6 +5,8 @@ package purchasereturns
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"time"
 
 	"karots-pos/internal/apperr"
@@ -93,6 +95,19 @@ func (r *Repository) List(ctx context.Context, limit int) ([]PurchaseReturn, err
 	return rows, err
 }
 
+func (r *Repository) FindByID(ctx context.Context, id int64) (*PurchaseReturn, error) {
+	var pr PurchaseReturn
+	err := r.q.GetContext(ctx, &pr, `
+		SELECT pr.*, s.name AS supplier_name
+		FROM purchase_returns pr
+		JOIN suppliers s ON s.id = pr.supplier_id
+		WHERE pr.id = $1`, id)
+	if err != nil {
+		return nil, err
+	}
+	return &pr, nil
+}
+
 func (r *Repository) Items(ctx context.Context, prID int64) ([]Item, error) {
 	var rows []Item
 	err := r.q.SelectContext(ctx, &rows, `
@@ -116,6 +131,22 @@ func (s *Service) List(ctx context.Context) ([]PurchaseReturn, error) {
 		return nil, apperr.Internal("failed to list purchase returns", err)
 	}
 	return rows, nil
+}
+
+// Get loads a debit note with its lines (for the detail view).
+func (s *Service) Get(ctx context.Context, id int64) (*Detail, error) {
+	pr, err := s.repo.FindByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, apperr.NotFound("purchase return")
+		}
+		return nil, apperr.Internal("failed to load purchase return", err)
+	}
+	items, err := s.repo.Items(ctx, id)
+	if err != nil {
+		return nil, apperr.Internal("failed to load purchase return items", err)
+	}
+	return &Detail{Return: *pr, Items: items}, nil
 }
 
 // Create books a debit note: deplete stock FEFO, reduce supplier payable, log it.

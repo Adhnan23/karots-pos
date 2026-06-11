@@ -99,7 +99,7 @@ func (r *Repository) InsertMovement(ctx context.Context, m MovementInput) error 
 }
 
 func (r *Repository) ListMovements(ctx context.Context, productID *int64, mtype string, limit int) ([]Movement, error) {
-	if limit <= 0 || limit > 200 {
+	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
 	var t *string

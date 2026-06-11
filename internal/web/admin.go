@@ -240,6 +240,36 @@ func (a *adminUI) StockTable(c echo.Context) error {
 	return response.RenderFragment(c, adminpages.MovementRows(moves))
 }
 
+// StockMovements is the full stock-movement history: every in/out with who did
+// it and why, filterable by product and type. Unlike the stock-overview page
+// (capped at 50, no filter), this is the audit trail.
+func (a *adminUI) StockMovements(c echo.Context) error {
+	ctx := c.Request().Context()
+	var pid *int64
+	pidStr := c.QueryParam("product_id")
+	if pidStr != "" {
+		if id, perr := strconv.ParseInt(pidStr, 10, 64); perr == nil {
+			pid = &id
+		}
+	}
+	mtype := c.QueryParam("type")
+	moves, err := a.s.stock.Movements(ctx, pid, mtype, 300)
+	if err != nil {
+		return err
+	}
+	prods, _, err := a.s.products.List(ctx, products.ListQuery{Limit: 1000})
+	if err != nil {
+		return err
+	}
+	return response.RenderPage(c, adminpages.StockMovementsPage(adminpages.StockMovementsData{
+		UserName:  middleware.CurrentUserName(c),
+		Products:  prods,
+		Movements: moves,
+		MoveType:  mtype,
+		ProductID: pidStr,
+	}))
+}
+
 func (a *adminUI) StockForm(c echo.Context) error {
 	prods, _, err := a.s.products.List(c.Request().Context(), products.ListQuery{Limit: 100})
 	if err != nil {

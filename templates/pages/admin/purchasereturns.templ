@@ -30,11 +30,12 @@ templ PurchaseReturnsPage(d PurchaseReturnsData) {
 						<th class="py-2 px-3">Supplier</th>
 						<th class="py-2 px-3">Reference</th>
 						<th class="py-2 px-3 text-right">Total</th>
+						<th class="py-2 px-3"></th>
 					</tr>
 				</thead>
 				<tbody>
 					if len(d.Rows) == 0 {
-						<tr><td colspan="4" class="py-6 text-center text-slate-500">No purchase returns yet.</td></tr>
+						<tr><td colspan="5" class="py-6 text-center text-slate-500">No purchase returns yet.</td></tr>
 					} else {
 						for _, r := range d.Rows {
 							<tr class="border-b last:border-0">
@@ -42,10 +43,63 @@ templ PurchaseReturnsPage(d PurchaseReturnsData) {
 								<td class="py-2 px-3 font-medium">{ r.SupplierName }</td>
 								<td class="py-2 px-3">{ strOrEmpty(r.Reference) }</td>
 								<td class="py-2 px-3 text-right">{ money.Format(d.Symbol, r.Total) }</td>
+								<td class="py-2 px-3 text-right">
+									<a class="text-indigo-600 hover:underline" href={ templ.SafeURL("/admin/purchase-returns/" + strconv.FormatInt(r.ID, 10)) }>View</a>
+								</td>
 							</tr>
 						}
 					}
 				</tbody>
+			</table>
+		</div>
+	}
+}
+
+type PurchaseReturnDetailData struct {
+	UserName string
+	Symbol   string
+	Detail   purchasereturns.Detail
+}
+
+templ PurchaseReturnDetailPage(d PurchaseReturnDetailData) {
+	@layouts.Admin("Purchase Return", d.UserName, "purchase-returns") {
+		<div class="flex items-center justify-between mb-6">
+			<h1 class="text-2xl font-bold">Debit Note #{ strconv.FormatInt(d.Detail.Return.ID, 10) }</h1>
+			<a href="/admin/purchase-returns" class="text-slate-500 hover:underline">← Back</a>
+		</div>
+		<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+			@statCard("Total returned", money.Format(d.Symbol, d.Detail.Return.Total), "rose")
+			@statCard("Supplier", d.Detail.Return.SupplierName, "slate")
+		</div>
+		<div class="bg-white rounded-2xl shadow-sm p-6 mb-6 text-sm space-y-1">
+			<div><span class="text-slate-400">When:</span> { d.Detail.Return.CreatedAt.Format("2006-01-02 15:04") }</div>
+			<div><span class="text-slate-400">Reference:</span> { strOrEmpty(d.Detail.Return.Reference) }</div>
+			<div><span class="text-slate-400">Reason:</span> { strOrEmpty(d.Detail.Return.Reason) }</div>
+		</div>
+		<div class="bg-white rounded-2xl shadow-sm p-6">
+			<h2 class="font-semibold mb-3">Returned items</h2>
+			<table class="w-full text-sm">
+				<thead class="text-left text-slate-500 border-b">
+					<tr>
+						<th class="py-2 px-3">Product</th>
+						<th class="py-2 px-3 text-right">Qty</th>
+						<th class="py-2 px-3 text-right">Cost</th>
+						<th class="py-2 px-3 text-right">Subtotal</th>
+					</tr>
+				</thead>
+				<tbody>
+					for _, it := range d.Detail.Items {
+						<tr class="border-b last:border-0">
+							<td class="py-2 px-3 font-medium">{ it.ProductName }</td>
+							<td class="py-2 px-3 text-right">{ money.Display(it.Quantity) }</td>
+							<td class="py-2 px-3 text-right">{ money.Format(d.Symbol, it.CostPrice) }</td>
+							<td class="py-2 px-3 text-right">{ money.Format(d.Symbol, it.Subtotal) }</td>
+						</tr>
+					}
+				</tbody>
+				<tfoot class="border-t-2 font-semibold">
+					<tr><td class="py-2 px-3" colspan="3">Total</td><td class="py-2 px-3 text-right">{ money.Format(d.Symbol, d.Detail.Return.Total) }</td></tr>
+				</tfoot>
 			</table>
 		</div>
 	}

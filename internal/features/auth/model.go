@@ -50,6 +50,15 @@ type CreateUserInput struct {
 	PIN   string `json:"pin"   form:"pin"   validate:"required,min=4,max=6,numeric"`
 }
 
+// UpdateUserInput edits a user's profile/role and optionally resets the PIN
+// (leave PIN blank to keep the current one).
+type UpdateUserInput struct {
+	Name  string `json:"name"  form:"name"  validate:"required,min=2,max=100"`
+	Phone string `json:"phone" form:"phone" validate:"required,min=4,max=15"`
+	Role  string `json:"role"  form:"role"  validate:"required,oneof=admin manager cashier"`
+	PIN   string `json:"pin"   form:"pin"   validate:"omitempty,min=4,max=6,numeric"`
+}
+
 type RefreshInput struct {
 	RefreshToken string `json:"refresh_token" validate:"required"`
 }

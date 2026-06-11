@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"time"
 
 	"karots-pos/internal/apperr"
@@ -125,6 +126,41 @@ func (s *Service) CreateUser(ctx context.Context, in CreateUserInput) (*User, er
 		return nil, apperr.Internal("could not create user", err)
 	}
 	return u, nil
+}
+
+// GetUser loads a single active user (for the edit form).
+func (s *Service) GetUser(ctx context.Context, id int64) (*User, error) {
+	u, err := s.repo.FindByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, apperr.NotFound("user")
+		}
+		return nil, apperr.Internal("could not load user", err)
+	}
+	return u, nil
+}
+
+// UpdateUser edits a user's name/phone/role and, when a new PIN is supplied,
+// resets it. A PIN reset revokes the user's refresh tokens so old sessions die.
+func (s *Service) UpdateUser(ctx context.Context, id int64, in UpdateUserInput) error {
+	err := s.repo.Update(ctx, id, in.Name, &in.Phone, in.Role)
+	if errors.Is(err, sql.ErrNoRows) {
+		return apperr.NotFound("user")
+	}
+	if err != nil {
+		return apperr.Internal("could not update user", err)
+	}
+	if strings.TrimSpace(in.PIN) != "" {
+		hash, herr := bcrypt.GenerateFromPassword([]byte(in.PIN), bcrypt.DefaultCost)
+		if herr != nil {
+			return apperr.Internal("could not hash PIN", herr)
+		}
+		if uerr := s.repo.UpdatePin(ctx, id, string(hash)); uerr != nil {
+			return apperr.Internal("could not reset PIN", uerr)
+		}
+		_ = s.repo.DeleteAllRefreshForUser(ctx, id)
+	}
+	return nil
 }
 
 func (s *Service) DeactivateUser(ctx context.Context, id int64) error {

@@ -267,6 +267,23 @@ func (a *adminUI) PurchaseReturns(c echo.Context) error {
 	}))
 }
 
+func (a *adminUI) PurchaseReturnDetail(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	ctx := c.Request().Context()
+	d, err := a.s.purchaseReturns.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	return response.RenderPage(c, adminpages.PurchaseReturnDetailPage(adminpages.PurchaseReturnDetailData{
+		UserName: middleware.CurrentUserName(c),
+		Symbol:   a.symbol(ctx),
+		Detail:   *d,
+	}))
+}
+
 func (a *adminUI) PurchaseReturnEntry(c echo.Context) error {
 	ctx := c.Request().Context()
 	sups, err := a.s.suppliers.List(ctx)
@@ -316,7 +333,40 @@ func (a *adminUI) Expenses(c echo.Context) error {
 }
 
 func (a *adminUI) ExpenseForm(c echo.Context) error {
-	return response.RenderFragment(c, adminpages.ExpenseForm())
+	return response.RenderFragment(c, adminpages.ExpenseForm(nil))
+}
+
+func (a *adminUI) ExpenseEditForm(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	e, err := a.s.expenses.Get(c.Request().Context(), id)
+	if err != nil {
+		return err
+	}
+	return response.RenderFragment(c, adminpages.ExpenseForm(e))
+}
+
+func (a *adminUI) ExpenseUpdate(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	var in expenses.CreateInput
+	if err := c.Bind(&in); err != nil {
+		return apperr.BadRequest("invalid form")
+	}
+	if err := c.Validate(&in); err != nil {
+		return err
+	}
+	if err := a.s.expenses.Update(c.Request().Context(), id, in); err != nil {
+		return err
+	}
+	a.s.logAudit(c, audit.ActionUpdate, "expense", strconv.FormatInt(id, 10), "updated expense")
+	c.Response().Header().Set("HX-Trigger", response.ToastAnd("Expense updated", "success", "close-modal"))
+	c.Response().Header().Set("HX-Refresh", "true")
+	return c.NoContent(200)
 }
 
 func (a *adminUI) ExpenseDelete(c echo.Context) error {
@@ -876,7 +926,38 @@ func (a *adminUI) UsersTable(c echo.Context) error {
 }
 
 func (a *adminUI) UserForm(c echo.Context) error {
-	return response.RenderFragment(c, adminpages.UserForm())
+	return response.RenderFragment(c, adminpages.UserForm(nil))
+}
+
+func (a *adminUI) UserEditForm(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	u, err := a.s.auth.GetUser(c.Request().Context(), id)
+	if err != nil {
+		return err
+	}
+	return response.RenderFragment(c, adminpages.UserForm(u))
+}
+
+func (a *adminUI) UserUpdate(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	var in auth.UpdateUserInput
+	if err := c.Bind(&in); err != nil {
+		return apperr.BadRequest("invalid form")
+	}
+	if err := c.Validate(&in); err != nil {
+		return err
+	}
+	if err := a.s.auth.UpdateUser(c.Request().Context(), id, in); err != nil {
+		return err
+	}
+	a.s.logAudit(c, audit.ActionUpdate, "user", strconv.FormatInt(id, 10), "updated user "+in.Name+" ("+in.Role+")")
+	return htmxDone(c, "User updated", "reload-users")
 }
 
 func (a *adminUI) UserCreate(c echo.Context) error {

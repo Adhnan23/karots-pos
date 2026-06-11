@@ -3,6 +3,8 @@ package expenses
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"strconv"
 	"strings"
 	"time"
@@ -72,6 +74,32 @@ func (r *Repository) Create(ctx context.Context, category string, amount decimal
 	return &e, nil
 }
 
+func (r *Repository) FindByID(ctx context.Context, id int64) (*Expense, error) {
+	var e Expense
+	err := r.q.GetContext(ctx, &e, `
+		SELECT e.*, u.name AS paid_by_name
+		FROM expenses e
+		LEFT JOIN users u ON u.id = e.paid_by
+		WHERE e.id = $1`, id)
+	if err != nil {
+		return nil, err
+	}
+	return &e, nil
+}
+
+func (r *Repository) Update(ctx context.Context, id int64, category string, amount decimal.Decimal, desc *string, date time.Time) error {
+	res, err := r.q.ExecContext(ctx, `
+		UPDATE expenses SET category=$1, amount=$2, description=$3, expense_date=$4 WHERE id=$5`,
+		category, amount, desc, date, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
 func (r *Repository) Delete(ctx context.Context, id int64) error {
 	_, err := r.q.ExecContext(ctx, `DELETE FROM expenses WHERE id = $1`, id)
 	return err
@@ -119,6 +147,39 @@ func (s *Service) Create(ctx context.Context, in CreateInput, userID int64) (*Ex
 		return nil, apperr.Internal("failed to record expense", err)
 	}
 	return e, nil
+}
+
+func (s *Service) Get(ctx context.Context, id int64) (*Expense, error) {
+	e, err := s.repo.FindByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, apperr.NotFound("expense")
+		}
+		return nil, apperr.Internal("failed to load expense", err)
+	}
+	return e, nil
+}
+
+func (s *Service) Update(ctx context.Context, id int64, in CreateInput) error {
+	amt, err := money.Parse(in.Amount)
+	if err != nil || !amt.IsPositive() {
+		return apperr.Validation("amount must be greater than zero")
+	}
+	date := time.Now()
+	if strings.TrimSpace(in.ExpenseDate) != "" {
+		date, err = time.Parse("2006-01-02", in.ExpenseDate)
+		if err != nil {
+			return apperr.Validation("date must be YYYY-MM-DD")
+		}
+	}
+	err = s.repo.Update(ctx, id, strings.TrimSpace(in.Category), amt, in.Description, date)
+	if errors.Is(err, sql.ErrNoRows) {
+		return apperr.NotFound("expense")
+	}
+	if err != nil {
+		return apperr.Internal("failed to update expense", err)
+	}
+	return nil
 }
 
 func (s *Service) Delete(ctx context.Context, id int64) error {
