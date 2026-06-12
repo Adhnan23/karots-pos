@@ -32,8 +32,16 @@ services:
       JWT_EXPIRES_IN: 12h
       JWT_REFRESH_EXPIRES_IN: 168h
       CORS_ORIGINS: http://localhost:3000
+      # Automatic backups (in-process, pure Go). The volume keeps them off the
+      # DB's data volume; for true durability sync this path off-site.
+      BACKUP_DIR: /data/backups
+      BACKUP_INTERVAL: 6h
+      BACKUP_KEEP: "28"
     ports:
       - "3000:3000"
+    volumes:
+      - pos_backups:/data/backups
 
 volumes:
   postgres_data:
+  pos_backups:

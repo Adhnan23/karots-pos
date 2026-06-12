@@ -13,6 +13,7 @@ import (
 	"time"
 	_ "time/tzdata" // embed the timezone database so local-time formatting works on any host
 
+	"karots-pos/internal/backup"
 	"karots-pos/internal/config"
 	"karots-pos/internal/db"
 	"karots-pos/internal/features/audit"
@@ -105,6 +106,19 @@ func main() {
 	// UI routes (HTMX + Templ)
 	web.RegisterUI(e, sqlxDB, cfg, authSvc)
 
+	// Background context cancelled on shutdown so long-lived workers stop cleanly.
+	bgCtx, bgCancel := context.WithCancel(context.Background())
+	defer bgCancel()
+
+	// Automatic time-based backups (in-process, same pure-Go path as the manual
+	// Settings backup). Disabled unless BACKUP_DIR is set.
+	if cfg.BackupDir != "" {
+		log.Printf("auto-backup: enabled (dir=%s, every %s, keep %d)", cfg.BackupDir, cfg.BackupInterval, cfg.BackupKeep)
+		go backup.RunScheduler(bgCtx, sqlxDB, cfg.BackupDir, cfg.BackupInterval, cfg.BackupKeep)
+	} else {
+		log.Printf("auto-backup: disabled (set BACKUP_DIR to enable)")
+	}
+
 	// Start with graceful shutdown.
 	go func() {
 		addr := fmt.Sprintf(":%d", cfg.ServerPort)
@@ -118,6 +132,7 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 	log.Println("shutting down…")
+	bgCancel()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := e.Shutdown(ctx); err != nil {

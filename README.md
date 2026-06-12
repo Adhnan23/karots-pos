@@ -105,7 +105,10 @@ reports (plus dashboard badges) read straight off this ledger.
 - **Backup & restore** — one-click backup download and restore-from-file in
   Settings. Runs **entirely over the database connection** (pure Go, gzipped
   data snapshot) — no `pg_dump`/`psql`, no Docker CLI, nothing to install. Works
-  the same whether Postgres is in a container or on a remote VPS.
+  the same whether Postgres is in a container or on a remote VPS. Set `BACKUP_DIR`
+  to also run **automatic time-based backups** in-process (same snapshot format;
+  default every 6h, keeping the last 28). Point `BACKUP_DIR` at a mounted volume
+  or an off-site-synced path — a backup on the DB's own disk won't survive disk loss.
 - **Partial sale returns** — return any quantity of any line; restocks, splits
   refund vs credit, flows `completed → partially_returned → returned`.
 - **Purchase returns (debit notes)** — send goods back to a supplier; FEFO

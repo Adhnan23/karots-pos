@@ -1,5 +1,9 @@
 # Printing (receipts & labels)
 
+> First-time installation (including the quick printer setup) lives in **`SETUP.md`**.
+> This document is the in-depth reference: paper widths, labels/TSPL, logo
+> rasterization, and full troubleshooting.
+
 Receipts print **server-side as ESC/POS** straight from the Go app to the thermal
 printer. The browser is not involved — no print dialog, no PDF, no driver. This is
 the reliable path for cheap thermal printers (Xprinter POS-80 etc.).
@@ -11,7 +15,13 @@ the reliable path for cheap thermal printers (Xprinter POS-80 etc.).
 - The handler builds the receipt as ESC/POS bytes (`internal/escpos`) using the
   printer's **built-in font** — sized to the shop's paper width, with header/totals
   formatting and an automatic **feed + partial cut** at the end.
-- Bytes are sent to CUPS with `lp -o raw` (`internal/escpos/printer.go`).
+- Bytes are sent to the printer raw, untouched, via `internal/printing`. The
+  transport is platform-specific behind build tags: **Linux** uses CUPS (`lp -o
+  raw` / `lpstat -e`, `printing_unix.go`); **Windows** uses the print spooler's RAW
+  datatype via `winspool.drv` (`printing_windows.go`); and a **`tcp://host:9100`**
+  target sends straight to a network printer over a socket on any OS. The renderers
+  (`internal/escpos`, `internal/tspl`, `internal/receiptimg`) are OS-independent —
+  only the ~transport differs per platform.
 
 Because it uses the built-in font and an explicit cut, the receipt is the exact
 length of its content (no A4, no 1-metre over-feed) and prints the correct
@@ -37,13 +47,9 @@ printers) uses the same setting via a per-page `@page { size }`.
    ```
 
 2. Tell the app which queue to use. **Admin → Settings → Printers & Labels** has a
-   **Receipt printer** dropdown (auto-filled from the queues CUPS reports). Pick the
-   receipt queue there. The `RECEIPT_PRINTER` env var in `.env` is only a fallback
-   used when that setting is left on "System default":
-   ```
-   RECEIPT_PRINTER=POS80
-   ```
-   If both are empty, the **system default printer** is used.
+   **Receipt printer** field (auto-suggests the printers the OS reports). Pick the
+   receipt queue there. Leave it blank to use the **system default printer**. There
+   is no environment variable — printer selection lives entirely in Settings.
 
 That's it — no `about:config`, no `--kiosk-printing`, no browser print settings.
 
@@ -71,9 +77,9 @@ barcode, so there's no image library and the binary stays self-contained.
    Find the exact device URI with `lpinfo -v`. (CUPS warns that raw queues are
    deprecated; they still work. The alternative is a queue with the vendor's
    PPD set to send data unfiltered.)
-2. **Admin → Settings → Printers & Labels**: set the **Label printer** dropdown to
-   that queue, and the **default label size** (default 50 × 25 mm). `LABEL_PRINTER`
-   in `.env` is the fallback when the setting is "System default".
+2. **Admin → Settings → Printers & Labels**: set the **Label printer** field to
+   that queue, and the **default label size** (default 50 × 25 mm). Leave it blank
+   for the system default.
 
 ### Sticker size
 

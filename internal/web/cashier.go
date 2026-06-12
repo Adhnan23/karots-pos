@@ -141,13 +141,10 @@ func (h *cashierUI) receiptOptions(ctx context.Context, cfg *settings.Settings) 
 	return opts
 }
 
-// receiptQueue resolves the print queue: the one chosen in Settings, else the
-// RECEIPT_PRINTER env fallback (else CUPS default when both are empty).
+// receiptQueue is the print target chosen in Settings (a detected printer name,
+// a "tcp://host:9100" network address, or empty = the OS default printer).
 func (h *cashierUI) receiptQueue(cfg *settings.Settings) string {
-	if cfg.ReceiptPrinter != "" {
-		return cfg.ReceiptPrinter
-	}
-	return h.s.cfg.ReceiptPrinter
+	return cfg.ReceiptPrinter
 }
 
 // printRefundSlip prints the refund slip for a sale's latest return. Best-effort:

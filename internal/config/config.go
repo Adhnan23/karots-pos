@@ -20,27 +20,29 @@ type Config struct {
 	JWTRefreshTTL time.Duration
 	CORSOrigins   []string
 	CookieSecure  bool
-	// ReceiptPrinter is the CUPS queue name for thermal receipts. Empty means
-	// use the system default destination. The queue must be a raw queue so the
-	// ESC/POS bytes pass through unmodified. Used as a fallback when the
-	// receipt_printer setting is blank.
-	ReceiptPrinter string
-	// LabelPrinter is the CUPS queue name for the barcode label printer, used as
-	// a fallback when the label_printer setting is blank. Must also be a raw queue.
-	LabelPrinter string
+	// BackupDir is where automatic time-based backups are written. Empty disables
+	// the scheduler (manual backup/restore in the UI is unaffected). It should
+	// point at a mounted volume or off-site-synced path — a backup on the DB's own
+	// disk does not survive disk/host loss.
+	BackupDir string
+	// BackupInterval is how often an automatic backup runs (when BackupDir is set).
+	BackupInterval time.Duration
+	// BackupKeep is how many automatic backup files to retain (oldest pruned).
+	BackupKeep int
 }
 
 func Load() *Config {
 	c := &Config{
-		Env:           getEnv("APP_ENV", "development"),
-		DatabaseURL:   mustEnv("DATABASE_URL"),
-		ServerPort:    mustInt("SERVER_PORT", 3000),
-		JWTSecret:     mustEnv("JWT_SECRET"),
-		JWTAccessTTL:  mustDuration("JWT_EXPIRES_IN", 15*time.Minute),
-		JWTRefreshTTL: mustDuration("JWT_REFRESH_EXPIRES_IN", 7*24*time.Hour),
-		CORSOrigins:   strings.Split(getEnv("CORS_ORIGINS", "http://localhost:3000"), ","),
-		ReceiptPrinter: getEnv("RECEIPT_PRINTER", ""),
-		LabelPrinter:   getEnv("LABEL_PRINTER", ""),
+		Env:            getEnv("APP_ENV", "development"),
+		DatabaseURL:    mustEnv("DATABASE_URL"),
+		ServerPort:     mustInt("SERVER_PORT", 3000),
+		JWTSecret:      mustEnv("JWT_SECRET"),
+		JWTAccessTTL:   mustDuration("JWT_EXPIRES_IN", 15*time.Minute),
+		JWTRefreshTTL:  mustDuration("JWT_REFRESH_EXPIRES_IN", 7*24*time.Hour),
+		CORSOrigins:    strings.Split(getEnv("CORS_ORIGINS", "http://localhost:3000"), ","),
+		BackupDir:      getEnv("BACKUP_DIR", ""),
+		BackupInterval: mustDuration("BACKUP_INTERVAL", 6*time.Hour),
+		BackupKeep:     mustInt("BACKUP_KEEP", 28),
 	}
 	c.CookieSecure = c.Env == "production"
 	if len(c.JWTSecret) < 32 {

@@ -175,6 +175,16 @@ for the standard docker Postgres user), `TRUNCATE … RESTART IDENTITY CASCADE`,
 reload, then `setval` each serial sequence. Verified: backup→add sale/customer→
 restore reverts counts and a subsequent insert gets a fresh non-colliding id.
 
+**Automatic backups** (`internal/backup/scheduler.go`, wired in `cmd/server/main.go`):
+when `BACKUP_DIR` is set, a goroutine writes the same gzipped snapshot to
+`BACKUP_DIR/pos-backup-<ts>.json.gz` immediately and then every `BACKUP_INTERVAL`
+(default 6h), pruning to the newest `BACKUP_KEEP` files (default 28). `WriteSnapshot`
+writes to a `.tmp` then renames (no half-files); the loop logs every run and
+swallows errors so a backup hiccup never crashes the POS; it stops on shutdown via
+the cancelled background context. Empty `BACKUP_DIR` disables it (logged at start).
+In `docker-compose.yml` it writes to the `pos_backups` volume — sync that off-site
+for real durability.
+
 ## ✅ Phase 7 — Management reports (printable / PDF, all live-tested)
 
 A **Reports** hub (`/admin/reports`, sidebar "All Reports (print)") of management
@@ -531,8 +541,12 @@ Browser printing to the Xprinter (POS-80, USB raw CUPS queue `POS80`) failed:
 Firefox sent a PDF to a driverless raw queue, so the printer printed the PDF
 source as text → CJK garbage + ~1m of paper. **Fixed**: the Go app builds the
 receipt as ESC/POS bytes (`internal/escpos`, 80/58mm from `settings.receipt_width`,
-built-in font, feed+cut) and sends them via `lp -o raw`
-(`POST /cashier/print/:id`). Print Bill + Reprint buttons use it; `RECEIPT_PRINTER`
-env selects the queue (default = system default). The CUPS queue must stay **raw**.
-Live-tested: job is ~1 KB vs the old ~19 KB PDF. See PRINTING.md. Unit tests in
-`internal/escpos/escpos_test.go`.
+built-in font, feed+cut) and sends them raw via `internal/printing`
+(`POST /cashier/print/:id`). Print Bill + Reprint buttons use it; the queue is
+chosen in **Admin → Settings** (a detected printer, a `tcp://host:9100` network
+address, or blank = system default) — no env var. The transport is per-platform
+behind build tags: CUPS `lp -o raw` on Linux (`printing_unix.go`), the Windows
+spooler RAW datatype via winspool on Windows (`printing_windows.go`), and a direct
+socket for `tcp://` targets. The CUPS queue must stay **raw**. Live-tested: job is
+~1 KB (text) vs the old ~19 KB PDF. See PRINTING.md. Unit tests in
+`internal/escpos/escpos_test.go` and `internal/printing/printing_test.go`.

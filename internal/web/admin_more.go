@@ -680,11 +680,9 @@ func (s *Server) sendLabel(c echo.Context) error {
 	}
 	w, h, gap := resolveLabelSize(c, cfg.LabelWidthMM, cfg.LabelHeightMM, cfg.LabelGapMM)
 
-	// Prefer the queue chosen in Settings; fall back to the LABEL_PRINTER env.
+	// The print target chosen in Settings (a detected printer name, a
+	// "tcp://host:9100" network address, or empty = the OS default printer).
 	queue := cfg.LabelPrinter
-	if queue == "" {
-		queue = s.cfg.LabelPrinter
-	}
 	doc := tspl.Document(tspl.Input{
 		Name:      req.Name,
 		Code:      req.Code,

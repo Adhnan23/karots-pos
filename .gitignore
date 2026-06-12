@@ -2,5 +2,6 @@
 /tmp/
 /karots-pos
 .env
+/backups/
 *_templ.go
 *.log
