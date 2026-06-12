@@ -149,6 +149,30 @@ function toast(message, level) {
   window.dispatchEvent(new CustomEvent("show-toast", { detail: { message, level } }));
 }
 
+// generateBarcode fills the barcode input in the button's .bc-field wrapper with
+// a fresh, unused EAN-13 from the server. Dispatching "input" keeps any Alpine
+// x-model (label-page preview) in sync. Reachable by any role via the session
+// cookie (same-origin fetch).
+async function generateBarcode(btn) {
+  const input = btn.closest(".bc-field")?.querySelector("input");
+  if (!input) return;
+  btn.disabled = true;
+  try {
+    const res = await fetch("/api/products/barcode/generate", { credentials: "same-origin" });
+    const json = await res.json();
+    if (!res.ok || !json.success) {
+      throw new Error(json?.error?.message || "Could not generate a barcode");
+    }
+    input.value = json.data.barcode;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  } catch (e) {
+    toast(e.message || "Could not generate a barcode", "error");
+  } finally {
+    btn.disabled = false;
+  }
+}
+window.generateBarcode = generateBarcode;
+
 // printBill sends a sale to the thermal printer server-side (ESC/POS via CUPS).
 // This replaces opening the HTML receipt + window.print(), which a driverless
 // raw thermal queue mis-prints as PDF garbage. apiFetch toasts on failure.
@@ -189,6 +213,11 @@ function pos(symbol, defaultType) {
     showWithdraw: false,
     withdrawAmount: 0,
     withdrawReason: "",
+    showDeposit: false,
+    depositAmount: 0,
+    depositReason: "",
+    showAddCustomer: false,
+    newCustomer: { name: "", phone: "", credit_limit: "" },
     closeResult: null,
     receipt: null,
     // Parked carts (hold / resume).
@@ -221,11 +250,13 @@ function pos(symbol, defaultType) {
       if (el.select) el.select();
     },
     anyModalOpen() {
-      return this.showHolds || this.showWithdraw || this.showClose || !!this.receipt;
+      return this.showHolds || this.showWithdraw || this.showDeposit || this.showAddCustomer || this.showClose || !!this.receipt;
     },
     closeModals() {
       this.showHolds = false;
       this.showWithdraw = false;
+      this.showDeposit = false;
+      this.showAddCustomer = false;
       this.showClose = false;
       this.closeResult = null;
       this.receipt = null;
@@ -366,6 +397,12 @@ function pos(symbol, defaultType) {
         toast("Enter an amount to withdraw", "error");
         return;
       }
+      // Can't take out more than the drawer holds (server enforces this too).
+      const available = Number(this.summary?.expected);
+      if (!Number.isNaN(available) && Number(this.withdrawAmount) > available) {
+        toast("Can't withdraw more than what's in the drawer", "error");
+        return;
+      }
       await apiFetch("POST", "/api/cash-register/withdraw", {
         amount: String(this.withdrawAmount),
         reason: this.withdrawReason,
@@ -375,6 +412,37 @@ function pos(symbol, defaultType) {
       this.withdrawReason = "";
       await this.loadSummary();
       toast("Cash withdrawn", "success");
+    },
+    async deposit() {
+      if (Number(this.depositAmount) <= 0) {
+        toast("Enter an amount to deposit", "error");
+        return;
+      }
+      await apiFetch("POST", "/api/cash-register/pay-in", {
+        amount: String(this.depositAmount),
+        reason: this.depositReason,
+      });
+      this.showDeposit = false;
+      this.depositAmount = 0;
+      this.depositReason = "";
+      await this.loadSummary();
+      toast("Cash deposited", "success");
+    },
+    async addCustomer() {
+      if (!this.newCustomer.name.trim()) {
+        toast("Enter a customer name", "error");
+        return;
+      }
+      const json = await apiFetch("POST", "/api/customers", {
+        name: this.newCustomer.name.trim(),
+        phone: this.newCustomer.phone.trim() || null,
+        credit_limit: String(this.newCustomer.credit_limit || "0"),
+      });
+      await this.loadCustomers();
+      this.customerId = String(json.data.id); // select the new customer
+      this.showAddCustomer = false;
+      this.newCustomer = { name: "", phone: "", credit_limit: "" };
+      toast("Customer added", "success");
     },
 
     // --- hold / park sale ---

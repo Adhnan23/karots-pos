@@ -11,6 +11,7 @@ import (
 type CustomersData struct {
 	UserName string
 	Symbol   string
+	Search   string
 	Rows     []customers.Customer
 }
 
@@ -26,6 +27,21 @@ templ CustomersPage(d CustomersData) {
 			>+ New Customer</button>
 		</div>
 		<div class="bg-white rounded-2xl shadow-sm p-6">
+			<form
+				class="flex flex-wrap gap-3 mb-4"
+				hx-get="/admin/customers/table"
+				hx-trigger="input changed delay:300ms from:input[name='search'], reload-customers from:body"
+				hx-target="#customer-tbody"
+				hx-swap="innerHTML"
+			>
+				<input
+					type="search"
+					name="search"
+					value={ d.Search }
+					placeholder="Search by name or phone…"
+					class="flex-1 min-w-[14rem] max-w-sm border rounded-lg px-3 py-2"
+				/>
+			</form>
 			<table class="w-full text-sm">
 				<thead class="text-left text-slate-500 border-b">
 					<tr>
@@ -37,13 +53,7 @@ templ CustomersPage(d CustomersData) {
 						<th class="py-2 px-3"></th>
 					</tr>
 				</thead>
-				<tbody
-					id="customer-tbody"
-					hx-get="/admin/customers/table"
-					hx-trigger="reload-customers from:body"
-					hx-target="#customer-tbody"
-					hx-swap="innerHTML"
-				>
+				<tbody id="customer-tbody">
 					@CustomerRows(d.Rows, d.Symbol)
 				</tbody>
 			</table>
@@ -56,16 +66,26 @@ templ CustomerRows(rows []customers.Customer, symbol string) {
 		<tr><td colspan="6" class="py-6 text-center text-slate-500">No customers yet.</td></tr>
 	} else {
 		for _, c := range rows {
-			<tr class="border-b last:border-0">
-				<td class="py-2 px-3 font-medium">{ c.Name }</td>
+			<tr class={ "border-b last:border-0", templ.KV("opacity-50", !c.IsActive) }>
+				<td class="py-2 px-3 font-medium">
+					{ c.Name }
+					if !c.IsActive {
+						<span class="ml-2 px-2 py-0.5 rounded-full text-xs bg-slate-200 text-slate-600">disabled</span>
+					}
+				</td>
 				<td class="py-2 px-3">{ strOrEmpty(c.Phone) }</td>
 				<td class="py-2 px-3 text-right">{ money.Format(symbol, c.CreditLimit) }</td>
 				<td class="py-2 px-3 text-right">{ money.Format(symbol, c.OutstandingBalance) }</td>
 				<td class="py-2 px-3">{ strconv.Itoa(c.LoyaltyPoints) } pts</td>
 				<td class="py-2 px-3 text-right whitespace-nowrap">
-					<button class="text-indigo-600 hover:underline" hx-get={ "/admin/customers/form/" + strconv.FormatInt(c.ID, 10) } hx-target="#modal-container" hx-swap="innerHTML">Edit</button>
-					if c.OutstandingBalance.IsPositive() {
-						<button class="text-emerald-600 hover:underline ml-3" hx-get={ "/admin/customers/pay/" + strconv.FormatInt(c.ID, 10) } hx-target="#modal-container" hx-swap="innerHTML">Pay</button>
+					if c.IsActive {
+						<button class="text-indigo-600 hover:underline" hx-get={ "/admin/customers/form/" + strconv.FormatInt(c.ID, 10) } hx-target="#modal-container" hx-swap="innerHTML">Edit</button>
+						if c.OutstandingBalance.IsPositive() {
+							<button class="text-emerald-600 hover:underline ml-3" hx-get={ "/admin/customers/pay/" + strconv.FormatInt(c.ID, 10) } hx-target="#modal-container" hx-swap="innerHTML">Pay</button>
+						}
+						<button class="text-red-600 hover:underline ml-3" hx-delete={ "/admin/customers/" + strconv.FormatInt(c.ID, 10) } hx-swap="none" hx-confirm={ "Deactivate " + c.Name + "?" }>Deactivate</button>
+					} else {
+						<button class="text-emerald-600 hover:underline" hx-post={ "/admin/customers/" + strconv.FormatInt(c.ID, 10) + "/activate" } hx-swap="none" hx-confirm={ "Reactivate " + c.Name + "?" }>Reactivate</button>
 					}
 				</td>
 			</tr>

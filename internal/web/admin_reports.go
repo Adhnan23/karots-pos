@@ -141,7 +141,7 @@ func (a *adminUI) PurchasesReport(c echo.Context) error {
 
 func (a *adminUI) SuppliersReport(c echo.Context) error {
 	ctx := c.Request().Context()
-	rows, err := a.s.suppliers.List(ctx)
+	rows, err := a.s.suppliers.List(ctx, "")
 	if err != nil {
 		return err
 	}

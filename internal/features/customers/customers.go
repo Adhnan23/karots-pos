@@ -120,6 +120,31 @@ func (r *Repository) AddBalance(ctx context.Context, id int64, delta decimal.Dec
 	return err
 }
 
+// ListAll includes inactive customers (for the admin list, so they can be
+// reactivated). Active first, then by name. Search matches name/phone.
+func (r *Repository) ListAll(ctx context.Context, search string) ([]Customer, error) {
+	var rows []Customer
+	var s *string
+	if strings.TrimSpace(search) != "" {
+		s = &search
+	}
+	err := r.q.SelectContext(ctx, &rows, `
+		SELECT * FROM customers
+		WHERE ($1::text IS NULL OR name ILIKE '%' || $1 || '%' OR phone ILIKE '%' || $1 || '%')
+		ORDER BY is_active DESC, name LIMIT 100`, s)
+	return rows, err
+}
+
+func (r *Repository) Deactivate(ctx context.Context, id int64) error {
+	_, err := r.q.ExecContext(ctx, `UPDATE customers SET is_active=false WHERE id=$1`, id)
+	return err
+}
+
+func (r *Repository) Reactivate(ctx context.Context, id int64) error {
+	_, err := r.q.ExecContext(ctx, `UPDATE customers SET is_active=true WHERE id=$1`, id)
+	return err
+}
+
 func (r *Repository) Update(ctx context.Context, id int64, name string, phone, address *string, limit decimal.Decimal) error {
 	res, err := r.q.ExecContext(ctx,
 		`UPDATE customers SET name=$1, phone=$2, address=$3, credit_limit=$4 WHERE id=$5 AND is_active=true`,
@@ -191,6 +216,32 @@ func (s *Service) Update(ctx context.Context, id int64, in UpdateInput) error {
 	}
 	if err != nil {
 		return apperr.Internal("failed to update customer", err)
+	}
+	return nil
+}
+
+// ListAll returns active + inactive customers for the admin list.
+func (s *Service) ListAll(ctx context.Context, search string) ([]Customer, error) {
+	rows, err := s.repo.ListAll(ctx, search)
+	if err != nil {
+		return nil, apperr.Internal("failed to list customers", err)
+	}
+	return rows, nil
+}
+
+// Delete soft-deletes a customer (sets is_active=false). Sales/credit history is
+// preserved; the customer just drops out of the active list and POS picker.
+func (s *Service) Delete(ctx context.Context, id int64) error {
+	if err := s.repo.Deactivate(ctx, id); err != nil {
+		return apperr.Internal("failed to remove customer", err)
+	}
+	return nil
+}
+
+// Reactivate restores a soft-deleted customer.
+func (s *Service) Reactivate(ctx context.Context, id int64) error {
+	if err := s.repo.Reactivate(ctx, id); err != nil {
+		return apperr.Internal("failed to reactivate customer", err)
 	}
 	return nil
 }

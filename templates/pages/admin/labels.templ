@@ -67,7 +67,10 @@ templ LabelsPage(d LabelsData) {
 					<input type="hidden" name="custom" value="1"/>
 					<div>
 						<label class="block text-sm font-medium mb-1">Barcode value</label>
-						<input name="code" required x-model="cCode" x-on:input="renderCustom()" placeholder="e.g. 4001234567890" class="w-full border rounded-lg px-3 py-2"/>
+						<div class="bc-field flex gap-2">
+							<input name="code" required x-model="cCode" x-on:input="renderCustom()" placeholder="e.g. 4001234567890" class="flex-1 border rounded-lg px-3 py-2"/>
+							<button type="button" onclick="generateBarcode(this)" class="px-3 py-2 rounded-lg border text-slate-700 whitespace-nowrap disabled:opacity-40">Generate</button>
+						</div>
 					</div>
 					<div class="grid grid-cols-2 gap-4">
 						<div>

@@ -114,6 +114,7 @@ templ POS(d POSData) {
 								<option x-bind:value="c.id" x-text="c.name"></option>
 							</template>
 						</select>
+						<button type="button" x-on:click="showAddCustomer = true" title="Add customer" class="px-2.5 py-1.5 rounded-lg border text-sm text-slate-600">+</button>
 					</div>
 
 					<div class="flex-1 overflow-auto p-4 space-y-2">
@@ -217,9 +218,10 @@ templ POS(d POSData) {
 							<span x-text="summary ? (sym + ' ' + money(summary.expected)) : ''"></span>
 						</div>
 						<div class="flex gap-2">
+							<button x-on:click="showDeposit = true" class="flex-1 py-2 rounded-lg border text-sm text-slate-600">Deposit</button>
 							<button x-on:click="showWithdraw = true" class="flex-1 py-2 rounded-lg border text-sm text-slate-600">Withdraw</button>
-							<button x-on:click="startClose()" class="flex-1 py-2 rounded-lg border text-sm text-slate-600">Close Register</button>
 						</div>
+						<button x-on:click="startClose()" class="w-full py-2 rounded-lg border text-sm text-slate-600">Close Register</button>
 						<!-- Keyboard shortcut legend (desktop only) -->
 						<div class="hidden lg:flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-400 pt-1">
 							<span><kbd>F2</kbd> Search</span>
@@ -259,6 +261,40 @@ templ POS(d POSData) {
 						<template x-if="holds.length === 0">
 							<p class="text-sm text-slate-400 py-6 text-center">No held sales.</p>
 						</template>
+					</div>
+				</div>
+			</div>
+
+			<!-- Deposit modal -->
+			<div x-show="showDeposit" x-cloak class="fixed inset-0 bg-black/40 z-40 flex items-center justify-center p-4">
+				<div class="bg-white rounded-2xl shadow-xl w-80 p-6">
+					<h3 class="text-lg font-semibold mb-1">Deposit Cash</h3>
+					<p class="text-sm text-slate-500 mb-4">Add cash to the drawer (owner top-up, extra float, etc.).</p>
+					<label class="block text-sm font-medium mb-1">Amount</label>
+					<input type="number" step="0.01" min="0" x-model.number="depositAmount" class="w-full border rounded-lg px-3 py-2 mb-3"/>
+					<label class="block text-sm font-medium mb-1">Reason</label>
+					<input x-model="depositReason" class="w-full border rounded-lg px-3 py-2 mb-4" placeholder="owner top-up, extra float…"/>
+					<div class="flex gap-2">
+						<button x-on:click="showDeposit = false" class="flex-1 py-2 rounded-lg border">Cancel</button>
+						<button x-on:click="deposit()" class="flex-1 py-2 rounded-lg bg-emerald-600 text-white font-medium">Deposit</button>
+					</div>
+				</div>
+			</div>
+
+			<!-- Add customer modal -->
+			<div x-show="showAddCustomer" x-cloak class="fixed inset-0 bg-black/40 z-40 flex items-center justify-center p-4">
+				<div class="bg-white rounded-2xl shadow-xl w-80 p-6">
+					<h3 class="text-lg font-semibold mb-1">Add Customer</h3>
+					<p class="text-sm text-slate-500 mb-4">Create a customer without leaving the till.</p>
+					<label class="block text-sm font-medium mb-1">Name</label>
+					<input x-model="newCustomer.name" class="w-full border rounded-lg px-3 py-2 mb-3" placeholder="Customer name"/>
+					<label class="block text-sm font-medium mb-1">Phone</label>
+					<input x-model="newCustomer.phone" class="w-full border rounded-lg px-3 py-2 mb-3" placeholder="Optional"/>
+					<label class="block text-sm font-medium mb-1">Credit limit</label>
+					<input type="number" step="0.01" min="0" x-model="newCustomer.credit_limit" class="w-full border rounded-lg px-3 py-2 mb-4" placeholder="0.00"/>
+					<div class="flex gap-2">
+						<button x-on:click="showAddCustomer = false" class="flex-1 py-2 rounded-lg border">Cancel</button>
+						<button x-on:click="addCustomer()" class="flex-1 py-2 rounded-lg bg-indigo-600 text-white font-medium">Add</button>
 					</div>
 				</div>
 			</div>

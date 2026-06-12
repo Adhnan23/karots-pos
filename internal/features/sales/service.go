@@ -297,6 +297,18 @@ func (s *Service) Get(ctx context.Context, id int64) (*Detail, error) {
 	return s.loadDetail(ctx, s.repo, id)
 }
 
+// ReturnReceipt loads the most recent return on a sale for a printed refund slip.
+func (s *Service) ReturnReceipt(ctx context.Context, saleID int64) (*ReturnReceipt, error) {
+	rr, err := s.repo.LatestReturn(ctx, saleID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, apperr.NotFound("return")
+		}
+		return nil, apperr.Internal("failed to load return", err)
+	}
+	return rr, nil
+}
+
 // Return reverses a completed sale: every line is restocked and audited, any
 // credit balance the sale created is removed from the customer, and the sale is
 // marked 'returned' (which also excludes it from revenue in reports). One tx.
@@ -399,8 +411,11 @@ type PartialReturnInput struct {
 // (into a return batch), reduces the customer's credit for the credit portion
 // and treats the rest as a cash refund, records the return, and moves the sale
 // to 'partially_returned' (or 'returned' when nothing is left). One tx.
-func (s *Service) PartialReturn(ctx context.Context, saleID int64, in PartialReturnInput, userID int64) (*Detail, error) {
+// The returned decimal is the cash-refund portion (refund value minus any credit
+// reduction), so the caller can post it to the cashier's drawer ledger.
+func (s *Service) PartialReturn(ctx context.Context, saleID int64, in PartialReturnInput, userID int64) (*Detail, decimal.Decimal, error) {
 	var detail *Detail
+	cashRefund := decimal.Zero
 	err := appdb.WithTx(ctx, s.db, func(tx *sqlx.Tx) error {
 		saleRepo := NewRepository(tx)
 		stkRepo := stock.NewRepository(tx)
@@ -482,6 +497,7 @@ func (s *Service) PartialReturn(ctx context.Context, saleID int64, in PartialRet
 			}
 		}
 		refund := totalRefundValue.Sub(creditReduction)
+		cashRefund = refund
 		if err := saleRepo.SetReturnTotals(ctx, returnID, refund, creditReduction); err != nil {
 			return apperr.Internal("failed to finalize return", err)
 		}
@@ -507,9 +523,9 @@ func (s *Service) PartialReturn(ctx context.Context, saleID int64, in PartialRet
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, decimal.Zero, err
 	}
-	return detail, nil
+	return detail, cashRefund, nil
 }
 
 func (s *Service) loadDetail(ctx context.Context, repo *Repository, id int64) (*Detail, error) {

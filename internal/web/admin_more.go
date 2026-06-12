@@ -34,24 +34,45 @@ import (
 
 func (a *adminUI) Suppliers(c echo.Context) error {
 	ctx := c.Request().Context()
-	rows, err := a.s.suppliers.List(ctx)
+	search := c.QueryParam("search")
+	owing := c.QueryParam("owing") == "1"
+	rows, err := a.s.suppliers.List(ctx, search)
 	if err != nil {
 		return err
+	}
+	if owing {
+		rows = suppliersOwing(rows)
 	}
 	return response.RenderPage(c, adminpages.SuppliersPage(adminpages.SuppliersData{
 		UserName: middleware.CurrentUserName(c),
 		Symbol:   a.symbol(ctx),
+		Search:   search,
+		Owing:    owing,
 		Rows:     rows,
 	}))
 }
 
 func (a *adminUI) SuppliersTable(c echo.Context) error {
 	ctx := c.Request().Context()
-	rows, err := a.s.suppliers.List(ctx)
+	rows, err := a.s.suppliers.List(ctx, c.QueryParam("search"))
 	if err != nil {
 		return err
 	}
+	if c.QueryParam("owing") == "1" {
+		rows = suppliersOwing(rows)
+	}
 	return response.RenderFragment(c, adminpages.SupplierRows(rows, a.symbol(ctx)))
+}
+
+// suppliersOwing keeps only suppliers with an outstanding payable balance.
+func suppliersOwing(rows []suppliers.Supplier) []suppliers.Supplier {
+	out := rows[:0]
+	for _, s := range rows {
+		if s.OutstandingBalance.IsPositive() {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 func (a *adminUI) SupplierForm(c echo.Context) error {
@@ -236,7 +257,7 @@ func (a *adminUI) PurchaseDetail(c echo.Context) error {
 
 func (a *adminUI) PurchaseEntry(c echo.Context) error {
 	ctx := c.Request().Context()
-	sups, err := a.s.suppliers.List(ctx)
+	sups, err := a.s.suppliers.List(ctx, "")
 	if err != nil {
 		return err
 	}
@@ -286,7 +307,7 @@ func (a *adminUI) PurchaseReturnDetail(c echo.Context) error {
 
 func (a *adminUI) PurchaseReturnEntry(c echo.Context) error {
 	ctx := c.Request().Context()
-	sups, err := a.s.suppliers.List(ctx)
+	sups, err := a.s.suppliers.List(ctx, "")
 	if err != nil {
 		return err
 	}

@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"log"
 	"strconv"
 	"time"
 
@@ -140,6 +141,34 @@ func (h *cashierUI) receiptOptions(ctx context.Context, cfg *settings.Settings) 
 	return opts
 }
 
+// receiptQueue resolves the print queue: the one chosen in Settings, else the
+// RECEIPT_PRINTER env fallback (else CUPS default when both are empty).
+func (h *cashierUI) receiptQueue(cfg *settings.Settings) string {
+	if cfg.ReceiptPrinter != "" {
+		return cfg.ReceiptPrinter
+	}
+	return h.s.cfg.ReceiptPrinter
+}
+
+// printRefundSlip prints the refund slip for a sale's latest return. Best-effort:
+// any failure (no return rows, no printer) is logged and swallowed so the return
+// flow is never blocked by printing.
+func (h *cashierUI) printRefundSlip(ctx context.Context, saleID int64) {
+	rr, err := h.s.sales.ReturnReceipt(ctx, saleID)
+	if err != nil {
+		log.Printf("refund slip: load return for sale %d: %v", saleID, err)
+		return
+	}
+	cfg, err := h.s.settings.Get(ctx)
+	if err != nil {
+		log.Printf("refund slip: load settings: %v", err)
+		return
+	}
+	if err := escpos.Send(ctx, h.receiptQueue(cfg), escpos.ReturnDocument(*rr, *cfg, h.receiptOptions(ctx, cfg))); err != nil {
+		log.Printf("refund slip: print for sale %d: %v", saleID, err)
+	}
+}
+
 func (h *cashierUI) PrintReceipt(c echo.Context) error {
 	ctx := c.Request().Context()
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
@@ -154,12 +183,7 @@ func (h *cashierUI) PrintReceipt(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	// Prefer the queue chosen in Settings; fall back to the RECEIPT_PRINTER env.
-	queue := cfg.ReceiptPrinter
-	if queue == "" {
-		queue = h.s.cfg.ReceiptPrinter
-	}
-	if err := escpos.Send(ctx, queue, escpos.Document(*detail, *cfg, h.receiptOptions(ctx, cfg))); err != nil {
+	if err := escpos.Send(ctx, h.receiptQueue(cfg), escpos.Document(*detail, *cfg, h.receiptOptions(ctx, cfg))); err != nil {
 		return apperr.Internal("could not print receipt", err)
 	}
 	// Feedback for the HTMX reprint button; the Alpine apiFetch path toasts itself.
@@ -267,11 +291,17 @@ func (h *cashierUI) ReturnSubmit(c echo.Context) error {
 	if err := c.Validate(&in); err != nil {
 		return err
 	}
-	detail, err := h.s.sales.PartialReturn(c.Request().Context(), id, in, middleware.CurrentUserID(c))
+	detail, cashRefund, err := h.s.sales.PartialReturn(c.Request().Context(), id, in, middleware.CurrentUserID(c))
 	if err != nil {
 		return err
 	}
 	h.s.logAudit(c, audit.ActionReturn, "sale", strconv.FormatInt(id, 10), "partial return")
+	// A cash refund leaves the cashier's drawer; record it so the close
+	// reconciliation stays accurate (no-op when no session is open).
+	h.s.cashRegister.RecordRefundCash(c.Request().Context(), middleware.CurrentUserID(c), cashRefund, "cash refund: "+detail.Sale.ReceiptNo)
+	// Hand the customer a refund slip. Non-fatal: a printer problem must never
+	// fail the return itself (the goods are already restocked / credit adjusted).
+	h.printRefundSlip(c.Request().Context(), id)
 	return response.OK(c, detail)
 }
 

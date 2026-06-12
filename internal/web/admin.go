@@ -337,20 +337,22 @@ func (a *adminUI) Sales(c echo.Context) error {
 
 func (a *adminUI) Customers(c echo.Context) error {
 	ctx := c.Request().Context()
-	rows, err := a.s.customers.List(ctx, "")
+	search := c.QueryParam("search")
+	rows, err := a.s.customers.ListAll(ctx, search)
 	if err != nil {
 		return err
 	}
 	return response.RenderPage(c, adminpages.CustomersPage(adminpages.CustomersData{
 		UserName: middleware.CurrentUserName(c),
 		Symbol:   a.symbol(ctx),
+		Search:   search,
 		Rows:     rows,
 	}))
 }
 
 func (a *adminUI) CustomersTable(c echo.Context) error {
 	ctx := c.Request().Context()
-	rows, err := a.s.customers.List(ctx, "")
+	rows, err := a.s.customers.ListAll(ctx, c.QueryParam("search"))
 	if err != nil {
 		return err
 	}
@@ -373,6 +375,30 @@ func (a *adminUI) CustomerCreate(c echo.Context) error {
 		return err
 	}
 	return htmxDone(c, "Customer created", "reload-customers")
+}
+
+func (a *adminUI) CustomerDelete(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	if err := a.s.customers.Delete(c.Request().Context(), id); err != nil {
+		return err
+	}
+	a.s.logAudit(c, audit.ActionDelete, "customer", strconv.FormatInt(id, 10), "")
+	return htmxReload(c, "Customer deactivated", "reload-customers")
+}
+
+func (a *adminUI) CustomerReactivate(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	if err := a.s.customers.Reactivate(c.Request().Context(), id); err != nil {
+		return err
+	}
+	a.s.logAudit(c, audit.ActionUpdate, "customer", strconv.FormatInt(id, 10), "reactivated")
+	return htmxReload(c, "Customer reactivated", "reload-customers")
 }
 
 // --- settings ---

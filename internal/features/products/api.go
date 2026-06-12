@@ -49,6 +49,16 @@ func (h *APIHandler) GetByBarcode(c echo.Context) error {
 	return response.OK(c, p)
 }
 
+// GenerateBarcode returns a fresh, unused EAN-13 for the "Generate" button next
+// to barcode inputs (product form + label pages).
+func (h *APIHandler) GenerateBarcode(c echo.Context) error {
+	code, err := h.svc.GenerateBarcode(c.Request().Context())
+	if err != nil {
+		return err
+	}
+	return response.OK(c, map[string]string{"barcode": code})
+}
+
 func (h *APIHandler) Create(c echo.Context) error {
 	var in CreateInput
 	if err := c.Bind(&in); err != nil {
@@ -102,6 +112,7 @@ func RegisterAPI(e *echo.Echo, db *sqlx.DB, cfg *config.Config) {
 	g := e.Group("/api/products", jwt)
 	g.GET("", api.List)
 	g.GET("/:id", api.Get)
+	g.GET("/barcode/generate", api.GenerateBarcode)
 	g.GET("/barcode/:code", api.GetByBarcode)
 	g.POST("", api.Create, manage)
 	g.PUT("/:id", api.Update, manage)

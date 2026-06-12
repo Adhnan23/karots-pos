@@ -378,6 +378,22 @@ func (s *Service) adjust(ctx context.Context, userID int64, in MovementInput, mt
 		}
 		return nil, apperr.Internal("failed to load session", err)
 	}
+	// A withdrawal can never exceed the cash currently in the drawer (opening +
+	// cash sales + net adjustments — the same balance the close reconciles to).
+	if mtype == MoveWithdrawal {
+		cashSales, cerr := s.sales.CashCollectedSince(ctx, userID, sess.OpenedAt)
+		if cerr != nil {
+			return nil, cerr
+		}
+		adj, aerr := s.repo.AdjustmentTotal(ctx, sess.ID)
+		if aerr != nil {
+			return nil, apperr.Internal("failed to total cash movements", aerr)
+		}
+		available := sess.OpeningCash.Add(cashSales).Add(adj)
+		if amt.GreaterThan(available) {
+			return nil, apperr.Validation("cannot withdraw more than the " + money.Display(available) + " currently in the drawer")
+		}
+	}
 	signed := amt
 	if negate {
 		signed = amt.Neg()
@@ -404,6 +420,21 @@ func (s *Service) RecordCreditCash(ctx context.Context, userID int64, amount dec
 		return
 	}
 	_ = s.repo.AddMovement(ctx, sess.ID, userID, MoveCreditPayment, amount, reason, nil)
+}
+
+// RecordRefundCash logs a cash refund paid out of the cashier's open drawer for
+// a return (negative, lowering expected cash). Like the other Record* helpers it
+// is a no-op when no session is open or the amount isn't positive, so the return
+// handler doesn't need to special-case the drawer.
+func (s *Service) RecordRefundCash(ctx context.Context, userID int64, amount decimal.Decimal, reason string) {
+	if !amount.IsPositive() {
+		return
+	}
+	sess, err := s.repo.FindOpen(ctx, userID)
+	if err != nil {
+		return
+	}
+	_ = s.repo.AddMovement(ctx, sess.ID, userID, MoveRefund, amount.Neg(), reason, nil)
 }
 
 // RecordSupplierCash logs cash paid out to a supplier from the cashier's open

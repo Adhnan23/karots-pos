@@ -72,6 +72,40 @@ func TestDocumentIsASCIIAndCut(t *testing.T) {
 	}
 }
 
+func TestReturnDocumentIsASCIIAndCut(t *testing.T) {
+	d := decimal.RequireFromString
+	reason := "damaged item"
+	rr := sales.ReturnReceipt{
+		ReceiptNo:       "R-0001",
+		CreatedAt:       time.Date(2026, 6, 11, 9, 0, 0, 0, time.UTC),
+		Reason:          &reason,
+		Refund:          d("400.00"),
+		CreditReduction: d("100.00"),
+		Items: []sales.ReturnReceiptItem{
+			{ProductName: "Onion", UnitAbbr: "kg", Quantity: d("1.00"), Refund: d("400.00")},
+		},
+	}
+	out := ReturnDocument(rr, cfg("80"), Options{})
+
+	if out[0] != esc || out[1] != '@' {
+		t.Fatalf("expected ESC @ init")
+	}
+	if !strings.HasSuffix(string(out), string([]byte{gs, 'V', 1})) {
+		t.Fatalf("expected partial-cut at end")
+	}
+	for i, b := range out {
+		if b >= 0x80 {
+			t.Fatalf("non-ASCII byte 0x%x at offset %d", b, i)
+		}
+	}
+	text := string(out)
+	for _, want := range []string{"Karots Store", "*** REFUND ***", "R-0001", "Onion", "CASH REFUND", "Rs. 400.00", "Credit reduced", "Refund slip"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("refund slip missing %q", want)
+		}
+	}
+}
+
 func TestColumnsByWidth(t *testing.T) {
 	if got := columns("58"); got != 32 {
 		t.Errorf("58mm => %d, want 32", got)

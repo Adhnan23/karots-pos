@@ -68,7 +68,9 @@ func (h *APIHandler) PartialReturn(c echo.Context) error {
 	if err := c.Validate(&in); err != nil {
 		return err
 	}
-	detail, err := h.svc.PartialReturn(c.Request().Context(), id, in, middleware.CurrentUserID(c))
+	// Drawer recording for cash refunds is wired on the cashier UI path
+	// (web.ReturnSubmit); the JSON API surface returns the detail only.
+	detail, _, err := h.svc.PartialReturn(c.Request().Context(), id, in, middleware.CurrentUserID(c))
 	if err != nil {
 		return err
 	}

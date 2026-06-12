@@ -46,9 +46,18 @@ type Repository struct{ q db.Queryer }
 
 func NewRepository(q db.Queryer) *Repository { return &Repository{q: q} }
 
-func (r *Repository) List(ctx context.Context) ([]Supplier, error) {
+func (r *Repository) List(ctx context.Context, search string) ([]Supplier, error) {
 	var rows []Supplier
-	err := r.q.SelectContext(ctx, &rows, `SELECT * FROM suppliers WHERE is_active = true ORDER BY name`)
+	var s *string
+	if strings.TrimSpace(search) != "" {
+		s = &search
+	}
+	err := r.q.SelectContext(ctx, &rows, `
+		SELECT * FROM suppliers
+		WHERE is_active = true
+		  AND ($1::text IS NULL OR name ILIKE '%' || $1 || '%'
+		       OR contact_person ILIKE '%' || $1 || '%' OR phone ILIKE '%' || $1 || '%')
+		ORDER BY name`, s)
 	return rows, err
 }
 
@@ -126,8 +135,8 @@ type Service struct {
 
 func NewService(db *sqlx.DB) *Service { return &Service{db: db, repo: NewRepository(db)} }
 
-func (s *Service) List(ctx context.Context) ([]Supplier, error) {
-	rows, err := s.repo.List(ctx)
+func (s *Service) List(ctx context.Context, search string) ([]Supplier, error) {
+	rows, err := s.repo.List(ctx, search)
 	if err != nil {
 		return nil, apperr.Internal("failed to list suppliers", err)
 	}
@@ -186,7 +195,7 @@ type APIHandler struct{ svc *Service }
 func NewAPIHandler(svc *Service) *APIHandler { return &APIHandler{svc: svc} }
 
 func (h *APIHandler) List(c echo.Context) error {
-	rows, err := h.svc.List(c.Request().Context())
+	rows, err := h.svc.List(c.Request().Context(), c.QueryParam("search"))
 	if err != nil {
 		return err
 	}

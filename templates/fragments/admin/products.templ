@@ -108,7 +108,10 @@ templ ProductForm(p *products.Product, cats []categories.Category, us []units.Un
 				</div>
 				<div>
 					<label class="block text-sm font-medium mb-1">Barcode</label>
-					<input name="barcode" value={ valOf(p, fBarcode) } class="w-full border rounded-lg px-3 py-2"/>
+					<div class="bc-field flex gap-2">
+						<input name="barcode" value={ valOf(p, fBarcode) } class="flex-1 border rounded-lg px-3 py-2"/>
+						<button type="button" onclick="generateBarcode(this)" class="px-3 py-2 rounded-lg border text-slate-700 whitespace-nowrap disabled:opacity-40">Generate</button>
+					</div>
 				</div>
 				<div class="grid grid-cols-3 gap-4">
 					<div>

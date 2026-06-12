@@ -201,6 +201,47 @@ func (r *Repository) InsertSaleReturnItem(ctx context.Context, returnID, saleIte
 	return err
 }
 
+// ReturnReceipt is the data for a printed refund slip: the most recent return on
+// a sale, with its returned lines and refund/credit split.
+type ReturnReceipt struct {
+	ReturnID        int64           `db:"id"`
+	ReceiptNo       string          `db:"receipt_no"`
+	CreatedAt       time.Time       `db:"created_at"`
+	Reason          *string         `db:"reason"`
+	Refund          decimal.Decimal `db:"refund_amount"`
+	CreditReduction decimal.Decimal `db:"credit_reduction"`
+	Items           []ReturnReceiptItem
+}
+
+type ReturnReceiptItem struct {
+	ProductName string          `db:"product_name"`
+	UnitAbbr    string          `db:"unit_abbr"`
+	Quantity    decimal.Decimal `db:"quantity"`
+	Refund      decimal.Decimal `db:"refund_amount"`
+}
+
+// LatestReturn loads the most recent return on a sale plus its line items, for
+// printing a refund slip right after a return is processed.
+func (r *Repository) LatestReturn(ctx context.Context, saleID int64) (*ReturnReceipt, error) {
+	var rr ReturnReceipt
+	if err := r.q.GetContext(ctx, &rr, `
+		SELECT sr.id, s.receipt_no, sr.created_at, sr.reason, sr.refund_amount, sr.credit_reduction
+		FROM sale_returns sr JOIN sales s ON s.id = sr.sale_id
+		WHERE sr.sale_id = $1 ORDER BY sr.id DESC LIMIT 1`, saleID); err != nil {
+		return nil, err
+	}
+	if err := r.q.SelectContext(ctx, &rr.Items, `
+		SELECT p.name AS product_name, u.abbreviation AS unit_abbr, sri.quantity, sri.refund_amount
+		FROM sale_return_items sri
+		JOIN products p ON p.id = sri.product_id
+		JOIN units u ON u.id = p.unit_id
+		WHERE sri.return_id = $1
+		ORDER BY sri.id`, rr.ReturnID); err != nil {
+		return nil, err
+	}
+	return &rr, nil
+}
+
 func (r *Repository) FindByID(ctx context.Context, id int64) (*Sale, error) {
 	var s Sale
 	err := r.q.GetContext(ctx, &s, `

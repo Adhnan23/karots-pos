@@ -169,6 +169,80 @@ func Document(d sales.Detail, cfg settings.Settings, opts Options) []byte {
 	return b.Bytes()
 }
 
+// ReturnDocument builds the ESC/POS byte stream for a refund slip — the proof a
+// customer is handed after a return. It mirrors Document's header/footer but
+// lists only the returned lines and the refund/credit split.
+func ReturnDocument(rr sales.ReturnReceipt, cfg settings.Settings, opts Options) []byte {
+	w := columns(cfg.ReceiptWidth)
+	sym := cfg.CurrencySymbol
+	if sym == "" {
+		sym = "Rs."
+	}
+
+	var b bytes.Buffer
+	b.Write([]byte{esc, '@'})
+	b.Write([]byte{esc, 't', 0})
+
+	// --- Header (centered) ---
+	b.Write([]byte{esc, 'a', 1})
+	if len(opts.Logo) > 0 {
+		b.Write(opts.Logo)
+		line(&b, "")
+	}
+	b.Write([]byte{esc, 'E', 1})
+	b.Write([]byte{gs, '!', 0x11})
+	line(&b, ascii(cfg.ShopName))
+	b.Write([]byte{gs, '!', 0x00})
+	b.Write([]byte{esc, 'E', 0})
+	if len(opts.SubName) > 0 {
+		b.Write(opts.SubName)
+	}
+	line(&b, "")
+	b.Write([]byte{esc, 'E', 1})
+	line(&b, "*** REFUND ***")
+	b.Write([]byte{esc, 'E', 0})
+
+	// --- Meta (left) ---
+	b.Write([]byte{esc, 'a', 0})
+	divider(&b, w)
+	line(&b, leftRight("Orig. receipt:", rr.ReceiptNo, w))
+	line(&b, leftRight("Date:", datetime.DateTime(rr.CreatedAt), w))
+	if rr.Reason != nil && *rr.Reason != "" {
+		for _, ln := range wrap("Reason: "+ascii(*rr.Reason), w) {
+			line(&b, ln)
+		}
+	}
+	divider(&b, w)
+
+	// --- Returned items ---
+	for _, it := range rr.Items {
+		for _, ln := range wrap(ascii(it.ProductName), w) {
+			line(&b, ln)
+		}
+		qty := money.Display(it.Quantity) + " " + ascii(it.UnitAbbr)
+		line(&b, leftRight("  "+qty, money.Format(sym, it.Refund), w))
+	}
+	divider(&b, w)
+
+	// --- Totals ---
+	b.Write([]byte{esc, 'E', 1})
+	line(&b, leftRight("CASH REFUND", money.Format(sym, rr.Refund), w))
+	b.Write([]byte{esc, 'E', 0})
+	if rr.CreditReduction.IsPositive() {
+		line(&b, leftRight("Credit reduced", money.Format(sym, rr.CreditReduction), w))
+	}
+	divider(&b, w)
+
+	// --- Footer (centered) ---
+	b.Write([]byte{esc, 'a', 1})
+	line(&b, "Refund slip - please retain.")
+
+	b.Write([]byte{esc, 'd', feedBeforeCut})
+	b.Write([]byte{gs, 'V', 1})
+
+	return b.Bytes()
+}
+
 // wrap breaks s into lines of at most w characters, preferring to break at
 // spaces. A single word longer than w is hard-split so it never overflows.
 func wrap(s string, w int) []string {

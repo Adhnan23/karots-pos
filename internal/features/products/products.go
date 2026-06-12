@@ -144,6 +144,15 @@ func (r *Repository) FindByBarcode(ctx context.Context, barcode string) (*Produc
 	return &p, nil
 }
 
+// BarcodeExists reports whether any product (active or not) already carries this
+// barcode, so a generated code never shadows an existing or deactivated product.
+func (r *Repository) BarcodeExists(ctx context.Context, code string) (bool, error) {
+	var exists bool
+	err := r.db.GetContext(ctx, &exists,
+		`SELECT EXISTS(SELECT 1 FROM products WHERE barcode = $1)`, code)
+	return exists, err
+}
+
 type writeRow struct {
 	Name                          string
 	NameSi, Barcode               *string
