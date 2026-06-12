@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"strconv"
+	"strings"
 	"time"
 
 	"karots-pos/internal/apperr"
@@ -459,6 +460,14 @@ func (a *adminUI) SettingsUpdate(c echo.Context) error {
 	}
 	if err := c.Validate(&in); err != nil {
 		return err
+	}
+	// A network-printer address (tcp://host:9100), if given, overrides the
+	// dropdown selection for that job.
+	if net := strings.TrimSpace(in.ReceiptPrinterNet); net != "" {
+		in.ReceiptPrinter = net
+	}
+	if net := strings.TrimSpace(in.LabelPrinterNet); net != "" {
+		in.LabelPrinter = net
 	}
 	if _, err := a.s.settings.Update(c.Request().Context(), in); err != nil {
 		return err

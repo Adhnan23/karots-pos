@@ -55,6 +55,11 @@ type UpdateInput struct {
 	DefaultSaleType string  `json:"default_sale_type" form:"default_sale_type" validate:"required,oneof=retail wholesale credit"`
 	ReceiptPrinter  string  `json:"receipt_printer"   form:"receipt_printer"   validate:"omitempty,max=100"`
 	LabelPrinter    string  `json:"label_printer"     form:"label_printer"     validate:"omitempty,max=100"`
+	// *PrinterNet are the optional "network printer" text inputs (tcp://host:9100).
+	// When non-empty they override the matching dropdown; merged in SettingsUpdate.
+	// Not stored as separate columns.
+	ReceiptPrinterNet string `json:"-" form:"receipt_printer_net" validate:"omitempty,max=100"`
+	LabelPrinterNet   string `json:"-" form:"label_printer_net"   validate:"omitempty,max=100"`
 	LabelWidthMM    int     `json:"label_width_mm"    form:"label_width_mm"     validate:"omitempty,min=10,max=200"`
 	LabelHeightMM   int     `json:"label_height_mm"   form:"label_height_mm"    validate:"omitempty,min=10,max=200"`
 	LabelGapMM      int     `json:"label_gap_mm"      form:"label_gap_mm"       validate:"omitempty,min=0,max=20"`

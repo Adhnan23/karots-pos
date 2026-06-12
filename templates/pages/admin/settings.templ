@@ -2,6 +2,7 @@ package adminpages
 
 import (
 	"strconv"
+	"strings"
 
 	"karots-pos/internal/features/settings"
 	"karots-pos/templates/layouts"
@@ -84,37 +85,37 @@ templ SettingsPage(d SettingsData) {
 				<!-- Printers & labels -->
 				<div class="border-t pt-5 mt-2">
 					<h2 class="text-lg font-semibold mb-1">Printers &amp; Labels</h2>
-					<p class="text-sm text-slate-500 mb-4">Printers installed on this computer are detected automatically — pick one from the list, leave it blank for the system default, or type a network printer's address as <code class="text-xs bg-slate-100 px-1 py-1 rounded">tcp://IP:9100</code>. The label size here is the default — you can change it per print on the Barcode Labels page.</p>
+					<p class="text-sm text-slate-500 mb-4">Installed printers are detected for you — <strong>you choose which one handles each job</strong> from the dropdown (or leave it on "System default"). For a printer on the network instead, type its address in the box below the dropdown. The label size here is the default — you can change it per print on the Barcode Labels page.</p>
 					<div class="grid grid-cols-2 gap-4">
 						<div>
 							<label class="block text-sm font-medium mb-1">Receipt printer</label>
-							<input
-								name="receipt_printer"
-								list="receipt-printers"
-								value={ d.S.ReceiptPrinter }
-								placeholder="System default"
-								class="w-full border rounded-lg px-3 py-2"
-							/>
-							<datalist id="receipt-printers">
-								for _, q := range d.Queues {
-									<option value={ q }></option>
+							<select name="receipt_printer" class="w-full border rounded-lg px-3 py-2">
+								<option value="" selected?={ queueVal(d.S.ReceiptPrinter) == "" }>System default</option>
+								for _, q := range queueList(d.Queues, queueVal(d.S.ReceiptPrinter)) {
+									<option value={ q } selected?={ q == queueVal(d.S.ReceiptPrinter) }>{ q }</option>
 								}
-							</datalist>
+							</select>
+							<input
+								name="receipt_printer_net"
+								value={ netAddr(d.S.ReceiptPrinter) }
+								placeholder="or network printer: tcp://192.168.1.50:9100"
+								class="w-full border rounded-lg px-3 py-2 mt-2 text-sm"
+							/>
 						</div>
 						<div>
 							<label class="block text-sm font-medium mb-1">Label printer</label>
-							<input
-								name="label_printer"
-								list="label-printers"
-								value={ d.S.LabelPrinter }
-								placeholder="System default"
-								class="w-full border rounded-lg px-3 py-2"
-							/>
-							<datalist id="label-printers">
-								for _, q := range d.Queues {
-									<option value={ q }></option>
+							<select name="label_printer" class="w-full border rounded-lg px-3 py-2">
+								<option value="" selected?={ queueVal(d.S.LabelPrinter) == "" }>System default</option>
+								for _, q := range queueList(d.Queues, queueVal(d.S.LabelPrinter)) {
+									<option value={ q } selected?={ q == queueVal(d.S.LabelPrinter) }>{ q }</option>
 								}
-							</datalist>
+							</select>
+							<input
+								name="label_printer_net"
+								value={ netAddr(d.S.LabelPrinter) }
+								placeholder="or network printer: tcp://192.168.1.50:9100"
+								class="w-full border rounded-lg px-3 py-2 mt-2 text-sm"
+							/>
 						</div>
 						<div>
 							<label class="block text-sm font-medium mb-1">Default label width (mm)</label>
@@ -198,6 +199,39 @@ templ paperOption(value, label, selected string) {
 
 // labelDim returns v, or the fallback when v is unset (a fresh row before the
 // label columns were configured).
+// queueList returns the detected printer queues, ensuring the currently-saved
+// queue is present even if it's offline/undetected right now (so saving doesn't
+// silently drop it).
+func queueList(queues []string, current string) []string {
+	if current == "" {
+		return queues
+	}
+	for _, q := range queues {
+		if q == current {
+			return queues
+		}
+	}
+	return append([]string{current}, queues...)
+}
+
+// netAddr returns the value if it's a network printer address (tcp://…), so it
+// populates the separate network-printer text box; otherwise "".
+func netAddr(v string) string {
+	if strings.HasPrefix(v, "tcp://") {
+		return v
+	}
+	return ""
+}
+
+// queueVal returns the value when it names an OS printer (not a tcp:// address),
+// so the dropdown selects it; a network address yields "" (dropdown = default).
+func queueVal(v string) string {
+	if strings.HasPrefix(v, "tcp://") {
+		return ""
+	}
+	return v
+}
+
 func labelDim(v, fallback int) int {
 	if v <= 0 {
 		return fallback
