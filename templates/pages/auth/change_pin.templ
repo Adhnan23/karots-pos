@@ -1,0 +1,48 @@
+package authpages
+
+import "karots-pos/templates/layouts"
+
+// ChangePINPage is a plain form POST (no HTMX) so an error re-renders the whole
+// page with errMsg set. It serves both the forced first-login change (when
+// `forced` is true the copy explains why) and voluntary self-service changes.
+templ ChangePINPage(errMsg string, forced bool) {
+	@layouts.Base("Change PIN") {
+		<div class="min-h-full flex items-center justify-center p-6">
+			<div class="w-full max-w-md bg-white rounded-2xl shadow-sm p-8">
+				<h1 class="text-2xl font-bold text-center text-slate-800">Change your PIN</h1>
+				if forced {
+					<p class="text-center text-slate-500 mt-1">For security, please choose your own PIN before continuing.</p>
+				} else {
+					<p class="text-center text-slate-500 mt-1">Update the PIN you use to sign in.</p>
+				}
+				if errMsg != "" {
+					<div class="mt-4 rounded-lg bg-red-50 text-red-700 px-4 py-3 text-sm text-center">
+						{ errMsg }
+					</div>
+				}
+				<form method="post" action="/account/pin" class="mt-6 space-y-4">
+					<div>
+						<label class="block text-sm font-medium text-slate-600 mb-1">Current PIN</label>
+						<input type="password" name="current_pin" inputmode="numeric" pattern="[0-9]*" maxlength="6" autofocus required
+							class="w-full border rounded-lg px-3 py-2.5 text-lg tracking-wide"/>
+					</div>
+					<div>
+						<label class="block text-sm font-medium text-slate-600 mb-1">New PIN (4–6 digits)</label>
+						<input type="password" name="new_pin" inputmode="numeric" pattern="[0-9]*" maxlength="6" required
+							class="w-full border rounded-lg px-3 py-2.5 text-lg tracking-wide"/>
+					</div>
+					<div>
+						<label class="block text-sm font-medium text-slate-600 mb-1">Confirm new PIN</label>
+						<input type="password" name="confirm_pin" inputmode="numeric" pattern="[0-9]*" maxlength="6" required
+							class="w-full border rounded-lg px-3 py-2.5 text-lg tracking-wide"/>
+					</div>
+					<button type="submit"
+						class="w-full py-3 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700">Change PIN</button>
+					if !forced {
+						<a href="/" class="block text-center text-sm text-slate-500 hover:text-slate-700">Cancel</a>
+					}
+				</form>
+			</div>
+		</div>
+	}
+}

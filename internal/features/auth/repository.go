@@ -50,9 +50,11 @@ func (r *Repository) ListAll(ctx context.Context) ([]User, error) {
 
 func (r *Repository) Create(ctx context.Context, name string, phone *string, role, pinHash string) (*User, error) {
 	var u User
+	// New accounts get a PIN the user did not choose (seed or admin-set), so
+	// they must change it on first login.
 	err := r.db.GetContext(ctx, &u,
-		`INSERT INTO users (name, phone, role, pin_hash)
-		 VALUES ($1, $2, $3, $4)
+		`INSERT INTO users (name, phone, role, pin_hash, must_change_pin)
+		 VALUES ($1, $2, $3, $4, true)
 		 RETURNING *`, name, phone, role, pinHash)
 	if err != nil {
 		return nil, err
@@ -73,9 +75,19 @@ func (r *Repository) Update(ctx context.Context, id int64, name string, phone *s
 	return nil
 }
 
-// UpdatePin resets a user's PIN (the value is already bcrypt-hashed).
+// UpdatePin sets a user's PIN (already bcrypt-hashed) and clears the
+// must-change flag — the new PIN is one the user has now (re)established.
+// Admin-driven resets re-arm the flag afterwards via SetMustChangePin.
 func (r *Repository) UpdatePin(ctx context.Context, id int64, pinHash string) error {
-	_, err := r.db.ExecContext(ctx, `UPDATE users SET pin_hash = $1 WHERE id = $2`, pinHash, id)
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE users SET pin_hash = $1, must_change_pin = false WHERE id = $2`, pinHash, id)
+	return err
+}
+
+// SetMustChangePin arms or clears the forced-change flag.
+func (r *Repository) SetMustChangePin(ctx context.Context, id int64, must bool) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE users SET must_change_pin = $1 WHERE id = $2`, must, id)
 	return err
 }
 

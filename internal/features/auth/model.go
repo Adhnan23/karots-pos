@@ -14,9 +14,10 @@ type User struct {
 	Name      string    `db:"name"      json:"name"`
 	Phone     *string   `db:"phone"     json:"phone,omitempty"`
 	Role      string    `db:"role"      json:"role"`
-	PinHash   string    `db:"pin_hash"  json:"-"`
-	IsActive  bool      `db:"is_active" json:"is_active"`
-	CreatedAt time.Time `db:"created_at" json:"created_at"`
+	PinHash       string    `db:"pin_hash"  json:"-"`
+	IsActive      bool      `db:"is_active" json:"is_active"`
+	MustChangePin bool      `db:"must_change_pin" json:"must_change_pin"`
+	CreatedAt     time.Time `db:"created_at" json:"created_at"`
 }
 
 // UserPublic is the safe projection used on login screens (no pin hash).
@@ -57,6 +58,13 @@ type UpdateUserInput struct {
 	Phone string `json:"phone" form:"phone" validate:"required,min=4,max=15"`
 	Role  string `json:"role"  form:"role"  validate:"required,oneof=admin manager cashier"`
 	PIN   string `json:"pin"   form:"pin"   validate:"omitempty,min=4,max=6,numeric"`
+}
+
+// ChangeOwnPINInput is a user changing their own PIN (self-service or forced).
+type ChangeOwnPINInput struct {
+	CurrentPIN string `json:"current_pin" form:"current_pin" validate:"required,min=4,max=6,numeric"`
+	NewPIN     string `json:"new_pin"     form:"new_pin"     validate:"required,min=4,max=6,numeric"`
+	ConfirmPIN string `json:"confirm_pin" form:"confirm_pin" validate:"required,min=4,max=6,numeric"`
 }
 
 type RefreshInput struct {

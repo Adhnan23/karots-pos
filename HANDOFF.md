@@ -1,9 +1,52 @@
 # 📋 Handoff — status
 
 **Everything compiles** (`go build ./...` clean, `go vet ./...` clean,
-`templ generate` clean). Phases 2–8 are wired, routed, and **smoke-tested live
-over HTTP** (incl. through the final 15M static binary). DB is at migration **20**
-and seeded. Go module is **`karots-pos`**.
+`templ generate` clean, `go test ./...` clean). Wired, routed, and **smoke-tested
+live over HTTP** (incl. through the final static binary; Linux + Windows builds).
+DB is at migration **23** and seeded. Go module is **`karots-pos`**.
+
+## ✅ Pre-ship hardening — warranty/recovery, finance, PIN, plain init (migrations 0021–0023, live-tested)
+
+The pre-ship pass. Full lifecycle (serialized sale → warranty replace → supplier
+recovery → damage write-off → cash open/close) was run end-to-end over HTTP
+against a freshly migrated+seeded DB; every route returns non-5xx and the finance
+numbers reconcile (gross − returns = net, with COGS, losses and recoveries).
+
+- **Warranty continues on replacement (not renewed)** — migration **0021**
+  (`warranty_units`, `track_serial`/`warranty_months` on products, `warranty_claims`).
+  `warranty.RecordReplacement` keeps the **original** `warranty_until`/`warranty_months`
+  on the replacement unit (old → `replaced`, new → `active`, same expiry). The
+  handed-out replacement leaves stock at FEFO cost via a `warranty_replacement`
+  movement. Admin-native pages (`/admin/warranty`, `/admin/damage`) — previously
+  only the cashier shell. Live-tested: SN-TEST-001 → replaced, SN-TEST-001R active,
+  both expire same date.
+- **Losses & recovery** — migration **0022**: `stock_movements.cost` (worth of goods
+  moved), `recovery` movement type, and `loss_recoveries` (source warranty|damage,
+  outcome replacement|paid|written_off, loss_value, recovered_value). New package
+  `internal/features/recovery` (imports stock+suppliers, queries warranty/damage by
+  raw SQL to avoid a cycle): `replacement` → restock + `recovery` movement;
+  `paid` → `suppliers.AddBalance` credit; `written_off` → recorded only. Finance
+  P&L gains **Losses** and **Recoveries**; `/admin/recovery` workflow. Live-tested:
+  paid recovery loss 60 / recovered 90.
+- **Finance correctness + report suite.** `reports.Compute` now nets returns:
+  GrossRevenue = Σ total (excl. void), Returns = Σ (line net/qty × returned_qty),
+  Revenue = gross − returns, COGS on net qty, GrossMargin. New printable reports:
+  **returns**, **profit-by-category**, **sales-trend**, **warranty & recovery**.
+  Dashboard "Today" and the cashier **Z-report** now show **net** (Z-report gained a
+  Returns line) so they agree with the P&L. Verified: partial-returned sale shows
+  gross 950 / returns 250 / net 700 / COGS 590 / profit 110 / margin 15.71%.
+- **PIN security** — migration **0023** (`users.must_change_pin`). Flag rides in the
+  JWT claim (no per-request DB hit). Self-service **`/account/pin`** (all roles) +
+  a guard that forces a change before using the app; seeded/admin-created/admin-reset
+  accounts are flagged, the user's own change clears it (and mints a fresh cookie).
+  "Change PIN" link in both shells. Live-tested end-to-end: forced redirect → wrong
+  current rejected → mismatch rejected → change → old PIN dies → admin reset re-arms.
+- **Plain `-init` for real shops.** `cmd/server/init.go`: creates **one admin only**
+  (forced PIN change), leaves the catalog empty and settings at the neutral `My Shop`
+  default — vs `-seed` (dev/demo data). Overridable via `POS_ADMIN_NAME/PHONE/PIN`.
+  **SETUP.md now uses `-init`** for first run. Verified on a wiped DB: 1 user, 0
+  products/categories/suppliers/customers, 9 default units, `My Shop`.
+- **`/health`** endpoint (public) — 200 with DB ping, 503 when the DB is down.
 
 ## ✅ Audit fixes — return-credit guard + real phone uniqueness (migration 0020, live-tested)
 

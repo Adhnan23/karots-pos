@@ -8,6 +8,7 @@ package escpos
 import (
 	"bytes"
 	"strings"
+	"time"
 
 	"karots-pos/internal/datetime"
 	"karots-pos/internal/features/sales"
@@ -42,6 +43,9 @@ func columns(width string) int {
 type Options struct {
 	Logo    []byte // raster for the logo (top of the receipt)
 	SubName []byte // raster for the secondary shop name (under the main name)
+	// Serials maps a product id to pre-formatted serial lines for serial-tracked
+	// items (e.g. "SN: ABC123 (wty 2027-06-13)"); printed under each matching line.
+	Serials map[int64][]string
 }
 
 // Document builds the ESC/POS byte stream for a completed sale.
@@ -110,6 +114,11 @@ func Document(d sales.Detail, cfg settings.Settings, opts Options) []byte {
 		if it.Discount.IsPositive() {
 			itemDisc = itemDisc.Add(it.Discount)
 			line(&b, leftRight("  Discount"+discSuffix(it.DiscountType, it.DiscountValue), "-"+money.Display(it.Discount), w))
+		}
+		for _, sn := range opts.Serials[it.ProductID] {
+			for _, ln := range wrap(ascii(sn), w) {
+				line(&b, "  "+ln)
+			}
 		}
 	}
 	divider(&b, w)
@@ -236,6 +245,78 @@ func ReturnDocument(rr sales.ReturnReceipt, cfg settings.Settings, opts Options)
 	// --- Footer (centered) ---
 	b.Write([]byte{esc, 'a', 1})
 	line(&b, "Refund slip - please retain.")
+
+	b.Write([]byte{esc, 'd', feedBeforeCut})
+	b.Write([]byte{gs, 'V', 1})
+
+	return b.Bytes()
+}
+
+// WarrantySlip is the data for a printed warranty-replacement slip — the proof
+// a customer is handed when a faulty unit is swapped for a new one.
+type WarrantySlip struct {
+	ProductName   string
+	OldSerial     string
+	NewSerial     string
+	WarrantyUntil string // pre-formatted date (e.g. "2027-06-13")
+	CustomerName  string
+}
+
+// WarrantyDocument builds the ESC/POS byte stream for a replacement slip. It
+// mirrors the receipt header/footer and lists the swapped serials.
+func WarrantyDocument(s WarrantySlip, cfg settings.Settings, opts Options) []byte {
+	w := columns(cfg.ReceiptWidth)
+
+	var b bytes.Buffer
+	b.Write([]byte{esc, '@'})
+	b.Write([]byte{esc, 't', 0})
+
+	// --- Header (centered) ---
+	b.Write([]byte{esc, 'a', 1})
+	if len(opts.Logo) > 0 {
+		b.Write(opts.Logo)
+		line(&b, "")
+	}
+	b.Write([]byte{esc, 'E', 1})
+	b.Write([]byte{gs, '!', 0x11})
+	line(&b, ascii(cfg.ShopName))
+	b.Write([]byte{gs, '!', 0x00})
+	b.Write([]byte{esc, 'E', 0})
+	if len(opts.SubName) > 0 {
+		b.Write(opts.SubName)
+	}
+	line(&b, "")
+	b.Write([]byte{esc, 'E', 1})
+	line(&b, "*** WARRANTY REPLACEMENT ***")
+	b.Write([]byte{esc, 'E', 0})
+
+	// --- Body (left) ---
+	b.Write([]byte{esc, 'a', 0})
+	divider(&b, w)
+	line(&b, leftRight("Date:", datetime.Date(time.Now()), w))
+	if s.CustomerName != "" {
+		line(&b, leftRight("Customer:", ascii(s.CustomerName), w))
+	}
+	for _, ln := range wrap("Product: "+ascii(s.ProductName), w) {
+		line(&b, ln)
+	}
+	divider(&b, w)
+	for _, ln := range wrap("Returned serial: "+ascii(s.OldSerial), w) {
+		line(&b, ln)
+	}
+	b.Write([]byte{esc, 'E', 1})
+	for _, ln := range wrap("New serial: "+ascii(s.NewSerial), w) {
+		line(&b, ln)
+	}
+	b.Write([]byte{esc, 'E', 0})
+	if s.WarrantyUntil != "" {
+		line(&b, leftRight("Warranty until:", ascii(s.WarrantyUntil), w))
+	}
+	divider(&b, w)
+
+	// --- Footer (centered) ---
+	b.Write([]byte{esc, 'a', 1})
+	line(&b, "Replacement slip - please retain.")
 
 	b.Write([]byte{esc, 'd', feedBeforeCut})
 	b.Write([]byte{gs, 'V', 1})

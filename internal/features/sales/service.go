@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"karots-pos/internal/apperr"
@@ -12,6 +13,7 @@ import (
 	"karots-pos/internal/features/customers"
 	"karots-pos/internal/features/products"
 	"karots-pos/internal/features/stock"
+	"karots-pos/internal/features/warranty"
 	"karots-pos/internal/money"
 
 	"github.com/jmoiron/sqlx"
@@ -30,6 +32,17 @@ type ItemInput struct {
 	Quantity     string `json:"quantity"      validate:"required"`
 	Discount     string `json:"discount"`
 	DiscountType string `json:"discount_type" validate:"omitempty,oneof=fixed percent"`
+	// Serials carries one unique serial number per unit for serial-tracked
+	// products (length must equal the quantity); ignored for other products.
+	Serials []string `json:"serials"`
+}
+
+// serialBatch holds the captured serials for one serial-tracked line, recorded
+// as warranty units once the sale id is known.
+type serialBatch struct {
+	productID int64
+	months    int
+	serials   []string
 }
 
 type PaymentInput struct {
@@ -117,6 +130,10 @@ func (s *Service) Create(ctx context.Context, in CreateInput, cashierID int64) (
 		itemDiscTotal := decimal.Zero
 		lines := make([]SaleItem, 0, len(in.Items))
 
+		warrRepo := warranty.NewRepository(tx)
+		serialSeen := map[string]bool{}
+		var serialBatches []serialBatch
+
 		for _, it := range in.Items {
 			p, err := prodRepo.FindByID(ctx, it.ProductID)
 			if err != nil {
@@ -133,6 +150,37 @@ func (s *Service) Create(ctx context.Context, in CreateInput, cashierID int64) (
 			// only units flagged allow_decimal (kg, g, ltr, ml) may be fractional.
 			if !p.UnitAllowDecimal && !qty.Equal(qty.Truncate(0)) {
 				return apperr.Validation(fmt.Sprintf("quantity for %s must be a whole number", p.Name))
+			}
+			// Serial-tracked products capture one unique serial per unit; validate
+			// here and record them as warranty units once the sale id is known.
+			if p.TrackSerial {
+				if !qty.Equal(qty.Truncate(0)) {
+					return apperr.Validation(fmt.Sprintf("%s is serial-tracked — quantity must be a whole number", p.Name))
+				}
+				want := int(qty.IntPart())
+				serials := make([]string, 0, want)
+				for _, raw := range it.Serials {
+					if sn := strings.TrimSpace(raw); sn != "" {
+						serials = append(serials, sn)
+					}
+				}
+				if len(serials) != want {
+					return apperr.Validation(fmt.Sprintf("enter %d serial number(s) for %s", want, p.Name))
+				}
+				for _, sn := range serials {
+					if serialSeen[sn] {
+						return apperr.Validation(fmt.Sprintf("duplicate serial number %q", sn))
+					}
+					serialSeen[sn] = true
+					exists, err := warrRepo.SerialExists(ctx, sn)
+					if err != nil {
+						return apperr.Internal("failed to check serial", err)
+					}
+					if exists {
+						return apperr.Validation(fmt.Sprintf("serial number %q is already on record", sn))
+					}
+				}
+				serialBatches = append(serialBatches, serialBatch{productID: p.ID, months: p.WarrantyMonths, serials: serials})
 			}
 			discValue, err := money.Parse(it.Discount)
 			if err != nil || discValue.IsNegative() {
@@ -267,6 +315,27 @@ func (s *Service) Create(ctx context.Context, in CreateInput, cashierID int64) (
 				UserID:        cashierID,
 			}); err != nil {
 				return apperr.Internal("failed to record stock movement", err)
+			}
+		}
+
+		// Record captured serials as warranty units, now that the sale id exists.
+		if len(serialBatches) > 0 {
+			now := time.Now()
+			for _, sb := range serialBatches {
+				for _, sn := range sb.serials {
+					if _, err := warrRepo.InsertUnit(ctx, warranty.NewUnit{
+						ProductID:      sb.productID,
+						SerialNo:       sn,
+						SaleID:         &saleID,
+						CustomerID:     in.CustomerID,
+						SoldAt:         now,
+						WarrantyMonths: sb.months,
+						WarrantyUntil:  warranty.Until(now, sb.months),
+						Source:         "sale",
+					}); err != nil {
+						return apperr.Internal("failed to record warranty serial", err)
+					}
+				}
 			}
 		}
 
@@ -567,7 +636,8 @@ type PeriodSummary struct {
 	Count    int             `json:"count"`
 	Gross    decimal.Decimal `json:"gross"`
 	Discount decimal.Decimal `json:"discount"`
-	Net      decimal.Decimal `json:"net"`
+	Returns  decimal.Decimal `json:"returns"` // value of returned lines on these sales
+	Net      decimal.Decimal `json:"net"`     // sales total − returns
 	ByMethod []MethodTotal   `json:"by_method"`
 }
 
@@ -592,7 +662,22 @@ func (s *Service) PeriodSummary(ctx context.Context, cashierID int64, from, to t
 	if err != nil {
 		return nil, apperr.Internal("failed to summarize sales", err)
 	}
-	out.Count, out.Gross, out.Discount, out.Net = agg.Count, agg.Gross, agg.Discount, agg.Net
+	out.Count, out.Gross, out.Discount = agg.Count, agg.Gross, agg.Discount
+
+	// Returns booked against this cashier's sales in the window, valued per unit
+	// at the line's net price — mirrors the P&L so the day-end Net is net of
+	// refunds (matches the cash actually kept after refunds out of the drawer).
+	var returns decimal.Decimal
+	err = s.db.GetContext(ctx, &returns, `
+		SELECT COALESCE(SUM((si.subtotal / NULLIF(si.quantity,0)) * si.returned_qty), 0)
+		FROM sale_items si JOIN sales s ON s.id = si.sale_id
+		WHERE s.cashier_id = $1 AND s.created_at >= $2 AND s.created_at <= $3 AND s.status <> 'void'`,
+		cashierID, from, to)
+	if err != nil {
+		return nil, apperr.Internal("failed to summarize returns", err)
+	}
+	out.Returns = returns
+	out.Net = agg.Net.Sub(returns)
 
 	err = s.db.SelectContext(ctx, &out.ByMethod, `
 		SELECT pmt.method AS method, COALESCE(SUM(pmt.amount),0) AS amount

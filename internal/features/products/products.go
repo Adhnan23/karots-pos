@@ -26,6 +26,8 @@ type Product struct {
 	TaxRate        decimal.Decimal `db:"tax_rate"        json:"tax_rate"`
 	ReorderLevel   int             `db:"reorder_level"   json:"reorder_level"`
 	HasExpiry      bool            `db:"has_expiry"      json:"has_expiry"`
+	TrackSerial    bool            `db:"track_serial"    json:"track_serial"`
+	WarrantyMonths int             `db:"warranty_months" json:"warranty_months"`
 	IsActive       bool            `db:"is_active"       json:"is_active"`
 	CreatedAt      time.Time       `db:"created_at"      json:"created_at"`
 	// Joined, read-only:
@@ -51,6 +53,8 @@ type CreateInput struct {
 	WholesalePrice string  `json:"wholesale_price" form:"wholesale_price"`
 	TaxRate        string  `json:"tax_rate"        form:"tax_rate"`
 	ReorderLevel   int     `json:"reorder_level"   form:"reorder_level"   validate:"gte=0"`
+	TrackSerial    bool    `json:"track_serial"    form:"track_serial"`
+	WarrantyMonths int     `json:"warranty_months" form:"warranty_months" validate:"gte=0,lte=600"`
 }
 
 type UpdateInput = CreateInput
@@ -159,6 +163,8 @@ type writeRow struct {
 	CategoryID, UnitID            int64
 	Cost, Selling, Wholesale, Tax decimal.Decimal
 	Reorder                       int
+	TrackSerial                   bool
+	WarrantyMonths                int
 }
 
 func (r *Repository) Insert(ctx context.Context, w writeRow) (int64, error) {
@@ -166,11 +172,13 @@ func (r *Repository) Insert(ctx context.Context, w writeRow) (int64, error) {
 	err := r.db.GetContext(ctx, &id, `
 		INSERT INTO products
 			(name, name_si, barcode, category_id, unit_id,
-			 cost_price, selling_price, wholesale_price, tax_rate, reorder_level)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+			 cost_price, selling_price, wholesale_price, tax_rate, reorder_level,
+			 track_serial, warranty_months)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
 		RETURNING id`,
 		w.Name, w.NameSi, w.Barcode, w.CategoryID, w.UnitID,
-		w.Cost, w.Selling, w.Wholesale, w.Tax, w.Reorder)
+		w.Cost, w.Selling, w.Wholesale, w.Tax, w.Reorder,
+		w.TrackSerial, w.WarrantyMonths)
 	return id, err
 }
 
@@ -178,10 +186,12 @@ func (r *Repository) Update(ctx context.Context, id int64, w writeRow) error {
 	res, err := r.db.ExecContext(ctx, `
 		UPDATE products SET
 			name=$1, name_si=$2, barcode=$3, category_id=$4, unit_id=$5,
-			cost_price=$6, selling_price=$7, wholesale_price=$8, tax_rate=$9, reorder_level=$10
-		WHERE id=$11 AND is_active = true`,
+			cost_price=$6, selling_price=$7, wholesale_price=$8, tax_rate=$9, reorder_level=$10,
+			track_serial=$11, warranty_months=$12
+		WHERE id=$13 AND is_active = true`,
 		w.Name, w.NameSi, w.Barcode, w.CategoryID, w.UnitID,
-		w.Cost, w.Selling, w.Wholesale, w.Tax, w.Reorder, id)
+		w.Cost, w.Selling, w.Wholesale, w.Tax, w.Reorder,
+		w.TrackSerial, w.WarrantyMonths, id)
 	if err != nil {
 		return err
 	}

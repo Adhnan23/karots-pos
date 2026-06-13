@@ -3,10 +3,13 @@ package web
 import (
 	"context"
 	"log"
+	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"karots-pos/internal/apperr"
+	"karots-pos/internal/datetime"
 	"karots-pos/internal/escpos"
 	"karots-pos/internal/features/audit"
 	"karots-pos/internal/features/auth"
@@ -15,6 +18,7 @@ import (
 	"karots-pos/internal/features/sales"
 	"karots-pos/internal/features/settings"
 	"karots-pos/internal/features/stock"
+	"karots-pos/internal/features/warranty"
 	"karots-pos/internal/middleware"
 	"karots-pos/internal/money"
 	"karots-pos/internal/receiptimg"
@@ -180,7 +184,9 @@ func (h *cashierUI) PrintReceipt(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := escpos.Send(ctx, h.receiptQueue(cfg), escpos.Document(*detail, *cfg, h.receiptOptions(ctx, cfg))); err != nil {
+	opts := h.receiptOptions(ctx, cfg)
+	opts.Serials = h.saleSerials(ctx, id)
+	if err := escpos.Send(ctx, h.receiptQueue(cfg), escpos.Document(*detail, *cfg, opts)); err != nil {
 		return apperr.Internal("could not print receipt", err)
 	}
 	// Feedback for the HTMX reprint button; the Alpine apiFetch path toasts itself.
@@ -407,4 +413,131 @@ func (h *cashierUI) CreditPay(c echo.Context) error {
 	}
 	h.s.logAudit(c, audit.ActionPayment, "customer", strconv.FormatInt(id, 10), "credit collected "+in.Amount+" from "+cust.Name)
 	return htmxDone(c, "Payment recorded", "reload-ccredit")
+}
+
+// ============================ Warranty ============================
+
+// saleSerials returns the serials recorded on a sale, formatted per product for
+// the printed receipt (e.g. "SN: ABC123 (wty 2027-06-13)"). Best-effort: any
+// error yields a nil map and the receipt simply omits serials.
+func (h *cashierUI) saleSerials(ctx context.Context, saleID int64) map[int64][]string {
+	units, err := h.s.warranty.UnitsForSale(ctx, saleID)
+	if err != nil || len(units) == 0 {
+		return nil
+	}
+	m := make(map[int64][]string, len(units))
+	for _, u := range units {
+		label := "SN: " + u.SerialNo
+		if u.WarrantyMonths > 0 {
+			label += " (wty " + datetime.Date(u.WarrantyUntil) + ")"
+		}
+		m[u.ProductID] = append(m[u.ProductID], label)
+	}
+	return m
+}
+
+func (h *cashierUI) warrantyData(c echo.Context) (cashierpages.WarrantyData, error) {
+	ctx := c.Request().Context()
+	status := c.QueryParam("status")
+	if status == "" {
+		status = "all"
+	}
+	search := c.QueryParam("q")
+	units, err := h.s.warranty.List(ctx, status, search)
+	if err != nil {
+		return cashierpages.WarrantyData{}, err
+	}
+	return cashierpages.WarrantyData{
+		CashierName: middleware.CurrentUserName(c),
+		Role:        middleware.CurrentRole(c),
+		Symbol:      h.cashierSymbol(ctx),
+		Base:        "/cashier",
+		Status:      status,
+		Search:      search,
+		Units:       units,
+	}, nil
+}
+
+func (h *cashierUI) Warranty(c echo.Context) error {
+	d, err := h.warrantyData(c)
+	if err != nil {
+		return err
+	}
+	return response.RenderPage(c, cashierpages.Warranty(d))
+}
+
+func (h *cashierUI) WarrantyTable(c echo.Context) error {
+	d, err := h.warrantyData(c)
+	if err != nil {
+		return err
+	}
+	return response.RenderFragment(c, cashierpages.WarrantyTable(d))
+}
+
+// WarrantyLookup renders the result card for a serial search. A not-found serial
+// renders a friendly "not found" card rather than an error page.
+func (h *cashierUI) WarrantyLookup(c echo.Context) error {
+	ctx := c.Request().Context()
+	serial := c.QueryParam("serial")
+	if strings.TrimSpace(serial) == "" {
+		return response.RenderFragment(c, cashierpages.WarrantyResult(nil, serial, "/cashier"))
+	}
+	detail, err := h.s.warranty.Lookup(ctx, serial)
+	if err != nil {
+		if ae, ok := apperr.As(err); ok && ae.Status == http.StatusNotFound {
+			return response.RenderFragment(c, cashierpages.WarrantyResult(nil, serial, "/cashier"))
+		}
+		return err
+	}
+	return response.RenderFragment(c, cashierpages.WarrantyResult(detail, serial, "/cashier"))
+}
+
+// WarrantyReplace records a replacement and returns the refreshed card for the
+// new (replacement) unit, prints a replacement slip, and refreshes the list.
+func (h *cashierUI) WarrantyReplace(c echo.Context) error {
+	ctx := c.Request().Context()
+	unitID, err := strconv.ParseInt(c.FormValue("unit_id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid unit")
+	}
+	newSerial := c.FormValue("new_serial")
+	reason := c.FormValue("reason")
+	oldSerial := c.FormValue("old_serial")
+
+	newUnit, err := h.s.warranty.RecordReplacement(ctx, unitID, newSerial, reason, middleware.CurrentUserID(c))
+	if err != nil {
+		return err
+	}
+	h.s.logAudit(c, audit.ActionUpdate, "warranty", strconv.FormatInt(unitID, 10), "replaced "+oldSerial+" -> "+newUnit.SerialNo)
+	// Hand the customer a replacement slip. Non-fatal: a printer problem must
+	// never fail the replacement (it's already recorded).
+	h.printWarrantySlip(ctx, oldSerial, newUnit)
+
+	detail, err := h.s.warranty.Lookup(ctx, newUnit.SerialNo)
+	if err != nil {
+		return err
+	}
+	return response.RenderFragment(c, cashierpages.WarrantyResult(detail, newUnit.SerialNo, "/cashier"),
+		response.ToastAnd("Replacement recorded", "success", "reload-warranty"))
+}
+
+// printWarrantySlip prints the replacement slip best-effort (logged, swallowed).
+func (h *cashierUI) printWarrantySlip(ctx context.Context, oldSerial string, u *warranty.Unit) {
+	cfg, err := h.s.settings.Get(ctx)
+	if err != nil {
+		log.Printf("warranty slip: load settings: %v", err)
+		return
+	}
+	slip := escpos.WarrantySlip{
+		ProductName:   u.ProductName,
+		OldSerial:     oldSerial,
+		NewSerial:     u.SerialNo,
+		WarrantyUntil: datetime.Date(u.WarrantyUntil),
+	}
+	if u.CustomerName != nil {
+		slip.CustomerName = *u.CustomerName
+	}
+	if err := escpos.Send(ctx, h.receiptQueue(cfg), escpos.WarrantyDocument(slip, *cfg, h.receiptOptions(ctx, cfg))); err != nil {
+		log.Printf("warranty slip: print for %s: %v", u.SerialNo, err)
+	}
 }

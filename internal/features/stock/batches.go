@@ -110,6 +110,12 @@ func (r *Repository) productCost(ctx context.Context, productID int64) (decimal.
 	return c, err
 }
 
+// ProductCost is the exported view of productCost, for callers outside this
+// package (e.g. the recovery service valuing a restocked replacement batch).
+func (r *Repository) ProductCost(ctx context.Context, productID int64) (decimal.Decimal, error) {
+	return r.productCost(ctx, productID)
+}
+
 // ListBatches returns the live (qty_remaining>0) lots for a product, FEFO order.
 func (r *Repository) ListBatches(ctx context.Context, productID int64) ([]Batch, error) {
 	var rows []Batch

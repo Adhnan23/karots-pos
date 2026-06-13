@@ -15,6 +15,7 @@ const (
 	fWholesale
 	fTax
 	fReorder
+	fWarrantyMonths
 )
 
 // valOf returns the prefill value for a product form field, or "" when creating
@@ -42,6 +43,8 @@ func valOf(p *products.Product, field int) string {
 		return p.TaxRate.StringFixed(2)
 	case fReorder:
 		return strconv.Itoa(p.ReorderLevel)
+	case fWarrantyMonths:
+		return strconv.Itoa(p.WarrantyMonths)
 	default:
 		return ""
 	}

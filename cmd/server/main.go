@@ -46,7 +46,8 @@ import (
 
 func main() {
 	migrateOnly := flag.Bool("migrate", false, "run migrations and exit")
-	seedOnly := flag.Bool("seed", false, "seed development data and exit")
+	seedOnly := flag.Bool("seed", false, "seed development/demo data and exit")
+	initOnly := flag.Bool("init", false, "create the initial admin account for a fresh shop and exit")
 	flag.Parse()
 
 	cfg := config.Load()
@@ -71,6 +72,12 @@ func main() {
 		log.Println("seed complete")
 		return
 	}
+	if *initOnly {
+		if err := initShop(sqlxDB); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 
 	e := echo.New()
 	e.HideBanner = true
@@ -83,6 +90,14 @@ func main() {
 	// Static assets are embedded in the binary (see internal package `static`),
 	// so no on-disk static/ directory is needed at runtime.
 	e.GET("/static/*", echo.WrapHandler(http.StripPrefix("/static/", http.FileServer(http.FS(poststatic.Files)))))
+
+	// Liveness probe for deployments: 200 only when the DB answers a ping.
+	e.GET("/health", func(c echo.Context) error {
+		if err := sqlxDB.PingContext(c.Request().Context()); err != nil {
+			return c.JSON(http.StatusServiceUnavailable, map[string]string{"status": "down", "db": "unreachable"})
+		}
+		return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
+	})
 
 	// API routes (JSON)
 	authSvc := auth.RegisterAPI(e, sqlxDB, cfg, auth.NewLoginLimiter())

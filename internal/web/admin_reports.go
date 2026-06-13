@@ -86,6 +86,83 @@ func (a *adminUI) FinanceReport(c echo.Context) error {
 	}))
 }
 
+func (a *adminUI) ReturnsReport(c echo.Context) error {
+	ctx := c.Request().Context()
+	from, to, fromStr, toStr, err := rangeStrings(c)
+	if err != nil {
+		return err
+	}
+	rows, err := a.s.reports.Returns(ctx, from, to)
+	if err != nil {
+		return err
+	}
+	d := adminpages.ReturnsReportData{
+		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx), From: fromStr, To: toStr, Rows: rows,
+	}
+	for _, r := range rows {
+		d.TotalRefund = d.TotalRefund.Add(r.RefundValue)
+	}
+	return response.RenderPage(c, adminpages.ReturnsReport(d))
+}
+
+func (a *adminUI) ProfitByCategoryReport(c echo.Context) error {
+	ctx := c.Request().Context()
+	from, to, fromStr, toStr, err := rangeStrings(c)
+	if err != nil {
+		return err
+	}
+	rows, err := a.s.reports.ProfitByCategory(ctx, from, to)
+	if err != nil {
+		return err
+	}
+	d := adminpages.CategoryProfitData{
+		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx), From: fromStr, To: toStr, Rows: rows,
+	}
+	for _, r := range rows {
+		d.TotalRevenue = d.TotalRevenue.Add(r.Revenue)
+		d.TotalProfit = d.TotalProfit.Add(r.Profit)
+	}
+	return response.RenderPage(c, adminpages.ProfitByCategoryReport(d))
+}
+
+func (a *adminUI) SalesTrendReport(c echo.Context) error {
+	ctx := c.Request().Context()
+	from, to, fromStr, toStr, err := rangeStrings(c)
+	if err != nil {
+		return err
+	}
+	rows, err := a.s.reports.DailySales(ctx, from, to)
+	if err != nil {
+		return err
+	}
+	d := adminpages.SalesTrendData{
+		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx), From: fromStr, To: toStr, Rows: rows,
+	}
+	for _, r := range rows {
+		d.TotalRevenue = d.TotalRevenue.Add(r.Revenue)
+		d.TotalProfit = d.TotalProfit.Add(r.Profit)
+		if r.Revenue.GreaterThan(d.MaxRevenue) {
+			d.MaxRevenue = r.Revenue
+		}
+	}
+	return response.RenderPage(c, adminpages.SalesTrendReport(d))
+}
+
+func (a *adminUI) WarrantyReport(c echo.Context) error {
+	ctx := c.Request().Context()
+	from, to, fromStr, toStr, err := rangeStrings(c)
+	if err != nil {
+		return err
+	}
+	sum, err := a.s.reports.WarrantyAndRecovery(ctx, from, to)
+	if err != nil {
+		return err
+	}
+	return response.RenderPage(c, adminpages.WarrantyReport(adminpages.WarrantyReportData{
+		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx), From: fromStr, To: toStr, Summary: *sum,
+	}))
+}
+
 func (a *adminUI) CashRegisterReport(c echo.Context) error {
 	ctx := c.Request().Context()
 	from, to, fromStr, toStr, err := rangeStrings(c)

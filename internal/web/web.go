@@ -20,6 +20,7 @@ import (
 	"karots-pos/internal/features/products"
 	"karots-pos/internal/features/purchasereturns"
 	"karots-pos/internal/features/purchases"
+	"karots-pos/internal/features/recovery"
 	"karots-pos/internal/features/reports"
 	"karots-pos/internal/features/sales"
 	"karots-pos/internal/features/settings"
@@ -27,6 +28,7 @@ import (
 	"karots-pos/internal/features/supplierpay"
 	"karots-pos/internal/features/suppliers"
 	"karots-pos/internal/features/units"
+	"karots-pos/internal/features/warranty"
 	"karots-pos/internal/middleware"
 
 	"github.com/jmoiron/sqlx"
@@ -54,6 +56,8 @@ type Server struct {
 	denominations *denominations.Service
 	cashRegister  *cashregister.Service
 	audit         *audit.Service
+	warranty      *warranty.Service
+	recovery      *recovery.Service
 }
 
 // RegisterUI builds UI services and mounts all server-rendered routes. authSvc
@@ -78,6 +82,8 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 		reports:    reports.NewService(db),
 		denominations: denominations.NewService(db),
 		audit:         audit.NewService(db),
+		warranty:      warranty.NewService(db),
+		recovery:      recovery.NewService(db),
 	}
 	s.cashRegister = cashregister.NewService(db, sales.NewService(db)).WithAudit(s.audit)
 	a := &authUI{svc: authSvc, cookie: CookieConfig{Secure: cfg.CookieSecure, MaxAge: cfg.JWTAccessTTL}}
@@ -86,11 +92,19 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 
 	limiter := auth.NewLoginLimiter()
 	jwt := middleware.JWTAuth(cfg.JWTSecret)
+	// pinGuard forces users carrying a server-assigned PIN to change it before
+	// using the app. The /account/pin routes themselves stay ungated.
+	pinGuard := middleware.RequirePinChosen()
 
 	// Public
 	e.GET("/login", a.ShowLogin)
 	e.POST("/login", a.Login, limiter)
 	e.POST("/logout", a.Logout)
+
+	// Self-service / forced PIN change (all authenticated roles; NOT pin-gated,
+	// so a user forced to change can always reach it).
+	e.GET("/account/pin", a.ChangePINForm, jwt)
+	e.POST("/account/pin", a.ChangePIN, jwt)
 
 	// Root: send the user to their home by role.
 	e.GET("/", func(c echo.Context) error {
@@ -98,7 +112,7 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	}, jwt)
 
 	// Cashier (all authenticated roles)
-	cg := e.Group("/cashier", jwt)
+	cg := e.Group("/cashier", jwt, pinGuard)
 	cg.GET("", cashier.POS)
 	cg.GET("/receipt/:id", cashier.Receipt)
 	cg.POST("/print/:id", cashier.PrintReceipt)
@@ -123,8 +137,14 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	cg.GET("/credit/pay/:id", cashier.CreditPayForm)
 	cg.POST("/credit/:id/payment", cashier.CreditPay)
 
+	// Warranty lookup + replacement (all roles — used at the counter)
+	cg.GET("/warranty", cashier.Warranty)
+	cg.GET("/warranty/table", cashier.WarrantyTable)
+	cg.GET("/warranty/lookup", cashier.WarrantyLookup)
+	cg.POST("/warranty/replace", cashier.WarrantyReplace)
+
 	// Admin (manager/admin)
-	ag := e.Group("/admin", jwt, middleware.RequireRole(auth.RoleAdmin, auth.RoleManager))
+	ag := e.Group("/admin", jwt, pinGuard, middleware.RequireRole(auth.RoleAdmin, auth.RoleManager))
 	ag.GET("", admin.Dashboard)
 	ag.GET("/products", admin.Products)
 	ag.GET("/products/table", admin.ProductsTable)
@@ -188,12 +208,26 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	ag.PUT("/expenses/:id", admin.ExpenseUpdate)
 	ag.DELETE("/expenses/:id", admin.ExpenseDelete)
 
+	// Warranty (admin shell) + losses & supplier recovery
+	ag.GET("/warranty", admin.Warranty)
+	ag.GET("/warranty/table", admin.WarrantyTable)
+	ag.GET("/warranty/lookup", admin.WarrantyLookup)
+	ag.POST("/warranty/replace", admin.WarrantyReplace)
+	ag.GET("/damage", admin.DamageReport)
+	ag.GET("/damage/table", admin.DamageTable)
+	ag.GET("/recovery/form", admin.RecoveryForm)
+	ag.POST("/recovery", admin.RecoveryRecord)
+
 	// Finance / profit
 	ag.GET("/finance", admin.Finance)
 
 	// Reports
 	ag.GET("/reports", admin.ReportsHub)
 	ag.GET("/reports/sales", admin.SalesReport)
+	ag.GET("/reports/returns", admin.ReturnsReport)
+	ag.GET("/reports/profit-by-category", admin.ProfitByCategoryReport)
+	ag.GET("/reports/sales-trend", admin.SalesTrendReport)
+	ag.GET("/reports/warranty", admin.WarrantyReport)
 	ag.GET("/reports/finance", admin.FinanceReport)
 	ag.GET("/reports/cash-register", admin.CashRegisterReport)
 	ag.GET("/reports/purchases", admin.PurchasesReport)

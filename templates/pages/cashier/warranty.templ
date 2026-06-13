@@ -1,0 +1,242 @@
+package cashierpages
+
+import (
+	"strconv"
+
+	"karots-pos/internal/datetime"
+	"karots-pos/internal/features/warranty"
+	"karots-pos/internal/money"
+	"karots-pos/templates/layouts"
+
+	"github.com/shopspring/decimal"
+)
+
+type WarrantyData struct {
+	CashierName string
+	Role        string
+	Symbol      string
+	Base        string // route prefix: "/cashier" or "/admin"
+	Status      string // current list filter: all|active|expired|replaced
+	Search      string
+	Units       []warranty.Unit
+}
+
+// Warranty renders the terminal page inside the cashier shell.
+templ Warranty(d WarrantyData) {
+	@layouts.Cashier("Warranty", d.CashierName, d.Role, "warranty") {
+		@warrantyInner(d)
+	}
+}
+
+// WarrantyAdmin renders the same page inside the admin shell so admins don't get
+// thrown into the cashier terminal.
+templ WarrantyAdmin(d WarrantyData) {
+	@layouts.Admin("Warranty", d.CashierName, "warranty") {
+		@warrantyInner(d)
+	}
+}
+
+templ warrantyInner(d WarrantyData) {
+	<div class="h-full overflow-auto p-6">
+		<div class="max-w-4xl mx-auto space-y-6">
+			<div>
+				<h1 class="text-xl font-bold mb-1">Warranty</h1>
+				<p class="text-sm text-slate-500">Look up a serial number to check warranty status, or record a replacement when a customer brings a faulty unit.</p>
+			</div>
+			<!-- Serial lookup -->
+			<div class="bg-white rounded-xl shadow-sm p-4">
+				<form hx-get={ d.Base + "/warranty/lookup" } hx-target="#warranty-result" hx-swap="innerHTML" class="flex gap-2">
+					<input
+						name="serial"
+						autofocus
+						placeholder="Scan or type serial / IMEI…"
+						class="flex-1 border rounded-lg px-3 py-2"
+					/>
+					<button type="submit" class="px-5 py-2 rounded-lg bg-indigo-600 text-white font-medium">Search</button>
+				</form>
+				<div id="warranty-result" class="mt-4"></div>
+			</div>
+			<!-- Recent units -->
+			<div>
+				<div class="flex items-center gap-2 mb-3 text-sm">
+					@warrantyFilterTab("all", "All", d.Status, d.Base)
+					@warrantyFilterTab("active", "Under warranty", d.Status, d.Base)
+					@warrantyFilterTab("expired", "Expired", d.Status, d.Base)
+					@warrantyFilterTab("replaced", "Replaced", d.Status, d.Base)
+				</div>
+				<div
+					id="warranty-list"
+					hx-get={ d.Base + "/warranty/table?status=" + d.Status }
+					hx-trigger="reload-warranty from:body"
+					hx-swap="innerHTML"
+				>
+					@WarrantyTable(d)
+				</div>
+			</div>
+		</div>
+	</div>
+}
+
+templ warrantyFilterTab(status, label, active, base string) {
+	if status == active {
+		<button type="button" class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white font-medium">{ label }</button>
+	} else {
+		<button
+			type="button"
+			hx-get={ base + "/warranty/table?status=" + status }
+			hx-target="#warranty-list"
+			hx-swap="innerHTML"
+			class="px-3 py-1.5 rounded-lg border text-slate-600 hover:bg-slate-50"
+		>{ label }</button>
+	}
+}
+
+templ WarrantyTable(d WarrantyData) {
+	<div class="bg-white rounded-xl shadow-sm overflow-hidden">
+		<table class="w-full text-sm">
+			<thead class="text-left text-slate-500 border-b bg-slate-50">
+				<tr>
+					<th class="py-2 px-3">Serial</th>
+					<th class="py-2 px-3">Product</th>
+					<th class="py-2 px-3">Customer</th>
+					<th class="py-2 px-3">Sold</th>
+					<th class="py-2 px-3">Warranty until</th>
+					<th class="py-2 px-3 text-right">Worth</th>
+					<th class="py-2 px-3 text-center">Status</th>
+					<th class="py-2 px-3"></th>
+				</tr>
+			</thead>
+			<tbody>
+				for _, u := range d.Units {
+					<tr class="border-b last:border-0">
+						<td class="py-2 px-3 font-medium">{ u.SerialNo }</td>
+						<td class="py-2 px-3 text-slate-600">{ u.ProductName }</td>
+						<td class="py-2 px-3 text-slate-500">{ strOrDash(u.CustomerName) }</td>
+						<td class="py-2 px-3 text-slate-500">{ datetime.Date(u.SoldAt) }</td>
+						<td class="py-2 px-3 text-slate-500">{ datetime.Date(u.WarrantyUntil) }</td>
+						<td class="py-2 px-3 text-right text-slate-600">{ worthOrDash(d.Symbol, u.LossValue) }</td>
+						<td class="py-2 px-3 text-center">@warrantyBadge(u)</td>
+						<td class="py-2 px-3 text-right">
+							<button
+								type="button"
+								hx-get={ d.Base + "/warranty/lookup?serial=" + u.SerialNo }
+								hx-target="#warranty-result"
+								hx-swap="innerHTML"
+								class="text-indigo-600 hover:underline"
+							>Open</button>
+						</td>
+					</tr>
+				}
+				if len(d.Units) == 0 {
+					<tr><td colspan="8" class="text-center text-slate-400 py-8">No serial-tracked units yet.</td></tr>
+				}
+			</tbody>
+		</table>
+	</div>
+}
+
+// warrantyBadge shows the live status: under warranty / expired / replaced.
+templ warrantyBadge(u warranty.Unit) {
+	if u.Status == "replaced" {
+		<span class="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">replaced</span>
+	} else if u.UnderWarranty() {
+		<span class="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">under warranty</span>
+	} else {
+		<span class="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">expired</span>
+	}
+}
+
+// WarrantyResult is the lookup result card. A nil detail means "not found". base
+// is the route prefix; when it is "/admin" the supplier-recovery affordance is
+// shown for a replaced (faulty) unit.
+templ WarrantyResult(detail *warranty.Detail, query, base string) {
+	if detail == nil {
+		if query != "" {
+			<div class="rounded-lg border border-dashed p-4 text-sm text-slate-500">
+				No unit found for serial <span class="font-medium">{ query }</span>.
+			</div>
+		}
+	} else {
+		<div class="rounded-lg border p-4 space-y-4">
+			<div class="flex items-start justify-between gap-3">
+				<div>
+					<div class="text-lg font-semibold">{ detail.Unit.SerialNo }</div>
+					<div class="text-sm text-slate-500">{ detail.Unit.ProductName }</div>
+				</div>
+				@warrantyBadge(detail.Unit)
+			</div>
+			<div class="grid grid-cols-2 gap-x-6 gap-y-1 text-sm">
+				<div class="text-slate-500">Customer</div>
+				<div>{ strOrDash(detail.Unit.CustomerName) }</div>
+				<div class="text-slate-500">Receipt</div>
+				<div>{ strOrDash(detail.Unit.ReceiptNo) }</div>
+				<div class="text-slate-500">Sold</div>
+				<div>{ datetime.Date(detail.Unit.SoldAt) }</div>
+				<div class="text-slate-500">Warranty until</div>
+				<div>{ datetime.Date(detail.Unit.WarrantyUntil) } ({ strconv.Itoa(detail.Unit.WarrantyMonths) } mo)</div>
+			</div>
+			if len(detail.Claims) > 0 {
+				<div class="border-t pt-3">
+					<div class="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-1">Claim history</div>
+					<ul class="text-sm space-y-1">
+						for _, cl := range detail.Claims {
+							<li class="flex flex-wrap gap-x-2 text-slate-600">
+								<span class="text-slate-400">{ datetime.Date(cl.ClaimDate) }</span>
+								<span class="capitalize font-medium">{ cl.Resolution }</span>
+								if cl.ReplacementSerial != nil {
+									<span>→ { *cl.ReplacementSerial }</span>
+								}
+								<span class="text-slate-400">by { cl.HandledByName }</span>
+							</li>
+						}
+					</ul>
+				</div>
+			}
+			if detail.Unit.Status == "replaced" {
+				<div class="border-t pt-3 text-sm text-slate-500">This unit was replaced and is no longer active.</div>
+				if base == "/admin" {
+					<div class="rounded-lg bg-slate-50 p-3">
+						<div class="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">Supplier recovery</div>
+						<button
+							type="button"
+							hx-get={ base + "/recovery/form?source_type=warranty&source_id=" + strconv.FormatInt(detail.Unit.ID, 10) }
+							hx-target="#recovery-slot"
+							hx-swap="innerHTML"
+							class="px-4 py-2 rounded-lg bg-slate-800 text-white text-sm font-medium"
+						>Record supplier recovery…</button>
+						<div id="recovery-slot" class="mt-3"></div>
+					</div>
+				}
+			} else {
+				<form
+					class="border-t pt-3 space-y-3"
+					hx-post={ base + "/warranty/replace" }
+					hx-target="#warranty-result"
+					hx-swap="innerHTML"
+				>
+					<div class="text-xs font-semibold uppercase tracking-wide text-slate-400">Record replacement</div>
+					<input type="hidden" name="unit_id" value={ strconv.FormatInt(detail.Unit.ID, 10) }/>
+					<input type="hidden" name="old_serial" value={ detail.Unit.SerialNo }/>
+					<div>
+						<label class="block text-sm font-medium mb-1">New unit serial / IMEI</label>
+						<input name="new_serial" required class="w-full border rounded-lg px-3 py-2" placeholder="serial of the replacement unit"/>
+					</div>
+					<div>
+						<label class="block text-sm font-medium mb-1">Reason (optional)</label>
+						<input name="reason" class="w-full border rounded-lg px-3 py-2" placeholder="fault / defect…"/>
+					</div>
+					<p class="text-xs text-slate-400">The replacement keeps the original warranty (same expiry) and one unit is removed from stock.</p>
+					<button type="submit" class="px-5 py-2 rounded-lg bg-rose-600 text-white font-medium">Record replacement</button>
+				</form>
+			}
+		</div>
+	}
+}
+
+// worthOrDash formats an optional cost worth, or a dash when absent.
+func worthOrDash(symbol string, v *decimal.Decimal) string {
+	if v == nil {
+		return "—"
+	}
+	return money.Format(symbol, *v)
+}

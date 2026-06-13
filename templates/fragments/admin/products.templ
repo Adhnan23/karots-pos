@@ -137,6 +137,18 @@ templ ProductForm(p *products.Product, cats []categories.Category, us []units.Un
 						<input name="reorder_level" type="number" min="0" value={ valOf(p, fReorder) } class="w-full border rounded-lg px-3 py-2"/>
 					</div>
 				</div>
+				<!-- Warranty / serial tracking: a serialized product prompts the cashier for
+				     a unique serial per unit at the till; warranty months stamps the cover. -->
+				<div class="grid grid-cols-2 gap-4 items-center">
+					<label class="flex items-center gap-2 pt-5">
+						<input type="checkbox" name="track_serial" value="true" checked?={ p != nil && p.TrackSerial }/>
+						<span class="text-sm font-medium">Track serial number</span>
+					</label>
+					<div>
+						<label class="block text-sm font-medium mb-1">Warranty (months)</label>
+						<input name="warranty_months" type="number" min="0" value={ valOf(p, fWarrantyMonths) } placeholder="0 = none" class="w-full border rounded-lg px-3 py-2"/>
+					</div>
+				</div>
 				<div class="flex justify-end gap-3 pt-2">
 					<button type="button" class="px-4 py-2 rounded-lg border" x-on:click="$dispatch('close-modal')">Cancel</button>
 					<button type="submit" class="px-4 py-2 rounded-lg bg-indigo-600 text-white">Save</button>

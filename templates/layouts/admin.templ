@@ -7,6 +7,7 @@ func adminGroups() []navGroup {
 		{"Sell", []navItem{
 			{"/admin/sales", "Sales", "sales"},
 			{"/admin/customers", "Customers", "customers"},
+			{"/admin/warranty", "Warranty", "warranty"},
 		}},
 		{"Inventory", []navItem{
 			{"/admin/products", "Products", "products"},
@@ -30,6 +31,7 @@ func adminGroups() []navGroup {
 			{"/admin/finance", "Finance & Profit", "finance"},
 			{"/admin/reports/low-stock", "Low Stock", "low-stock"},
 			{"/admin/reports/expiring", "Expiring Stock", "expiring"},
+			{"/admin/damage", "Damage Report", "damage-report"},
 			{"/admin/expenses", "Expenses", "expenses"},
 		}},
 		{"Setup", []navItem{
@@ -88,6 +90,7 @@ templ Admin(title, userName, active string) {
 						<span x-text="dark ? 'Light mode' : 'Dark mode'">Dark mode</span>
 					</button>
 					<a href="/cashier" class="block px-3 py-2 rounded-lg hover:bg-slate-800">Open Cashier →</a>
+					<a href="/account/pin" class="block px-3 py-2 rounded-lg hover:bg-slate-800">Change PIN</a>
 					<form method="post" action="/logout">
 						<button type="submit" class="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-800 text-red-300">Log out</button>
 					</form>

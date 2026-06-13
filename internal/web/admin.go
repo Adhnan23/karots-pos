@@ -42,14 +42,17 @@ func (a *adminUI) Dashboard(c echo.Context) error {
 	ctx := c.Request().Context()
 	now := time.Now()
 	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	tomorrow := start.AddDate(0, 0, 1)
 
 	todays, err := a.s.sales.List(ctx, sales.ListFilter{From: &start, Limit: 500})
 	if err != nil {
 		return err
 	}
-	total := decimal.Zero
-	for _, s := range todays {
-		total = total.Add(s.Total)
+	// Today's headline figure mirrors the P&L: net revenue (gross − returns),
+	// excluding voids — so the dashboard and the finance report never disagree.
+	pl, err := a.s.reports.Compute(ctx, start, tomorrow)
+	if err != nil {
+		return err
 	}
 	recent := todays
 	if len(recent) > 8 {
@@ -72,8 +75,8 @@ func (a *adminUI) Dashboard(c echo.Context) error {
 	return response.RenderPage(c, adminpages.Dashboard(adminpages.DashboardData{
 		UserName:       middleware.CurrentUserName(c),
 		Symbol:         a.symbol(ctx),
-		TodayCount:     len(todays),
-		TodayTotal:     total,
+		TodayCount:     pl.SalesCount,
+		TodayTotal:     pl.Revenue,
 		LowStockCount:  lowStock,
 		ExpiringCount:  len(expiring),
 		OutstandingDue: due,

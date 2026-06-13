@@ -42,6 +42,7 @@ templ ZReport(d ZReportData) {
 				@zRow("Sales count", itoa(d.Sales.Count))
 				@zMoney(d.Symbol, "Gross", d.Sales.Gross)
 				@zMoney(d.Symbol, "Discounts", d.Sales.Discount)
+				@zMoney(d.Symbol, "Returns", d.Sales.Returns)
 				@zMoney(d.Symbol, "Net sales", d.Sales.Net)
 			</tbody>
 		</table>

@@ -17,9 +17,10 @@ import (
 func (s *Service) issueAccess(u *User, now time.Time) (string, time.Time, error) {
 	exp := now.Add(s.accessTTL)
 	claims := middleware.Claims{
-		UserID: u.ID,
-		Role:   u.Role,
-		Name:   u.Name,
+		UserID:        u.ID,
+		Role:          u.Role,
+		Name:          u.Name,
+		MustChangePin: u.MustChangePin,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   strconv.FormatInt(u.ID, 10),
 			IssuedAt:  jwt.NewNumericDate(now),

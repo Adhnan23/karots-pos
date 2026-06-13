@@ -55,11 +55,28 @@ make build                    # → bin/karots-pos  (CGO-free, fully static)
 export DATABASE_URL=postgres://user:pass@host:5432/db?sslmode=disable
 export JWT_SECRET=$(openssl rand -hex 24)
 ./bin/karots-pos -migrate      # apply schema (run once / on deploy)
-./bin/karots-pos -seed         # optional starter data
+./bin/karots-pos -init         # create the shop's first admin (real deploy)
 ./bin/karots-pos               # serve on :3000
 ```
 
 Migrations also run automatically on every start, so `-migrate` is optional.
+
+### `-init` vs `-seed`
+
+For a **real shop's first boot**, use `-init`: it creates a single **admin** account
+and nothing else, leaving the catalog empty and the shop identity at its neutral
+default (`My Shop`) so the owner configures everything in the UI. The admin is
+forced to choose their own PIN on first login. Defaults can be overridden:
+
+```bash
+POS_ADMIN_NAME="Jane"  POS_ADMIN_PHONE=0771112222  POS_ADMIN_PIN=4321 \
+  ./bin/karots-pos -init
+```
+
+`-seed` is the **development/demo** dataset (staff users, "Karots Super Mart"
+identity, a nested category tree, 8 stocked products, suppliers and customers) —
+**do not run it on a production install.** Both commands are idempotent (they skip
+if any users already exist) and exit without serving.
 
 ### Full stack in Docker
 
@@ -72,8 +89,8 @@ docker compose run --rm server -seed                # one-time seed
 
 | Surface | Path | Who | Does |
 |---|---|---|---|
-| **Cashier terminal** | `/cashier` | all roles | barcode scan, product search, live cart, retail/wholesale/credit checkout, **split-tender payments (cash/card/online)**, **hold/park & resume sales**, **count-by-denomination drawer open/close**, **mid-shift withdrawals**, **day-end Z-report**, thermal receipt (80mm/58mm) + **reprint**, **returns/refunds**, **damage write-off**, **credit collection** |
-| **Admin panel** | `/admin` | admin, manager | dashboard + alerts, products, inventory & **FEFO batches**, sales + **partial returns**, purchasing (GRN) + **supplier returns**, suppliers, customers & credit, expenses, **finance/profit**, reports (incl. **customer dues**), **cash register sessions & denominations**, **categories (nested)**, units, **conversions**, **barcode labels**, users, **audit log**, settings + **backup/restore** |
+| **Cashier terminal** | `/cashier` | all roles | barcode scan, product search, live cart, retail/wholesale/credit checkout, **split-tender payments (cash/card/online)**, **hold/park & resume sales**, **count-by-denomination drawer open/close**, **mid-shift withdrawals**, **day-end Z-report**, thermal receipt (80mm/58mm) + **reprint**, **returns/refunds**, **damage write-off**, **credit collection**, **serial/warranty lookup & replacement** |
+| **Admin panel** | `/admin` | admin, manager | dashboard + alerts, products, inventory & **FEFO batches**, sales + **partial returns**, purchasing (GRN) + **supplier returns**, suppliers, customers & credit, expenses, **finance/profit** (net of returns, with **losses & recoveries**), reports (incl. **customer dues**, **returns**, **profit-by-category**, **sales-trend**, **warranty**), **cash register sessions & denominations**, **categories (nested)**, units, **conversions**, **barcode labels**, **warranty tracking + supplier recovery**, **damage report**, users, **audit log**, settings + **backup/restore** |
 
 Both call the **same services**. The cashier UI talks to the JSON API
 (`/api/*`); the admin panel is server-rendered HTML with HTMX partials.
@@ -198,6 +215,12 @@ change computed) → **oversell returns 409 with stock unchanged** → credit sa
 - **Login is phone + PIN.** Each user's phone number is unique and is their login
   id; there is no user list on the login page (so staff aren't enumerable). The
   admin "Users" page sets each staff member's phone + PIN.
-- Change the seeded **Admin (0771234567 / 1234)**, **Manager (0772222222 / 2222)**
-  and **Cashier (0771111111 / 1111)** credentials before any real deployment.
+- **Forced PIN change.** Seeded, admin-created, and admin-reset accounts are flagged
+  `must_change_pin`, so the user is redirected to `/account/pin` to choose their own
+  PIN on next login. Anyone can change their own PIN any time via the "Change PIN"
+  link. A real deploy uses **`-init`** (one admin, empty shop) — see SETUP.md —
+  rather than the demo `-seed` credentials below.
+- The demo `-seed` credentials (**Admin 0771234567 / 1234**, **Manager 0772222222 /
+  2222**, **Cashier 0771111111 / 1111**) are for development only; change them before
+  any real deployment.
 ```

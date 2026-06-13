@@ -173,6 +173,8 @@ func toWriteRow(in CreateInput) (writeRow, error) {
 		Wholesale:  whole,
 		Tax:        tax,
 		Reorder:    in.ReorderLevel,
+		TrackSerial:    in.TrackSerial,
+		WarrantyMonths: in.WarrantyMonths,
 	}, nil
 }
 

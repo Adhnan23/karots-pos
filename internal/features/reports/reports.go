@@ -21,12 +21,17 @@ type PL struct {
 	From         time.Time          `json:"from"`
 	To           time.Time          `json:"to"`
 	SalesCount   int                `json:"sales_count"`
-	Revenue      decimal.Decimal    `json:"revenue"`       // sum of sale totals (excl. returned/void)
+	GrossRevenue decimal.Decimal    `json:"gross_revenue"` // sale totals before returns (excl. void)
+	Returns      decimal.Decimal    `json:"returns"`       // value of returned lines, by sale date
+	Revenue      decimal.Decimal    `json:"revenue"`       // net revenue = gross - returns
 	Received     decimal.Decimal    `json:"received"`      // cash/card/online actually collected
-	COGS         decimal.Decimal    `json:"cogs"`          // cost of goods sold (snapshot cost)
+	COGS         decimal.Decimal    `json:"cogs"`          // cost of goods sold, net of returns
 	GrossProfit  decimal.Decimal    `json:"gross_profit"`  // revenue - COGS
+	GrossMargin  decimal.Decimal    `json:"gross_margin"`  // gross profit / revenue, percent
 	Expenses     decimal.Decimal    `json:"expenses"`      // operating expenses in range
-	NetProfit    decimal.Decimal    `json:"net_profit"`    // gross profit - expenses
+	Losses       decimal.Decimal    `json:"losses"`        // damage + warranty replacement cost
+	Recoveries   decimal.Decimal    `json:"recoveries"`    // value reclaimed from suppliers
+	NetProfit    decimal.Decimal    `json:"net_profit"`    // gross - expenses - losses + recoveries
 	Receivables  decimal.Decimal    `json:"receivables"`   // customer dues (current snapshot)
 	Payables     decimal.Decimal    `json:"payables"`      // supplier dues (current snapshot)
 	CashWithdrawn decimal.Decimal   `json:"cash_withdrawn"` // drawer withdrawals in range
@@ -54,39 +59,71 @@ func NewService(db *sqlx.DB) *Service { return &Service{db: db} }
 func (s *Service) Compute(ctx context.Context, from, to time.Time) (*PL, error) {
 	pl := &PL{From: from, To: to}
 
+	// Gross sales (every real sale at its original total) and cash collected. A
+	// return is accounted by sale date: it reduces this sale's period below via the
+	// Returns figure and the net COGS, rather than dropping the whole sale.
 	var head struct {
-		Count   int             `db:"count"`
-		Revenue decimal.Decimal `db:"revenue"`
-		Paid    decimal.Decimal `db:"paid"`
+		Count int             `db:"count"`
+		Gross decimal.Decimal `db:"gross"`
+		Paid  decimal.Decimal `db:"paid"`
 	}
 	if err := s.db.GetContext(ctx, &head, `
 		SELECT COUNT(*) AS count,
-		       COALESCE(SUM(total),0) AS revenue,
+		       COALESCE(SUM(total),0) AS gross,
 		       COALESCE(SUM(paid_amount),0) AS paid
 		FROM sales
-		WHERE status IN ('completed','credit') AND created_at >= $1 AND created_at < $2`,
+		WHERE status <> 'void' AND created_at >= $1 AND created_at < $2`,
 		from, to); err != nil {
 		return nil, apperr.Internal("failed to compute revenue", err)
 	}
 	pl.SalesCount = head.Count
-	pl.Revenue = head.Revenue
+	pl.GrossRevenue = head.Gross
 	pl.Received = head.Paid
 
-	if err := s.db.GetContext(ctx, &pl.COGS, `
-		SELECT COALESCE(SUM(si.quantity * si.cost_price),0)
+	// Returns: value of returned lines (valued per unit as line net / qty, matching
+	// the refund actually given), for sales in this period.
+	if err := s.db.GetContext(ctx, &pl.Returns, `
+		SELECT COALESCE(SUM( (si.subtotal / NULLIF(si.quantity,0)) * si.returned_qty ),0)
 		FROM sale_items si JOIN sales s ON s.id = si.sale_id
-		WHERE s.status IN ('completed','credit') AND s.created_at >= $1 AND s.created_at < $2`,
+		WHERE s.status <> 'void' AND s.created_at >= $1 AND s.created_at < $2`,
+		from, to); err != nil {
+		return nil, apperr.Internal("failed to compute returns", err)
+	}
+	pl.Revenue = pl.GrossRevenue.Sub(pl.Returns)
+
+	// COGS net of returns — returned units are restocked, so their cost is excluded.
+	if err := s.db.GetContext(ctx, &pl.COGS, `
+		SELECT COALESCE(SUM( (si.quantity - si.returned_qty) * si.cost_price ),0)
+		FROM sale_items si JOIN sales s ON s.id = si.sale_id
+		WHERE s.status <> 'void' AND s.created_at >= $1 AND s.created_at < $2`,
 		from, to); err != nil {
 		return nil, apperr.Internal("failed to compute COGS", err)
 	}
 	pl.GrossProfit = pl.Revenue.Sub(pl.COGS)
+	pl.GrossMargin = grossMargin(pl.GrossProfit, pl.Revenue)
 
 	if err := s.db.GetContext(ctx, &pl.Expenses, `
 		SELECT COALESCE(SUM(amount),0) FROM expenses
 		WHERE expense_date >= $1 AND expense_date < $2`, from, to); err != nil {
 		return nil, apperr.Internal("failed to compute expenses", err)
 	}
-	pl.NetProfit = pl.GrossProfit.Sub(pl.Expenses)
+	// Stock losses (damaged + warranty replacements) and any value reclaimed from
+	// suppliers against them. These never touch revenue, so without these lines the
+	// P&L would silently overstate profit by the cost of the lost goods.
+	if err := s.db.GetContext(ctx, &pl.Losses, `
+		SELECT COALESCE(SUM(cost),0) FROM stock_movements
+		WHERE type IN ('damage','warranty_replacement') AND created_at >= $1 AND created_at < $2`,
+		from, to); err != nil {
+		return nil, apperr.Internal("failed to compute losses", err)
+	}
+	if err := s.db.GetContext(ctx, &pl.Recoveries, `
+		SELECT COALESCE(SUM(recovered_value),0) FROM loss_recoveries
+		WHERE created_at >= $1 AND created_at < $2`,
+		from, to); err != nil {
+		return nil, apperr.Internal("failed to compute recoveries", err)
+	}
+
+	pl.NetProfit = pl.GrossProfit.Sub(pl.Expenses).Sub(pl.Losses).Add(pl.Recoveries)
 
 	_ = s.db.GetContext(ctx, &pl.Receivables, `SELECT COALESCE(SUM(outstanding_balance),0) FROM customers`)
 	_ = s.db.GetContext(ctx, &pl.Payables, `SELECT COALESCE(SUM(outstanding_balance),0) FROM suppliers`)
@@ -100,16 +137,19 @@ func (s *Service) Compute(ctx context.Context, from, to time.Time) (*PL, error) 
 		SELECT COALESCE(SUM(difference),0) FROM cash_register
 		WHERE closed_at >= $1 AND closed_at < $2`, from, to)
 
+	// Top products on net (kept) quantities and value.
 	if err := s.db.SelectContext(ctx, &pl.TopProducts, `
 		SELECT p.name AS product_name,
-		       SUM(si.quantity) AS qty,
-		       SUM(si.subtotal) AS revenue,
-		       SUM(si.subtotal - si.quantity * si.cost_price) AS profit
+		       SUM(si.quantity - si.returned_qty) AS qty,
+		       SUM( (si.subtotal / NULLIF(si.quantity,0)) * (si.quantity - si.returned_qty) ) AS revenue,
+		       SUM( (si.subtotal / NULLIF(si.quantity,0)) * (si.quantity - si.returned_qty)
+		            - (si.quantity - si.returned_qty) * si.cost_price ) AS profit
 		FROM sale_items si
 		JOIN sales s ON s.id = si.sale_id
 		JOIN products p ON p.id = si.product_id
-		WHERE s.status IN ('completed','credit') AND s.created_at >= $1 AND s.created_at < $2
+		WHERE s.status <> 'void' AND s.created_at >= $1 AND s.created_at < $2
 		GROUP BY p.name
+		HAVING SUM(si.quantity - si.returned_qty) > 0
 		ORDER BY revenue DESC
 		LIMIT 10`, from, to); err != nil {
 		return nil, apperr.Internal("failed to compute top products", err)
@@ -118,12 +158,165 @@ func (s *Service) Compute(ctx context.Context, from, to time.Time) (*PL, error) 
 	if err := s.db.SelectContext(ctx, &pl.ByPayment, `
 		SELECT pmt.method, COALESCE(SUM(pmt.amount),0) AS total
 		FROM payments pmt JOIN sales s ON s.id = pmt.sale_id
-		WHERE s.created_at >= $1 AND s.created_at < $2
+		WHERE s.status <> 'void' AND s.created_at >= $1 AND s.created_at < $2
 		GROUP BY pmt.method ORDER BY total DESC`, from, to); err != nil {
 		return nil, apperr.Internal("failed to compute payment breakdown", err)
 	}
 
 	return pl, nil
+}
+
+// grossMargin is gross profit as a percent of net revenue (0 when revenue is 0).
+func grossMargin(profit, revenue decimal.Decimal) decimal.Decimal {
+	if !revenue.IsPositive() {
+		return decimal.Zero
+	}
+	return profit.Div(revenue).Mul(decimal.NewFromInt(100)).Round(2)
+}
+
+// ReturnRow is one returned line for the returns report.
+type ReturnRow struct {
+	SaleDate    time.Time       `db:"sale_date"    json:"sale_date"`
+	ReceiptNo   string          `db:"receipt_no"   json:"receipt_no"`
+	ProductName string          `db:"product_name" json:"product_name"`
+	Qty         decimal.Decimal `db:"qty"          json:"qty"`
+	RefundValue decimal.Decimal `db:"refund_value" json:"refund_value"`
+	Customer    *string         `db:"customer"     json:"customer,omitempty"`
+}
+
+// Returns lists returned lines (full or partial) for sales in the period.
+func (s *Service) Returns(ctx context.Context, from, to time.Time) ([]ReturnRow, error) {
+	var rows []ReturnRow
+	if err := s.db.SelectContext(ctx, &rows, `
+		SELECT s.created_at AS sale_date, s.receipt_no, p.name AS product_name,
+		       si.returned_qty AS qty,
+		       ((si.subtotal / NULLIF(si.quantity,0)) * si.returned_qty) AS refund_value,
+		       c.name AS customer
+		FROM sale_items si
+		JOIN sales s     ON s.id = si.sale_id
+		JOIN products p  ON p.id = si.product_id
+		LEFT JOIN customers c ON c.id = s.customer_id
+		WHERE si.returned_qty > 0 AND s.status <> 'void'
+		  AND s.created_at >= $1 AND s.created_at < $2
+		ORDER BY s.created_at DESC, s.receipt_no`, from, to); err != nil {
+		return nil, apperr.Internal("failed to load returns", err)
+	}
+	return rows, nil
+}
+
+// CategoryProfit is net revenue/COGS/profit for one category in the period.
+type CategoryProfit struct {
+	Category string          `db:"category" json:"category"`
+	Revenue  decimal.Decimal `db:"revenue"  json:"revenue"`
+	COGS     decimal.Decimal `db:"cogs"     json:"cogs"`
+	Profit   decimal.Decimal `db:"profit"   json:"profit"`
+}
+
+// ProfitByCategory groups net sales by product category for the period.
+func (s *Service) ProfitByCategory(ctx context.Context, from, to time.Time) ([]CategoryProfit, error) {
+	var rows []CategoryProfit
+	if err := s.db.SelectContext(ctx, &rows, `
+		SELECT cat.name AS category,
+		       SUM( (si.subtotal / NULLIF(si.quantity,0)) * (si.quantity - si.returned_qty) ) AS revenue,
+		       SUM( (si.quantity - si.returned_qty) * si.cost_price ) AS cogs,
+		       SUM( (si.subtotal / NULLIF(si.quantity,0)) * (si.quantity - si.returned_qty)
+		            - (si.quantity - si.returned_qty) * si.cost_price ) AS profit
+		FROM sale_items si
+		JOIN sales s     ON s.id = si.sale_id
+		JOIN products p  ON p.id = si.product_id
+		JOIN categories cat ON cat.id = p.category_id
+		WHERE s.status <> 'void' AND s.created_at >= $1 AND s.created_at < $2
+		GROUP BY cat.name
+		HAVING SUM(si.quantity - si.returned_qty) > 0
+		ORDER BY profit DESC`, from, to); err != nil {
+		return nil, apperr.Internal("failed to load category profit", err)
+	}
+	return rows, nil
+}
+
+// DayRow is one day's net sales for the trend report.
+type DayRow struct {
+	Day     time.Time       `db:"day"     json:"day"`
+	Count   int             `db:"count"   json:"count"`
+	Revenue decimal.Decimal `db:"revenue" json:"revenue"`
+	Profit  decimal.Decimal `db:"profit"  json:"profit"`
+}
+
+// DailySales is per-day net revenue and profit for the period.
+func (s *Service) DailySales(ctx context.Context, from, to time.Time) ([]DayRow, error) {
+	var rows []DayRow
+	if err := s.db.SelectContext(ctx, &rows, `
+		SELECT d.day, d.count, d.revenue, d.revenue - d.cogs AS profit
+		FROM (
+			SELECT date_trunc('day', s.created_at) AS day,
+			       COUNT(DISTINCT s.id) AS count,
+			       COALESCE(SUM( (si.subtotal / NULLIF(si.quantity,0)) * (si.quantity - si.returned_qty) ),0) AS revenue,
+			       COALESCE(SUM( (si.quantity - si.returned_qty) * si.cost_price ),0) AS cogs
+			FROM sales s
+			JOIN sale_items si ON si.sale_id = s.id
+			WHERE s.status <> 'void' AND s.created_at >= $1 AND s.created_at < $2
+			GROUP BY 1
+		) d
+		ORDER BY d.day`, from, to); err != nil {
+		return nil, apperr.Internal("failed to load daily sales", err)
+	}
+	return rows, nil
+}
+
+// WarrantySummary is the periodised warranty-cost vs supplier-recovery picture.
+type WarrantySummary struct {
+	ReplacementCount int             `json:"replacement_count"`
+	ReplacementCost  decimal.Decimal `json:"replacement_cost"`
+	DamageCount      int             `json:"damage_count"`
+	DamageCost       decimal.Decimal `json:"damage_cost"`
+	Recoveries       []RecoveryRow   `json:"recoveries"`
+	RecoveredValue   decimal.Decimal `json:"recovered_value"`
+}
+
+// RecoveryRow is recovery totals for one outcome.
+type RecoveryRow struct {
+	Outcome   string          `db:"outcome"   json:"outcome"`
+	Count     int             `db:"count"     json:"count"`
+	LossValue decimal.Decimal `db:"loss_value" json:"loss_value"`
+	Recovered decimal.Decimal `db:"recovered" json:"recovered"`
+}
+
+// WarrantyAndRecovery summarises stock losses and supplier recoveries by period.
+func (s *Service) WarrantyAndRecovery(ctx context.Context, from, to time.Time) (*WarrantySummary, error) {
+	out := &WarrantySummary{}
+	var moves []struct {
+		Type  string          `db:"type"`
+		Count int             `db:"count"`
+		Cost  decimal.Decimal `db:"cost"`
+	}
+	if err := s.db.SelectContext(ctx, &moves, `
+		SELECT type, COUNT(*) AS count, COALESCE(SUM(cost),0) AS cost
+		FROM stock_movements
+		WHERE type IN ('warranty_replacement','damage') AND created_at >= $1 AND created_at < $2
+		GROUP BY type`, from, to); err != nil {
+		return nil, apperr.Internal("failed to load losses", err)
+	}
+	for _, m := range moves {
+		switch m.Type {
+		case "warranty_replacement":
+			out.ReplacementCount, out.ReplacementCost = m.Count, m.Cost
+		case "damage":
+			out.DamageCount, out.DamageCost = m.Count, m.Cost
+		}
+	}
+	if err := s.db.SelectContext(ctx, &out.Recoveries, `
+		SELECT outcome, COUNT(*) AS count,
+		       COALESCE(SUM(loss_value),0) AS loss_value,
+		       COALESCE(SUM(recovered_value),0) AS recovered
+		FROM loss_recoveries
+		WHERE created_at >= $1 AND created_at < $2
+		GROUP BY outcome ORDER BY outcome`, from, to); err != nil {
+		return nil, apperr.Internal("failed to load recoveries", err)
+	}
+	for _, r := range out.Recoveries {
+		out.RecoveredValue = out.RecoveredValue.Add(r.Recovered)
+	}
+	return out, nil
 }
 
 type APIHandler struct{ svc *Service }

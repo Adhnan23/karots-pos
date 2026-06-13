@@ -1,0 +1,72 @@
+package adminpages
+
+import (
+	"strconv"
+
+	"karots-pos/internal/features/suppliers"
+	"karots-pos/internal/money"
+
+	"github.com/shopspring/decimal"
+)
+
+type RecoveryFormData struct {
+	Base        string
+	Symbol      string
+	SourceType  string // "warranty" | "damage"
+	SourceID    int64
+	ProductName string
+	LossValue   decimal.Decimal
+	Suppliers   []suppliers.Supplier
+}
+
+// RecoveryForm is the supplier-recovery form fragment, shared by the admin
+// warranty card and the damage report. Posts to <base>/recovery.
+templ RecoveryForm(d RecoveryFormData) {
+	<form
+		x-data="{ outcome: 'replacement' }"
+		hx-post={ d.Base + "/recovery" }
+		hx-target="#recovery-slot"
+		hx-swap="innerHTML"
+		class="space-y-3 border rounded-lg p-3 bg-white"
+	>
+		<input type="hidden" name="source_type" value={ d.SourceType }/>
+		<input type="hidden" name="source_id" value={ strconv.FormatInt(d.SourceID, 10) }/>
+		<div class="text-sm">
+			<span class="text-slate-500">Faulty item:</span> <span class="font-medium">{ d.ProductName }</span>
+			<span class="text-slate-400">· worth { money.Format(d.Symbol, d.LossValue) }</span>
+		</div>
+		<div>
+			<label class="block text-xs font-semibold uppercase tracking-wide text-slate-400 mb-1">Outcome</label>
+			<div class="flex flex-col gap-1 text-sm">
+				<label class="flex items-center gap-2"><input type="radio" name="outcome" value="replacement" x-model="outcome"/> Replacement received (restock +1)</label>
+				<label class="flex items-center gap-2"><input type="radio" name="outcome" value="paid" x-model="outcome"/> Supplier paid / credited</label>
+				<label class="flex items-center gap-2"><input type="radio" name="outcome" value="written_off" x-model="outcome"/> Written off (full loss)</label>
+			</div>
+		</div>
+		<div x-show="outcome === 'paid'" class="space-y-2">
+			<div>
+				<label class="block text-sm font-medium mb-1">Supplier</label>
+				<select name="supplier_id" class="w-full border rounded-lg px-3 py-2">
+					<option value="">— select supplier —</option>
+					for _, s := range d.Suppliers {
+						<option value={ strconv.FormatInt(s.ID, 10) }>{ s.Name }</option>
+					}
+				</select>
+			</div>
+			<div>
+				<label class="block text-sm font-medium mb-1">Amount paid / credited</label>
+				<input name="recovered_amount" inputmode="decimal" class="w-full border rounded-lg px-3 py-2" placeholder="0.00"/>
+			</div>
+		</div>
+		<div>
+			<label class="block text-sm font-medium mb-1">Note (optional)</label>
+			<input name="note" class="w-full border rounded-lg px-3 py-2" placeholder="reference / remarks…"/>
+		</div>
+		<button type="submit" class="px-5 py-2 rounded-lg bg-slate-800 text-white text-sm font-medium">Save recovery</button>
+	</form>
+}
+
+// RecoveryDone is the small confirmation swapped in after a recovery is saved.
+templ RecoveryDone() {
+	<div class="rounded-lg border border-dashed p-3 text-sm text-emerald-700 bg-emerald-50">Recovery recorded.</div>
+}

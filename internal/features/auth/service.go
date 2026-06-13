@@ -164,9 +164,49 @@ func (s *Service) UpdateUser(ctx context.Context, id int64, in UpdateUserInput) 
 		if uerr := s.repo.UpdatePin(ctx, id, string(hash)); uerr != nil {
 			return apperr.Internal("could not reset PIN", uerr)
 		}
+		// An admin-set PIN is not one the user chose: force them to change it
+		// on next login.
+		if uerr := s.repo.SetMustChangePin(ctx, id, true); uerr != nil {
+			return apperr.Internal("could not flag PIN reset", uerr)
+		}
 		_ = s.repo.DeleteAllRefreshForUser(ctx, id)
 	}
 	return nil
+}
+
+// ChangeOwnPIN lets the authenticated user replace their own PIN. It verifies
+// the current PIN, enforces a different new PIN, and clears the forced-change
+// flag (via UpdatePin). The fresh user is returned so the caller can mint a new
+// session token carrying the cleared flag.
+func (s *Service) ChangeOwnPIN(ctx context.Context, userID int64, in ChangeOwnPINInput) (*User, error) {
+	if in.NewPIN != in.ConfirmPIN {
+		return nil, apperr.BadRequest("the new PIN and confirmation do not match")
+	}
+	if in.NewPIN == in.CurrentPIN {
+		return nil, apperr.BadRequest("the new PIN must be different from the current one")
+	}
+	u, err := s.repo.FindByID(ctx, userID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, apperr.Unauthorized("account is no longer active")
+		}
+		return nil, apperr.Internal("could not load account", err)
+	}
+	if bcrypt.CompareHashAndPassword([]byte(u.PinHash), []byte(in.CurrentPIN)) != nil {
+		return nil, apperr.BadRequest("your current PIN is incorrect")
+	}
+	hash, herr := bcrypt.GenerateFromPassword([]byte(in.NewPIN), bcrypt.DefaultCost)
+	if herr != nil {
+		return nil, apperr.Internal("could not hash PIN", herr)
+	}
+	if uerr := s.repo.UpdatePin(ctx, userID, string(hash)); uerr != nil {
+		return nil, apperr.Internal("could not change PIN", uerr)
+	}
+	// Old sessions on the previous PIN should die.
+	_ = s.repo.DeleteAllRefreshForUser(ctx, userID)
+	u.MustChangePin = false
+	u.PinHash = string(hash)
+	return u, nil
 }
 
 func (s *Service) DeactivateUser(ctx context.Context, id int64) error {
@@ -185,6 +225,17 @@ func (s *Service) ReactivateUser(ctx context.Context, id int64) error {
 		return apperr.Internal("could not reactivate user", err)
 	}
 	return nil
+}
+
+// AccessTokenFor mints a standalone access token for an already-authenticated
+// user — used to refresh the UI cookie after a self-service change (e.g. a PIN
+// change that must clear the forced-change claim).
+func (s *Service) AccessTokenFor(u *User) (string, error) {
+	access, _, err := s.issueAccess(u, s.now())
+	if err != nil {
+		return "", apperr.Internal("could not issue token", err)
+	}
+	return access, nil
 }
 
 func (s *Service) issuePair(ctx context.Context, u *User) (*TokenPair, error) {

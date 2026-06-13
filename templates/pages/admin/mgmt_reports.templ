@@ -32,6 +32,10 @@ templ ReportsHub(d ReportsHubData) {
 		<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
 			@reportCard("/admin/reports/sales", "Sales", "Receipts and totals over a date range")
 			@reportCard("/admin/reports/finance", "Finance / P&L", "Revenue, COGS, profit, dues for a period")
+			@reportCard("/admin/reports/returns", "Returns / Refunds", "Returned lines and refund value")
+			@reportCard("/admin/reports/profit-by-category", "Profit by Category", "Net revenue & profit per category")
+			@reportCard("/admin/reports/sales-trend", "Daily Sales Trend", "Day-by-day net revenue & profit")
+			@reportCard("/admin/reports/warranty", "Warranty & Recovery", "Replacement cost vs supplier recovery")
 			@reportCard("/admin/reports/cash-register", "Cash Register", "Drawer sessions with over/short")
 			@reportCard("/admin/reports/purchases", "Purchases", "GRNs received in a period")
 			@reportCard("/admin/reports/suppliers", "Suppliers", "Outstanding payables snapshot")
@@ -149,10 +153,15 @@ templ FinanceReport(d FinanceReportData) {
 		<table class="w-full text-sm">
 			<tbody>
 				@plRow("Sales count", strconv.Itoa(d.PL.SalesCount))
-				@plMoney(d.Symbol, "Revenue", d.PL.Revenue, false)
+				@plMoney(d.Symbol, "Gross revenue", d.PL.GrossRevenue, false)
+				@plMoney(d.Symbol, "Returns", d.PL.Returns, true)
+				@plMoney(d.Symbol, "Net revenue", d.PL.Revenue, false)
 				@plMoney(d.Symbol, "Cost of goods sold (COGS)", d.PL.COGS, true)
 				@plMoney(d.Symbol, "Gross profit", d.PL.GrossProfit, false)
+				@plRow("Gross margin", money.Display(d.PL.GrossMargin)+"%")
 				@plMoney(d.Symbol, "Operating expenses", d.PL.Expenses, true)
+				@plMoney(d.Symbol, "Stock losses (damage + warranty)", d.PL.Losses, true)
+				@plMoney(d.Symbol, "Supplier recoveries", d.PL.Recoveries, false)
 				@plMoney(d.Symbol, "Net profit", d.PL.NetProfit, false)
 				@plMoney(d.Symbol, "Cash received", d.PL.Received, false)
 				@plMoney(d.Symbol, "Receivables (customer dues)", d.PL.Receivables, false)

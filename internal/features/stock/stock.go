@@ -21,6 +21,8 @@ const (
 	MoveDamage         = "damage"
 	MoveConversion     = "conversion"
 	MovePurchaseReturn = "purchase_return"
+	MoveWarranty       = "warranty_replacement"
+	MoveRecovery       = "recovery"
 )
 
 type Movement struct {
@@ -32,6 +34,7 @@ type Movement struct {
 	ReferenceType *string         `db:"reference_type" json:"reference_type,omitempty"`
 	UserID        int64           `db:"user_id"        json:"user_id"`
 	Note          *string         `db:"note"           json:"note,omitempty"`
+	Cost          decimal.Decimal `db:"cost"           json:"cost"`
 	CreatedAt     time.Time       `db:"created_at"     json:"created_at"`
 	// joined
 	ProductName string `db:"product_name" json:"product_name"`
@@ -47,6 +50,7 @@ type MovementInput struct {
 	ReferenceType *string
 	UserID        int64
 	Note          *string
+	Cost          decimal.Decimal // worth of the goods moved (damage/warranty/recovery)
 }
 
 type Repository struct{ q db.Queryer }
@@ -92,9 +96,9 @@ func (r *Repository) SetQuantity(ctx context.Context, productID int64, qty decim
 func (r *Repository) InsertMovement(ctx context.Context, m MovementInput) error {
 	_, err := r.q.ExecContext(ctx, `
 		INSERT INTO stock_movements
-			(product_id, type, quantity, reference_id, reference_type, user_id, note)
-		VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-		m.ProductID, m.Type, m.Quantity, m.ReferenceID, m.ReferenceType, m.UserID, m.Note)
+			(product_id, type, quantity, reference_id, reference_type, user_id, note, cost)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+		m.ProductID, m.Type, m.Quantity, m.ReferenceID, m.ReferenceType, m.UserID, m.Note, m.Cost)
 	return err
 }
 

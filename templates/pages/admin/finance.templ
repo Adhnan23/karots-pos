@@ -31,10 +31,19 @@ templ FinancePage(d FinanceData) {
 		</form>
 
 		<div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-			@statCard("Revenue", money.Format(d.Symbol, d.PL.Revenue), "indigo")
+			@statCard("Gross Revenue", money.Format(d.Symbol, d.PL.GrossRevenue), "slate")
+			@statCard("Returns", money.Format(d.Symbol, d.PL.Returns), "rose")
+			@statCard("Net Revenue", money.Format(d.Symbol, d.PL.Revenue), "indigo")
 			@statCard("COGS", money.Format(d.Symbol, d.PL.COGS), "slate")
+		</div>
+		<div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
 			@statCard("Gross Profit", money.Format(d.Symbol, d.PL.GrossProfit), "emerald")
+			@statCard("Gross Margin", money.Display(d.PL.GrossMargin) + "%", profitColor(d.PL.GrossMargin.IsNegative()))
 			@statCard("Expenses", money.Format(d.Symbol, d.PL.Expenses), "rose")
+		</div>
+		<div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+			@statCard("Losses (damage + warranty)", money.Format(d.Symbol, d.PL.Losses), "rose")
+			@statCard("Recoveries (supplier)", money.Format(d.Symbol, d.PL.Recoveries), "emerald")
 		</div>
 		<div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
 			@statCard("Net Profit", money.Format(d.Symbol, d.PL.NetProfit), profitColor(d.PL.NetProfit.IsNegative()))

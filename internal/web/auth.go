@@ -57,6 +57,42 @@ func (h *authUI) Logout(c echo.Context) error {
 	return c.Redirect(http.StatusSeeOther, "/login")
 }
 
+// ChangePINForm renders the self-service / forced PIN-change screen.
+func (h *authUI) ChangePINForm(c echo.Context) error {
+	return response.RenderPage(c, authpages.ChangePINPage("", middleware.MustChangePin(c)))
+}
+
+// ChangePIN applies a user's own PIN change, then mints a fresh cookie so the
+// cleared forced-change claim takes effect immediately.
+func (h *authUI) ChangePIN(c echo.Context) error {
+	var in auth.ChangeOwnPINInput
+	if err := c.Bind(&in); err != nil {
+		return h.changePINError(c, "Please fill in all three fields")
+	}
+	if err := c.Validate(&in); err != nil {
+		return h.changePINError(c, "PINs must be 4–6 digits")
+	}
+	u, err := h.svc.ChangeOwnPIN(c.Request().Context(), middleware.CurrentUserID(c), in)
+	if err != nil {
+		if ae, ok := apperr.As(err); ok {
+			return h.changePINError(c, ae.Message)
+		}
+		return err
+	}
+	token, err := h.svc.AccessTokenFor(u)
+	if err != nil {
+		return err
+	}
+	h.setCookie(c, token)
+	return c.Redirect(http.StatusSeeOther, auth.HomePath(u.Role))
+}
+
+func (h *authUI) changePINError(c echo.Context, msg string) error {
+	c.Response().Header().Set(echo.HeaderContentType, echo.MIMETextHTMLCharsetUTF8)
+	c.Response().WriteHeader(http.StatusBadRequest)
+	return authpages.ChangePINPage(msg, middleware.MustChangePin(c)).Render(c.Request().Context(), c.Response().Writer)
+}
+
 func (h *authUI) loginError(c echo.Context, msg string) error {
 	c.Response().Header().Set(echo.HeaderContentType, echo.MIMETextHTMLCharsetUTF8)
 	c.Response().WriteHeader(http.StatusUnauthorized)

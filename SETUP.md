@@ -135,14 +135,15 @@ cd /opt/karots-pos
 chmod +x karots-pos
 ```
 
-Run the **one-time setup** (this creates the database tables and the starter user
-accounts). Because the program doesn't auto-read `.env`, load it for this command:
+Run the **one-time setup** (this creates the database tables and your first admin
+account — nothing else, so you start with an empty catalog). Because the program
+doesn't auto-read `.env`, load it for this command:
 
 ```bash
-set -a && . ./.env && set +a && ./karots-pos -seed
+set -a && . ./.env && set +a && ./karots-pos -init
 ```
 
-You should see `seed complete`. Now start it normally:
+You should see `init complete`. Now start it normally:
 
 ```bash
 set -a && . ./.env && set +a && ./karots-pos
@@ -150,15 +151,20 @@ set -a && . ./.env && set +a && ./karots-pos
 
 Open **http://localhost:3000** in a browser.
 
-**Default logins** (phone number + PIN):
+**First login** (phone number + PIN):
 
 | Role | Phone | PIN |
 |---|---|---|
 | Admin | `0771234567` | `1234` |
-| Manager | `0772222222` | `2222` |
-| Cashier | `0771111111` | `1111` |
 
-> 🔐 **Change these immediately** in Admin → Users. They are public defaults.
+> 🔐 You'll be **prompted to choose your own PIN immediately** on first login (the
+> default above is public). To set different starting credentials, run init with
+> `POS_ADMIN_NAME`, `POS_ADMIN_PHONE` and `POS_ADMIN_PIN` set. Add your cashiers and
+> managers afterwards in **Admin → Users** — they too pick their own PIN on first login.
+
+> ℹ️ `-init` gives you a clean, empty shop. If you instead want sample data to try
+> the system out, use `-seed` (demo products, suppliers and customers) — but don't
+> run it on a real install.
 
 ---
 
@@ -347,7 +353,7 @@ Install **PostgreSQL for Windows** (from the official installer), then create th
 window so the variables apply):
 
 ```powershell
-.\karots-pos.exe -seed     # one-time setup
+.\karots-pos.exe -init     # one-time setup (creates your first admin)
 .\karots-pos.exe           # start it; open http://localhost:3000
 ```
 

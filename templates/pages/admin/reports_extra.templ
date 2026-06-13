@@ -1,0 +1,198 @@
+package adminpages
+
+import (
+	"strconv"
+
+	"karots-pos/internal/datetime"
+	"karots-pos/internal/features/reports"
+	"karots-pos/internal/money"
+	"karots-pos/templates/layouts"
+
+	"github.com/shopspring/decimal"
+)
+
+// ============================ Returns / refunds report ============================
+
+type ReturnsReportData struct {
+	ShopName, Symbol, From, To string
+	Rows                       []reports.ReturnRow
+	TotalRefund                decimal.Decimal
+}
+
+templ ReturnsReport(d ReturnsReportData) {
+	@layouts.Report("Returns / Refunds", d.ShopName) {
+		@rptRangeForm("/admin/reports/returns", d.From, d.To) {
+		}
+		@rptPeriodLine(d.From, d.To)
+		<table class="w-full text-sm">
+			<thead class="text-left text-slate-500 border-b">
+				<tr><th class="py-1.5">Date</th><th class="py-1.5">Receipt</th><th class="py-1.5">Product</th><th class="py-1.5">Customer</th><th class="py-1.5 text-right">Qty</th><th class="py-1.5 text-right">Refund</th></tr>
+			</thead>
+			<tbody>
+				for _, r := range d.Rows {
+					<tr class="border-b last:border-0">
+						<td class="py-1.5 text-slate-500">{ r.SaleDate.Format("2006-01-02 15:04") }</td>
+						<td class="py-1.5 font-medium">{ r.ReceiptNo }</td>
+						<td class="py-1.5">{ r.ProductName }</td>
+						<td class="py-1.5 text-slate-500">{ strOrDashAdmin(r.Customer) }</td>
+						<td class="py-1.5 text-right">{ money.Display(r.Qty) }</td>
+						<td class="py-1.5 text-right">{ money.Format(d.Symbol, r.RefundValue) }</td>
+					</tr>
+				}
+				if len(d.Rows) == 0 {
+					<tr><td colspan="6" class="py-6 text-center text-slate-400">No returns in this period.</td></tr>
+				}
+			</tbody>
+			<tfoot class="border-t-2 font-semibold">
+				<tr><td class="py-2" colspan="5">Total refunded</td><td class="py-2 text-right">{ money.Format(d.Symbol, d.TotalRefund) }</td></tr>
+			</tfoot>
+		</table>
+	}
+}
+
+// ============================ Profit by category ============================
+
+type CategoryProfitData struct {
+	ShopName, Symbol, From, To string
+	Rows                       []reports.CategoryProfit
+	TotalRevenue, TotalProfit  decimal.Decimal
+}
+
+templ ProfitByCategoryReport(d CategoryProfitData) {
+	@layouts.Report("Profit by Category", d.ShopName) {
+		@rptRangeForm("/admin/reports/profit-by-category", d.From, d.To) {
+		}
+		@rptPeriodLine(d.From, d.To)
+		<table class="w-full text-sm">
+			<thead class="text-left text-slate-500 border-b">
+				<tr><th class="py-1.5">Category</th><th class="py-1.5 text-right">Net revenue</th><th class="py-1.5 text-right">COGS</th><th class="py-1.5 text-right">Profit</th><th class="py-1.5 text-right">Margin</th></tr>
+			</thead>
+			<tbody>
+				for _, r := range d.Rows {
+					<tr class="border-b last:border-0">
+						<td class="py-1.5 font-medium">{ r.Category }</td>
+						<td class="py-1.5 text-right">{ money.Format(d.Symbol, r.Revenue) }</td>
+						<td class="py-1.5 text-right">{ money.Format(d.Symbol, r.COGS) }</td>
+						<td class="py-1.5 text-right">{ money.Format(d.Symbol, r.Profit) }</td>
+						<td class="py-1.5 text-right">{ pctOf(r.Profit, r.Revenue) }%</td>
+					</tr>
+				}
+				if len(d.Rows) == 0 {
+					<tr><td colspan="5" class="py-6 text-center text-slate-400">No sales in this period.</td></tr>
+				}
+			</tbody>
+			<tfoot class="border-t-2 font-semibold">
+				<tr>
+					<td class="py-2">Total</td>
+					<td class="py-2 text-right">{ money.Format(d.Symbol, d.TotalRevenue) }</td>
+					<td class="py-2"></td>
+					<td class="py-2 text-right">{ money.Format(d.Symbol, d.TotalProfit) }</td>
+					<td class="py-2 text-right">{ pctOf(d.TotalProfit, d.TotalRevenue) }%</td>
+				</tr>
+			</tfoot>
+		</table>
+	}
+}
+
+// ============================ Daily sales trend ============================
+
+type SalesTrendData struct {
+	ShopName, Symbol, From, To              string
+	Rows                                    []reports.DayRow
+	TotalRevenue, TotalProfit, MaxRevenue   decimal.Decimal
+}
+
+templ SalesTrendReport(d SalesTrendData) {
+	@layouts.Report("Daily Sales Trend", d.ShopName) {
+		@rptRangeForm("/admin/reports/sales-trend", d.From, d.To) {
+		}
+		@rptPeriodLine(d.From, d.To)
+		<table class="w-full text-sm">
+			<thead class="text-left text-slate-500 border-b">
+				<tr><th class="py-1.5">Day</th><th class="py-1.5 text-right">Sales</th><th class="py-1.5 text-right">Net revenue</th><th class="py-1.5 text-right">Profit</th><th class="py-1.5 w-1/3">&nbsp;</th></tr>
+			</thead>
+			<tbody>
+				for _, r := range d.Rows {
+					<tr class="border-b last:border-0">
+						<td class="py-1.5 font-medium">{ datetime.Date(r.Day) }</td>
+						<td class="py-1.5 text-right">{ strconv.Itoa(r.Count) }</td>
+						<td class="py-1.5 text-right">{ money.Format(d.Symbol, r.Revenue) }</td>
+						<td class="py-1.5 text-right">{ money.Format(d.Symbol, r.Profit) }</td>
+						<td class="py-1.5">
+							<div class="bg-slate-100 rounded h-3">
+								<div class="bg-indigo-500 h-3 rounded" style={ "width:" + pctOf(r.Revenue, d.MaxRevenue) + "%" }></div>
+							</div>
+						</td>
+					</tr>
+				}
+				if len(d.Rows) == 0 {
+					<tr><td colspan="5" class="py-6 text-center text-slate-400">No sales in this period.</td></tr>
+				}
+			</tbody>
+			<tfoot class="border-t-2 font-semibold">
+				<tr>
+					<td class="py-2">Total</td>
+					<td class="py-2"></td>
+					<td class="py-2 text-right">{ money.Format(d.Symbol, d.TotalRevenue) }</td>
+					<td class="py-2 text-right">{ money.Format(d.Symbol, d.TotalProfit) }</td>
+					<td class="py-2"></td>
+				</tr>
+			</tfoot>
+		</table>
+	}
+}
+
+// ============================ Warranty & recovery ============================
+
+type WarrantyReportData struct {
+	ShopName, Symbol, From, To string
+	Summary                    reports.WarrantySummary
+}
+
+templ WarrantyReport(d WarrantyReportData) {
+	@layouts.Report("Warranty & Recovery", d.ShopName) {
+		@rptRangeForm("/admin/reports/warranty", d.From, d.To) {
+		}
+		@rptPeriodLine(d.From, d.To)
+		<h3 class="font-semibold mb-2">Stock losses</h3>
+		<table class="w-full text-sm mb-6">
+			<thead class="text-left text-slate-500 border-b">
+				<tr><th class="py-1.5">Type</th><th class="py-1.5 text-right">Count</th><th class="py-1.5 text-right">Worth</th></tr>
+			</thead>
+			<tbody>
+				<tr class="border-b"><td class="py-1.5">Warranty replacements</td><td class="py-1.5 text-right">{ strconv.Itoa(d.Summary.ReplacementCount) }</td><td class="py-1.5 text-right">{ money.Format(d.Symbol, d.Summary.ReplacementCost) }</td></tr>
+				<tr class="border-b"><td class="py-1.5">Damage write-offs</td><td class="py-1.5 text-right">{ strconv.Itoa(d.Summary.DamageCount) }</td><td class="py-1.5 text-right">{ money.Format(d.Symbol, d.Summary.DamageCost) }</td></tr>
+			</tbody>
+		</table>
+		<h3 class="font-semibold mb-2">Supplier recoveries</h3>
+		<table class="w-full text-sm">
+			<thead class="text-left text-slate-500 border-b">
+				<tr><th class="py-1.5">Outcome</th><th class="py-1.5 text-right">Count</th><th class="py-1.5 text-right">Loss value</th><th class="py-1.5 text-right">Recovered</th></tr>
+			</thead>
+			<tbody>
+				for _, r := range d.Summary.Recoveries {
+					<tr class="border-b last:border-0">
+						<td class="py-1.5 capitalize">{ r.Outcome }</td>
+						<td class="py-1.5 text-right">{ strconv.Itoa(r.Count) }</td>
+						<td class="py-1.5 text-right">{ money.Format(d.Symbol, r.LossValue) }</td>
+						<td class="py-1.5 text-right">{ money.Format(d.Symbol, r.Recovered) }</td>
+					</tr>
+				}
+				if len(d.Summary.Recoveries) == 0 {
+					<tr><td colspan="4" class="py-6 text-center text-slate-400">No recoveries in this period.</td></tr>
+				}
+			</tbody>
+			<tfoot class="border-t-2 font-semibold">
+				<tr><td class="py-2" colspan="3">Total recovered</td><td class="py-2 text-right">{ money.Format(d.Symbol, d.Summary.RecoveredValue) }</td></tr>
+			</tfoot>
+		</table>
+	}
+}
+
+// pctOf returns part/whole as a rounded whole-number percent string (0 when whole<=0).
+func pctOf(part, whole decimal.Decimal) string {
+	if !whole.IsPositive() {
+		return "0"
+	}
+	return part.Div(whole).Mul(decimal.NewFromInt(100)).Round(0).String()
+}

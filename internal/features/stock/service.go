@@ -105,7 +105,8 @@ func (s *Service) Damage(ctx context.Context, in DamageInput, userID int64) erro
 		if !ok {
 			return apperr.Conflict("not enough stock to write off")
 		}
-		if _, err := repo.DepleteFEFO(ctx, in.ProductID, qty); err != nil {
+		cost, err := repo.DepleteFEFO(ctx, in.ProductID, qty)
+		if err != nil {
 			return apperr.Internal("failed to deplete batches", err)
 		}
 		return repo.InsertMovement(ctx, MovementInput{
@@ -114,6 +115,7 @@ func (s *Service) Damage(ctx context.Context, in DamageInput, userID int64) erro
 			Quantity:  qty.Neg(),
 			UserID:    userID,
 			Note:      nilIfEmpty(in.Note),
+			Cost:      cost.Mul(qty), // total worth written off
 		})
 	})
 }

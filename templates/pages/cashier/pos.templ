@@ -143,6 +143,21 @@ templ POS(d POSData) {
 									</div>
 									<span class="text-xs text-rose-500 w-20 text-right" x-show="lineDiscount(it) > 0" x-text="'-' + sym + ' ' + money(lineDiscount(it))"></span>
 								</div>
+								<!-- Serial capture: one box per unit for serial-tracked products. -->
+								<div x-show="it.track_serial" class="space-y-1 pt-1 border-t border-dashed">
+									<div class="text-[11px] text-slate-400">
+										Serial number<span x-show="it.serials.length !== 1">s</span>
+										<span x-show="it.warranty_months > 0" x-text="'· ' + it.warranty_months + ' mo warranty'"></span>
+									</div>
+									<template x-for="(s, i) in it.serials" x-bind:key="i">
+										<input
+											type="text"
+											x-model="it.serials[i]"
+											x-bind:placeholder="'Serial / IMEI #' + (i + 1)"
+											class="w-full border rounded px-2 py-1 text-sm"
+										/>
+									</template>
+								</div>
 							</div>
 						</template>
 						<template x-if="cart.length === 0">

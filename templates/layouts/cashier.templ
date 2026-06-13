@@ -12,6 +12,7 @@ func cashierPalette(role string) []paletteEntry {
 		{"/cashier/credit", "Credit", "Terminal"},
 		{"/cashier/receipts", "Receipts", "Terminal"},
 		{"/cashier/labels", "Print Labels", "Terminal"},
+		{"/cashier/warranty", "Warranty", "Terminal"},
 	}
 	if role == auth.RoleAdmin || role == auth.RoleManager {
 		out = append(out, paletteEntry{"/admin", "Admin", "Go"})
@@ -35,6 +36,7 @@ templ Cashier(title, userName, role, active string) {
 						@cashierTab("/cashier/credit", "Credit", active == "credit")
 						@cashierTab("/cashier/receipts", "Receipts", active == "receipts")
 						@cashierTab("/cashier/labels", "Labels", active == "labels")
+						@cashierTab("/cashier/warranty", "Warranty", active == "warranty")
 					</nav>
 					<button
 						type="button"
@@ -54,6 +56,7 @@ templ Cashier(title, userName, role, active string) {
 					if role == auth.RoleAdmin || role == auth.RoleManager {
 						<a href="/admin" class="text-slate-300 hover:text-white">Admin</a>
 					}
+					<a href="/account/pin" class="text-slate-300 hover:text-white">Change PIN</a>
 					<form method="post" action="/logout">
 						<button type="submit" class="text-red-300 hover:text-red-200">Log out</button>
 					</form>

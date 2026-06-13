@@ -1,0 +1,100 @@
+package adminpages
+
+import (
+	"strconv"
+
+	"karots-pos/internal/datetime"
+	"karots-pos/internal/features/recovery"
+	"karots-pos/internal/money"
+	"karots-pos/templates/layouts"
+)
+
+type DamageReportData struct {
+	UserName string
+	Symbol   string
+	Base     string // "/admin"
+	Losses   []recovery.DamageLoss
+}
+
+templ DamageReport(d DamageReportData) {
+	@layouts.Admin("Damage Report", d.UserName, "damage-report") {
+		<div class="max-w-5xl">
+			<h1 class="text-2xl font-bold mb-1">Damage Report</h1>
+			<p class="text-sm text-slate-500 mb-6">Stock written off as damaged, its worth, and any value reclaimed from the supplier.</p>
+			<div id="recovery-slot" class="mb-4"></div>
+			<div
+				id="damage-list"
+				hx-get={ d.Base + "/damage/table" }
+				hx-trigger="reload-damage from:body"
+				hx-swap="innerHTML"
+			>
+				@DamageTable(d)
+			</div>
+		</div>
+	}
+}
+
+templ DamageTable(d DamageReportData) {
+	<div class="bg-white rounded-2xl shadow-sm overflow-hidden">
+		<table class="w-full text-sm">
+			<thead class="text-left text-slate-500 border-b bg-slate-50">
+				<tr>
+					<th class="py-2 px-3">Date</th>
+					<th class="py-2 px-3">Product</th>
+					<th class="py-2 px-3 text-right">Qty</th>
+					<th class="py-2 px-3 text-right">Worth</th>
+					<th class="py-2 px-3">Note</th>
+					<th class="py-2 px-3">By</th>
+					<th class="py-2 px-3 text-center">Recovery</th>
+					<th class="py-2 px-3"></th>
+				</tr>
+			</thead>
+			<tbody>
+				for _, l := range d.Losses {
+					<tr class="border-b last:border-0">
+						<td class="py-2 px-3 text-slate-500">{ datetime.Date(l.CreatedAt) }</td>
+						<td class="py-2 px-3 text-slate-700">{ l.ProductName }</td>
+						<td class="py-2 px-3 text-right">{ money.Display(l.Quantity) }</td>
+						<td class="py-2 px-3 text-right text-slate-600">{ money.Format(d.Symbol, l.LossValue) }</td>
+						<td class="py-2 px-3 text-slate-500">{ strOrDashAdmin(l.Note) }</td>
+						<td class="py-2 px-3 text-slate-500">{ l.UserName }</td>
+						<td class="py-2 px-3 text-center">@damageRecoveryBadge(l, d.Symbol)</td>
+						<td class="py-2 px-3 text-right">
+							if l.RecoveryStatus == nil {
+								<button
+									type="button"
+									hx-get={ d.Base + "/recovery/form?source_type=damage&source_id=" + strconv.FormatInt(l.MovementID, 10) }
+									hx-target="#recovery-slot"
+									hx-swap="innerHTML"
+									class="text-indigo-600 hover:underline"
+								>Record recovery</button>
+							}
+						</td>
+					</tr>
+				}
+				if len(d.Losses) == 0 {
+					<tr><td colspan="8" class="text-center text-slate-400 py-8">No damage write-offs yet.</td></tr>
+				}
+			</tbody>
+		</table>
+	</div>
+}
+
+templ damageRecoveryBadge(l recovery.DamageLoss, symbol string) {
+	if l.RecoveryStatus == nil {
+		<span class="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">pending</span>
+	} else if *l.RecoveryStatus == "replacement" {
+		<span class="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">replaced</span>
+	} else if *l.RecoveryStatus == "paid" {
+		<span class="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">paid { money.Format(symbol, l.RecoveredValue) }</span>
+	} else {
+		<span class="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">written off</span>
+	}
+}
+
+func strOrDashAdmin(s *string) string {
+	if s == nil || *s == "" {
+		return "—"
+	}
+	return *s
+}

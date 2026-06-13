@@ -304,9 +304,11 @@ function pos(symbol, defaultType) {
     // Touch-friendly qty steppers for cart lines.
     incQty(it) {
       it.qty = (Number(it.qty) || 0) + 1;
+      this.syncSerials(it);
     },
     decQty(it) {
       it.qty = Math.max(0, (Number(it.qty) || 0) - 1);
+      this.syncSerials(it);
     },
 
     async loadProducts() {
@@ -514,6 +516,7 @@ function pos(symbol, defaultType) {
       const existing = this.cart.find((x) => x.id === p.id);
       if (existing) {
         existing.qty = Number(existing.qty) + 1;
+        this.syncSerials(existing);
         return;
       }
       this.cart.push({
@@ -530,7 +533,21 @@ function pos(symbol, defaultType) {
         // counter. Fixed is PER UNIT (× qty); percent is off the line.
         discount: 0,
         discountType: "fixed",
+        // Serial-tracked products need a unique serial per unit captured below.
+        track_serial: !!p.track_serial,
+        warranty_months: Number(p.warranty_months) || 0,
+        serials: [],
       });
+      this.syncSerials(this.cart[this.cart.length - 1]);
+    },
+    // syncSerials keeps a serial-tracked line's serial inputs in step with its
+    // quantity (one box per unit), preserving anything already typed.
+    syncSerials(it) {
+      if (!it || !it.track_serial) return;
+      const n = Math.max(0, Math.round(Number(it.qty) || 0));
+      if (!Array.isArray(it.serials)) it.serials = [];
+      while (it.serials.length < n) it.serials.push("");
+      if (it.serials.length > n) it.serials.length = n;
     },
     async scanBarcode() {
       const code = this.scan.trim();
@@ -549,6 +566,7 @@ function pos(symbol, defaultType) {
       // Whole-only units snap to integers; weighed units keep their decimals.
       if (!it.allowDecimal) q = Math.round(q);
       it.qty = q;
+      this.syncSerials(it);
     },
     removeItem(idx) {
       this.cart.splice(idx, 1);
@@ -630,6 +648,16 @@ function pos(symbol, defaultType) {
 
     async checkout() {
       if (this.cart.length === 0 || this.busy) return;
+      // Serial-tracked lines need a serial for every unit before we can sell.
+      for (const it of this.cart) {
+        if (!it.track_serial) continue;
+        const n = Math.max(0, Math.round(Number(it.qty) || 0));
+        const filled = (it.serials || []).filter((s) => String(s || "").trim() !== "").length;
+        if (filled < n) {
+          toast(`Enter ${n} serial number(s) for ${it.name}`, "error");
+          return;
+        }
+      }
       this.busy = true;
       try {
         const payload = {
@@ -642,6 +670,9 @@ function pos(symbol, defaultType) {
             quantity: String(it.qty),
             discount: String(it.discount || 0),
             discount_type: it.discountType || "fixed",
+            serials: it.track_serial
+              ? (it.serials || []).map((s) => String(s || "").trim())
+              : [],
           })),
           payments: this.payments
             .filter((p) => Number(p.amount) > 0)
