@@ -9,6 +9,9 @@ import (
 func itoa(n int) string     { return strconv.Itoa(n) }
 func itoa64(n int64) string { return strconv.FormatInt(n, 10) }
 
+// jsBool renders a Go bool as a JS boolean literal for inline x-data init.
+func jsBool(b bool) string { return strconv.FormatBool(b) }
+
 // zMoveLabel turns a cash_movement_type into a readable label for the Z-report.
 func zMoveLabel(t string) string {
 	switch t {

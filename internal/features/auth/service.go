@@ -121,7 +121,7 @@ func (s *Service) CreateUser(ctx context.Context, in CreateUserInput) (*User, er
 	if err != nil {
 		return nil, apperr.Internal("could not hash PIN", err)
 	}
-	u, err := s.repo.Create(ctx, in.Name, &in.Phone, in.Role, string(hash))
+	u, err := s.repo.Create(ctx, in.Name, &in.Phone, in.Role, string(hash), in.ReceiptPrinter)
 	if err != nil {
 		if appdb.IsUniqueViolation(err) {
 			return nil, apperr.Conflict("that phone number is already used by another user")
@@ -146,7 +146,7 @@ func (s *Service) GetUser(ctx context.Context, id int64) (*User, error) {
 // UpdateUser edits a user's name/phone/role and, when a new PIN is supplied,
 // resets it. A PIN reset revokes the user's refresh tokens so old sessions die.
 func (s *Service) UpdateUser(ctx context.Context, id int64, in UpdateUserInput) error {
-	err := s.repo.Update(ctx, id, in.Name, &in.Phone, in.Role)
+	err := s.repo.Update(ctx, id, in.Name, &in.Phone, in.Role, in.ReceiptPrinter)
 	if errors.Is(err, sql.ErrNoRows) {
 		return apperr.NotFound("user")
 	}

@@ -1,6 +1,9 @@
 package response
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"strings"
+)
 
 // Trigger builds an HX-Trigger header value from a set of client events.
 // Example: Trigger(map[string]any{"closeModal": true, "showToast": ...}).
@@ -19,13 +22,25 @@ func Toast(message, level string) string {
 }
 
 // ToastAnd builds an HX-Trigger that shows a toast and fires extra events,
-// e.g. ToastAnd("Saved", "success", "close-modal").
+// e.g. ToastAnd("Saved", "success", "reload-products", "close-modal").
+//
+// The events are emitted in the order given (not as a Go map, whose JSON keys
+// json.Marshal would sort alphabetically). htmx dispatches HX-Trigger events on
+// the triggering element in JSON order; since the triggering element is often a
+// form inside the modal that "close-modal" empties, callers pass "close-modal"
+// last so the list-refresh ("reload-*") and toast events fire while the form is
+// still attached and can bubble to their from:body / .window listeners.
 func ToastAnd(message, level string, events ...string) string {
-	m := map[string]any{
-		"show-toast": map[string]string{"message": message, "level": level},
-	}
+	toast, _ := json.Marshal(map[string]string{"message": message, "level": level})
+	var b strings.Builder
+	b.WriteString(`{"show-toast":`)
+	b.Write(toast)
 	for _, e := range events {
-		m[e] = true
+		key, _ := json.Marshal(e) // safely quote/escape the event name
+		b.WriteString(",")
+		b.Write(key)
+		b.WriteString(":true")
 	}
-	return Trigger(m)
+	b.WriteByte('}')
+	return b.String()
 }

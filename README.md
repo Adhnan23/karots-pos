@@ -143,7 +143,10 @@ reports (plus dashboard badges) read straight off this ledger.
 - **Barcode labels** — printed **server-side** straight to a label printer (TSPL,
   e.g. Xprinter XP-365B) — no browser, no driver; an A4 sticker-sheet (JsBarcode)
   is the fallback. Receipts print server-side as ESC/POS (80mm/58mm) with an
-  optional shop logo. See **[PRINTING.md](PRINTING.md)**.
+  optional shop logo. Each cashier can have their **own counter printer** (a
+  `tcp://ip:9100` network address on their user account; falls back to the shop
+  default), and a Settings toggle can **auto-print** the receipt on sale completion
+  instead of showing the Print/New-Sale prompt. See **[PRINTING.md](PRINTING.md)**.
 - **Management reports** — a Reports hub (`/admin/reports`) of filterable,
   **print/Save-as-PDF** reports: sales, finance/P&L, cash register, purchases,
   suppliers, inventory valuation, batches/expiry, low-stock, expiring. Each has a

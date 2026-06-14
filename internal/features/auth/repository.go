@@ -48,24 +48,24 @@ func (r *Repository) ListAll(ctx context.Context) ([]User, error) {
 	return users, err
 }
 
-func (r *Repository) Create(ctx context.Context, name string, phone *string, role, pinHash string) (*User, error) {
+func (r *Repository) Create(ctx context.Context, name string, phone *string, role, pinHash, receiptPrinter string) (*User, error) {
 	var u User
 	// New accounts get a PIN the user did not choose (seed or admin-set), so
 	// they must change it on first login.
 	err := r.db.GetContext(ctx, &u,
-		`INSERT INTO users (name, phone, role, pin_hash, must_change_pin)
-		 VALUES ($1, $2, $3, $4, true)
-		 RETURNING *`, name, phone, role, pinHash)
+		`INSERT INTO users (name, phone, role, pin_hash, must_change_pin, receipt_printer)
+		 VALUES ($1, $2, $3, $4, true, $5)
+		 RETURNING *`, name, phone, role, pinHash, receiptPrinter)
 	if err != nil {
 		return nil, err
 	}
 	return &u, nil
 }
 
-func (r *Repository) Update(ctx context.Context, id int64, name string, phone *string, role string) error {
+func (r *Repository) Update(ctx context.Context, id int64, name string, phone *string, role, receiptPrinter string) error {
 	res, err := r.db.ExecContext(ctx,
-		`UPDATE users SET name = $1, phone = $2, role = $3 WHERE id = $4`,
-		name, phone, role, id)
+		`UPDATE users SET name = $1, phone = $2, role = $3, receipt_printer = $4 WHERE id = $5`,
+		name, phone, role, receiptPrinter, id)
 	if err != nil {
 		return err
 	}

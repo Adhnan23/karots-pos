@@ -7,6 +7,7 @@ type POSData struct {
 	Role            string
 	Symbol          string
 	DefaultSaleType string
+	PromptAfterSale bool
 }
 
 // POS is the cashier terminal. Almost all interactivity is driven by the pos()
@@ -17,7 +18,7 @@ templ POS(d POSData) {
 	@layouts.Cashier("Cashier", d.CashierName, d.Role, "pos") {
 		<div
 			class="h-full"
-			x-data={ "pos('" + d.Symbol + "', '" + d.DefaultSaleType + "')" }
+			x-data={ "pos('" + d.Symbol + "', '" + d.DefaultSaleType + "', " + jsBool(d.PromptAfterSale) + ")" }
 			x-init="init()"
 			x-on:keydown.window="onKey($event)"
 		>

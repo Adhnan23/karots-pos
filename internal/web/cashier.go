@@ -81,16 +81,18 @@ func (h *cashierUI) ZReport(c echo.Context) error {
 
 func (h *cashierUI) POS(c echo.Context) error {
 	ctx := c.Request().Context()
-	symbol, defaultType := "Rs.", "retail"
+	symbol, defaultType, promptAfterSale := "Rs.", "retail", true
 	if cfg, err := h.s.settings.Get(ctx); err == nil {
 		symbol = cfg.CurrencySymbol
 		defaultType = cfg.DefaultSaleType
+		promptAfterSale = cfg.PromptAfterSale
 	}
 	return response.RenderPage(c, cashierpages.POS(cashierpages.POSData{
 		CashierName:     middleware.CurrentUserName(c),
 		Role:            middleware.CurrentRole(c),
 		Symbol:          symbol,
 		DefaultSaleType: defaultType,
+		PromptAfterSale: promptAfterSale,
 	}))
 }
 
@@ -145,16 +147,25 @@ func (h *cashierUI) receiptOptions(ctx context.Context, cfg *settings.Settings) 
 	return opts
 }
 
-// receiptQueue is the print target chosen in Settings (a detected printer name,
-// a "tcp://host:9100" network address, or empty = the OS default printer).
-func (h *cashierUI) receiptQueue(cfg *settings.Settings) string {
+// receiptQueue is the print target for the logged-in cashier: their own
+// per-counter printer (set on their user record) when present, otherwise the
+// shop-wide printer chosen in Settings (a detected printer name, a
+// "tcp://host:9100" network address, or empty = the OS default printer). Only
+// the target varies per cashier — paper width, logo and footer stay global.
+func (h *cashierUI) receiptQueue(c echo.Context, cfg *settings.Settings) string {
+	if uid := middleware.CurrentUserID(c); uid != 0 {
+		if u, err := h.s.auth.GetUser(c.Request().Context(), uid); err == nil && strings.TrimSpace(u.ReceiptPrinter) != "" {
+			return u.ReceiptPrinter
+		}
+	}
 	return cfg.ReceiptPrinter
 }
 
 // printRefundSlip prints the refund slip for a sale's latest return. Best-effort:
 // any failure (no return rows, no printer) is logged and swallowed so the return
 // flow is never blocked by printing.
-func (h *cashierUI) printRefundSlip(ctx context.Context, saleID int64) {
+func (h *cashierUI) printRefundSlip(c echo.Context, saleID int64) {
+	ctx := c.Request().Context()
 	rr, err := h.s.sales.ReturnReceipt(ctx, saleID)
 	if err != nil {
 		log.Printf("refund slip: load return for sale %d: %v", saleID, err)
@@ -165,7 +176,7 @@ func (h *cashierUI) printRefundSlip(ctx context.Context, saleID int64) {
 		log.Printf("refund slip: load settings: %v", err)
 		return
 	}
-	if err := escpos.Send(ctx, h.receiptQueue(cfg), escpos.ReturnDocument(*rr, *cfg, h.receiptOptions(ctx, cfg))); err != nil {
+	if err := escpos.Send(ctx, h.receiptQueue(c, cfg), escpos.ReturnDocument(*rr, *cfg, h.receiptOptions(ctx, cfg))); err != nil {
 		log.Printf("refund slip: print for sale %d: %v", saleID, err)
 	}
 }
@@ -186,7 +197,7 @@ func (h *cashierUI) PrintReceipt(c echo.Context) error {
 	}
 	opts := h.receiptOptions(ctx, cfg)
 	opts.Serials = h.saleSerials(ctx, id)
-	if err := escpos.Send(ctx, h.receiptQueue(cfg), escpos.Document(*detail, *cfg, opts)); err != nil {
+	if err := escpos.Send(ctx, h.receiptQueue(c, cfg), escpos.Document(*detail, *cfg, opts)); err != nil {
 		return apperr.Internal("could not print receipt", err)
 	}
 	// Feedback for the HTMX reprint button; the Alpine apiFetch path toasts itself.
@@ -304,7 +315,7 @@ func (h *cashierUI) ReturnSubmit(c echo.Context) error {
 	h.s.cashRegister.RecordRefundCash(c.Request().Context(), middleware.CurrentUserID(c), cashRefund, "cash refund: "+detail.Sale.ReceiptNo)
 	// Hand the customer a refund slip. Non-fatal: a printer problem must never
 	// fail the return itself (the goods are already restocked / credit adjusted).
-	h.printRefundSlip(c.Request().Context(), id)
+	h.printRefundSlip(c, id)
 	return response.OK(c, detail)
 }
 
@@ -511,7 +522,7 @@ func (h *cashierUI) WarrantyReplace(c echo.Context) error {
 	h.s.logAudit(c, audit.ActionUpdate, "warranty", strconv.FormatInt(unitID, 10), "replaced "+oldSerial+" -> "+newUnit.SerialNo)
 	// Hand the customer a replacement slip. Non-fatal: a printer problem must
 	// never fail the replacement (it's already recorded).
-	h.printWarrantySlip(ctx, oldSerial, newUnit)
+	h.printWarrantySlip(c, oldSerial, newUnit)
 
 	detail, err := h.s.warranty.Lookup(ctx, newUnit.SerialNo)
 	if err != nil {
@@ -522,7 +533,8 @@ func (h *cashierUI) WarrantyReplace(c echo.Context) error {
 }
 
 // printWarrantySlip prints the replacement slip best-effort (logged, swallowed).
-func (h *cashierUI) printWarrantySlip(ctx context.Context, oldSerial string, u *warranty.Unit) {
+func (h *cashierUI) printWarrantySlip(c echo.Context, oldSerial string, u *warranty.Unit) {
+	ctx := c.Request().Context()
 	cfg, err := h.s.settings.Get(ctx)
 	if err != nil {
 		log.Printf("warranty slip: load settings: %v", err)
@@ -537,7 +549,7 @@ func (h *cashierUI) printWarrantySlip(ctx context.Context, oldSerial string, u *
 	if u.CustomerName != nil {
 		slip.CustomerName = *u.CustomerName
 	}
-	if err := escpos.Send(ctx, h.receiptQueue(cfg), escpos.WarrantyDocument(slip, *cfg, h.receiptOptions(ctx, cfg))); err != nil {
+	if err := escpos.Send(ctx, h.receiptQueue(c, cfg), escpos.WarrantyDocument(slip, *cfg, h.receiptOptions(ctx, cfg))); err != nil {
 		log.Printf("warranty slip: print for %s: %v", u.SerialNo, err)
 	}
 }

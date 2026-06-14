@@ -94,6 +94,11 @@ templ UserForm(u *auth.User) {
 					<input name="pin" type="password" inputmode="numeric" minlength="4" maxlength="6" class="w-full border rounded-lg px-3 py-2"/>
 				}
 			</div>
+			<div>
+				<label class="block text-sm font-medium mb-1">Receipt printer (this counter)</label>
+				<input name="receipt_printer" value={ usrVal(u, "receipt_printer") } class="w-full border rounded-lg px-3 py-2" placeholder="tcp://192.168.1.50:9100"/>
+				<p class="text-xs text-slate-500">Network printer address for this cashier's counter. Leave blank to use the shop's default receipt printer. Paper size, logo and footer come from Settings.</p>
+			</div>
 			@modalButtons()
 		</form>
 	}
@@ -118,6 +123,8 @@ func usrVal(u *auth.User, field string) string {
 		return u.Name
 	case "phone":
 		return strOrEmpty(u.Phone)
+	case "receipt_printer":
+		return u.ReceiptPrinter
 	}
 	return ""
 }

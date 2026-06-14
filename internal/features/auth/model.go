@@ -17,6 +17,7 @@ type User struct {
 	PinHash       string    `db:"pin_hash"  json:"-"`
 	IsActive      bool      `db:"is_active" json:"is_active"`
 	MustChangePin bool      `db:"must_change_pin" json:"must_change_pin"`
+	ReceiptPrinter string   `db:"receipt_printer" json:"receipt_printer"`
 	CreatedAt     time.Time `db:"created_at" json:"created_at"`
 }
 
@@ -49,6 +50,7 @@ type CreateUserInput struct {
 	Phone string `json:"phone" form:"phone" validate:"required,min=4,max=15"`
 	Role  string `json:"role"  form:"role"  validate:"required,oneof=admin manager cashier"`
 	PIN   string `json:"pin"   form:"pin"   validate:"required,min=4,max=6,numeric"`
+	ReceiptPrinter string `json:"receipt_printer" form:"receipt_printer" validate:"omitempty,max=100"`
 }
 
 // UpdateUserInput edits a user's profile/role and optionally resets the PIN
@@ -58,6 +60,7 @@ type UpdateUserInput struct {
 	Phone string `json:"phone" form:"phone" validate:"required,min=4,max=15"`
 	Role  string `json:"role"  form:"role"  validate:"required,oneof=admin manager cashier"`
 	PIN   string `json:"pin"   form:"pin"   validate:"omitempty,min=4,max=6,numeric"`
+	ReceiptPrinter string `json:"receipt_printer" form:"receipt_printer" validate:"omitempty,max=100"`
 }
 
 // ChangeOwnPINInput is a user changing their own PIN (self-service or forced).

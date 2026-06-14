@@ -266,6 +266,17 @@ picking a detected printer, type its address in the field as
 `tcp://192.168.1.50:9100` (use your printer's IP; `9100` is the standard port). The
 program sends straight to it over the network — no CUPS queue needed for this.
 
+**A printer at each counter (multiple cashiers):** if cashiers work from different
+PCs and each counter has its own printer, give each cashier their own login and set
+**Admin → Users → edit user → "Receipt printer (this counter)"** to that counter's
+**network** printer (`tcp://<counter-ip>:9100`). Each cashier's bills then print at
+their counter; anyone left blank uses the shop's default Settings printer. (Paper
+size, logo and footer always come from Settings.)
+
+**Skip the print prompt:** by default a finished sale asks *Print / New Sale*. To
+print automatically instead, turn off **Admin → Settings → "Ask to print after each
+sale"**.
+
 > For barcode labels, sticker sizes, the receipt paper width (80mm/58mm), shop
 > logo, and detailed troubleshooting, see **`PRINTING.md`**.
 

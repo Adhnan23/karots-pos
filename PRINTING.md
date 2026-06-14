@@ -27,6 +27,10 @@ Because it uses the built-in font and an explicit cut, the receipt is the exact
 length of its content (no A4, no 1-metre over-feed) and prints the correct
 characters (no CJK garbage).
 
+By default, completing a sale shows a **Print / New Sale** prompt. You can turn
+this off in **Admin → Settings → "Ask to print after each sale"**: with it off, a
+completed sale prints the receipt automatically and resets for the next customer.
+
 ## Paper width
 
 Admin → Settings → **Receipt Paper Width** (`80mm` = 48 cols, `58mm` = 32 cols),
@@ -52,6 +56,32 @@ printers) uses the same setting via a per-page `@page { size }`.
    is no environment variable — printer selection lives entirely in Settings.
 
 That's it — no `about:config`, no `--kiosk-printing`, no browser print settings.
+
+## Per-cashier printer (multiple counters on a LAN)
+
+When several cashiers each run the web terminal from their own PC (one binary + DB
+on the admin PC, the others connecting over the LAN), each counter usually needs
+its own receipt printer. Printing is server-side, so the target is resolved on the
+server **per logged-in cashier** (by account, not by PC), in this order:
+
+1. The cashier is identified from their login.
+2. If that user has a **Receipt printer** set on their account
+   (**Admin → Users → edit user → "Receipt printer (this counter)"**), it wins.
+3. Otherwise the shop-wide **Admin → Settings → Receipt printer** is used.
+4. If that is also blank, the server's OS default printer is used.
+
+Because the bytes are sent from the server (the admin PC), a per-cashier value
+should normally be a **network** address — `tcp://<counter-ip>:9100` — so the bill
+prints at that counter rather than on a queue attached to the admin PC. A plain
+queue name would resolve against the **server's** CUPS/Windows spooler. Everything
+else about the receipt (paper width, logo, secondary name, footer) still comes from
+the global Settings — only the destination is per-cashier.
+
+Reprints (`/cashier/receipts`), refund slips, and warranty slips follow the same
+per-cashier rule.
+
+> Cash drawers are independent too: each cashier's till/Z-report is keyed to their
+> user account, so give every cashier their **own** login.
 
 ## Barcode label printing
 

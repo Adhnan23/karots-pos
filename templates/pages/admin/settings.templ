@@ -80,6 +80,10 @@ templ SettingsPage(d SettingsData) {
 							<input type="checkbox" name="low_stock_alerts" value="true" checked?={ d.S.LowStockAlerts }/>
 							<span class="text-sm">Low-stock alerts</span>
 						</label>
+						<label class="flex items-center gap-2">
+							<input type="checkbox" name="prompt_after_sale" value="true" checked?={ d.S.PromptAfterSale }/>
+							<span class="text-sm">Ask to print after each sale</span>
+						</label>
 					</div>
 				</div>
 				<!-- Printers & labels -->
