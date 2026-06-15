@@ -168,6 +168,40 @@ Open **http://localhost:3000** in a browser.
 
 ---
 
+## 3a. Going live with a shop that already has stock
+
+A running shop already owns inventory and has hundreds of products to add. Two
+features make the switch painless:
+
+**Load the products, then the stock you already have.** Add products in
+**Admin → Products** (or import gradually). To record the quantities currently on
+the shelf — stock you owned *before* this system existed — use
+**Admin → Stock-take** (`/admin/stock/take`): search, type the **counted quantity**
+(and optionally the **cost**) for each product, and **Save**. This is *not* booked
+as a purchase, so it doesn't inflate expenses or create a supplier debt — it just
+sets your opening on-hand. (For a single product, **Stock → Adjust** does the same.)
+Set the **cost** so that when this stock later sells, its profit is correct.
+
+**You will miss some products — that's fine.** When a customer brings an item that
+isn't in the system yet, the cashier doesn't have to turn them away or stop to do a
+full product setup. At the till they hit **+ Quick item** (or it pops up
+automatically when a scan finds nothing), type just a **name and price** (barcode
+optional — scan it, generate one, or leave it for later), and sell it. The item is
+created on the spot and **flagged for review**.
+
+Back in the office, a banner on the **Dashboard** and the **Admin → Items to Review**
+list show every quick-added item and **who** rang it up. Click **Finish setup** to
+give it a real category, unit and cost; saving also corrects the temporary cost on
+the sales it already appeared on, so your **profit figures become accurate**. Then do
+a quick physical count and set its stock. After that the item scans like any other —
+so the gap closes itself, one item at a time.
+
+> 💡 Until a quick-added item is reviewed its cost is 0, so it shows **100% profit**.
+> That's why the dashboard nudges you to finish them — the review list doubles as a
+> "numbers not yet trustworthy for these items" worklist.
+
+---
+
 ## 4. Run automatically on startup (Linux)
 
 Ubuntu, Fedora, and Arch all use **systemd**, so the same steps work everywhere.

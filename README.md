@@ -126,6 +126,20 @@ reports (plus dashboard badges) read straight off this ledger.
   to also run **automatic time-based backups** in-process (same snapshot format;
   default every 6h, keeping the last 28). Point `BACKUP_DIR` at a mounted volume
   or an off-site-synced path — a backup on the DB's own disk won't survive disk loss.
+- **Quick-add at the till** — when a cashier scans/looks up an item that isn't in
+  the catalog yet, they can sell it anyway with a 2-field quick-add (name + price;
+  barcode optional — scanned, generated, or left blank). It's created on the fly,
+  its stock seeded so the sale nets to zero ("count later"), and flagged
+  **needs review** stamped with who added it. A dashboard banner + an **Items to
+  Review** list let the admin finish each one (real category, unit, cost); saving
+  the cost also **back-fills the placeholder cost 0 onto its past sale lines**, so
+  historical profit becomes accurate. Every missed item is captured once and scans
+  normally thereafter.
+- **Stock-take / opening stock** — a bulk screen (`/admin/stock/take`) to enter the
+  counted quantity (and cost) for many products at once — how a shop already running
+  loads the stock it owned before adopting the system. Each change is an audited
+  `adjust` movement (not a purchase, so it doesn't hit expenses or supplier dues).
+  For one product, **Stock → Adjust** still sets an absolute count.
 - **Partial sale returns** — return any quantity of any line; restocks, splits
   refund vs credit, flows `completed → partially_returned → returned`.
 - **Purchase returns (debit notes)** — send goods back to a supplier; FEFO

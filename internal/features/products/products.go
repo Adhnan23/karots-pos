@@ -29,12 +29,15 @@ type Product struct {
 	TrackSerial    bool            `db:"track_serial"    json:"track_serial"`
 	WarrantyMonths int             `db:"warranty_months" json:"warranty_months"`
 	IsActive       bool            `db:"is_active"       json:"is_active"`
+	NeedsReview    bool            `db:"needs_review"    json:"needs_review"`
+	CreatedBy      *int64          `db:"created_by"      json:"created_by,omitempty"`
 	CreatedAt      time.Time       `db:"created_at"      json:"created_at"`
 	// Joined, read-only:
 	CategoryName     string          `db:"category_name"      json:"category_name"`
 	UnitAbbr         string          `db:"unit_abbr"          json:"unit_abbr"`
 	UnitAllowDecimal bool            `db:"unit_allow_decimal" json:"unit_allow_decimal"`
 	StockQty         decimal.Decimal `db:"stock_qty"          json:"stock_qty"`
+	CreatedByName    *string         `db:"created_by_name"    json:"created_by_name,omitempty"`
 }
 
 // IsLowStock reports whether on-hand quantity is at or below the reorder level.
@@ -165,6 +168,8 @@ type writeRow struct {
 	Reorder                       int
 	TrackSerial                   bool
 	WarrantyMonths                int
+	NeedsReview                   bool   // set by the till quick-add; false for normal creates
+	CreatedBy                     *int64 // the user who quick-added it (nil otherwise)
 }
 
 func (r *Repository) Insert(ctx context.Context, w writeRow) (int64, error) {
@@ -173,12 +178,12 @@ func (r *Repository) Insert(ctx context.Context, w writeRow) (int64, error) {
 		INSERT INTO products
 			(name, name_si, barcode, category_id, unit_id,
 			 cost_price, selling_price, wholesale_price, tax_rate, reorder_level,
-			 track_serial, warranty_months)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+			 track_serial, warranty_months, needs_review, created_by)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
 		RETURNING id`,
 		w.Name, w.NameSi, w.Barcode, w.CategoryID, w.UnitID,
 		w.Cost, w.Selling, w.Wholesale, w.Tax, w.Reorder,
-		w.TrackSerial, w.WarrantyMonths)
+		w.TrackSerial, w.WarrantyMonths, w.NeedsReview, w.CreatedBy)
 	return id, err
 }
 
@@ -204,6 +209,63 @@ func (r *Repository) Update(ctx context.Context, id int64, w writeRow) error {
 func (r *Repository) SoftDelete(ctx context.Context, id int64) error {
 	_, err := r.db.ExecContext(ctx, `UPDATE products SET is_active = false WHERE id = $1`, id)
 	return err
+}
+
+// SetCost updates only a product's cost price (used by the stock-take screen when
+// the admin enters the cost of opening stock).
+func (r *Repository) SetCost(ctx context.Context, id int64, cost decimal.Decimal) error {
+	_, err := r.db.ExecContext(ctx, `UPDATE products SET cost_price = $1 WHERE id = $2`, cost, id)
+	return err
+}
+
+// CountNeedsReview is the number of active products still flagged for review
+// (quick-added at the till). Powers the admin-panel badge.
+func (r *Repository) CountNeedsReview(ctx context.Context) (int, error) {
+	var n int
+	err := r.db.GetContext(ctx, &n,
+		`SELECT COUNT(*) FROM products WHERE needs_review = true AND is_active = true`)
+	return n, err
+}
+
+// ListNeedsReview returns the products awaiting review, newest first, with the
+// name of the user who quick-added each one.
+func (r *Repository) ListNeedsReview(ctx context.Context) ([]Product, error) {
+	var rows []Product
+	err := r.db.SelectContext(ctx, &rows, `
+		SELECT p.*, c.name AS category_name, u.abbreviation AS unit_abbr,
+		       u.allow_decimal AS unit_allow_decimal,
+		       COALESCE(s.quantity, 0) AS stock_qty,
+		       cb.name AS created_by_name
+		FROM products p
+		JOIN categories c ON c.id = p.category_id
+		JOIN units u      ON u.id = p.unit_id
+		LEFT JOIN stock s ON s.product_id = p.id
+		LEFT JOIN users cb ON cb.id = p.created_by
+		WHERE p.is_active = true AND p.needs_review = true
+		ORDER BY p.created_at DESC`)
+	return rows, err
+}
+
+// ClearReview marks a product as reviewed (admin has finished its setup).
+func (r *Repository) ClearReview(ctx context.Context, id int64) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE products SET needs_review = false WHERE id = $1`, id)
+	return err
+}
+
+// BackfillZeroCost sets the cost on this product's sale lines that were recorded
+// with the placeholder cost 0 (quick-add). This corrects COGS/profit on those
+// past sales once the admin enters the real cost during review. Returns the
+// number of sale lines corrected.
+func (r *Repository) BackfillZeroCost(ctx context.Context, productID int64, cost decimal.Decimal) (int64, error) {
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE sale_items SET cost_price = $1 WHERE product_id = $2 AND cost_price = 0`,
+		cost, productID)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
 }
 
 func nullStr(s string) *string {

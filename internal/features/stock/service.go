@@ -83,6 +83,12 @@ func (s *Service) Adjust(ctx context.Context, in AdjustInput, userID int64) erro
 	})
 }
 
+// Quantity returns a product's current on-hand quantity (used by the stock-take
+// screen to detect which rows actually changed).
+func (s *Service) Quantity(ctx context.Context, productID int64) (decimal.Decimal, error) {
+	return s.repo.GetQuantity(ctx, productID)
+}
+
 type DamageInput struct {
 	ProductID int64  `json:"product_id" form:"product_id" validate:"required,gt=0"`
 	Quantity  string `json:"quantity"   form:"quantity"   validate:"required"`

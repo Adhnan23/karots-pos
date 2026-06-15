@@ -57,7 +57,7 @@ function toastHost() {
 }
 
 // --- API helper for the cashier terminal ---------------------------------
-async function apiFetch(method, url, body) {
+async function apiFetch(method, url, body, options) {
   const opts = { method, headers: {}, credentials: "same-origin" };
   if (body !== undefined) {
     opts.headers["Content-Type"] = "application/json";
@@ -78,10 +78,16 @@ async function apiFetch(method, url, body) {
   }
   if (!res.ok) {
     const msg = (json && json.error && json.error.message) || "Request failed";
-    window.dispatchEvent(
-      new CustomEvent("show-toast", { detail: { message: msg, level: "error" } })
-    );
-    throw new Error(msg);
+    // `silent` lets a caller handle a specific status (e.g. 404) itself without a
+    // generic error toast firing first.
+    if (!(options && options.silent)) {
+      window.dispatchEvent(
+        new CustomEvent("show-toast", { detail: { message: msg, level: "error" } })
+      );
+    }
+    const err = new Error(msg);
+    err.status = res.status;
+    throw err;
   }
   return json;
 }
@@ -226,12 +232,17 @@ function pos(symbol, defaultType, promptAfterSale) {
     // Parked carts (hold / resume).
     holds: [],
     showHolds: false,
+    // Quick-add: sell an item that isn't in the catalog yet.
+    showQuickItem: false,
+    quickItem: { name: "", price: "", qty: 1, barcode: "", unit_id: 0 },
+    units: [],
 
     async init() {
       await this.loadDenoms();
       await this.loadSummary();
       await this.loadProducts();
       await this.loadCustomers();
+      await this.loadUnits();
       await this.loadHolds();
     },
 
@@ -253,7 +264,7 @@ function pos(symbol, defaultType, promptAfterSale) {
       if (el.select) el.select();
     },
     anyModalOpen() {
-      return this.showHolds || this.showWithdraw || this.showDeposit || this.showAddCustomer || this.showClose || !!this.receipt;
+      return this.showHolds || this.showWithdraw || this.showDeposit || this.showAddCustomer || this.showClose || this.showQuickItem || !!this.receipt;
     },
     closeModals() {
       this.showHolds = false;
@@ -261,6 +272,7 @@ function pos(symbol, defaultType, promptAfterSale) {
       this.showDeposit = false;
       this.showAddCustomer = false;
       this.showClose = false;
+      this.showQuickItem = false;
       this.closeResult = null;
       this.receipt = null;
     },
@@ -325,6 +337,14 @@ function pos(symbol, defaultType, promptAfterSale) {
         this.customers = json.data || [];
       } catch (_) {
         this.customers = [];
+      }
+    },
+    async loadUnits() {
+      try {
+        const json = await apiFetch("GET", "/api/units");
+        this.units = json.data || [];
+      } catch (_) {
+        this.units = [];
       }
     },
     async loadDenoms() {
@@ -556,11 +576,76 @@ function pos(symbol, defaultType, promptAfterSale) {
       const code = this.scan.trim();
       if (!code) return;
       try {
-        const json = await apiFetch("GET", `/api/products/barcode/${encodeURIComponent(code)}`);
+        const json = await apiFetch("GET", `/api/products/barcode/${encodeURIComponent(code)}`, undefined, { silent: true });
         this.addToCart(json.data);
         this.scan = "";
-      } catch (_) {
+      } catch (e) {
         this.scan = "";
+        // Unknown barcode → offer to quick-add it (prefilled with the scanned code)
+        // instead of a dead-end. Other errors still surface a toast.
+        if (e && e.status === 404) {
+          this.openQuickItem(code);
+        } else {
+          toast((e && e.message) || "Lookup failed", "error");
+        }
+      }
+    },
+    // --- Quick item (sell something not yet in the catalog) ---
+    // Default the unit to "pcs" if present, else the first unit.
+    defaultUnitId() {
+      const pcs = this.units.find((u) => u.abbreviation === "pcs");
+      return (pcs || this.units[0] || {}).id || 0;
+    },
+    quickUnitAllowsDecimal() {
+      const u = this.units.find((x) => x.id === this.quickItem.unit_id);
+      return !!(u && u.allow_decimal);
+    },
+    openQuickItem(barcode) {
+      this.quickItem = { name: "", price: "", qty: 1, barcode: barcode || "", unit_id: this.defaultUnitId() };
+      this.showQuickItem = true;
+      this.$nextTick(() => this.$refs.quickItemName && this.$refs.quickItemName.focus());
+    },
+    async genQuickBarcode() {
+      try {
+        const json = await apiFetch("GET", "/api/products/barcode/generate");
+        this.quickItem.barcode = json.data.barcode;
+      } catch (_) {
+        /* apiFetch already toasted */
+      }
+    },
+    async submitQuickItem() {
+      const name = (this.quickItem.name || "").trim();
+      if (!name) {
+        toast("Enter an item name", "error");
+        return;
+      }
+      if (!(Number(this.quickItem.price) >= 0) || this.quickItem.price === "") {
+        toast("Enter a price", "error");
+        return;
+      }
+      let qty = Number(this.quickItem.qty) || 0;
+      if (!this.quickUnitAllowsDecimal()) qty = Math.round(qty);
+      if (!(qty > 0)) qty = 1;
+      try {
+        const json = await apiFetch("POST", "/cashier/quick-item", {
+          name,
+          price: String(this.quickItem.price),
+          qty: String(qty),
+          barcode: (this.quickItem.barcode || "").trim(),
+          unit_id: Number(this.quickItem.unit_id) || 0,
+        });
+        this.addToCart(json.data);
+        // Reflect the entered quantity (addToCart starts a new line at qty 1).
+        const line = this.cart[this.cart.length - 1];
+        if (line) {
+          line.qty = qty;
+          this.syncSerials(line);
+        }
+        this.showQuickItem = false;
+        toast("Item added", "success");
+        await this.loadProducts();
+      } catch (_) {
+        /* apiFetch already toasted */
       }
     },
     clampQty(it) {

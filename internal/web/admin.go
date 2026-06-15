@@ -15,6 +15,7 @@ import (
 	"karots-pos/internal/features/settings"
 	"karots-pos/internal/features/stock"
 	"karots-pos/internal/middleware"
+	"karots-pos/internal/money"
 	"karots-pos/internal/printing"
 	"karots-pos/internal/receiptimg"
 	"karots-pos/internal/response"
@@ -72,6 +73,11 @@ func (a *adminUI) Dashboard(c echo.Context) error {
 		return err
 	}
 
+	reviewCount, err := a.s.products.CountNeedsReview(ctx)
+	if err != nil {
+		return err
+	}
+
 	return response.RenderPage(c, adminpages.Dashboard(adminpages.DashboardData{
 		UserName:       middleware.CurrentUserName(c),
 		Symbol:         a.symbol(ctx),
@@ -80,6 +86,7 @@ func (a *adminUI) Dashboard(c echo.Context) error {
 		LowStockCount:  lowStock,
 		ExpiringCount:  len(expiring),
 		OutstandingDue: due,
+		ReviewCount:    reviewCount,
 		Recent:         recent,
 	}))
 }
@@ -197,11 +204,77 @@ func (a *adminUI) ProductUpdate(c echo.Context) error {
 	if err := c.Validate(&in); err != nil {
 		return err
 	}
-	if _, err := a.s.products.Update(c.Request().Context(), id, in); err != nil {
+	ctx := c.Request().Context()
+	p, err := a.s.products.Update(ctx, id, in)
+	if err != nil {
 		return err
 	}
+	msg := "Product updated"
+	// Finishing a quick-added item: clear the review flag and correct the
+	// placeholder cost 0 on its past sale lines so historical COGS/profit are right.
+	if p.NeedsReview {
+		_ = a.s.products.MarkReviewed(ctx, id)
+		msg = "Item finalized & removed from review"
+		if n, berr := a.s.products.BackfillCost(ctx, id, in.CostPrice); berr == nil && n > 0 {
+			msg = "Item finalized — corrected cost on " + strconv.FormatInt(n, 10) + " past sale line(s)"
+		}
+		a.s.logAudit(c, audit.ActionUpdate, "product", strconv.FormatInt(id, 10), "finalized quick-add "+in.Name)
+		return htmxDone(c, msg, "reload-products")
+	}
 	a.s.logAudit(c, audit.ActionUpdate, "product", strconv.FormatInt(id, 10), "updated "+in.Name)
-	return htmxDone(c, "Product updated", "reload-products")
+	return htmxDone(c, msg, "reload-products")
+}
+
+// ProductReview lists items quick-added at the till that still need an admin to
+// finish them (real category/unit/cost + a true stock count). It's reachable from
+// the dashboard banner and the Inventory nav.
+func (a *adminUI) ProductReview(c echo.Context) error {
+	rows, err := a.s.products.NeedsReview(c.Request().Context())
+	if err != nil {
+		return err
+	}
+	return response.RenderPage(c, adminpages.ReviewPage(adminpages.ReviewData{
+		UserName: middleware.CurrentUserName(c),
+		Symbol:   a.symbol(c.Request().Context()),
+		Rows:     rows,
+	}))
+}
+
+// ProductReviewTable is the HTMX-refreshed body of the review list.
+func (a *adminUI) ProductReviewTable(c echo.Context) error {
+	rows, err := a.s.products.NeedsReview(c.Request().Context())
+	if err != nil {
+		return err
+	}
+	return response.RenderFragment(c, adminpages.ReviewRows(adminpages.ReviewData{
+		Symbol: a.symbol(c.Request().Context()),
+		Rows:   rows,
+	}))
+}
+
+// ProductReviewCount renders the small count badge loaded over HTMX into the
+// sidebar "Items to Review" link (empty when nothing needs review).
+func (a *adminUI) ProductReviewCount(c echo.Context) error {
+	n, err := a.s.products.CountNeedsReview(c.Request().Context())
+	if err != nil {
+		return err
+	}
+	return response.RenderFragment(c, adminpages.ReviewCountBadge(n))
+}
+
+// ProductReviewDone clears the review flag without editing — for items the admin
+// has confirmed are fine as-is (kept simple; cost backfill happens when they
+// actually edit the cost via the product form).
+func (a *adminUI) ProductReviewDone(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	if err := a.s.products.MarkReviewed(c.Request().Context(), id); err != nil {
+		return err
+	}
+	a.s.logAudit(c, audit.ActionUpdate, "product", strconv.FormatInt(id, 10), "marked reviewed")
+	return htmxReload(c, "Marked reviewed", "reload-products")
 }
 
 func (a *adminUI) ProductDelete(c echo.Context) error {
@@ -294,6 +367,96 @@ func (a *adminUI) StockAdjust(c echo.Context) error {
 		return err
 	}
 	return htmxDone(c, "Stock adjusted", "reload-stock")
+}
+
+// StockTake is the bulk opening-stock / stock-take screen: a (search-filterable)
+// list of products, each with a counted-quantity box and an optional cost box.
+// It's how a shop already running enters the stock it owned before this system —
+// no fake supplier/purchase needed.
+func (a *adminUI) StockTake(c echo.Context) error {
+	d, err := a.stockTakeData(c, -1)
+	if err != nil {
+		return err
+	}
+	return response.RenderPage(c, adminpages.StockTakePage(d))
+}
+
+func (a *adminUI) stockTakeData(c echo.Context, saved int) (adminpages.StockTakeData, error) {
+	ctx := c.Request().Context()
+	search := strings.TrimSpace(c.FormValue("search"))
+	page := 1
+	if v, err := strconv.Atoi(c.FormValue("page")); err == nil && v > 1 {
+		page = v
+	}
+	prods, _, err := a.s.products.List(ctx, products.ListQuery{Search: search, Page: page, Limit: stockTakePageSize + 1})
+	if err != nil {
+		return adminpages.StockTakeData{}, err
+	}
+	hasNext := len(prods) > stockTakePageSize
+	if hasNext {
+		prods = prods[:stockTakePageSize]
+	}
+	return adminpages.StockTakeData{
+		UserName: middleware.CurrentUserName(c),
+		Symbol:   a.symbol(ctx),
+		Rows:     prods,
+		Search:   search,
+		Page:     page,
+		HasNext:  hasNext,
+		Saved:    saved,
+	}, nil
+}
+
+const stockTakePageSize = 50
+
+// StockTakeApply reads the per-row qty_<id> (and optional cost_<id>) fields and
+// applies each as an absolute count via the audited stock.Adjust path. Setting
+// the cost first means the opening batch is valued correctly. Rows left blank are
+// skipped, so the admin can save a section at a time.
+func (a *adminUI) StockTakeApply(c echo.Context) error {
+	ctx := c.Request().Context()
+	uid := middleware.CurrentUserID(c)
+	form, err := c.FormParams()
+	if err != nil {
+		return apperr.BadRequest("invalid form")
+	}
+	saved := 0
+	for key, vals := range form {
+		if !strings.HasPrefix(key, "qty_") || len(vals) == 0 {
+			continue
+		}
+		idStr := strings.TrimPrefix(key, "qty_")
+		id, perr := strconv.ParseInt(idStr, 10, 64)
+		if perr != nil {
+			continue
+		}
+		qty := strings.TrimSpace(vals[0])
+		if qty == "" {
+			continue
+		}
+		target, perr := money.Parse(qty)
+		if perr != nil {
+			continue
+		}
+		// Skip rows whose count is unchanged so "Saved N" reflects real edits.
+		if cur, cerr := a.s.stock.Quantity(ctx, id); cerr == nil && cur.Equal(target) {
+			continue
+		}
+		// Set cost first (if entered) so the opening batch is valued correctly.
+		if costStr := strings.TrimSpace(c.FormValue("cost_" + idStr)); costStr != "" {
+			if cost, cerr := money.Parse(costStr); cerr == nil {
+				_ = a.s.products.SetCost(ctx, id, cost)
+			}
+		}
+		if err := a.s.stock.Adjust(ctx, stock.AdjustInput{ProductID: id, NewQuantity: qty, Note: "stock-take"}, uid); err == nil {
+			saved++
+		}
+	}
+	d, err := a.stockTakeData(c, saved)
+	if err != nil {
+		return err
+	}
+	return response.RenderPage(c, adminpages.StockTakePage(d))
 }
 
 // --- sales ---

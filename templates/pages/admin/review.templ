@@ -1,0 +1,93 @@
+package adminpages
+
+import (
+	"strconv"
+
+	"karots-pos/internal/datetime"
+	"karots-pos/internal/features/products"
+	"karots-pos/internal/money"
+	"karots-pos/templates/layouts"
+)
+
+type ReviewData struct {
+	UserName string
+	Symbol   string
+	Rows     []products.Product
+}
+
+// ReviewPage lists items that were quick-added at the till and still need an admin
+// to finish them: set the real category/unit/cost and a true stock count. Until
+// then their cost is 0, so their profit figures are overstated.
+templ ReviewPage(d ReviewData) {
+	@layouts.Admin("Items to review", d.UserName, "review") {
+		<div class="flex items-center justify-between mb-2">
+			<h1 class="text-2xl font-bold">Items to review</h1>
+			<a href="/admin/products" class="text-sm text-indigo-600 hover:underline">All products →</a>
+		</div>
+		<p class="text-sm text-slate-500 mb-6 max-w-3xl">
+			These were quick-added at the till to complete a sale. <strong>Finish setup</strong> opens the
+			product so you can set its real category, unit and cost — saving it also corrects the cost (currently 0)
+			on its past sales, so your profit figures become accurate. Then do a physical count and set the stock
+			under <a href="/admin/stock" class="text-indigo-600 hover:underline">Stock</a>.
+		</p>
+		<div class="bg-white rounded-2xl shadow-sm p-6">
+			<table class="w-full text-sm">
+				<thead class="text-left text-slate-500 border-b">
+					<tr>
+						<th class="py-2 px-3">Item</th>
+						<th class="py-2 px-3">Barcode</th>
+						<th class="py-2 px-3 text-right">Price</th>
+						<th class="py-2 px-3 text-right">Stock</th>
+						<th class="py-2 px-3">Added by</th>
+						<th class="py-2 px-3">When</th>
+						<th class="py-2 px-3"></th>
+					</tr>
+				</thead>
+				<tbody id="review-tbody" hx-get="/admin/products/review/table" hx-trigger="reload-products from:body" hx-target="#review-tbody" hx-swap="innerHTML">
+					@ReviewRows(d)
+				</tbody>
+			</table>
+		</div>
+	}
+}
+
+// ReviewCountBadge is loaded over HTMX into the sidebar nav link. It renders
+// nothing when there's nothing to review, so the link stays clean.
+templ ReviewCountBadge(n int) {
+	if n > 0 {
+		<span class="ml-2 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-400 text-amber-950">{ strconv.Itoa(n) }</span>
+	}
+}
+
+templ ReviewRows(d ReviewData) {
+	if len(d.Rows) == 0 {
+		<tr><td colspan="7" class="py-10 text-center text-slate-400">Nothing to review — every item is set up. 🎉</td></tr>
+	} else {
+		for _, p := range d.Rows {
+			<tr class="border-b last:border-0">
+				<td class="py-2 px-3 font-medium">{ p.Name }</td>
+				<td class="py-2 px-3 text-slate-500">
+					if p.Barcode != nil && *p.Barcode != "" {
+						{ *p.Barcode }
+					} else {
+						<span class="text-slate-300">—</span>
+					}
+				</td>
+				<td class="py-2 px-3 text-right">{ money.Format(d.Symbol, p.SellingPrice) }</td>
+				<td class="py-2 px-3 text-right">{ money.Display(p.StockQty) } { p.UnitAbbr }</td>
+				<td class="py-2 px-3">
+					if p.CreatedByName != nil {
+						{ *p.CreatedByName }
+					} else {
+						<span class="text-slate-300">—</span>
+					}
+				</td>
+				<td class="py-2 px-3 text-slate-500">{ datetime.Date(p.CreatedAt) }</td>
+				<td class="py-2 px-3 text-right whitespace-nowrap">
+					<button class="text-indigo-600 hover:underline" hx-get={ "/admin/products/form/" + strconv.FormatInt(p.ID, 10) } hx-target="#modal-container" hx-swap="innerHTML">Finish setup</button>
+					<button class="text-slate-500 hover:underline ml-3" hx-post={ "/admin/products/" + strconv.FormatInt(p.ID, 10) + "/review-done" } hx-swap="none" hx-confirm={ "Mark " + p.Name + " as reviewed without changes?" }>Mark reviewed</button>
+				</td>
+			</tr>
+		}
+	}
+}

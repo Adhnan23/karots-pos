@@ -79,6 +79,12 @@ templ POS(d POSData) {
 							placeholder="Search products…  (F2)"
 							class="flex-1 border rounded-lg px-3 py-2.5"
 						/>
+						<button
+							type="button"
+							x-on:click="openQuickItem('')"
+							title="Sell an item that isn't in the catalog yet"
+							class="shrink-0 px-3 py-2.5 rounded-lg border border-indigo-300 text-indigo-700 font-medium text-sm hover:bg-indigo-50"
+						>+ Quick item</button>
 					</div>
 					<div class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3">
 						<template x-for="p in products" x-bind:key="p.id">
@@ -311,6 +317,44 @@ templ POS(d POSData) {
 					<div class="flex gap-2">
 						<button x-on:click="showAddCustomer = false" class="flex-1 py-2 rounded-lg border">Cancel</button>
 						<button x-on:click="addCustomer()" class="flex-1 py-2 rounded-lg bg-indigo-600 text-white font-medium">Add</button>
+					</div>
+				</div>
+			</div>
+
+			<!-- Quick item modal: sell an item that isn't in the catalog yet -->
+			<div x-show="showQuickItem" x-cloak class="fixed inset-0 bg-black/40 z-40 flex items-center justify-center p-4">
+				<div class="bg-white rounded-2xl shadow-xl w-96 max-w-full p-6">
+					<h3 class="text-lg font-semibold mb-1">Quick item</h3>
+					<p class="text-sm text-slate-500 mb-4">Sell something that isn't in the system yet. It's added to the catalog and flagged for an admin to finish later (category, cost, stock count).</p>
+					<label class="block text-sm font-medium mb-1">Item name</label>
+					<input x-ref="quickItemName" x-model="quickItem.name" x-on:keydown.enter.prevent="submitQuickItem()" class="w-full border rounded-lg px-3 py-2 mb-3" placeholder="e.g. Imported chocolate bar"/>
+					<div class="grid grid-cols-3 gap-3 mb-3">
+						<div>
+							<label class="block text-sm font-medium mb-1">Price</label>
+							<input type="number" step="0.01" min="0" x-model="quickItem.price" x-on:keydown.enter.prevent="submitQuickItem()" class="w-full border rounded-lg px-3 py-2" placeholder="0.00"/>
+						</div>
+						<div>
+							<label class="block text-sm font-medium mb-1">Qty</label>
+							<input type="number" x-bind:step="quickUnitAllowsDecimal() ? '0.001' : '1'" min="0" x-model="quickItem.qty" class="w-full border rounded-lg px-3 py-2"/>
+						</div>
+						<div>
+							<label class="block text-sm font-medium mb-1">Unit</label>
+							<select x-model.number="quickItem.unit_id" class="w-full border rounded-lg px-3 py-2">
+								<template x-for="u in units" x-bind:key="u.id">
+									<option x-bind:value="u.id" x-text="u.abbreviation"></option>
+								</template>
+							</select>
+						</div>
+					</div>
+					<label class="block text-sm font-medium mb-1">Barcode <span class="text-slate-400 font-normal">(optional)</span></label>
+					<div class="flex gap-2 mb-1">
+						<input x-model="quickItem.barcode" class="flex-1 border rounded-lg px-3 py-2" placeholder="scan, generate, or leave blank"/>
+						<button type="button" x-on:click="genQuickBarcode()" class="shrink-0 px-3 py-2 rounded-lg border text-sm text-slate-600">Generate</button>
+					</div>
+					<p class="text-xs text-slate-500 mb-4">Leave blank if the item has no barcode — the admin can add one later.</p>
+					<div class="flex gap-2">
+						<button x-on:click="showQuickItem = false" class="flex-1 py-2 rounded-lg border">Cancel</button>
+						<button x-on:click="submitQuickItem()" class="flex-1 py-2 rounded-lg bg-indigo-600 text-white font-medium">Add to cart</button>
 					</div>
 				</div>
 			</div>

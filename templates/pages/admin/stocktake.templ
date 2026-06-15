@@ -1,0 +1,120 @@
+package adminpages
+
+import (
+	"net/url"
+	"strconv"
+
+	"karots-pos/internal/features/products"
+	"karots-pos/internal/money"
+	"karots-pos/templates/layouts"
+)
+
+type StockTakeData struct {
+	UserName string
+	Symbol   string
+	Rows     []products.Product
+	Search   string
+	Page     int
+	HasNext  bool
+	Saved    int // -1 = page just opened; >=0 = number of counts applied on the last save
+}
+
+// StockTakePage is the bulk opening-stock / stock-take screen. Enter a counted
+// quantity (and, if you like, the cost) for each product and save — each change is
+// recorded as an audited stock adjustment. Use it to load the stock a shop already
+// owned when it started using the system; for a single product, Stock → Adjust
+// still works.
+templ StockTakePage(d StockTakeData) {
+	@layouts.Admin("Stock-take", d.UserName, "stocktake") {
+		<div class="flex items-center justify-between mb-2">
+			<h1 class="text-2xl font-bold">Stock-take / opening stock</h1>
+			<a href="/admin/stock" class="text-sm text-indigo-600 hover:underline">Stock &amp; movements →</a>
+		</div>
+		<p class="text-sm text-slate-500 mb-4 max-w-3xl">
+			Enter the counted quantity for each product to set its on-hand level. Each change is recorded as an
+			audited adjustment, not a purchase, so it does not affect expenses or supplier dues. Optionally set the
+			cost so future sales of this stock show the right profit. Leave a row blank to skip it; you can save one
+			section at a time.
+		</p>
+
+		if d.Saved >= 0 {
+			<div class="mb-4 px-4 py-3 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-800 text-sm">
+				Saved { strconv.Itoa(d.Saved) }
+				if d.Saved == 1 {
+					count.
+				} else {
+					counts.
+				}
+				On-hand values below reflect the update.
+			</div>
+		}
+
+		<form method="get" action="/admin/stock/take" class="flex gap-3 mb-4">
+			<input type="search" name="search" value={ d.Search } placeholder="Search by name or barcode…" class="flex-1 max-w-sm border rounded-lg px-3 py-2"/>
+			<button class="px-4 py-2 rounded-lg border font-medium">Search</button>
+		</form>
+
+		<form method="post" action="/admin/stock/take" class="bg-white rounded-2xl shadow-sm p-6">
+			<input type="hidden" name="search" value={ d.Search }/>
+			<input type="hidden" name="page" value={ strconv.Itoa(d.Page) }/>
+			<table class="w-full text-sm">
+				<thead class="text-left text-slate-500 border-b">
+					<tr>
+						<th class="py-2 px-3">Product</th>
+						<th class="py-2 px-3 text-right">On hand now</th>
+						<th class="py-2 px-3 text-right">Counted qty</th>
+						<th class="py-2 px-3 text-right">Cost <span class="font-normal text-slate-400">{ d.Symbol }</span></th>
+					</tr>
+				</thead>
+				<tbody>
+					if len(d.Rows) == 0 {
+						<tr><td colspan="4" class="py-10 text-center text-slate-400">No products found.</td></tr>
+					} else {
+						for _, p := range d.Rows {
+							<tr class="border-b last:border-0">
+								<td class="py-2 px-3">
+									<div class="font-medium">{ p.Name }</div>
+									<div class="text-xs text-slate-400">{ p.CategoryName } · { p.UnitAbbr }</div>
+								</td>
+								<td class="py-2 px-3 text-right text-slate-500">{ money.Display(p.StockQty) }</td>
+								<td class="py-2 px-3 text-right">
+									<input type="number" step="0.001" min="0" name={ "qty_" + strconv.FormatInt(p.ID, 10) } placeholder={ money.Display(p.StockQty) } class="w-28 border rounded px-2 py-1 text-right"/>
+								</td>
+								<td class="py-2 px-3 text-right">
+									<input type="number" step="0.01" min="0" name={ "cost_" + strconv.FormatInt(p.ID, 10) } value={ money.Display(p.CostPrice) } class="w-28 border rounded px-2 py-1 text-right"/>
+								</td>
+							</tr>
+						}
+					}
+				</tbody>
+			</table>
+			if len(d.Rows) > 0 {
+				<div class="flex items-center justify-between mt-4">
+					<div class="flex items-center gap-2 text-sm">
+						if d.Page > 1 {
+							<a href={ templ.SafeURL(stockTakeURL(d.Search, d.Page-1)) } class="px-3 py-1.5 rounded-lg border hover:bg-slate-50">← Prev</a>
+						}
+						if d.Page > 1 || d.HasNext {
+							<span class="text-slate-500">Page { strconv.Itoa(d.Page) }</span>
+						}
+						if d.HasNext {
+							<a href={ templ.SafeURL(stockTakeURL(d.Search, d.Page+1)) } class="px-3 py-1.5 rounded-lg border hover:bg-slate-50">Next →</a>
+						}
+					</div>
+					<button class="px-5 py-2.5 rounded-lg bg-indigo-600 text-white font-medium">Save counts</button>
+				</div>
+				<p class="text-xs text-slate-400 mt-2">Save before changing pages — moving to another page discards unsaved counts on this one.</p>
+			}
+		</form>
+	}
+}
+
+// stockTakeURL builds a stock-take page link preserving the search filter.
+func stockTakeURL(search string, page int) string {
+	v := url.Values{}
+	if search != "" {
+		v.Set("search", search)
+	}
+	v.Set("page", strconv.Itoa(page))
+	return "/admin/stock/take?" + v.Encode()
+}

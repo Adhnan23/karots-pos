@@ -11,7 +11,9 @@ func adminGroups() []navGroup {
 		}},
 		{"Inventory", []navItem{
 			{"/admin/products", "Products", "products"},
+			{"/admin/products/review", "Items to Review", "review"},
 			{"/admin/stock", "Stock & Movements", "stock"},
+			{"/admin/stock/take", "Stock-take", "stocktake"},
 			{"/admin/conversions", "Conversions", "conversions"},
 			{"/admin/labels", "Barcode Labels", "labels"},
 			{"/admin/categories", "Categories", "categories-mgmt"},
@@ -137,7 +139,7 @@ templ navGroupBlock(g navGroup, active string) {
 			<div class="overflow-hidden">
 				<div class="space-y-1 pb-1">
 					for _, it := range g.Items {
-						@navLink(it.Href, it.Label, active == it.Key)
+						@navLinkKeyed(it.Href, it.Label, it.Key, active == it.Key)
 					}
 				</div>
 			</div>
@@ -151,4 +153,22 @@ templ navLink(href, label string, active bool) {
 	} else {
 		<a href={ templ.SafeURL(href) } class="block px-3 py-2 rounded-lg hover:bg-slate-800">{ label }</a>
 	}
+}
+
+// navLinkKeyed is navLink that can carry a live badge for specific items (the
+// "review" item shows a count loaded over HTMX, refreshed when items change).
+templ navLinkKeyed(href, label, key string, active bool) {
+	<a
+		href={ templ.SafeURL(href) }
+		if active {
+			class="block px-3 py-2 rounded-lg bg-indigo-600 text-white font-medium"
+		} else {
+			class="block px-3 py-2 rounded-lg hover:bg-slate-800"
+		}
+	>
+		{ label }
+		if key == "review" {
+			<span hx-get="/admin/products/review/count" hx-trigger="load, reload-products from:body" hx-swap="innerHTML"></span>
+		}
+	</a>
 }

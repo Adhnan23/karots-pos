@@ -23,7 +23,12 @@ templ ProductTable(rows []products.Product, symbol string) {
 templ ProductRow(p products.Product, symbol string) {
 	<tr class="border-b last:border-0 hover:bg-slate-50">
 		<td class="py-2 px-3">
-			<div class="font-medium">{ p.Name }</div>
+			<div class="font-medium">
+				{ p.Name }
+				if p.NeedsReview {
+					<a href="/admin/products/review" class="ml-2 px-2 py-0.5 rounded-full text-xs bg-amber-100 text-amber-700 align-middle">needs review</a>
+				}
+			</div>
 			if p.Barcode != nil {
 				<div class="text-xs text-slate-400">{ *p.Barcode }</div>
 			}

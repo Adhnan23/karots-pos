@@ -9,9 +9,12 @@ import (
 	"strings"
 
 	"karots-pos/internal/apperr"
+	appdb "karots-pos/internal/db"
+	"karots-pos/internal/features/stock"
 	"karots-pos/internal/money"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/shopspring/decimal"
 )
 
 type Service struct {
@@ -121,6 +124,145 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (*Product, error) 
 	return s.Get(ctx, id)
 }
 
+// QuickInput is a till-side quick-add: the cashier hit an item that isn't in the
+// catalog and must still sell it. Only name + price are required; the barcode is
+// optional (scanned, generated, or left for the admin).
+type QuickInput struct {
+	Name    string `json:"name"    form:"name"`
+	Price   string `json:"price"   form:"price"`
+	Qty     string `json:"qty"     form:"qty"`
+	Barcode string `json:"barcode" form:"barcode"`
+	UnitID  int64  `json:"unit_id" form:"unit_id"`
+}
+
+// QuickCreate makes a minimal, sellable product on the fly and seeds its stock to
+// the quantity being sold, so the imminent sale nets it back to zero ("count
+// later"). It is flagged needs_review and stamped with the cashier (created_by) so
+// the admin can finish it (real category, unit, cost) from the review queue. The
+// whole thing — product row, opening batch, stock bump and audit movement — runs
+// in one transaction. cost_price is 0 (a placeholder corrected during review).
+func (s *Service) QuickCreate(ctx context.Context, in QuickInput, userID int64) (*Product, error) {
+	name := strings.TrimSpace(in.Name)
+	if name == "" {
+		return nil, apperr.Validation("item name is required")
+	}
+	price, err := money.Parse(in.Price)
+	if err != nil || price.IsNegative() {
+		return nil, apperr.Validation("price must be a non-negative amount")
+	}
+	qty, err := money.Parse(in.Qty)
+	if err != nil || qty.LessThanOrEqual(decimal.Zero) {
+		qty = decimal.NewFromInt(1)
+	}
+
+	var newID int64
+	err = appdb.WithTx(ctx, s.db, func(tx *sqlx.Tx) error {
+		catID, err := ensureUncategorized(ctx, tx)
+		if err != nil {
+			return apperr.Internal("failed to resolve category", err)
+		}
+		unitID := in.UnitID
+		if unitID <= 0 {
+			unitID, err = defaultUnitID(ctx, tx)
+			if err != nil {
+				return apperr.Internal("failed to resolve unit", err)
+			}
+		}
+		repo := NewRepository(tx)
+		id, err := repo.Insert(ctx, writeRow{
+			Name:        name,
+			Barcode:     nullStr(in.Barcode),
+			CategoryID:  catID,
+			UnitID:      unitID,
+			Cost:        decimal.Zero,
+			Selling:     price,
+			Wholesale:   decimal.Zero,
+			Tax:         decimal.Zero,
+			NeedsReview: true,
+			CreatedBy:   &userID,
+		})
+		if err != nil {
+			return mapWriteErr(err)
+		}
+		// Seed stock = qty so the upcoming sale nets it to 0. A product-insert
+		// trigger already created the stock row at 0; bump it and open a costing
+		// batch + audit movement, mirroring a manual stock adjustment.
+		stk := stock.NewRepository(tx)
+		if err := stk.Increment(ctx, id, qty); err != nil {
+			return apperr.Internal("failed to seed stock", err)
+		}
+		if _, err := stk.InsertBatch(ctx, stock.NewBatch{
+			ProductID: id, Quantity: qty, CostPrice: decimal.Zero, Source: "opening",
+		}); err != nil {
+			return apperr.Internal("failed to open stock batch", err)
+		}
+		note := "quick-add opening (count pending)"
+		if err := stk.InsertMovement(ctx, stock.MovementInput{
+			ProductID: id, Type: stock.MoveAdjust, Quantity: qty, UserID: userID, Note: &note,
+		}); err != nil {
+			return apperr.Internal("failed to record stock movement", err)
+		}
+		newID = id
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return s.Get(ctx, newID)
+}
+
+// NeedsReview lists the products awaiting admin review (quick-added at the till).
+func (s *Service) NeedsReview(ctx context.Context) ([]Product, error) {
+	rows, err := s.repo.ListNeedsReview(ctx)
+	if err != nil {
+		return nil, apperr.Internal("failed to list items needing review", err)
+	}
+	return rows, nil
+}
+
+// CountNeedsReview powers the admin-panel badge.
+func (s *Service) CountNeedsReview(ctx context.Context) (int, error) {
+	n, err := s.repo.CountNeedsReview(ctx)
+	if err != nil {
+		return 0, apperr.Internal("failed to count items needing review", err)
+	}
+	return n, nil
+}
+
+// SetCost updates a product's cost price (stock-take opening-stock valuation).
+func (s *Service) SetCost(ctx context.Context, id int64, cost decimal.Decimal) error {
+	if cost.IsNegative() {
+		return apperr.Validation("cost must be a non-negative amount")
+	}
+	if err := s.repo.SetCost(ctx, id, cost); err != nil {
+		return apperr.Internal("failed to update cost", err)
+	}
+	return nil
+}
+
+// MarkReviewed clears the review flag once the admin has finished an item.
+func (s *Service) MarkReviewed(ctx context.Context, id int64) error {
+	if err := s.repo.ClearReview(ctx, id); err != nil {
+		return apperr.Internal("failed to mark reviewed", err)
+	}
+	return nil
+}
+
+// BackfillCost corrects the placeholder cost 0 on a product's past sale lines once
+// a real cost is known, so historical COGS/profit are accurate. Returns how many
+// lines were corrected.
+func (s *Service) BackfillCost(ctx context.Context, productID int64, costStr string) (int64, error) {
+	cost, err := money.Parse(costStr)
+	if err != nil || cost.IsNegative() {
+		return 0, apperr.Validation("cost must be a non-negative amount")
+	}
+	n, err := s.repo.BackfillZeroCost(ctx, productID, cost)
+	if err != nil {
+		return 0, apperr.Internal("failed to backfill cost", err)
+	}
+	return n, nil
+}
+
 func (s *Service) Update(ctx context.Context, id int64, in UpdateInput) (*Product, error) {
 	w, err := toWriteRow(in)
 	if err != nil {
@@ -197,4 +339,30 @@ func deref(s *string) string {
 		return ""
 	}
 	return *s
+}
+
+// ensureUncategorized returns the id of the "Uncategorized" category, creating it
+// once if it doesn't exist. Quick-added items land here until an admin recategorizes
+// them during review.
+func ensureUncategorized(ctx context.Context, tx *sqlx.Tx) (int64, error) {
+	var id int64
+	err := tx.GetContext(ctx, &id, `SELECT id FROM categories WHERE name = 'Uncategorized' LIMIT 1`)
+	if err == nil {
+		return id, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return 0, err
+	}
+	err = tx.GetContext(ctx, &id,
+		`INSERT INTO categories (name, parent_id) VALUES ('Uncategorized', NULL) RETURNING id`)
+	return id, err
+}
+
+// defaultUnitID picks a sensible default unit for quick-added items — the seeded
+// "Piece" (pcs) when present, otherwise the lowest-id unit.
+func defaultUnitID(ctx context.Context, tx *sqlx.Tx) (int64, error) {
+	var id int64
+	err := tx.GetContext(ctx, &id,
+		`SELECT id FROM units ORDER BY (abbreviation = 'pcs') DESC, id ASC LIMIT 1`)
+	return id, err
 }

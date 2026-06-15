@@ -348,6 +348,23 @@ func (h *cashierUI) DamageRecord(c echo.Context) error {
 	return htmxDone(c, "Damage written off", "reload-stock")
 }
 
+// QuickItem creates a missing product on the fly so the cashier can sell an item
+// that isn't in the catalog yet, and returns it (as JSON, same shape as a barcode
+// lookup) so the POS can drop it straight into the cart. It is flagged for admin
+// review. Any cashier may do this; the created_by stamp records who.
+func (h *cashierUI) QuickItem(c echo.Context) error {
+	var in products.QuickInput
+	if err := c.Bind(&in); err != nil {
+		return apperr.BadRequest("invalid request")
+	}
+	p, err := h.s.products.QuickCreate(c.Request().Context(), in, middleware.CurrentUserID(c))
+	if err != nil {
+		return err
+	}
+	h.s.logAudit(c, audit.ActionCreate, "product", strconv.FormatInt(p.ID, 10), "quick-add at till: "+p.Name)
+	return response.OK(c, p)
+}
+
 // ============================ Credit collection ============================
 
 func (h *cashierUI) creditData(c echo.Context) (cashierpages.CreditData, error) {
