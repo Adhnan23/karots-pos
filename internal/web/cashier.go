@@ -46,6 +46,15 @@ func (h *cashierUI) cashierShopName(ctx context.Context) string {
 	return "Shop"
 }
 
+// showChangePin decides whether the terminal shows the "Change PIN" link.
+// Admins/managers always may; cashiers only when the shop allows it.
+func (h *cashierUI) showChangePin(c echo.Context) bool {
+	if middleware.CurrentRole(c) != auth.RoleCashier {
+		return true
+	}
+	return h.s.auth.AllowCashierPinChange(c.Request().Context())
+}
+
 // ZReport renders the printable day-end (Z) summary for a drawer session. A
 // cashier may only view their own session; admins/managers may view any.
 func (h *cashierUI) ZReport(c echo.Context) error {
@@ -90,6 +99,7 @@ func (h *cashierUI) POS(c echo.Context) error {
 	return response.RenderPage(c, cashierpages.POS(cashierpages.POSData{
 		CashierName:     middleware.CurrentUserName(c),
 		Role:            middleware.CurrentRole(c),
+		ShowChangePin:   h.showChangePin(c),
 		Symbol:          symbol,
 		DefaultSaleType: defaultType,
 		PromptAfterSale: promptAfterSale,
@@ -215,8 +225,9 @@ func (h *cashierUI) Receipts(c echo.Context) error {
 		return err
 	}
 	return response.RenderPage(c, cashierpages.Receipts(cashierpages.ReceiptsData{
-		CashierName: middleware.CurrentUserName(c),
-		Role:        middleware.CurrentRole(c),
+		CashierName:   middleware.CurrentUserName(c),
+		Role:          middleware.CurrentRole(c),
+		ShowChangePin: h.showChangePin(c),
 		Symbol:      h.cashierSymbol(ctx),
 		Query:       q,
 		Sales:       rows,
@@ -234,8 +245,9 @@ func (h *cashierUI) Labels(c echo.Context) error {
 		return err
 	}
 	return response.RenderPage(c, cashierpages.Labels(cashierpages.LabelsData{
-		CashierName: middleware.CurrentUserName(c),
-		Role:        middleware.CurrentRole(c),
+		CashierName:   middleware.CurrentUserName(c),
+		Role:          middleware.CurrentRole(c),
+		ShowChangePin: h.showChangePin(c),
 		Symbol:      h.cashierSymbol(ctx),
 		Products:    prods,
 	}))
@@ -254,8 +266,9 @@ func (h *cashierUI) returnsData(c echo.Context) (cashierpages.ReturnsData, error
 		return cashierpages.ReturnsData{}, err
 	}
 	return cashierpages.ReturnsData{
-		CashierName: middleware.CurrentUserName(c),
-		Role:        middleware.CurrentRole(c),
+		CashierName:   middleware.CurrentUserName(c),
+		Role:          middleware.CurrentRole(c),
+		ShowChangePin: h.showChangePin(c),
 		Symbol:      h.cashierSymbol(ctx),
 		Sales:       rows,
 	}, nil
@@ -327,8 +340,9 @@ func (h *cashierUI) Damage(c echo.Context) error {
 		return err
 	}
 	return response.RenderPage(c, cashierpages.Damage(cashierpages.DamageData{
-		CashierName: middleware.CurrentUserName(c),
-		Role:        middleware.CurrentRole(c),
+		CashierName:   middleware.CurrentUserName(c),
+		Role:          middleware.CurrentRole(c),
+		ShowChangePin: h.showChangePin(c),
 		Products:    prods,
 	}))
 }
@@ -380,8 +394,9 @@ func (h *cashierUI) creditData(c echo.Context) (cashierpages.CreditData, error) 
 		}
 	}
 	return cashierpages.CreditData{
-		CashierName: middleware.CurrentUserName(c),
-		Role:        middleware.CurrentRole(c),
+		CashierName:   middleware.CurrentUserName(c),
+		Role:          middleware.CurrentRole(c),
+		ShowChangePin: h.showChangePin(c),
 		Symbol:      h.cashierSymbol(ctx),
 		Customers:   owing,
 	}, nil
@@ -476,8 +491,9 @@ func (h *cashierUI) warrantyData(c echo.Context) (cashierpages.WarrantyData, err
 		return cashierpages.WarrantyData{}, err
 	}
 	return cashierpages.WarrantyData{
-		CashierName: middleware.CurrentUserName(c),
-		Role:        middleware.CurrentRole(c),
+		CashierName:   middleware.CurrentUserName(c),
+		Role:          middleware.CurrentRole(c),
+		ShowChangePin: h.showChangePin(c),
 		Symbol:      h.cashierSymbol(ctx),
 		Base:        "/cashier",
 		Status:      status,

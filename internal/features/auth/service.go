@@ -121,7 +121,7 @@ func (s *Service) CreateUser(ctx context.Context, in CreateUserInput) (*User, er
 	if err != nil {
 		return nil, apperr.Internal("could not hash PIN", err)
 	}
-	u, err := s.repo.Create(ctx, in.Name, &in.Phone, in.Role, string(hash), in.ReceiptPrinter)
+	u, err := s.repo.Create(ctx, in.Name, &in.Phone, in.Role, string(hash), in.ReceiptPrinter, s.forcePinChange(ctx))
 	if err != nil {
 		if appdb.IsUniqueViolation(err) {
 			return nil, apperr.Conflict("that phone number is already used by another user")
@@ -131,7 +131,8 @@ func (s *Service) CreateUser(ctx context.Context, in CreateUserInput) (*User, er
 	return u, nil
 }
 
-// GetUser loads a single active user (for the edit form).
+// GetUser loads a single active user (for the edit form). The hidden system
+// admin is reported as not found so it can't be opened via a hand-typed URL.
 func (s *Service) GetUser(ctx context.Context, id int64) (*User, error) {
 	u, err := s.repo.FindByID(ctx, id)
 	if err != nil {
@@ -140,7 +141,30 @@ func (s *Service) GetUser(ctx context.Context, id int64) (*User, error) {
 		}
 		return nil, apperr.Internal("could not load user", err)
 	}
+	if u.IsSystem {
+		return nil, apperr.NotFound("user")
+	}
 	return u, nil
+}
+
+// forcePinChange reports whether new/admin-reset PINs must be changed on next
+// login, per the shop setting. Defaults to false (no forced change) on any error.
+func (s *Service) forcePinChange(ctx context.Context) bool {
+	var v bool
+	if err := s.db.GetContext(ctx, &v, `SELECT force_pin_change FROM settings WHERE id = 1`); err != nil {
+		return false
+	}
+	return v
+}
+
+// AllowCashierPinChange reports whether cashiers may change their own PIN, per
+// the shop setting. Defaults to true (allowed) on any error.
+func (s *Service) AllowCashierPinChange(ctx context.Context) bool {
+	var v bool
+	if err := s.db.GetContext(ctx, &v, `SELECT allow_cashier_pin_change FROM settings WHERE id = 1`); err != nil {
+		return true
+	}
+	return v
 }
 
 // UpdateUser edits a user's name/phone/role and, when a new PIN is supplied,
@@ -164,10 +188,12 @@ func (s *Service) UpdateUser(ctx context.Context, id int64, in UpdateUserInput) 
 		if uerr := s.repo.UpdatePin(ctx, id, string(hash)); uerr != nil {
 			return apperr.Internal("could not reset PIN", uerr)
 		}
-		// An admin-set PIN is not one the user chose: force them to change it
-		// on next login.
-		if uerr := s.repo.SetMustChangePin(ctx, id, true); uerr != nil {
-			return apperr.Internal("could not flag PIN reset", uerr)
+		// An admin-set PIN is not one the user chose. Force a change on next
+		// login only when the shop has opted into that policy.
+		if s.forcePinChange(ctx) {
+			if uerr := s.repo.SetMustChangePin(ctx, id, true); uerr != nil {
+				return apperr.Internal("could not flag PIN reset", uerr)
+			}
 		}
 		_ = s.repo.DeleteAllRefreshForUser(ctx, id)
 	}

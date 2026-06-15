@@ -29,10 +29,11 @@ func (a *adminUI) warrantyData(c echo.Context) (cashierpages.WarrantyData, error
 		return cashierpages.WarrantyData{}, err
 	}
 	return cashierpages.WarrantyData{
-		CashierName: middleware.CurrentUserName(c),
-		Role:        middleware.CurrentRole(c),
-		Symbol:      a.symbol(ctx),
-		Base:        "/admin",
+		CashierName:   middleware.CurrentUserName(c),
+		Role:          middleware.CurrentRole(c),
+		ShowChangePin: true, // admins/managers may always change their PIN
+		Symbol:        a.symbol(ctx),
+		Base:          "/admin",
 		Status:      status,
 		Search:      search,
 		Units:       units,

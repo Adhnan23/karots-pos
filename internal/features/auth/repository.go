@@ -33,38 +33,43 @@ func (r *Repository) FindByPhone(ctx context.Context, phone string) (*User, erro
 	return &u, nil
 }
 
-// ListActivePublic returns active users for the login picker.
+// ListActivePublic returns active users for the login picker. The hidden system
+// admin is excluded so it never shows on any screen.
 func (r *Repository) ListActivePublic(ctx context.Context) ([]UserPublic, error) {
 	var users []UserPublic
 	err := r.db.SelectContext(ctx, &users,
-		`SELECT id, name, role FROM users WHERE is_active = true ORDER BY name`)
+		`SELECT id, name, role FROM users WHERE is_active = true AND is_system = false ORDER BY name`)
 	return users, err
 }
 
+// ListAll returns every (non-system) user for the admin user panel.
 func (r *Repository) ListAll(ctx context.Context) ([]User, error) {
 	var users []User
 	err := r.db.SelectContext(ctx, &users,
-		`SELECT * FROM users ORDER BY is_active DESC, name`)
+		`SELECT * FROM users WHERE is_system = false ORDER BY is_active DESC, name`)
 	return users, err
 }
 
-func (r *Repository) Create(ctx context.Context, name string, phone *string, role, pinHash, receiptPrinter string) (*User, error) {
+// Create inserts a new user. mustChange arms the forced PIN-change flag — the
+// caller decides based on the shop's "force PIN change" setting.
+func (r *Repository) Create(ctx context.Context, name string, phone *string, role, pinHash, receiptPrinter string, mustChange bool) (*User, error) {
 	var u User
-	// New accounts get a PIN the user did not choose (seed or admin-set), so
-	// they must change it on first login.
 	err := r.db.GetContext(ctx, &u,
 		`INSERT INTO users (name, phone, role, pin_hash, must_change_pin, receipt_printer)
-		 VALUES ($1, $2, $3, $4, true, $5)
-		 RETURNING *`, name, phone, role, pinHash, receiptPrinter)
+		 VALUES ($1, $2, $3, $4, $5, $6)
+		 RETURNING *`, name, phone, role, pinHash, mustChange, receiptPrinter)
 	if err != nil {
 		return nil, err
 	}
 	return &u, nil
 }
 
+// Update edits a profile. The is_system guard means the hidden system admin can
+// never be edited through the admin UI (0 rows → NotFound).
 func (r *Repository) Update(ctx context.Context, id int64, name string, phone *string, role, receiptPrinter string) error {
 	res, err := r.db.ExecContext(ctx,
-		`UPDATE users SET name = $1, phone = $2, role = $3, receipt_printer = $4 WHERE id = $5`,
+		`UPDATE users SET name = $1, phone = $2, role = $3, receipt_printer = $4
+		 WHERE id = $5 AND is_system = false`,
 		name, phone, role, receiptPrinter, id)
 	if err != nil {
 		return err
@@ -91,9 +96,10 @@ func (r *Repository) SetMustChangePin(ctx context.Context, id int64, must bool) 
 	return err
 }
 
+// Deactivate guards the system admin: it can never be deactivated from the UI.
 func (r *Repository) Deactivate(ctx context.Context, id int64) error {
 	_, err := r.db.ExecContext(ctx,
-		`UPDATE users SET is_active = false WHERE id = $1`, id)
+		`UPDATE users SET is_active = false WHERE id = $1 AND is_system = false`, id)
 	return err
 }
 

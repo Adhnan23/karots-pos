@@ -5,6 +5,7 @@ import "karots-pos/templates/layouts"
 type POSData struct {
 	CashierName     string
 	Role            string
+	ShowChangePin   bool
 	Symbol          string
 	DefaultSaleType string
 	PromptAfterSale bool
@@ -15,7 +16,7 @@ type POSData struct {
 // math (a preview — the server recomputes authoritatively), checkout, and the
 // cash-drawer session.
 templ POS(d POSData) {
-	@layouts.Cashier("Cashier", d.CashierName, d.Role, "pos") {
+	@layouts.Cashier("Cashier", d.CashierName, d.Role, "pos", d.ShowChangePin) {
 		<div
 			class="h-full"
 			x-data={ "pos('" + d.Symbol + "', '" + d.DefaultSaleType + "', " + jsBool(d.PromptAfterSale) + ")" }

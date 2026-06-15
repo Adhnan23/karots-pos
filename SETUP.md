@@ -135,9 +135,9 @@ cd /opt/karots-pos
 chmod +x karots-pos
 ```
 
-Run the **one-time setup** (this creates the database tables and your first admin
-account — nothing else, so you start with an empty catalog). Because the program
-doesn't auto-read `.env`, load it for this command:
+Run the **one-time setup** (this creates the database tables — nothing else, so you
+start with an empty catalog and no staff accounts). Because the program doesn't
+auto-read `.env`, load it for this command:
 
 ```bash
 set -a && . ./.env && set +a && ./karots-pos -init
@@ -151,16 +151,21 @@ set -a && . ./.env && set +a && ./karots-pos
 
 Open **http://localhost:3000** in a browser.
 
-**First login** (phone number + PIN):
+**First login.** A fresh shop has **no staff accounts** — only a hidden system
+admin that you (the installer) use to get in and set everything up. Sign in with
+that account, then create the shop's real users in **Admin → Users** and hand
+those credentials to the staff. By default an admin sets each person's PIN and
+they just log in with it; to require staff to choose their own PIN on first login,
+turn on **Force PIN change on first login** in **Admin → Settings** (you can also
+stop cashiers changing their own PIN there).
 
-| Role | Phone | PIN |
-|---|---|---|
-| Admin | `0771234567` | `1234` |
-
-> 🔐 You'll be **prompted to choose your own PIN immediately** on first login (the
-> default above is public). To set different starting credentials, run init with
-> `POS_ADMIN_NAME`, `POS_ADMIN_PHONE` and `POS_ADMIN_PIN` set. Add your cashiers and
-> managers afterwards in **Admin → Users** — they too pick their own PIN on first login.
+> 🛟 **System login (keep this to yourself).** The hidden system admin never shows
+> in the user list and can't be edited or deactivated from the app, so a shop can
+> never lock you out. It logs in like any other user (phone `0000000001`, PIN
+> `2273` by default). Override per install with the `POS_SYSTEM_PHONE` /
+> `POS_SYSTEM_PIN` environment variables — keep these out of the shop's hands. The
+> account is re-created and its PIN reset on every startup, so you can always get
+> back in.
 
 > ℹ️ `-init` gives you a clean, empty shop. If you instead want sample data to try
 > the system out, use `-seed` (demo products, suppliers and customers) — but don't

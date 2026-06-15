@@ -12,10 +12,11 @@ import (
 )
 
 type WarrantyData struct {
-	CashierName string
-	Role        string
-	Symbol      string
-	Base        string // route prefix: "/cashier" or "/admin"
+	CashierName   string
+	Role          string
+	ShowChangePin bool
+	Symbol        string
+	Base          string // route prefix: "/cashier" or "/admin"
 	Status      string // current list filter: all|active|expired|replaced
 	Search      string
 	Units       []warranty.Unit
@@ -23,7 +24,7 @@ type WarrantyData struct {
 
 // Warranty renders the terminal page inside the cashier shell.
 templ Warranty(d WarrantyData) {
-	@layouts.Cashier("Warranty", d.CashierName, d.Role, "warranty") {
+	@layouts.Cashier("Warranty", d.CashierName, d.Role, "warranty", d.ShowChangePin) {
 		@warrantyInner(d)
 	}
 }

@@ -57,14 +57,31 @@ func (h *authUI) Logout(c echo.Context) error {
 	return c.Redirect(http.StatusSeeOther, "/login")
 }
 
+// pinChangeBlocked reports whether this user may NOT change their own PIN: a
+// cashier, when the shop has disabled cashier PIN changes and the user is not
+// being forced to change (forced users must always be able to reach the screen,
+// or they'd be stuck in a redirect loop).
+func (h *authUI) pinChangeBlocked(c echo.Context) bool {
+	if middleware.CurrentRole(c) != auth.RoleCashier || middleware.MustChangePin(c) {
+		return false
+	}
+	return !h.svc.AllowCashierPinChange(c.Request().Context())
+}
+
 // ChangePINForm renders the self-service / forced PIN-change screen.
 func (h *authUI) ChangePINForm(c echo.Context) error {
+	if h.pinChangeBlocked(c) {
+		return c.Redirect(http.StatusSeeOther, auth.HomePath(middleware.CurrentRole(c)))
+	}
 	return response.RenderPage(c, authpages.ChangePINPage("", middleware.MustChangePin(c)))
 }
 
 // ChangePIN applies a user's own PIN change, then mints a fresh cookie so the
 // cleared forced-change claim takes effect immediately.
 func (h *authUI) ChangePIN(c echo.Context) error {
+	if h.pinChangeBlocked(c) {
+		return c.Redirect(http.StatusSeeOther, auth.HomePath(middleware.CurrentRole(c)))
+	}
 	var in auth.ChangeOwnPINInput
 	if err := c.Bind(&in); err != nil {
 		return h.changePINError(c, "Please fill in all three fields")

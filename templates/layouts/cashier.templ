@@ -22,8 +22,9 @@ func cashierPalette(role string) []paletteEntry {
 
 // Cashier is the terminal shell: a slim topbar with the terminal sections plus a
 // full-height work area. `active` highlights the current section; `role` decides
-// whether the Admin link is shown (cashiers don't get it).
-templ Cashier(title, userName, role, active string) {
+// whether the Admin link is shown (cashiers don't get it); `showChangePin` hides
+// the Change PIN link when the shop has disabled cashier PIN changes.
+templ Cashier(title, userName, role, active string, showChangePin bool) {
 	@Base(title) {
 		<div class="h-full flex flex-col">
 			<header class="h-14 shrink-0 bg-slate-900 text-white flex items-center justify-between px-5">
@@ -49,6 +50,7 @@ templ Cashier(title, userName, role, active string) {
 					</button>
 				</div>
 				<div class="flex items-center gap-4 text-sm">
+					@liveClock("text-slate-300 tabular-nums")
 					<button type="button" x-data="themeToggle()" x-on:click="toggle()" title="Toggle light / dark" class="text-slate-300 hover:text-white text-base leading-none">
 						<span x-text="dark ? '☀️' : '🌙'">🌙</span>
 					</button>
@@ -56,7 +58,9 @@ templ Cashier(title, userName, role, active string) {
 					if role == auth.RoleAdmin || role == auth.RoleManager {
 						<a href="/admin" class="text-slate-300 hover:text-white">Admin</a>
 					}
-					<a href="/account/pin" class="text-slate-300 hover:text-white">Change PIN</a>
+					if showChangePin {
+						<a href="/account/pin" class="text-slate-300 hover:text-white">Change PIN</a>
+					}
 					<form method="post" action="/logout">
 						<button type="submit" class="text-red-300 hover:text-red-200">Log out</button>
 					</form>

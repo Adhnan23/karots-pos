@@ -10,17 +10,18 @@ import (
 )
 
 type ReceiptsData struct {
-	CashierName string
-	Role        string
-	Symbol      string
-	Query       string
-	Sales       []sales.Sale
+	CashierName   string
+	Role          string
+	ShowChangePin bool
+	Symbol        string
+	Query         string
+	Sales         []sales.Sale
 }
 
 // Receipts lets the cashier find a past sale (by receipt number) and reprint the
 // thermal bill from the terminal.
 templ Receipts(d ReceiptsData) {
-	@layouts.Cashier("Receipts", d.CashierName, d.Role, "receipts") {
+	@layouts.Cashier("Receipts", d.CashierName, d.Role, "receipts", d.ShowChangePin) {
 		<div class="h-full overflow-auto p-5">
 			<div class="max-w-3xl mx-auto">
 				<h1 class="text-xl font-bold mb-1">Receipts</h1>

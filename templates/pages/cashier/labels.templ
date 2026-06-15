@@ -9,16 +9,17 @@ import (
 )
 
 type LabelsData struct {
-	CashierName string
-	Role        string
-	Symbol      string
-	Products    []products.Product
+	CashierName   string
+	Role          string
+	ShowChangePin bool
+	Symbol        string
+	Products      []products.Product
 }
 
 // Labels is the terminal barcode-label printer: pick a product (or type a custom
 // code), choose the sticker size, and print straight to the label printer.
 templ Labels(d LabelsData) {
-	@layouts.Cashier("Print Labels", d.CashierName, d.Role, "labels") {
+	@layouts.Cashier("Print Labels", d.CashierName, d.Role, "labels", d.ShowChangePin) {
 		<div class="h-full overflow-auto p-5">
 			<div class="max-w-3xl mx-auto">
 				<h1 class="text-xl font-bold mb-1">Print Labels</h1>

@@ -86,6 +86,21 @@ templ SettingsPage(d SettingsData) {
 						</label>
 					</div>
 				</div>
+				<!-- Staff sign-in / PIN policy -->
+				<div class="border-t pt-5 mt-2">
+					<h2 class="text-lg font-semibold mb-1">Staff sign-in</h2>
+					<p class="text-sm text-slate-500 mb-4">By default an admin sets a staff member's PIN and they just log in. Turn these on to make staff choose their own PIN, or to stop cashiers changing theirs.</p>
+					<div class="space-y-3">
+						<label class="flex items-center gap-2">
+							<input type="checkbox" name="force_pin_change" value="true" checked?={ d.S.ForcePinChange }/>
+							<span class="text-sm">Force PIN change on first login <span class="text-slate-400">— new and admin-reset accounts must choose a new PIN before using the app</span></span>
+						</label>
+						<label class="flex items-center gap-2">
+							<input type="checkbox" name="allow_cashier_pin_change" value="true" checked?={ d.S.AllowCashierPinChange }/>
+							<span class="text-sm">Allow cashiers to change their own PIN <span class="text-slate-400">— when off, only admins/managers can change a cashier's PIN</span></span>
+						</label>
+					</div>
+				</div>
 				<!-- Printers & labels -->
 				<div class="border-t pt-5 mt-2">
 					<h2 class="text-lg font-semibold mb-1">Printers &amp; Labels</h2>

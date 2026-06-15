@@ -31,6 +31,8 @@ type Settings struct {
 	TaxRegNo        *string   `db:"tax_reg_no"        json:"tax_reg_no,omitempty"`
 	LowStockAlerts  bool      `db:"low_stock_alerts"  json:"low_stock_alerts"`
 	PromptAfterSale bool      `db:"prompt_after_sale" json:"prompt_after_sale"`
+	ForcePinChange        bool `db:"force_pin_change"          json:"force_pin_change"`
+	AllowCashierPinChange bool `db:"allow_cashier_pin_change"  json:"allow_cashier_pin_change"`
 	DefaultSaleType string    `db:"default_sale_type" json:"default_sale_type"`
 	ReceiptPrinter  string    `db:"receipt_printer"   json:"receipt_printer"`
 	LabelPrinter    string    `db:"label_printer"     json:"label_printer"`
@@ -54,6 +56,8 @@ type UpdateInput struct {
 	TaxRegNo        *string `json:"tax_reg_no"        form:"tax_reg_no"`
 	LowStockAlerts  bool    `json:"low_stock_alerts"  form:"low_stock_alerts"`
 	PromptAfterSale bool    `json:"prompt_after_sale" form:"prompt_after_sale"`
+	ForcePinChange        bool `json:"force_pin_change"         form:"force_pin_change"`
+	AllowCashierPinChange bool `json:"allow_cashier_pin_change" form:"allow_cashier_pin_change"`
 	DefaultSaleType string  `json:"default_sale_type" form:"default_sale_type" validate:"required,oneof=retail wholesale credit"`
 	ReceiptPrinter  string  `json:"receipt_printer"   form:"receipt_printer"   validate:"omitempty,max=100"`
 	LabelPrinter    string  `json:"label_printer"     form:"label_printer"     validate:"omitempty,max=100"`
@@ -121,14 +125,16 @@ func (r *Repository) Update(ctx context.Context, in UpdateInput) error {
 			logo_url=$12, receipt_width=$13,
 			receipt_printer=$14, label_printer=$15,
 			label_width_mm=$16, label_height_mm=$17, label_gap_mm=$18,
-			prompt_after_sale=$19
+			prompt_after_sale=$19,
+			force_pin_change=$20, allow_cashier_pin_change=$21
 		WHERE id = 1`,
 		in.ShopName, in.ShopNameSi, in.Address, in.Phone,
 		in.CurrencyCode, in.CurrencySymbol, in.ReceiptFooter,
 		in.TaxRegistered, in.TaxRegNo, in.LowStockAlerts, in.DefaultSaleType,
 		nilIfEmptyStr(in.LogoURL), in.ReceiptWidth,
 		in.ReceiptPrinter, in.LabelPrinter, w, h, gap,
-		in.PromptAfterSale)
+		in.PromptAfterSale,
+		in.ForcePinChange, in.AllowCashierPinChange)
 	return err
 }
 

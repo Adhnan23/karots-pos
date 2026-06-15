@@ -1,0 +1,12 @@
+package layouts
+
+// liveClock renders a date + time that ticks every second on the client. Used in
+// the admin and cashier shells so staff always see the current date and time.
+templ liveClock(class string) {
+	<span
+		class={ class }
+		x-data="{ now: '' }"
+		x-init="now = new Date().toLocaleString(); setInterval(() => { now = new Date().toLocaleString() }, 1000)"
+		x-text="now"
+	></span>
+}

@@ -27,14 +27,15 @@ templ cashierModal(title string) {
 // ====================== Returns ======================
 
 type ReturnsData struct {
-	CashierName string
-	Role        string
-	Symbol      string
-	Sales       []sales.Sale
+	CashierName   string
+	Role          string
+	ShowChangePin bool
+	Symbol        string
+	Sales         []sales.Sale
 }
 
 templ Returns(d ReturnsData) {
-	@layouts.Cashier("Returns", d.CashierName, d.Role, "returns") {
+	@layouts.Cashier("Returns", d.CashierName, d.Role, "returns", d.ShowChangePin) {
 		<div class="h-full overflow-auto p-6">
 			<div class="max-w-4xl mx-auto">
 				<h1 class="text-xl font-bold mb-1">Returns &amp; Refunds</h1>
@@ -144,13 +145,14 @@ templ CashierReturnForm(d sales.Detail) {
 // ====================== Damage / write-off ======================
 
 type DamageData struct {
-	CashierName string
-	Role        string
-	Products    []products.Product
+	CashierName   string
+	Role          string
+	ShowChangePin bool
+	Products      []products.Product
 }
 
 templ Damage(d DamageData) {
-	@layouts.Cashier("Damage", d.CashierName, d.Role, "damage") {
+	@layouts.Cashier("Damage", d.CashierName, d.Role, "damage", d.ShowChangePin) {
 		<div class="h-full overflow-auto p-6">
 			<div class="max-w-md mx-auto bg-white rounded-xl shadow-sm p-6">
 				<h1 class="text-xl font-bold mb-1">Record Damage / Write-off</h1>
@@ -182,14 +184,15 @@ templ Damage(d DamageData) {
 // ====================== Credit collection ======================
 
 type CreditData struct {
-	CashierName string
-	Role        string
-	Symbol      string
-	Customers   []customers.Customer
+	CashierName   string
+	Role          string
+	ShowChangePin bool
+	Symbol        string
+	Customers     []customers.Customer
 }
 
 templ Credit(d CreditData) {
-	@layouts.Cashier("Credit", d.CashierName, d.Role, "credit") {
+	@layouts.Cashier("Credit", d.CashierName, d.Role, "credit", d.ShowChangePin) {
 		<div class="h-full overflow-auto p-6">
 			<div class="max-w-3xl mx-auto">
 				<h1 class="text-xl font-bold mb-1">Credit Collection</h1>

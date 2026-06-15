@@ -17,6 +17,7 @@ type User struct {
 	PinHash       string    `db:"pin_hash"  json:"-"`
 	IsActive      bool      `db:"is_active" json:"is_active"`
 	MustChangePin bool      `db:"must_change_pin" json:"must_change_pin"`
+	IsSystem      bool      `db:"is_system" json:"is_system"`
 	ReceiptPrinter string   `db:"receipt_printer" json:"receipt_printer"`
 	CreatedAt     time.Time `db:"created_at" json:"created_at"`
 }
