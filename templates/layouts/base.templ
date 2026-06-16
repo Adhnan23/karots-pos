@@ -65,7 +65,7 @@ templ ConfirmHost() {
 		x-on:app-confirm.window="open($event.detail)"
 		x-on:keydown.escape.window="no()"
 	>
-		<div x-show="show" x-cloak class="fixed inset-0 z-[65] flex items-center justify-center p-4 bg-black/40" x-on:click.self="no()">
+		<div x-show="show" x-cloak class="fixed inset-0 z-[65] flex items-center justify-center p-4 bg-black/40">
 			<div class="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6">
 				<div class="text-base text-slate-800" x-text="question"></div>
 				<div class="flex justify-end gap-2 mt-6">

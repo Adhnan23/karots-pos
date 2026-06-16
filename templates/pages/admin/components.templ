@@ -3,7 +3,7 @@ package adminpages
 // modalShell is the reusable modal chrome (backdrop + card + header). The form
 // body is passed as children.
 templ modalShell(title string) {
-	<div class="fixed inset-0 bg-black/40 flex items-center justify-center z-40 p-4" x-data x-on:click.self="$dispatch('close-modal')">
+	<div class="fixed inset-0 bg-black/40 flex items-center justify-center z-40 p-4" x-data>
 		<div class="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-full overflow-auto">
 			<div class="flex items-center justify-between px-6 py-4 border-b">
 				<h3 class="text-lg font-semibold">{ title }</h3>
