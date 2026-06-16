@@ -163,6 +163,7 @@ templ Receipt(d ReceiptData) {
 				<div class="r-center r-small">Thank you! Come again.</div>
 				<div class="r-print-btn">
 					<button onclick="printThermal()">🖨 Print</button>
+					<button type="button" class="r-secondary" onclick="window.history.length>1?window.history.back():window.close()">← Back</button>
 					<div id="printmsg" class="r-small r-center"></div>
 					if d.Narrow {
 						<a href={ templ.SafeURL("/cashier/receipt/" + strconv.FormatInt(d.Detail.Sale.ID, 10)) }>Switch to 80mm</a>

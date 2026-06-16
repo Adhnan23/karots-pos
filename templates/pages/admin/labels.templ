@@ -194,6 +194,7 @@ templ LabelSheet(d LabelSheetData) {
 		<body class="label-body">
 			<div class="label-toolbar">
 				<button onclick="window.print()">🖨 Print</button>
+				<button type="button" class="label-back" onclick="window.history.length>1?window.history.back():window.close()">← Back</button>
 				<span>{ d.Name } — { strconv.Itoa(d.Count) } labels</span>
 			</div>
 			<div class="label-sheet">

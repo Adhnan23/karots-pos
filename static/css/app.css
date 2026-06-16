@@ -150,6 +150,8 @@ html.dark body.bg-slate-100 { background-color: #0b1120 !important; color: #e2e8
   font-size: 13px;
   cursor: pointer;
 }
+/* Secondary action (Back/Close) next to the primary Print button. */
+.r-print-btn .r-secondary { background: #e2e8f0; color: #334155; margin-left: 8px; }
 
 @media print {
   /* Page size + margins are injected per-receipt in receipt.templ (pageStyle)
@@ -170,6 +172,7 @@ html.dark body.bg-slate-100 { background-color: #0b1120 !important; color: #e2e8
 .label-toolbar button {
   padding: 6px 16px; border: 0; border-radius: 8px; background: #4f46e5; color: #fff; cursor: pointer;
 }
+.label-toolbar .label-back { background: #e2e8f0; color: #334155; }
 .label-sheet {
   display: grid; grid-template-columns: repeat(3, 1fr); gap: 4mm;
   padding: 6mm; max-width: 210mm; margin: 0 auto;
