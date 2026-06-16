@@ -45,6 +45,10 @@ type ReceiptData struct {
 	Settings  settings.Settings
 	AutoPrint bool
 	Narrow    bool // 58mm paper when true, otherwise 80mm
+	// CustomerDue is the customer's outstanding balance after this sale (prior
+	// debt + this sale's unpaid portion); drives the "Total due" line on credit
+	// receipts. Zero when the sale has no customer.
+	CustomerDue decimal.Decimal
 }
 
 // pageStyle builds the per-receipt print stylesheet so the printed page matches
@@ -136,16 +140,19 @@ templ Receipt(d ReceiptData) {
 					<div class="r-row"><span>Tax</span><span>{ money.Format(d.Settings.CurrencySymbol, d.Detail.Sale.Tax) }</span></div>
 				}
 				<div class="r-row r-total"><span>TOTAL</span><span>{ money.Format(d.Settings.CurrencySymbol, d.Detail.Sale.Total) }</span></div>
-				<div class="r-row"><span>Paid</span><span>{ money.Format(d.Settings.CurrencySymbol, d.Detail.Sale.PaidAmount) }</span></div>
-				if d.Detail.Sale.ChangeGiven.IsPositive() {
-					<div class="r-row"><span>Change</span><span>{ money.Format(d.Settings.CurrencySymbol, d.Detail.Sale.ChangeGiven) }</span></div>
+				if len(d.Detail.Payments) > 0 {
+					for _, p := range d.Detail.Payments {
+						<div class="r-row"><span class="r-cap">{ p.Method }</span><span>{ money.Format(d.Settings.CurrencySymbol, p.Amount) }</span></div>
+					}
 				}
-				for _, p := range d.Detail.Payments {
-					<div class="r-row r-small"><span class="r-cap">{ p.Method }</span><span>{ money.Format(d.Settings.CurrencySymbol, p.Amount) }</span></div>
-				}
-				if d.Detail.Sale.Status == "credit" {
-					<div class="r-hr"></div>
-					<div class="r-center r-small">*** CREDIT SALE — BALANCE DUE ***</div>
+				{{ thisDue := d.Detail.Sale.Total.Sub(d.Detail.Sale.PaidAmount) }}
+				if d.Detail.Sale.Status == "credit" && thisDue.IsPositive() {
+					<div class="r-row r-big"><span>DUE</span><span>{ money.Format(d.Settings.CurrencySymbol, thisDue) }</span></div>
+					if prior := d.CustomerDue.Sub(thisDue); prior.IsPositive() {
+						<div class="r-row r-big"><span>TOTAL DUE</span><span>{ money.Format(d.Settings.CurrencySymbol, d.CustomerDue) }</span></div>
+					}
+				} else if d.Detail.Sale.ChangeGiven.IsPositive() {
+					<div class="r-row r-big"><span>CHANGE</span><span>{ money.Format(d.Settings.CurrencySymbol, d.Detail.Sale.ChangeGiven) }</span></div>
 				}
 				<div class="r-hr"></div>
 				if d.Settings.ReceiptFooter != nil && *d.Settings.ReceiptFooter != "" {

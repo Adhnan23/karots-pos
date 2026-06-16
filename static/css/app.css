@@ -133,7 +133,10 @@ html.dark body.bg-slate-100 { background-color: #0b1120 !important; color: #e2e8
 .r-small { font-size: 11px; }
 .r-hr { border-top: 1px dashed #000; margin: 4px 0; }
 .r-row { display: flex; justify-content: space-between; gap: 8px; }
-.r-total { font-weight: 700; font-size: 14px; margin: 2px 0; }
+.r-total { font-weight: 700; font-size: 16px; margin: 6px 0; }
+/* CHANGE / DUE / TOTAL DUE — emphasized and set off from the payment lines, to
+   mirror the double-height block on the thermal print. */
+.r-big { font-weight: 700; font-size: 16px; margin-top: 6px; }
 .r-items { width: 100%; border-collapse: collapse; }
 .r-items td { padding: 0; vertical-align: top; }
 .r-item-name td { padding-top: 3px; font-weight: 600; }

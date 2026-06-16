@@ -65,10 +65,14 @@ func TestDocumentIsASCIIAndCut(t *testing.T) {
 	}
 
 	text := string(out)
-	for _, want := range []string{"Karots Store", "R-0001", "Onion", "2.25 kg x 400.00", "TOTAL", "Rs. 1,400.00", "Change", "Thank you! Come again."} {
+	for _, want := range []string{"Karots Store", "R-0001", "Onion", "2.25 kg x 400.00", "TOTAL", "Rs. 1,400.00", "CHANGE", "Thank you! Come again."} {
 		if !strings.Contains(text, want) {
 			t.Errorf("receipt missing %q", want)
 		}
+	}
+	// The standalone "Paid" row was removed in favour of the per-tender lines.
+	if strings.Contains(text, "Paid") {
+		t.Errorf("receipt should no longer contain a 'Paid' row")
 	}
 }
 

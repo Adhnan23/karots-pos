@@ -27,6 +27,7 @@ import (
 	cashierpages "karots-pos/templates/pages/cashier"
 
 	"github.com/labstack/echo/v4"
+	"github.com/shopspring/decimal"
 )
 
 type cashierUI struct{ s *Server }
@@ -129,11 +130,26 @@ func (h *cashierUI) Receipt(c echo.Context) error {
 		narrow = sz == "58"
 	}
 	return response.RenderPage(c, cashierpages.Receipt(cashierpages.ReceiptData{
-		Detail:    *detail,
-		Settings:  *cfg,
-		AutoPrint: c.QueryParam("print") == "1",
-		Narrow:    narrow,
+		Detail:      *detail,
+		Settings:    *cfg,
+		AutoPrint:   c.QueryParam("print") == "1",
+		Narrow:      narrow,
+		CustomerDue: h.customerDue(ctx, detail),
 	}))
+}
+
+// customerDue returns the customer's current outstanding balance for a sale, or
+// zero when the sale has no customer (or the lookup fails). Used to print the
+// "Total due" line on credit receipts. Best-effort: it never blocks the receipt.
+func (h *cashierUI) customerDue(ctx context.Context, detail *sales.Detail) decimal.Decimal {
+	if detail.Sale.CustomerID == nil {
+		return decimal.Zero
+	}
+	cust, err := h.s.customers.Get(ctx, *detail.Sale.CustomerID)
+	if err != nil {
+		return decimal.Zero
+	}
+	return cust.OutstandingBalance
 }
 
 // PrintReceipt sends a sale straight to the thermal printer as ESC/POS bytes
@@ -207,6 +223,7 @@ func (h *cashierUI) PrintReceipt(c echo.Context) error {
 	}
 	opts := h.receiptOptions(ctx, cfg)
 	opts.Serials = h.saleSerials(ctx, id)
+	opts.CustomerDue = h.customerDue(ctx, detail)
 	if err := escpos.Send(ctx, h.receiptQueue(c, cfg), escpos.Document(*detail, *cfg, opts)); err != nil {
 		return apperr.Internal("could not print receipt", err)
 	}

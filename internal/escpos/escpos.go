@@ -46,6 +46,10 @@ type Options struct {
 	// Serials maps a product id to pre-formatted serial lines for serial-tracked
 	// items (e.g. "SN: ABC123 (wty 2027-06-13)"); printed under each matching line.
 	Serials map[int64][]string
+	// CustomerDue is the customer's outstanding balance after this sale (prior
+	// debt + this sale's unpaid portion). Used only on credit/partial sales to
+	// print the "Total due" line; the zero value means no balance line.
+	CustomerDue decimal.Decimal
 }
 
 // Document builds the ESC/POS byte stream for a completed sale.
@@ -136,21 +140,34 @@ func Document(d sales.Detail, cfg settings.Settings, opts Options) []byte {
 	if d.Sale.Tax.IsPositive() {
 		line(&b, leftRight("Tax", money.Format(sym, d.Sale.Tax), w))
 	}
-	b.Write([]byte{esc, 'E', 1}) // bold total
-	line(&b, leftRight("TOTAL", money.Format(sym, d.Sale.Total), w))
-	b.Write([]byte{esc, 'E', 0})
-	line(&b, leftRight("Paid", money.Format(sym, d.Sale.PaidAmount), w))
-	if d.Sale.ChangeGiven.IsPositive() {
-		line(&b, leftRight("Change", money.Format(sym, d.Sale.ChangeGiven), w))
+	// TOTAL — emphasized and set off with blank lines so it stands out.
+	line(&b, "")
+	bigLine(&b, "TOTAL", money.Format(sym, d.Sale.Total), w)
+
+	// Payment breakdown: one line per tender (cash/card/online/...). This
+	// replaces the old single "Paid" row — the per-method lines already show it.
+	if len(d.Payments) > 0 {
+		line(&b, "")
+		for _, p := range d.Payments {
+			line(&b, leftRight(capitalize(ascii(p.Method)), money.Format(sym, p.Amount), w))
+		}
 	}
-	for _, p := range d.Payments {
-		line(&b, leftRight(capitalize(ascii(p.Method)), money.Format(sym, p.Amount), w))
-	}
-	if d.Sale.Status == "credit" {
-		divider(&b, w)
-		b.Write([]byte{esc, 'a', 1})
-		line(&b, "*** CREDIT SALE - BALANCE DUE ***")
-		b.Write([]byte{esc, 'a', 0})
+
+	// Change/Due last, emphasized. A credit/partial sale shows what is still
+	// owed (Due) instead of Change; if the customer already carried a balance,
+	// their running Total due is shown too. Both appear only when money is
+	// actually outstanding (thisDue > 0).
+	thisDue := d.Sale.Total.Sub(d.Sale.PaidAmount)
+	switch {
+	case d.Sale.Status == "credit" && thisDue.IsPositive():
+		line(&b, "")
+		bigLine(&b, "DUE", money.Format(sym, thisDue), w)
+		if prior := opts.CustomerDue.Sub(thisDue); prior.IsPositive() {
+			bigLine(&b, "TOTAL DUE", money.Format(sym, opts.CustomerDue), w)
+		}
+	case d.Sale.ChangeGiven.IsPositive():
+		line(&b, "")
+		bigLine(&b, "CHANGE", money.Format(sym, d.Sale.ChangeGiven), w)
 	}
 	divider(&b, w)
 
@@ -366,6 +383,18 @@ func line(b *bytes.Buffer, s string) {
 }
 
 func divider(b *bytes.Buffer, w int) { line(b, strings.Repeat("-", w)) }
+
+// bigLine prints a label/amount line in double-height bold text for emphasis
+// (TOTAL, CHANGE, DUE, TOTAL DUE). Double-height only (not double-width) keeps
+// the character count the same, so leftRight's padding still lines up on the
+// 48/58-column roll without risk of overflow.
+func bigLine(b *bytes.Buffer, l, r string, w int) {
+	b.Write([]byte{esc, 'E', 1})   // bold on
+	b.Write([]byte{gs, '!', 0x01}) // double height
+	line(b, leftRight(l, r, w))
+	b.Write([]byte{gs, '!', 0x00}) // normal size
+	b.Write([]byte{esc, 'E', 0})   // bold off
+}
 
 // leftRight pads a left and right label out to w columns. The left side is
 // truncated if the two together would overflow the line.
