@@ -148,9 +148,11 @@ templ Receipt(d ReceiptData) {
 				{{ thisDue := d.Detail.Sale.Total.Sub(d.Detail.Sale.PaidAmount) }}
 				if d.Detail.Sale.Status == "credit" && thisDue.IsPositive() {
 					<div class="r-row r-big"><span>DUE</span><span>{ money.Format(d.Settings.CurrencySymbol, thisDue) }</span></div>
-					if prior := d.CustomerDue.Sub(thisDue); prior.IsPositive() {
-						<div class="r-row r-big"><span>TOTAL DUE</span><span>{ money.Format(d.Settings.CurrencySymbol, d.CustomerDue) }</span></div>
+					{{ totalDue := d.CustomerDue }}
+					if totalDue.LessThan(thisDue) {
+						{{ totalDue = thisDue }}
 					}
+					<div class="r-row r-big"><span>TOTAL DUE</span><span>{ money.Format(d.Settings.CurrencySymbol, totalDue) }</span></div>
 				} else if d.Detail.Sale.ChangeGiven.IsPositive() {
 					<div class="r-row r-big"><span>CHANGE</span><span>{ money.Format(d.Settings.CurrencySymbol, d.Detail.Sale.ChangeGiven) }</span></div>
 				}

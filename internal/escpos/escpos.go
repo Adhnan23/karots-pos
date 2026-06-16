@@ -154,17 +154,21 @@ func Document(d sales.Detail, cfg settings.Settings, opts Options) []byte {
 	}
 
 	// Change/Due last, emphasized. A credit/partial sale shows what is still
-	// owed (Due) instead of Change; if the customer already carried a balance,
-	// their running Total due is shown too. Both appear only when money is
-	// actually outstanding (thisDue > 0).
+	// owed (Due) instead of Change, plus the customer's running Total due — shown
+	// on every due receipt, whether this is their first due or a continuing
+	// balance. Both appear only when money is actually outstanding (thisDue > 0).
 	thisDue := d.Sale.Total.Sub(d.Sale.PaidAmount)
 	switch {
 	case d.Sale.Status == "credit" && thisDue.IsPositive():
 		line(&b, "")
 		bigLine(&b, "DUE", money.Format(sym, thisDue), w)
-		if prior := opts.CustomerDue.Sub(thisDue); prior.IsPositive() {
-			bigLine(&b, "TOTAL DUE", money.Format(sym, opts.CustomerDue), w)
+		// Total due = the customer's running balance. Fall back to this sale's
+		// due if the balance lookup was unavailable, so we never print 0.00.
+		totalDue := opts.CustomerDue
+		if totalDue.LessThan(thisDue) {
+			totalDue = thisDue
 		}
+		bigLine(&b, "TOTAL DUE", money.Format(sym, totalDue), w)
 	case d.Sale.ChangeGiven.IsPositive():
 		line(&b, "")
 		bigLine(&b, "CHANGE", money.Format(sym, d.Sale.ChangeGiven), w)
