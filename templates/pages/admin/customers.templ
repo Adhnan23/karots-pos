@@ -80,6 +80,7 @@ templ CustomerRows(rows []customers.Customer, symbol string) {
 				<td class="py-2 px-3 text-right whitespace-nowrap">
 					if c.IsActive {
 						<button class="text-indigo-600 hover:underline" hx-get={ "/admin/customers/form/" + strconv.FormatInt(c.ID, 10) } hx-target="#modal-container" hx-swap="innerHTML">Edit</button>
+						<a class="text-slate-600 hover:underline ml-3" href={ templ.SafeURL("/admin/customers/" + strconv.FormatInt(c.ID, 10) + "/statement") } target="_blank">Statement</a>
 						if c.OutstandingBalance.IsPositive() {
 							<button class="text-emerald-600 hover:underline ml-3" hx-get={ "/admin/customers/pay/" + strconv.FormatInt(c.ID, 10) } hx-target="#modal-container" hx-swap="innerHTML">Pay</button>
 						}
@@ -123,9 +124,23 @@ templ CustomerPaymentForm(c customers.Customer, symbol string) {
 	@modalShell("Collect Payment") {
 		<form class="p-6 space-y-4" hx-post={ "/admin/customers/" + strconv.FormatInt(c.ID, 10) + "/payment" } hx-swap="none">
 			<p class="text-sm text-slate-600">{ c.Name } — outstanding <span class="font-semibold">{ money.Format(symbol, c.OutstandingBalance) }</span></p>
+			<div class="grid grid-cols-2 gap-4">
+				<div>
+					<label class="block text-sm font-medium mb-1">Payment Amount</label>
+					<input name="amount" type="number" step="0.01" min="0" required class="w-full border rounded-lg px-3 py-2"/>
+				</div>
+				<div>
+					<label class="block text-sm font-medium mb-1">Method</label>
+					<select name="method" class="w-full border rounded-lg px-3 py-2">
+						<option value="cash">Cash</option>
+						<option value="card">Card</option>
+						<option value="online">Online</option>
+					</select>
+				</div>
+			</div>
 			<div>
-				<label class="block text-sm font-medium mb-1">Payment Amount</label>
-				<input name="amount" type="number" step="0.01" min="0" required class="w-full border rounded-lg px-3 py-2"/>
+				<label class="block text-sm font-medium mb-1">Reference <span class="text-slate-400">(optional)</span></label>
+				<input name="reference" class="w-full border rounded-lg px-3 py-2"/>
 			</div>
 			@modalButtons()
 		</form>
@@ -133,7 +148,7 @@ templ CustomerPaymentForm(c customers.Customer, symbol string) {
 }
 
 templ CustomerForm() {
-	<div class="fixed inset-0 bg-black/40 flex items-center justify-center z-40 p-4" x-data x-on:click.self="$dispatch('close-modal')">
+	<div class="fixed inset-0 bg-black/40 flex items-center justify-center z-40 p-4" x-data>
 		<div class="bg-white rounded-2xl shadow-xl w-full max-w-md">
 			<div class="flex items-center justify-between px-6 py-4 border-b">
 				<h3 class="text-lg font-semibold">New Customer</h3>

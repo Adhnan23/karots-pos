@@ -68,6 +68,17 @@ func (a *adminUI) SalesReport(c echo.Context) error {
 		d.Discount = d.Discount.Add(s.Discount)
 		d.Net = d.Net.Add(s.Total)
 	}
+	if wantsCSV(c) {
+		out := make([][]string, 0, len(rows))
+		for _, s := range rows {
+			out = append(out, []string{
+				s.ReceiptNo, s.CreatedAt.Format("2006-01-02 15:04"), s.SaleType, s.Status,
+				csvMoney(s.Discount), csvMoney(s.Total),
+			})
+		}
+		return writeCSV(c, "sales_"+fromStr+"_"+toStr,
+			[]string{"Receipt", "Date", "Type", "Status", "Discount", "Total"}, out)
+	}
 	return response.RenderPage(c, adminpages.SalesReport(d))
 }
 
@@ -80,6 +91,23 @@ func (a *adminUI) FinanceReport(c echo.Context) error {
 	pl, err := a.s.reports.Compute(ctx, from, to)
 	if err != nil {
 		return err
+	}
+	if wantsCSV(c) {
+		out := [][]string{
+			{"Gross revenue", csvMoney(pl.GrossRevenue)},
+			{"Returns", csvMoney(pl.Returns)},
+			{"Net revenue", csvMoney(pl.Revenue)},
+			{"COGS", csvMoney(pl.COGS)},
+			{"Gross profit", csvMoney(pl.GrossProfit)},
+			{"Operating expenses", csvMoney(pl.Expenses)},
+			{"Stock losses", csvMoney(pl.Losses)},
+			{"Supplier recoveries", csvMoney(pl.Recoveries)},
+			{"Net profit", csvMoney(pl.NetProfit)},
+			{"Cash received", csvMoney(pl.Received)},
+			{"Receivables", csvMoney(pl.Receivables)},
+			{"Payables", csvMoney(pl.Payables)},
+		}
+		return writeCSV(c, "finance_"+fromStr+"_"+toStr, []string{"Line", "Amount"}, out)
 	}
 	return response.RenderPage(c, adminpages.FinanceReport(adminpages.FinanceReportData{
 		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx), From: fromStr, To: toStr, PL: *pl,
@@ -239,6 +267,24 @@ func (a *adminUI) CustomerDuesReport(c echo.Context) error {
 	for _, r := range rows {
 		d.TotalDue = d.TotalDue.Add(r.OutstandingBalance)
 	}
+	if wantsCSV(c) {
+		out := make([][]string, 0, len(rows))
+		for _, r := range rows {
+			phone := ""
+			if r.Phone != nil {
+				phone = *r.Phone
+			}
+			oldest := ""
+			if r.OldestCredit != nil {
+				oldest = r.OldestCredit.Format("2006-01-02")
+			}
+			out = append(out, []string{
+				r.Name, phone, csvMoney(r.CreditLimit), csvMoney(r.OutstandingBalance), oldest,
+			})
+		}
+		return writeCSV(c, "customer_dues",
+			[]string{"Customer", "Phone", "Credit limit", "Outstanding", "Oldest credit"}, out)
+	}
 	return response.RenderPage(c, adminpages.CustomerDuesReport(d))
 }
 
@@ -252,7 +298,50 @@ func (a *adminUI) SupplierDuesReport(c echo.Context) error {
 	for _, r := range rows {
 		d.TotalDue = d.TotalDue.Add(r.OutstandingBalance)
 	}
+	if wantsCSV(c) {
+		out := make([][]string, 0, len(rows))
+		for _, r := range rows {
+			phone := ""
+			if r.Phone != nil {
+				phone = *r.Phone
+			}
+			oldest := ""
+			if r.OldestUnpaid != nil {
+				oldest = r.OldestUnpaid.Format("2006-01-02")
+			}
+			out = append(out, []string{
+				r.Name, phone, strconv.Itoa(r.CreditDays), csvMoney(r.OutstandingBalance), oldest,
+			})
+		}
+		return writeCSV(c, "supplier_dues",
+			[]string{"Supplier", "Phone", "Credit days", "Outstanding", "Oldest unpaid"}, out)
+	}
 	return response.RenderPage(c, adminpages.SupplierDuesReport(d))
+}
+
+func (a *adminUI) TaxReport(c echo.Context) error {
+	ctx := c.Request().Context()
+	from, to, fromStr, toStr, err := rangeStrings(c)
+	if err != nil {
+		return err
+	}
+	sum, err := a.s.reports.TaxSummary(ctx, from, to)
+	if err != nil {
+		return err
+	}
+	if wantsCSV(c) {
+		out := make([][]string, 0, len(sum.Rows))
+		for _, r := range sum.Rows {
+			out = append(out, []string{
+				r.Day.Format("2006-01-02"), strconv.Itoa(r.Count), csvMoney(r.Base), csvMoney(r.Tax),
+			})
+		}
+		return writeCSV(c, "tax_"+fromStr+"_"+toStr,
+			[]string{"Date", "Sales", "Taxable base", "Tax"}, out)
+	}
+	return response.RenderPage(c, adminpages.TaxReport(adminpages.TaxReportData{
+		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx), From: fromStr, To: toStr, Summary: *sum,
+	}))
 }
 
 func (a *adminUI) InventoryReport(c echo.Context) error {

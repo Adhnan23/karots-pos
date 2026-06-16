@@ -1098,11 +1098,27 @@ func (a *adminUI) CustomerPay(c echo.Context) error {
 	if err := c.Validate(&in); err != nil {
 		return err
 	}
-	if err := a.s.customers.RecordPayment(c.Request().Context(), id, in); err != nil {
+	if err := a.s.customers.RecordPayment(c.Request().Context(), id, in, middleware.CurrentUserID(c)); err != nil {
 		return err
 	}
 	a.s.logAudit(c, audit.ActionPayment, "customer", strconv.FormatInt(id, 10), "credit payment "+in.Amount)
 	return htmxDone(c, "Payment recorded", "reload-customers")
+}
+
+// CustomerStatement renders a printable credit ledger for one customer.
+func (a *adminUI) CustomerStatement(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	ctx := c.Request().Context()
+	st, err := a.s.customers.Statement(ctx, id)
+	if err != nil {
+		return err
+	}
+	return response.RenderPage(c, adminpages.CustomerStatement(adminpages.CustomerStatementData{
+		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx), Stmt: *st,
+	}))
 }
 
 // ============================ Sale return ============================

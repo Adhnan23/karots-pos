@@ -1,56 +1,80 @@
 package layouts
 
-// adminGroups is the grouped admin navigation. Dashboard is rendered standalone
-// above the groups; everything else lives in a collapsible cluster.
-func adminGroups() []navGroup {
-	return []navGroup{
-		{"Sell", []navItem{
-			{"/admin/sales", "Sales", "sales"},
-			{"/admin/customers", "Customers", "customers"},
-			{"/admin/warranty", "Warranty", "warranty"},
+// AdminSections is the admin navigation: each section is a flat sidebar link to
+// its own hub page (which lists the section's Links as cards). Dashboard is
+// rendered standalone above the sections; Reports keeps its own rich hub page so
+// its Links are exposed only through the command palette.
+func AdminSections() []AdminSection {
+	return []AdminSection{
+		{"Sell", "/admin/sell", "sell", "🧾", []AdminLink{
+			{"/admin/sales", "Sales", "sales", "Browse and search past sales"},
+			{"/admin/customers", "Customers", "customers", "Accounts, credit limits & statements"},
+			{"/admin/warranty", "Warranty", "warranty", "Serial tracking, claims & replacements"},
 		}},
-		{"Inventory", []navItem{
-			{"/admin/products", "Products", "products"},
-			{"/admin/products/review", "Items to Review", "review"},
-			{"/admin/stock", "Stock & Movements", "stock"},
-			{"/admin/stock/take", "Stock-take", "stocktake"},
-			{"/admin/conversions", "Conversions", "conversions"},
-			{"/admin/labels", "Barcode Labels", "labels"},
-			{"/admin/categories", "Categories", "categories-mgmt"},
-			{"/admin/units", "Units", "units-mgmt"},
+		{"Inventory", "/admin/inventory", "inventory", "📦", []AdminLink{
+			{"/admin/products", "Products", "products", "Product catalogue & pricing"},
+			{"/admin/products/review", "Items to Review", "review", "Quick-added items needing details"},
+			{"/admin/stock", "Stock & Movements", "stock", "Adjust stock and view movement history"},
+			{"/admin/stock/take", "Stock-take", "stocktake", "Count and reconcile on-hand quantities"},
+			{"/admin/conversions", "Conversions", "conversions", "Repack / break bulk into sellable units"},
 		}},
-		{"Purchasing", []navItem{
-			{"/admin/purchases", "Purchases", "purchases"},
-			{"/admin/purchase-returns", "Purchase Returns", "purchase-returns"},
-			{"/admin/suppliers", "Suppliers", "suppliers"},
+		{"Purchasing", "/admin/purchasing", "purchasing", "🛒", []AdminLink{
+			{"/admin/purchases", "Purchases", "purchases", "Record goods received (GRN)"},
+			{"/admin/purchase-returns", "Purchase Returns", "purchase-returns", "Return stock to suppliers"},
+			{"/admin/suppliers", "Suppliers", "suppliers", "Supplier accounts & payables"},
 		}},
-		{"Cash", []navItem{
-			{"/admin/cash-register", "Cash Register", "cash-register"},
-			{"/admin/denominations", "Denominations", "denoms"},
+		{"Money", "/admin/money", "money", "💰", []AdminLink{
+			{"/admin/cash-register", "Cash Register", "cash-register", "Drawer sessions, pay-in/out, Z-report"},
+			{"/admin/expenses", "Expenses", "expenses", "Record operating expenses"},
+			{"/admin/finance", "Finance & Profit", "finance", "Revenue, COGS and profit"},
 		}},
-		{"Reports", []navItem{
-			{"/admin/reports", "All Reports (print)", "reports-hub"},
-			{"/admin/finance", "Finance & Profit", "finance"},
-			{"/admin/reports/low-stock", "Low Stock", "low-stock"},
-			{"/admin/reports/expiring", "Expiring Stock", "expiring"},
-			{"/admin/damage", "Damage Report", "damage-report"},
-			{"/admin/expenses", "Expenses", "expenses"},
-		}},
-		{"Setup", []navItem{
-			{"/admin/users", "Users", "users"},
-			{"/admin/audit", "Audit Log", "audit"},
-			{"/admin/settings", "Settings", "settings"},
+		// Reports keeps its existing rich hub page; Links drive only the palette.
+		{"Reports", "/admin/reports", "reports-hub", "📊", adminReportLinks()},
+		{"Setup", "/admin/setup", "setup", "⚙️", []AdminLink{
+			{"/admin/categories", "Categories", "categories-mgmt", "Product categories"},
+			{"/admin/units", "Units", "units-mgmt", "Units of measure"},
+			{"/admin/labels", "Barcode Labels", "labels", "Print product labels"},
+			{"/admin/denominations", "Denominations", "denoms", "Cash note / coin denominations"},
+			{"/admin/users", "Users", "users", "Staff accounts & roles"},
+			{"/admin/audit", "Audit Log", "audit", "System activity history"},
+			{"/admin/settings", "Settings", "settings", "Shop, receipt & printer settings"},
 		}},
 	}
 }
 
-// adminPalette flattens every admin destination (plus the cashier hand-off) into
-// the command-palette list.
+// adminReportLinks are the individual report pages reachable from the Reports hub.
+// They aren't in the sidebar (which only shows the section hubs) but are surfaced
+// in the command palette so power users can jump straight to one.
+func adminReportLinks() []AdminLink {
+	return []AdminLink{
+		{"/admin/reports/sales", "Sales Report", "rep-sales", "Receipts and totals over a date range"},
+		{"/admin/reports/finance", "Finance / P&L", "rep-finance", "Revenue, COGS, profit, dues"},
+		{"/admin/reports/tax", "Tax Summary", "rep-tax", "VAT/tax collected over a period"},
+		{"/admin/reports/returns", "Returns Report", "rep-returns", "Returned lines and refund value"},
+		{"/admin/reports/profit-by-category", "Profit by Category", "rep-profit-cat", "Net revenue & profit per category"},
+		{"/admin/reports/sales-trend", "Sales Trend", "rep-trend", "Day-by-day net revenue & profit"},
+		{"/admin/reports/warranty", "Warranty & Recovery", "rep-warranty", "Replacement cost vs recovery"},
+		{"/admin/reports/cash-register", "Cash Register Report", "rep-cash", "Drawer sessions with over/short"},
+		{"/admin/reports/purchases", "Purchases Report", "rep-purchases", "GRNs received in a period"},
+		{"/admin/reports/suppliers", "Suppliers Report", "rep-suppliers", "Outstanding payables snapshot"},
+		{"/admin/reports/customer-dues", "Customer Dues", "rep-cust-dues", "Receivables — who owes you"},
+		{"/admin/reports/supplier-dues", "Supplier Dues", "rep-supp-dues", "Payables — who you owe"},
+		{"/admin/reports/inventory", "Inventory Valuation", "rep-inventory", "Stock on hand at cost & retail"},
+		{"/admin/reports/batches", "Batches / Expiry", "rep-batches", "Live batches and expiry dates"},
+		{"/admin/reports/expiring", "Expiring Stock", "rep-expiring", "Batches expiring soon"},
+		{"/admin/reports/low-stock", "Low Stock", "rep-low-stock", "Items at or below reorder level"},
+		{"/admin/damage", "Damage Report", "damage-report", "Damaged/written-off stock & recovery"},
+	}
+}
+
+// adminPalette flattens every admin destination (section links + the individual
+// reports + the cashier hand-off) into the command-palette list.
 func adminPalette() []paletteEntry {
 	out := []paletteEntry{{"/admin", "Dashboard", ""}}
-	for _, g := range adminGroups() {
-		for _, it := range g.Items {
-			out = append(out, paletteEntry{it.Href, it.Label, g.Label})
+	for _, s := range AdminSections() {
+		out = append(out, paletteEntry{s.Href, s.Label, "Sections"})
+		for _, l := range s.Links {
+			out = append(out, paletteEntry{l.Href, l.Label, s.Label})
 		}
 	}
 	out = append(out, paletteEntry{"/cashier", "Open Cashier", "Go"})
@@ -81,10 +105,10 @@ templ Admin(title, userName, active string) {
 						<kbd class="text-[10px] px-1.5 py-0.5 rounded bg-slate-700 text-slate-300">⌘K</kbd>
 					</button>
 				</div>
-				<nav class="flex-1 px-3 py-3 space-y-1 text-sm overflow-auto" x-data={ "adminNav('" + activeGroupFor(adminGroups(), active) + "')" }>
-					@navLink("/admin", "Dashboard", active == "dashboard")
-					for _, g := range adminGroups() {
-						@navGroupBlock(g, active)
+				<nav class="flex-1 px-3 py-3 space-y-1 text-sm overflow-auto">
+					@adminSectionLink("/admin", "🏠", "Dashboard", "dashboard", active == "dashboard")
+					for _, s := range AdminSections() {
+						@adminSectionLink(s.Href, s.Icon, s.Label, s.Key, activeSectionKey(active) == s.Key)
 					}
 				</nav>
 				<div class="px-3 py-4 border-t border-slate-800 space-y-1 text-sm">
@@ -107,68 +131,21 @@ templ Admin(title, userName, active string) {
 	}
 }
 
-// navGroupBlock renders one collapsible group header plus its links. The body
-// uses the CSS grid 0fr→1fr trick for a smooth height collapse (no plugin); the
-// initial inline grid-template-rows matches the server-known open state so the
-// current section doesn't flash before Alpine hydrates.
-templ navGroupBlock(g navGroup, active string) {
-	<div>
-		<button
-			type="button"
-			x-on:click={ "toggle('" + g.Label + "')" }
-			class="w-full flex items-center justify-between px-3 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500 hover:text-slate-300"
-		>
-			<span>{ g.Label }</span>
-			<svg
-				class="w-3 h-3 transition-transform"
-				x-bind:class={ "isOpen('" + g.Label + "') ? 'rotate-90' : ''" }
-				fill="none"
-				stroke="currentColor"
-				stroke-width="2.5"
-				viewBox="0 0 24 24"
-			><path d="M9 18l6-6-6-6"></path></svg>
-		</button>
-		<div
-			class="grid transition-[grid-template-rows] duration-200 ease-out"
-			if groupHasActive(g, active) {
-				style="grid-template-rows:1fr"
-			} else {
-				style="grid-template-rows:0fr"
-			}
-			x-bind:style={ "isOpen('" + g.Label + "') ? 'grid-template-rows:1fr' : 'grid-template-rows:0fr'" }
-		>
-			<div class="overflow-hidden">
-				<div class="space-y-1 pb-1">
-					for _, it := range g.Items {
-						@navLinkKeyed(it.Href, it.Label, it.Key, active == it.Key)
-					}
-				</div>
-			</div>
-		</div>
-	</div>
-}
-
-templ navLink(href, label string, active bool) {
-	if active {
-		<a href={ templ.SafeURL(href) } class="block px-3 py-2 rounded-lg bg-indigo-600 text-white font-medium">{ label }</a>
-	} else {
-		<a href={ templ.SafeURL(href) } class="block px-3 py-2 rounded-lg hover:bg-slate-800">{ label }</a>
-	}
-}
-
-// navLinkKeyed is navLink that can carry a live badge for specific items (the
-// "review" item shows a count loaded over HTMX, refreshed when items change).
-templ navLinkKeyed(href, label, key string, active bool) {
+// adminSectionLink renders one flat sidebar entry: a leading icon, the label, and
+// an indigo highlight when it owns the current page. The Inventory link carries a
+// live "items to review" badge (count loaded over HTMX, refreshed on changes).
+templ adminSectionLink(href, icon, label, key string, active bool) {
 	<a
 		href={ templ.SafeURL(href) }
 		if active {
-			class="block px-3 py-2 rounded-lg bg-indigo-600 text-white font-medium"
+			class="flex items-center gap-3 px-3 py-2 rounded-lg bg-indigo-600 text-white font-medium"
 		} else {
-			class="block px-3 py-2 rounded-lg hover:bg-slate-800"
+			class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-200 hover:bg-slate-800"
 		}
 	>
-		{ label }
-		if key == "review" {
+		<span class="text-base leading-none">{ icon }</span>
+		<span class="flex-1">{ label }</span>
+		if key == "inventory" {
 			<span hx-get="/admin/products/review/count" hx-trigger="load, reload-products from:body" hx-swap="innerHTML"></span>
 		}
 	</a>

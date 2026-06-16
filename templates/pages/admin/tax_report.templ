@@ -1,0 +1,57 @@
+package adminpages
+
+import (
+	"strconv"
+
+	"karots-pos/internal/features/reports"
+	"karots-pos/internal/money"
+	"karots-pos/templates/layouts"
+)
+
+type TaxReportData struct {
+	ShopName, Symbol, From, To string
+	Summary                    reports.TaxSummary
+}
+
+templ TaxReport(d TaxReportData) {
+	@layouts.Report("Tax Summary", d.ShopName) {
+		@rptRangeForm("/admin/reports/tax", d.From, d.To) {
+			<a
+				class="no-print px-4 py-1.5 rounded-lg border text-sm"
+				href={ templ.SafeURL("/admin/reports/tax?format=csv&from=" + d.From + "&to=" + d.To) }
+			>Download CSV</a>
+		}
+		@rptPeriodLine(d.From, d.To)
+		<table class="w-full text-sm">
+			<thead class="text-left text-slate-500 border-b">
+				<tr>
+					<th class="py-1.5">Date</th>
+					<th class="py-1.5 text-right">Sales</th>
+					<th class="py-1.5 text-right">Taxable base</th>
+					<th class="py-1.5 text-right">Tax</th>
+				</tr>
+			</thead>
+			<tbody>
+				for _, r := range d.Summary.Rows {
+					<tr class="border-b last:border-0">
+						<td class="py-1.5">{ r.Day.Format("2006-01-02") }</td>
+						<td class="py-1.5 text-right">{ strconv.Itoa(r.Count) }</td>
+						<td class="py-1.5 text-right">{ money.Display(r.Base) }</td>
+						<td class="py-1.5 text-right">{ money.Format(d.Symbol, r.Tax) }</td>
+					</tr>
+				}
+				if len(d.Summary.Rows) == 0 {
+					<tr><td colspan="4" class="py-6 text-center text-slate-400">No sales in this period.</td></tr>
+				}
+			</tbody>
+			<tfoot class="border-t-2 font-semibold">
+				<tr>
+					<td class="py-2">Totals ({ strconv.Itoa(d.Summary.Count) } sales)</td>
+					<td class="py-2"></td>
+					<td class="py-2 text-right">{ money.Display(d.Summary.TotalBase) }</td>
+					<td class="py-2 text-right">{ money.Format(d.Symbol, d.Summary.TotalTax) }</td>
+				</tr>
+			</tfoot>
+		</table>
+	}
+}

@@ -32,6 +32,7 @@ templ ReportsHub(d ReportsHubData) {
 		<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
 			@reportCard("/admin/reports/sales", "Sales", "Receipts and totals over a date range")
 			@reportCard("/admin/reports/finance", "Finance / P&L", "Revenue, COGS, profit, dues for a period")
+			@reportCard("/admin/reports/tax", "Tax Summary", "VAT/tax collected over a period")
 			@reportCard("/admin/reports/returns", "Returns / Refunds", "Returned lines and refund value")
 			@reportCard("/admin/reports/profit-by-category", "Profit by Category", "Net revenue & profit per category")
 			@reportCard("/admin/reports/sales-trend", "Daily Sales Trend", "Day-by-day net revenue & profit")
@@ -45,6 +46,7 @@ templ ReportsHub(d ReportsHubData) {
 			@reportCard("/admin/reports/batches", "Batches / Expiry", "Live batches and expiry dates")
 			@reportCard("/admin/reports/low-stock", "Low Stock", "Items at or below reorder level")
 			@reportCard("/admin/reports/expiring", "Expiring Stock", "Batches expiring soon")
+			@reportCard("/admin/damage", "Damage Report", "Damaged/written-off stock & recovery")
 		</div>
 	}
 }
@@ -98,6 +100,10 @@ templ SalesReport(d SalesReportData) {
 					@statusOpt("returned", "Returned", d.Status)
 				</select>
 			</div>
+			<a
+				class="no-print px-4 py-1.5 rounded-lg border text-sm"
+				href={ templ.SafeURL("/admin/reports/sales?format=csv&from=" + d.From + "&to=" + d.To + "&status=" + d.Status) }
+			>Download CSV</a>
 		}
 		@rptPeriodLine(d.From, d.To)
 		<table class="w-full text-sm">
@@ -148,6 +154,10 @@ type FinanceReportData struct {
 templ FinanceReport(d FinanceReportData) {
 	@layouts.Report("Finance / Profit & Loss", d.ShopName) {
 		@rptRangeForm("/admin/reports/finance", d.From, d.To) {
+			<a
+				class="no-print px-4 py-1.5 rounded-lg border text-sm"
+				href={ templ.SafeURL("/admin/reports/finance?format=csv&from=" + d.From + "&to=" + d.To) }
+			>Download CSV</a>
 		}
 		@rptPeriodLine(d.From, d.To)
 		<table class="w-full text-sm">
@@ -350,6 +360,9 @@ type CustomerDuesData struct {
 
 templ CustomerDuesReport(d CustomerDuesData) {
 	@layouts.Report("Customer Dues — Receivables", d.ShopName) {
+		<div class="no-print mb-4">
+			<a class="px-4 py-1.5 rounded-lg border text-sm" href="/admin/reports/customer-dues?format=csv">Download CSV</a>
+		</div>
 		<table class="w-full text-sm">
 			<thead class="text-left text-slate-500 border-b">
 				<tr><th class="py-1.5">Customer</th><th class="py-1.5">Phone</th><th class="py-1.5 text-right">Credit limit</th><th class="py-1.5 text-right">Outstanding</th><th class="py-1.5 text-right">Oldest credit</th><th class="py-1.5 text-right">Age (days)</th></tr>
@@ -390,6 +403,9 @@ type SupplierDuesData struct {
 
 templ SupplierDuesReport(d SupplierDuesData) {
 	@layouts.Report("Supplier Dues — Payables", d.ShopName) {
+		<div class="no-print mb-4">
+			<a class="px-4 py-1.5 rounded-lg border text-sm" href="/admin/reports/supplier-dues?format=csv">Download CSV</a>
+		</div>
 		<table class="w-full text-sm">
 			<thead class="text-left text-slate-500 border-b">
 				<tr><th class="py-1.5">Supplier</th><th class="py-1.5">Phone</th><th class="py-1.5 text-center">Credit days</th><th class="py-1.5 text-right">Outstanding</th><th class="py-1.5 text-right">Oldest unpaid</th><th class="py-1.5 text-right">Age (days)</th></tr>

@@ -340,8 +340,13 @@ func (s *Service) Create(ctx context.Context, in CreateInput, cashierID int64) (
 		}
 
 		for _, p := range in.Payments {
-			amt, _ := money.Parse(p.Amount)
-			if amt.IsZero() {
+			amt, err := money.Parse(p.Amount)
+			if err != nil {
+				return apperr.Validation("payment amount is invalid")
+			}
+			// Skip blank/zero tender lines (e.g. an unused method in a multi-tender
+			// form); negative amounts were already rejected above.
+			if !amt.IsPositive() {
 				continue
 			}
 			if err := saleRepo.InsertPayment(ctx, saleID, p.Method, amt, p.Reference); err != nil {

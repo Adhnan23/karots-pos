@@ -1099,30 +1099,6 @@ function themeToggle() {
   };
 }
 
-// adminNav: collapsible grouped sidebar. Open/closed state per group is kept in
-// localStorage so it survives full page reloads (every page is server-rendered);
-// the group containing the current page is always forced open.
-function adminNav(activeGroup) {
-  return {
-    open: {},
-    init() {
-      try {
-        this.open = JSON.parse(localStorage.getItem("adminNavOpen") || "{}");
-      } catch (_) {
-        this.open = {};
-      }
-      if (activeGroup) this.open[activeGroup] = true;
-    },
-    toggle(g) {
-      this.open[g] = !this.open[g];
-      localStorage.setItem("adminNavOpen", JSON.stringify(this.open));
-    },
-    isOpen(g) {
-      return !!this.open[g];
-    },
-  };
-}
-
 // cmdPalette: keyboard-first "jump to any page" overlay (Cmd/Ctrl+K, or the
 // search button). Type to filter, ↑/↓ to move, Enter to go, Esc to close.
 function cmdPalette(items) {

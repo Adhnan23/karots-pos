@@ -463,7 +463,7 @@ func (h *cashierUI) CreditPay(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := h.s.customers.RecordPayment(c.Request().Context(), id, in); err != nil {
+	if err := h.s.customers.RecordPayment(c.Request().Context(), id, in, middleware.CurrentUserID(c)); err != nil {
 		return err
 	}
 	// Mirror the cash into the cashier's open drawer (no-op if none is open) so

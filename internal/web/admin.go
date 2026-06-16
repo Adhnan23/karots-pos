@@ -20,6 +20,7 @@ import (
 	"karots-pos/internal/receiptimg"
 	"karots-pos/internal/response"
 	adminfragments "karots-pos/templates/fragments/admin"
+	"karots-pos/templates/layouts"
 	adminpages "karots-pos/templates/pages/admin"
 
 	"github.com/jmoiron/sqlx"
@@ -37,6 +38,21 @@ func (a *adminUI) symbol(ctx context.Context) string {
 		return cfg.CurrencySymbol
 	}
 	return "Rs."
+}
+
+// sectionHub renders the generic landing page for an admin section (Sell,
+// Inventory, Purchasing, Money, Setup). Reports keeps its own richer ReportsHub.
+func (a *adminUI) sectionHub(key string) echo.HandlerFunc {
+	return func(c echo.Context) error {
+		sec, ok := layouts.SectionByKey(key)
+		if !ok {
+			return apperr.NotFound("section")
+		}
+		return response.RenderPage(c, adminpages.SectionHub(adminpages.SectionHubData{
+			UserName: middleware.CurrentUserName(c),
+			Section:  sec,
+		}))
+	}
 }
 
 func (a *adminUI) Dashboard(c echo.Context) error {

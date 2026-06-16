@@ -319,6 +319,46 @@ func (s *Service) WarrantyAndRecovery(ctx context.Context, from, to time.Time) (
 	return out, nil
 }
 
+// TaxDayRow is one day's taxable base (net sales excl. tax) and tax charged.
+type TaxDayRow struct {
+	Day   time.Time       `db:"day"   json:"day"`
+	Count int             `db:"count" json:"count"`
+	Base  decimal.Decimal `db:"base"  json:"base"`
+	Tax   decimal.Decimal `db:"tax"   json:"tax"`
+}
+
+// TaxSummary is the per-day and total tax charged on sales for a period.
+type TaxSummary struct {
+	Rows      []TaxDayRow     `json:"rows"`
+	Count     int             `json:"count"`
+	TotalBase decimal.Decimal `json:"total_base"`
+	TotalTax  decimal.Decimal `json:"total_tax"`
+}
+
+// TaxSummary aggregates tax charged on (non-void) sales per day. Base is the
+// pre-tax amount (total − tax); this reflects tax charged at sale time and is
+// not net of subsequent returns.
+func (s *Service) TaxSummary(ctx context.Context, from, to time.Time) (*TaxSummary, error) {
+	var rows []TaxDayRow
+	if err := s.db.SelectContext(ctx, &rows, `
+		SELECT date_trunc('day', created_at) AS day,
+		       COUNT(*) AS count,
+		       COALESCE(SUM(total - tax),0) AS base,
+		       COALESCE(SUM(tax),0) AS tax
+		FROM sales
+		WHERE status <> 'void' AND created_at >= $1 AND created_at < $2
+		GROUP BY 1 ORDER BY 1`, from, to); err != nil {
+		return nil, apperr.Internal("failed to load tax summary", err)
+	}
+	out := &TaxSummary{Rows: rows}
+	for _, r := range rows {
+		out.TotalBase = out.TotalBase.Add(r.Base)
+		out.TotalTax = out.TotalTax.Add(r.Tax)
+		out.Count += r.Count
+	}
+	return out, nil
+}
+
 type APIHandler struct{ svc *Service }
 
 func NewAPIHandler(svc *Service) *APIHandler { return &APIHandler{svc: svc} }

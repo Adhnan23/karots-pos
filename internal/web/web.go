@@ -175,11 +175,20 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	ag.GET("/sales/return/:id", admin.SaleReturnForm)
 	ag.POST("/sales/:id/return", admin.SaleReturn) // whole-sale return (fallback)
 
+	// Section hub landing pages (the sidebar links to these; each lists its
+	// subsections as cards). Reports keeps its own richer hub below.
+	ag.GET("/sell", admin.sectionHub("sell"))
+	ag.GET("/inventory", admin.sectionHub("inventory"))
+	ag.GET("/purchasing", admin.sectionHub("purchasing"))
+	ag.GET("/money", admin.sectionHub("money"))
+	ag.GET("/setup", admin.sectionHub("setup"))
+
 	ag.GET("/customers", admin.Customers)
 	ag.GET("/customers/table", admin.CustomersTable)
 	ag.GET("/customers/form", admin.CustomerForm)
 	ag.GET("/customers/form/:id", admin.CustomerEditForm)
 	ag.GET("/customers/pay/:id", admin.CustomerPayForm)
+	ag.GET("/customers/:id/statement", admin.CustomerStatement)
 	ag.POST("/customers", admin.CustomerCreate)
 	ag.PUT("/customers/:id", admin.CustomerUpdate)
 	ag.DELETE("/customers/:id", admin.CustomerDelete)
@@ -236,6 +245,7 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	ag.GET("/reports/sales-trend", admin.SalesTrendReport)
 	ag.GET("/reports/warranty", admin.WarrantyReport)
 	ag.GET("/reports/finance", admin.FinanceReport)
+	ag.GET("/reports/tax", admin.TaxReport)
 	ag.GET("/reports/cash-register", admin.CashRegisterReport)
 	ag.GET("/reports/purchases", admin.PurchasesReport)
 	ag.GET("/reports/suppliers", admin.SuppliersReport)

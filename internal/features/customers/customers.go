@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -49,7 +50,22 @@ type CreateInput struct {
 type UpdateInput = CreateInput
 
 type PaymentInput struct {
-	Amount string `json:"amount" form:"amount" validate:"required"`
+	Amount    string  `json:"amount"    form:"amount"    validate:"required"`
+	Method    string  `json:"method"    form:"method"`
+	Reference *string `json:"reference" form:"reference"`
+	Note      *string `json:"note"      form:"note"`
+}
+
+// CustomerPayment is one recorded credit repayment (the statement ledger).
+type CustomerPayment struct {
+	ID         int64           `db:"id"          json:"id"`
+	CustomerID int64           `db:"customer_id" json:"customer_id"`
+	Amount     decimal.Decimal `db:"amount"      json:"amount"`
+	Method     string          `db:"method"      json:"method"`
+	Reference  *string         `db:"reference"   json:"reference,omitempty"`
+	Note       *string         `db:"note"        json:"note,omitempty"`
+	CreatedBy  *int64          `db:"created_by"  json:"created_by,omitempty"`
+	CreatedAt  time.Time       `db:"created_at"  json:"created_at"`
 }
 
 type Repository struct{ q db.Queryer }
@@ -117,6 +133,19 @@ func (r *Repository) AddBalance(ctx context.Context, id int64, delta decimal.Dec
 	_, err := r.q.ExecContext(ctx,
 		`UPDATE customers SET outstanding_balance = outstanding_balance + $1 WHERE id = $2`,
 		delta, id)
+	return err
+}
+
+// InsertPayment logs a credit repayment. createdBy of 0 stores NULL.
+func (r *Repository) InsertPayment(ctx context.Context, customerID int64, amount decimal.Decimal, method string, reference, note *string, createdBy int64) error {
+	var cb *int64
+	if createdBy > 0 {
+		cb = &createdBy
+	}
+	_, err := r.q.ExecContext(ctx,
+		`INSERT INTO customer_payments (customer_id, amount, method, reference, note, created_by)
+		 VALUES ($1,$2,$3,$4,$5,$6)`,
+		customerID, amount, method, reference, note, cb)
 	return err
 }
 
@@ -246,8 +275,10 @@ func (s *Service) Reactivate(ctx context.Context, id int64) error {
 	return nil
 }
 
-// RecordPayment reduces a customer's outstanding credit balance.
-func (s *Service) RecordPayment(ctx context.Context, id int64, in PaymentInput) error {
+// RecordPayment reduces a customer's outstanding credit balance and logs the
+// repayment (balance decrement + ledger row in one transaction). createdBy is
+// the acting user (0 = unknown/system).
+func (s *Service) RecordPayment(ctx context.Context, id int64, in PaymentInput, createdBy int64) error {
 	amt, err := money.Parse(in.Amount)
 	if err != nil || !amt.IsPositive() {
 		return apperr.Validation("payment amount must be greater than zero")
@@ -255,10 +286,108 @@ func (s *Service) RecordPayment(ctx context.Context, id int64, in PaymentInput) 
 	if _, err := s.Get(ctx, id); err != nil {
 		return err
 	}
-	if err := s.repo.AddBalance(ctx, id, amt.Neg()); err != nil {
-		return apperr.Internal("failed to record payment", err)
+	method := strings.TrimSpace(in.Method)
+	if method == "" {
+		method = "cash"
 	}
-	return nil
+	return db.WithTx(ctx, s.db, func(tx *sqlx.Tx) error {
+		r := NewRepository(tx)
+		if err := r.AddBalance(ctx, id, amt.Neg()); err != nil {
+			return apperr.Internal("failed to record payment", err)
+		}
+		if err := r.InsertPayment(ctx, id, amt, method, in.Reference, in.Note, createdBy); err != nil {
+			return apperr.Internal("failed to record payment", err)
+		}
+		return nil
+	})
+}
+
+// LedgerEntry is one line of a customer statement (a debit raises what the
+// customer owes; a credit lowers it).
+type LedgerEntry struct {
+	Date    time.Time
+	Kind    string
+	Ref     string
+	Debit   decimal.Decimal
+	Credit  decimal.Decimal
+	Balance decimal.Decimal
+}
+
+// Statement is a customer's full credit ledger with a forward running balance.
+type Statement struct {
+	Customer    Customer
+	Entries     []LedgerEntry
+	TotalDebit  decimal.Decimal
+	TotalCredit decimal.Decimal
+}
+
+// Statement builds the full credit ledger for a customer: credit-sale debits,
+// return credits, and repayment credits, time-ordered with a running balance.
+// Note: repayments are only logged from migration 0028 onward, so the running
+// balance reconciles to the current outstanding balance for activity recorded
+// since then; the authoritative figure is always Customer.OutstandingBalance.
+func (s *Service) Statement(ctx context.Context, id int64) (*Statement, error) {
+	cust, err := s.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	type evRow struct {
+		CreatedAt time.Time       `db:"created_at"`
+		Ref       string          `db:"ref"`
+		Amount    decimal.Decimal `db:"amount"`
+	}
+	var creditSales, returns []evRow
+	if err := s.db.SelectContext(ctx, &creditSales, `
+		SELECT created_at, receipt_no AS ref, (total - paid_amount) AS amount
+		FROM sales
+		WHERE customer_id = $1 AND total > paid_amount
+		ORDER BY created_at`, id); err != nil {
+		return nil, err
+	}
+	if err := s.db.SelectContext(ctx, &returns, `
+		SELECT sr.created_at, s.receipt_no AS ref, sr.credit_reduction AS amount
+		FROM sale_returns sr JOIN sales s ON s.id = sr.sale_id
+		WHERE s.customer_id = $1 AND sr.credit_reduction > 0
+		ORDER BY sr.created_at`, id); err != nil {
+		return nil, err
+	}
+	type payRow struct {
+		CreatedAt time.Time       `db:"created_at"`
+		Method    string          `db:"method"`
+		Reference *string         `db:"reference"`
+		Amount    decimal.Decimal `db:"amount"`
+	}
+	var pays []payRow
+	if err := s.db.SelectContext(ctx, &pays, `
+		SELECT created_at, method, reference, amount
+		FROM customer_payments WHERE customer_id = $1 ORDER BY created_at`, id); err != nil {
+		return nil, err
+	}
+
+	entries := make([]LedgerEntry, 0, len(creditSales)+len(returns)+len(pays))
+	for _, r := range creditSales {
+		entries = append(entries, LedgerEntry{Date: r.CreatedAt, Kind: "Credit sale", Ref: r.Ref, Debit: r.Amount})
+	}
+	for _, r := range returns {
+		entries = append(entries, LedgerEntry{Date: r.CreatedAt, Kind: "Return", Ref: r.Ref, Credit: r.Amount})
+	}
+	for _, r := range pays {
+		ref := r.Method
+		if r.Reference != nil && strings.TrimSpace(*r.Reference) != "" {
+			ref += " · " + *r.Reference
+		}
+		entries = append(entries, LedgerEntry{Date: r.CreatedAt, Kind: "Payment", Ref: ref, Credit: r.Amount})
+	}
+	sort.SliceStable(entries, func(i, j int) bool { return entries[i].Date.Before(entries[j].Date) })
+
+	bal, totalDebit, totalCredit := decimal.Zero, decimal.Zero, decimal.Zero
+	for i := range entries {
+		bal = bal.Add(entries[i].Debit).Sub(entries[i].Credit)
+		entries[i].Balance = bal
+		totalDebit = totalDebit.Add(entries[i].Debit)
+		totalCredit = totalCredit.Add(entries[i].Credit)
+	}
+	return &Statement{Customer: *cust, Entries: entries, TotalDebit: totalDebit, TotalCredit: totalCredit}, nil
 }
 
 type APIHandler struct{ svc *Service }
@@ -330,7 +459,7 @@ func (h *APIHandler) Payment(c echo.Context) error {
 	if err := c.Validate(&in); err != nil {
 		return err
 	}
-	if err := h.svc.RecordPayment(c.Request().Context(), id, in); err != nil {
+	if err := h.svc.RecordPayment(c.Request().Context(), id, in, middleware.CurrentUserID(c)); err != nil {
 		return err
 	}
 	return response.NoContent(c)

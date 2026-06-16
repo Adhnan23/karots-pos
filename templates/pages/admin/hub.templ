@@ -1,0 +1,24 @@
+package adminpages
+
+import "karots-pos/templates/layouts"
+
+// SectionHubData drives the generic section landing page (Sell, Inventory,
+// Purchasing, Money, Setup). Reports has its own richer hub (ReportsHub).
+type SectionHubData struct {
+	UserName string
+	Section  layouts.AdminSection
+}
+
+templ SectionHub(d SectionHubData) {
+	@layouts.Admin(d.Section.Label, d.UserName, d.Section.Key) {
+		<div class="mb-6">
+			<h1 class="text-2xl font-bold">{ d.Section.Icon + " " + d.Section.Label }</h1>
+			<p class="text-sm text-slate-500">Choose a section to manage.</p>
+		</div>
+		<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+			for _, l := range d.Section.Links {
+				@reportCard(l.Href, l.Label, l.Desc)
+			}
+		</div>
+	}
+}
