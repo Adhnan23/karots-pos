@@ -1082,20 +1082,6 @@ function labels(sym) {
   };
 }
 
-// login: PIN-pad state for the login screen.
-function login() {
-  return {
-    phone: "",
-    pin: "",
-    tap(d) {
-      if (this.pin.length < 6) this.pin += d;
-    },
-    back() {
-      this.pin = this.pin.slice(0, -1);
-    },
-  };
-}
-
 // themeToggle: light ⇄ dark switch. The class lives on <html> (set pre-paint by
 // the inline script in Base); we just flip it and remember the choice.
 function themeToggle() {

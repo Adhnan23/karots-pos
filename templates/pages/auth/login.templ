@@ -9,7 +9,7 @@ import "karots-pos/templates/layouts"
 templ LoginPage(errMsg string) {
 	@layouts.Base("Login") {
 		<div class="min-h-full flex items-center justify-center p-6">
-			<div class="w-full max-w-md bg-white rounded-2xl shadow-sm p-8" x-data="login()">
+			<div class="w-full max-w-md bg-white rounded-2xl shadow-sm p-8">
 				<h1 class="text-2xl font-bold text-center text-slate-800">Point of Sale</h1>
 				<p class="text-center text-slate-500 mt-1">Sign in with your phone number and PIN</p>
 				if errMsg != "" {
@@ -17,42 +17,43 @@ templ LoginPage(errMsg string) {
 						{ errMsg }
 					</div>
 				}
-				<form method="post" action="/login" class="mt-6">
-					<input type="hidden" name="phone" x-bind:value="phone"/>
-					<input type="hidden" name="pin" x-bind:value="pin"/>
-
+				<form method="post" action="/login" class="mt-6 space-y-4">
 					<!-- Phone -->
-					<label class="block text-sm font-medium text-slate-600 mb-1">Phone number</label>
-					<input
-						type="tel"
-						inputmode="numeric"
-						x-model="phone"
-						autofocus
-						placeholder="07XXXXXXXX"
-						class="w-full border rounded-lg px-3 py-2.5 text-lg tracking-wide"
-					/>
-
-					<!-- PIN dots -->
-					<label class="block text-sm font-medium text-slate-600 mt-5 mb-1">PIN</label>
-					<div class="flex justify-center gap-3 mt-2 h-4">
-						<template x-for="i in 6" x-bind:key="i">
-							<div class="w-3 h-3 rounded-full" x-bind:class="pin.length>=i ? 'bg-indigo-600' : 'bg-slate-200'"></div>
-						</template>
+					<div>
+						<label class="block text-sm font-medium text-slate-600 mb-1">Phone number</label>
+						<input
+							type="tel"
+							name="phone"
+							inputmode="numeric"
+							autocomplete="username"
+							autofocus
+							required
+							placeholder="07XXXXXXXX"
+							class="w-full border rounded-lg px-3 py-2.5 text-lg tracking-wide"
+						/>
 					</div>
 
-					<!-- Keypad -->
-					<div class="grid grid-cols-3 gap-2 mt-6">
-						for _, d := range []string{"1","2","3","4","5","6","7","8","9"} {
-							<button type="button" x-on:click={ "tap('" + d + "')" } class="py-4 rounded-lg bg-slate-100 text-xl font-semibold hover:bg-slate-200">{ d }</button>
-						}
-						<button type="button" x-on:click="back()" class="py-4 rounded-lg bg-slate-100 text-xl hover:bg-slate-200">←</button>
-						<button type="button" x-on:click="tap('0')" class="py-4 rounded-lg bg-slate-100 text-xl font-semibold hover:bg-slate-200">0</button>
-						<button
-							type="submit"
-							x-bind:disabled="phone.length<4 || pin.length<4"
-							class="py-4 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700 disabled:opacity-40"
-						>Enter</button>
+					<!-- PIN -->
+					<div>
+						<label class="block text-sm font-medium text-slate-600 mb-1">PIN</label>
+						<input
+							type="password"
+							name="pin"
+							inputmode="numeric"
+							pattern="[0-9]*"
+							autocomplete="current-password"
+							minlength="4"
+							maxlength="6"
+							required
+							placeholder="••••"
+							class="w-full border rounded-lg px-3 py-2.5 text-lg tracking-wide"
+						/>
 					</div>
+
+					<button
+						type="submit"
+						class="w-full py-3 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700"
+					>Sign in</button>
 				</form>
 			</div>
 		</div>
