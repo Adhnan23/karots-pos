@@ -722,6 +722,20 @@ function pos(symbol, defaultType, promptAfterSale) {
     changeDue() {
       return Math.max(0, this.paidTotal() - this.total());
     },
+    // Advisory greedy breakdown of the change due into available denominations,
+    // high→low. Stateless suggestion only — we don't track the live drawer mix,
+    // so the cashier overrides if a note isn't on hand. Returns [{value, qty}].
+    changeNotes() {
+      let rem = Math.round(this.changeDue() * 100); // work in cents to avoid float drift
+      const out = [];
+      for (const d of this.denoms) {
+        const cents = Math.round(Number(d.value) * 100);
+        if (cents <= 0) continue;
+        const qty = Math.floor(rem / cents);
+        if (qty > 0) { out.push({ value: Number(d.value), qty }); rem -= qty * cents; }
+      }
+      return out; // any sub-smallest remainder is simply not representable; ignore
+    },
     balanceDue() {
       return Math.max(0, this.total() - this.paidTotal());
     },

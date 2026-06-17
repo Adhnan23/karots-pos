@@ -222,6 +222,13 @@ templ POS(d POSData) {
 						<div class="flex justify-between text-sm text-emerald-700" x-show="changeDue() > 0">
 							<span>Change</span><span x-text="sym + ' ' + money(changeDue())"></span>
 						</div>
+						<div class="flex flex-wrap gap-1.5 text-xs text-emerald-700" x-show="changeDue() > 0 && changeNotes().length">
+							<template x-for="c in changeNotes()" x-bind:key="c.value">
+								<span class="px-1.5 py-0.5 rounded bg-emerald-50 border border-emerald-200">
+									<span x-text="c.qty"></span>×<span x-text="sym + ' ' + money(c.value)"></span>
+								</span>
+							</template>
+						</div>
 						<div class="flex justify-between text-sm text-rose-600" x-show="balanceDue() > 0">
 							<span>Balance (credit)</span><span x-text="sym + ' ' + money(balanceDue())"></span>
 						</div>
