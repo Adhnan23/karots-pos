@@ -30,6 +30,7 @@ type Customer struct {
 	Address            *string         `db:"address"             json:"address,omitempty"`
 	CreditLimit        decimal.Decimal `db:"credit_limit"        json:"credit_limit"`
 	OutstandingBalance decimal.Decimal `db:"outstanding_balance" json:"outstanding_balance"`
+	OpeningBalance     decimal.Decimal `db:"opening_balance"     json:"opening_balance"`
 	LoyaltyPoints      int             `db:"loyalty_points"      json:"loyalty_points"`
 	IsActive           bool            `db:"is_active"           json:"is_active"`
 	CreatedAt          time.Time       `db:"created_at"          json:"created_at"`
@@ -41,10 +42,13 @@ func (c Customer) AvailableCredit() decimal.Decimal {
 }
 
 type CreateInput struct {
-	Name        string  `json:"name"         form:"name"         validate:"required,min=2,max=100"`
-	Phone       *string `json:"phone"        form:"phone"        validate:"omitempty,max=15"`
-	Address     *string `json:"address"      form:"address"`
-	CreditLimit string  `json:"credit_limit" form:"credit_limit"`
+	Name        string  `json:"name"           form:"name"           validate:"required,min=2,max=100"`
+	Phone       *string `json:"phone"          form:"phone"          validate:"omitempty,max=15"`
+	Address     *string `json:"address"        form:"address"`
+	CreditLimit string  `json:"credit_limit"   form:"credit_limit"`
+	// OpeningBalance is the amount this customer already owed at onboarding. It is
+	// applied once, at creation, and ignored thereafter (Update never touches it).
+	OpeningBalance string `json:"opening_balance" form:"opening_balance"`
 }
 
 type UpdateInput = CreateInput
@@ -86,6 +90,14 @@ func (r *Repository) List(ctx context.Context, search string) ([]Customer, error
 	return rows, err
 }
 
+// AllActive returns every active customer (no limit), ordered by name — for the
+// CSV export round-trip.
+func (r *Repository) AllActive(ctx context.Context) ([]Customer, error) {
+	var rows []Customer
+	err := r.q.SelectContext(ctx, &rows, `SELECT * FROM customers WHERE is_active = true ORDER BY name`)
+	return rows, err
+}
+
 // OwingRow is a customer with an outstanding balance, plus the date of their
 // oldest unpaid credit sale (a proxy for aging — the system tracks an aggregate
 // balance, not per-invoice allocation).
@@ -116,11 +128,23 @@ func (r *Repository) FindByID(ctx context.Context, id int64) (*Customer, error) 
 	return &c, nil
 }
 
-func (r *Repository) Create(ctx context.Context, name string, phone, address *string, limit decimal.Decimal) (*Customer, error) {
+// FindByPhone looks up an active customer by exact phone (the bulk-import upsert
+// key). Returns sql.ErrNoRows when absent.
+func (r *Repository) FindByPhone(ctx context.Context, phone string) (*Customer, error) {
+	var c Customer
+	err := r.q.GetContext(ctx, &c,
+		`SELECT * FROM customers WHERE phone = $1 AND is_active = true ORDER BY id LIMIT 1`, phone)
+	if err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
+func (r *Repository) Create(ctx context.Context, name string, phone, address *string, limit, opening decimal.Decimal) (*Customer, error) {
 	var c Customer
 	err := r.q.GetContext(ctx, &c, `
-		INSERT INTO customers (name, phone, address, credit_limit)
-		VALUES ($1,$2,$3,$4) RETURNING *`, name, phone, address, limit)
+		INSERT INTO customers (name, phone, address, credit_limit, opening_balance, outstanding_balance)
+		VALUES ($1,$2,$3,$4,$5,$5) RETURNING *`, name, phone, address, limit, opening)
 	if err != nil {
 		return nil, err
 	}
@@ -202,6 +226,15 @@ func (s *Service) List(ctx context.Context, search string) ([]Customer, error) {
 	return rows, nil
 }
 
+// AllActive returns every active customer for the CSV export.
+func (s *Service) AllActive(ctx context.Context) ([]Customer, error) {
+	rows, err := s.repo.AllActive(ctx)
+	if err != nil {
+		return nil, apperr.Internal("failed to list customers", err)
+	}
+	return rows, nil
+}
+
 // Owing lists customers with an outstanding balance (for the dues report).
 func (s *Service) Owing(ctx context.Context) ([]OwingRow, error) {
 	rows, err := s.repo.Owing(ctx)
@@ -227,11 +260,28 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (*Customer, error)
 	if err != nil || limit.IsNegative() {
 		return nil, apperr.Validation("credit limit must be a non-negative amount")
 	}
-	c, err := s.repo.Create(ctx, strings.TrimSpace(in.Name), in.Phone, in.Address, limit)
+	opening, err := parseOpening(in.OpeningBalance)
+	if err != nil {
+		return nil, err
+	}
+	c, err := s.repo.Create(ctx, strings.TrimSpace(in.Name), in.Phone, in.Address, limit, opening)
 	if err != nil {
 		return nil, apperr.Internal("failed to create customer", err)
 	}
 	return c, nil
+}
+
+// parseOpening parses an optional opening-balance string (blank → 0), rejecting
+// negatives. A customer can't start with a negative receivable.
+func parseOpening(s string) (decimal.Decimal, error) {
+	if strings.TrimSpace(s) == "" {
+		return decimal.Zero, nil
+	}
+	v, err := money.Parse(s)
+	if err != nil || v.IsNegative() {
+		return decimal.Zero, apperr.Validation("opening balance must be a non-negative amount")
+	}
+	return v, nil
 }
 
 func (s *Service) Update(ctx context.Context, id int64, in UpdateInput) error {
@@ -247,6 +297,75 @@ func (s *Service) Update(ctx context.Context, id int64, in UpdateInput) error {
 		return apperr.Internal("failed to update customer", err)
 	}
 	return nil
+}
+
+// ImportRow is one resolved row of a bulk customer import (fields already parsed
+// by the web handler). OpeningBalance is applied only when the row creates a new
+// customer.
+type ImportRow struct {
+	Name           string
+	Phone          string
+	Address        string
+	CreditLimit    decimal.Decimal
+	OpeningBalance decimal.Decimal
+}
+
+// ImportResult reports what one import row did, for the summary.
+type ImportResult struct {
+	Action string // "created" | "updated"
+	Note   string
+}
+
+// ImportOne upserts one customer in a transaction. It matches an existing active
+// customer by phone (when given) and updates master fields; otherwise it creates
+// one. The opening balance is applied on create only, so re-running an import
+// never re-adds a balance.
+func (s *Service) ImportOne(ctx context.Context, in ImportRow) (ImportResult, error) {
+	name := strings.TrimSpace(in.Name)
+	if name == "" {
+		return ImportResult{}, apperr.Validation("name is required")
+	}
+	phone := nilIfBlank(in.Phone)
+	address := nilIfBlank(in.Address)
+	var res ImportResult
+	err := db.WithTx(ctx, s.db, func(tx *sqlx.Tx) error {
+		r := NewRepository(tx)
+		var existing *Customer
+		if phone != nil {
+			if c, ferr := r.FindByPhone(ctx, *phone); ferr == nil {
+				existing = c
+			} else if !errors.Is(ferr, sql.ErrNoRows) {
+				return ferr
+			}
+		}
+		if existing != nil {
+			if uerr := r.Update(ctx, existing.ID, name, phone, address, in.CreditLimit); uerr != nil {
+				return uerr
+			}
+			res.Action = "updated"
+			if in.OpeningBalance.IsPositive() {
+				res.Note = "opening balance skipped (existing customer)"
+			}
+			return nil
+		}
+		if _, cerr := r.Create(ctx, name, phone, address, in.CreditLimit, in.OpeningBalance); cerr != nil {
+			return cerr
+		}
+		res.Action = "created"
+		return nil
+	})
+	if err != nil {
+		return ImportResult{}, apperr.Internal("failed to import customer", err)
+	}
+	return res, nil
+}
+
+func nilIfBlank(s string) *string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+	return &s
 }
 
 // ListAll returns active + inactive customers for the admin list.
@@ -364,7 +483,12 @@ func (s *Service) Statement(ctx context.Context, id int64) (*Statement, error) {
 		return nil, err
 	}
 
-	entries := make([]LedgerEntry, 0, len(creditSales)+len(returns)+len(pays))
+	entries := make([]LedgerEntry, 0, len(creditSales)+len(returns)+len(pays)+1)
+	// An onboarding opening balance is the carried-forward debit that predates all
+	// recorded activity, so the running balance reconciles to OutstandingBalance.
+	if cust.OpeningBalance.IsPositive() {
+		entries = append(entries, LedgerEntry{Date: cust.CreatedAt, Kind: "Opening balance", Debit: cust.OpeningBalance})
+	}
 	for _, r := range creditSales {
 		entries = append(entries, LedgerEntry{Date: r.CreatedAt, Kind: "Credit sale", Ref: r.Ref, Debit: r.Amount})
 	}

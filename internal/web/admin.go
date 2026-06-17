@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"karots-pos/internal/apperr"
+	"karots-pos/internal/escpos"
 	"karots-pos/internal/features/audit"
 	"karots-pos/internal/features/customers"
 	"karots-pos/internal/features/products"
@@ -104,6 +105,7 @@ func (a *adminUI) Dashboard(c echo.Context) error {
 		OutstandingDue: due,
 		ReviewCount:    reviewCount,
 		Recent:         recent,
+		Setup:          a.setupStatus(ctx),
 	}))
 }
 
@@ -637,6 +639,29 @@ func (a *adminUI) LogoClear(c echo.Context) error {
 	}
 	c.Response().Header().Set("HX-Trigger", response.Toast("Logo removed", "success"))
 	return response.OK(c, map[string]bool{"ok": true})
+}
+
+// PrinterTest sends a short test slip to the configured receipt printer so the
+// owner can verify printer wiring during setup, without ringing up a real sale.
+// It reports the outcome as a toast either way. It uses the saved printer, so the
+// owner must save a new printer choice before testing it.
+func (a *adminUI) PrinterTest(c echo.Context) error {
+	ctx := c.Request().Context()
+	cfg, err := a.s.settings.Get(ctx)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(cfg.ReceiptPrinter) == "" {
+		c.Response().Header().Set("HX-Trigger", response.Toast("Set and save a receipt printer first", "error"))
+		return c.NoContent(200)
+	}
+	if err := escpos.Send(ctx, cfg.ReceiptPrinter, escpos.TestDocument(*cfg)); err != nil {
+		c.Response().Header().Set("HX-Trigger", response.Toast("Test print failed: "+err.Error(), "error"))
+		return c.NoContent(200)
+	}
+	a.s.logAudit(c, audit.ActionSettings, "settings", "", "sent printer test")
+	c.Response().Header().Set("HX-Trigger", response.Toast("Test slip sent to "+cfg.ReceiptPrinter, "success"))
+	return c.NoContent(200)
 }
 
 func (a *adminUI) SettingsUpdate(c echo.Context) error {

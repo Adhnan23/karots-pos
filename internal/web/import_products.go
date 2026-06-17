@@ -49,9 +49,25 @@ var importSynonyms = map[string]string{
 
 const maxImportRows = 5000
 
+// productImportConfig parameterizes the generic import modal for products.
+func productImportConfig() adminfragments.ImportConfig {
+	return adminfragments.ImportConfig{
+		Title:       "Import Products (CSV)",
+		Columns:     strings.Join(importColumns, ", "),
+		PostURL:     "/admin/products/import",
+		TemplateURL: "/admin/products/import/template",
+		Help: []string{
+			"<b>category</b> is a path like <code>Beverages &gt; Soft Drinks</code> — missing levels are created.",
+			"<b>barcode</b> updates a matching product; otherwise a new one is created.",
+			"<b>opening_qty</b> seeds stock at <b>cost_price</b> (new / empty-stock items only).",
+			"<b>supplier</b> is the preferred supplier (created if new) — no purchase or debt is recorded.",
+		},
+	}
+}
+
 // ProductImportModal returns the upload dialog (instructions + file form).
 func (a *adminUI) ProductImportModal(c echo.Context) error {
-	return response.RenderFragment(c, adminfragments.ImportProductsModal())
+	return response.RenderFragment(c, adminfragments.ImportModal(productImportConfig()))
 }
 
 // ProductImportTemplate streams an empty CSV with just the header row.
@@ -243,7 +259,7 @@ func (a *adminUI) ProductImport(c echo.Context) error {
 
 	// Refresh the product list behind the modal.
 	c.Response().Header().Set("HX-Trigger", "reload-products")
-	return response.RenderFragment(c, adminfragments.ImportProductsResult(sum))
+	return response.RenderFragment(c, adminfragments.ImportResultView(sum))
 }
 
 // mapImportHeader builds canonical-column → index from a header row, applying

@@ -23,8 +23,13 @@ templ SuppliersPage(d SuppliersData) {
 	@layouts.Admin("Suppliers", d.UserName, "suppliers") {
 		<div class="flex items-center justify-between mb-6">
 			<h1 class="text-2xl font-bold">Suppliers</h1>
-			<button class="px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium"
-				hx-get="/admin/suppliers/form" hx-target="#modal-container" hx-swap="innerHTML">+ New Supplier</button>
+			<div class="flex gap-2">
+				<a href="/admin/suppliers/export" class="px-4 py-2 rounded-lg border text-slate-700 font-medium">Export CSV</a>
+				<button class="px-4 py-2 rounded-lg border text-slate-700 font-medium"
+					hx-get="/admin/suppliers/import" hx-target="#modal-container" hx-swap="innerHTML">Import CSV</button>
+				<button class="px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium"
+					hx-get="/admin/suppliers/form" hx-target="#modal-container" hx-swap="innerHTML">+ New Supplier</button>
+			</div>
 		</div>
 		<div class="bg-white rounded-2xl shadow-sm p-6">
 			<form
@@ -113,6 +118,12 @@ templ SupplierForm(s *suppliers.Supplier) {
 					<label class="block text-sm font-medium mb-1">Credit Days</label>
 					<input name="credit_days" type="number" min="0" value={ supVal(s, "credit_days") } class="w-full border rounded-lg px-3 py-2"/>
 				</div>
+				if s == nil {
+					<div>
+						<label class="block text-sm font-medium mb-1">Opening Balance <span class="text-slate-400 font-normal">(already owed)</span></label>
+						<input name="opening_balance" type="number" step="0.01" min="0" value="0" class="w-full border rounded-lg px-3 py-2"/>
+					</div>
+				}
 			</div>
 			<div>
 				<label class="block text-sm font-medium mb-1">Address</label>

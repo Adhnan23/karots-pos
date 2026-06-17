@@ -40,13 +40,23 @@ type ImportRowError struct {
 	Message string
 }
 
-// ImportSummary is the outcome of a bulk product CSV import, shown after upload.
+// ImportSummary is the outcome of a bulk CSV import, shown after upload.
 type ImportSummary struct {
 	Created int
 	Updated int
 	Skipped int
 	Notes   []string
 	Errors  []ImportRowError
+}
+
+// ImportConfig parameterizes the generic bulk-import modal (ImportModal) so the
+// same dialog serves products, customers and suppliers.
+type ImportConfig struct {
+	Title       string   // e.g. "Import Customers (CSV)"
+	Columns     string   // the CSV header line, shown verbatim
+	Help        []string // bullet points of import rules (may contain HTML)
+	PostURL     string   // multipart upload endpoint
+	TemplateURL string   // download-template endpoint
 }
 
 // productCatID is the selected category ID for the product form picker, or ""

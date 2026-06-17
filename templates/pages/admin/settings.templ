@@ -120,6 +120,13 @@ templ SettingsPage(d SettingsData) {
 								placeholder="or network printer: tcp://192.168.1.50:9100"
 								class="w-full border rounded-lg px-3 py-2 mt-2 text-sm"
 							/>
+							<button
+								type="button"
+								hx-post="/admin/settings/printer/test"
+								hx-swap="none"
+								class="mt-2 px-3 py-1.5 rounded-lg border text-slate-700 text-sm font-medium"
+							>🖨 Test print</button>
+							<p class="text-xs text-slate-400 mt-1">Sends a short test slip to the <strong>saved</strong> receipt printer — save first if you just changed it.</p>
 						</div>
 						<div>
 							<label class="block text-sm font-medium mb-1">Label printer</label>

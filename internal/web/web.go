@@ -170,6 +170,9 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	ag.POST("/stock/adjust", admin.StockAdjust)
 	ag.GET("/stock/take", admin.StockTake)
 	ag.POST("/stock/take", admin.StockTakeApply)
+	ag.GET("/stock/take/sheet", admin.StockTakeSheet)
+	ag.GET("/stock/take/import", admin.StockTakeImportModal)
+	ag.POST("/stock/take/import", admin.StockTakeImport)
 	ag.GET("/stock/damage", admin.DamageForm)
 	ag.POST("/stock/damage", admin.DamageRecord)
 	ag.GET("/stock/batches/:id", admin.BatchesView)
@@ -185,7 +188,7 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	ag.GET("/inventory", admin.sectionHub("inventory"))
 	ag.GET("/purchasing", admin.sectionHub("purchasing"))
 	ag.GET("/money", admin.sectionHub("money"))
-	ag.GET("/setup", admin.sectionHub("setup"))
+	ag.GET("/setup", admin.Setup)
 
 	ag.GET("/customers", admin.Customers)
 	ag.GET("/customers/table", admin.CustomersTable)
@@ -198,6 +201,10 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	ag.DELETE("/customers/:id", admin.CustomerDelete)
 	ag.POST("/customers/:id/activate", admin.CustomerReactivate)
 	ag.POST("/customers/:id/payment", admin.CustomerPay)
+	ag.GET("/customers/import", admin.CustomerImportModal)
+	ag.GET("/customers/import/template", admin.CustomerImportTemplate)
+	ag.GET("/customers/export", admin.CustomerExportCSV)
+	ag.POST("/customers/import", admin.CustomerImport)
 
 	// Suppliers
 	ag.GET("/suppliers", admin.Suppliers)
@@ -209,6 +216,10 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	ag.PUT("/suppliers/:id", admin.SupplierUpdate)
 	ag.POST("/suppliers/:id/payment", admin.SupplierPay)
 	ag.DELETE("/suppliers/:id", admin.SupplierDelete)
+	ag.GET("/suppliers/import", admin.SupplierImportModal)
+	ag.GET("/suppliers/import/template", admin.SupplierImportTemplate)
+	ag.GET("/suppliers/export", admin.SupplierExportCSV)
+	ag.POST("/suppliers/import", admin.SupplierImport)
 
 	// Purchases (GRN)
 	ag.GET("/purchases", admin.Purchases)
@@ -320,6 +331,7 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 
 	ag.GET("/settings", admin.Settings)
 	ag.PUT("/settings", admin.SettingsUpdate)
+	ag.POST("/settings/printer/test", admin.PrinterTest)
 	ag.POST("/settings/logo", admin.LogoUpload)
 	ag.POST("/settings/logo/clear", admin.LogoClear)
 

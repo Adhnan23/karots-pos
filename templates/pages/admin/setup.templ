@@ -1,0 +1,89 @@
+package adminpages
+
+import (
+	"strconv"
+
+	"karots-pos/templates/layouts"
+)
+
+// SetupStep is one item on the onboarding checklist: a thing the shop should do
+// before going live, with whether it's done and where to go to do it.
+type SetupStep struct {
+	Label string
+	Hint  string
+	Href  string
+	Done  bool
+}
+
+// DoneCount returns how many steps are complete.
+func DoneCount(steps []SetupStep) int {
+	n := 0
+	for _, s := range steps {
+		if s.Done {
+			n++
+		}
+	}
+	return n
+}
+
+// SetupData drives the Setup hub page: the onboarding checklist plus the section's
+// management links.
+type SetupData struct {
+	UserName string
+	Section  layouts.AdminSection
+	Steps    []SetupStep
+}
+
+templ SetupPage(d SetupData) {
+	@layouts.Admin(d.Section.Label, d.UserName, d.Section.Key) {
+		<div class="mb-6">
+			<h1 class="text-2xl font-bold">{ d.Section.Icon + " " + d.Section.Label }</h1>
+			<p class="text-sm text-slate-500">Finish setting up your shop, then manage everything from here.</p>
+		</div>
+		@SetupChecklist(d.Steps, false)
+		<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+			for _, l := range d.Section.Links {
+				@reportCard(l.Href, l.Label, l.Desc)
+			}
+		</div>
+	}
+}
+
+// SetupChecklist renders the onboarding progress card. Used on the Setup hub and,
+// while incomplete, on the Dashboard. compact hides the surrounding helper text.
+templ SetupChecklist(steps []SetupStep, compact bool) {
+	{{ done := DoneCount(steps) }}
+	<div class="bg-white rounded-2xl shadow-sm p-6 mb-6 border border-slate-100">
+		<div class="flex items-center justify-between mb-3">
+			<h2 class="text-lg font-semibold">Setup checklist</h2>
+			<span class={ "text-sm font-medium px-2.5 py-1 rounded-full", templ.KV("bg-emerald-100 text-emerald-700", done == len(steps)), templ.KV("bg-indigo-100 text-indigo-700", done < len(steps)) }>
+				{ strconv.Itoa(done) } / { strconv.Itoa(len(steps)) } done
+			</span>
+		</div>
+		if !compact && done < len(steps) {
+			<p class="text-sm text-slate-500 mb-3">Complete these to get your shop ready to sell.</p>
+		}
+		<ul class="divide-y">
+			for _, s := range steps {
+				<li class="flex items-center gap-3 py-2.5">
+					if s.Done {
+						<span class="flex-none w-6 h-6 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-sm">✓</span>
+						<div class="flex-1">
+							<div class="font-medium text-slate-700">{ s.Label }</div>
+						</div>
+						<span class="text-xs text-emerald-600">Done</span>
+					} else {
+						<span class="flex-none w-6 h-6 rounded-full border-2 border-slate-300"></span>
+						<div class="flex-1">
+							<div class="font-medium">{ s.Label }</div>
+							if s.Hint != "" {
+								<div class="text-xs text-slate-400">{ s.Hint }</div>
+							}
+						</div>
+						<a href={ templ.SafeURL(s.Href) } class="text-sm text-indigo-600 hover:underline whitespace-nowrap">Set up →</a>
+					}
+				</li>
+			}
+		</ul>
+	</div>
+}

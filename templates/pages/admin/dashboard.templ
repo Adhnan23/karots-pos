@@ -21,11 +21,15 @@ type DashboardData struct {
 	OutstandingDue decimal.Decimal
 	ReviewCount    int
 	Recent         []sales.Sale
+	Setup          []SetupStep // onboarding checklist; shown only while incomplete
 }
 
 templ Dashboard(d DashboardData) {
 	@layouts.Admin("Dashboard", d.UserName, "dashboard") {
 		<h1 class="text-2xl font-bold mb-6">Dashboard</h1>
+		if len(d.Setup) > 0 && DoneCount(d.Setup) < len(d.Setup) {
+			@SetupChecklist(d.Setup, true)
+		}
 		if d.ReviewCount > 0 {
 			<a href="/admin/products/review" class="flex items-center gap-3 mb-6 px-5 py-4 rounded-2xl bg-amber-50 border border-amber-300 text-amber-900 hover:bg-amber-100 transition">
 				<span class="text-2xl">⚠️</span>

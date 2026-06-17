@@ -7,6 +7,7 @@ package escpos
 
 import (
 	"bytes"
+	"strconv"
 	"strings"
 	"time"
 
@@ -196,6 +197,45 @@ func Document(d sales.Detail, cfg settings.Settings, opts Options) []byte {
 	b.Write([]byte{esc, 'd', feedBeforeCut})
 	b.Write([]byte{gs, 'V', 1})
 
+	return b.Bytes()
+}
+
+// TestDocument builds a short ESC/POS slip used to verify printer wiring from the
+// settings page: it prints the shop name, a marker and a timestamp, then cuts —
+// just enough to confirm bytes reach the printer at the configured width.
+func TestDocument(cfg settings.Settings) []byte {
+	w := columns(cfg.ReceiptWidth)
+
+	var b bytes.Buffer
+	b.Write([]byte{esc, '@'})    // initialize
+	b.Write([]byte{esc, 't', 0}) // code page PC437 (Latin)
+
+	b.Write([]byte{esc, 'a', 1}) // center
+	b.Write([]byte{esc, 'E', 1}) // bold on
+	b.Write([]byte{gs, '!', 0x11})
+	name := cfg.ShopName
+	if strings.TrimSpace(name) == "" {
+		name = "POS"
+	}
+	line(&b, ascii(name))
+	b.Write([]byte{gs, '!', 0x00})
+	b.Write([]byte{esc, 'E', 0})
+	line(&b, "")
+	line(&b, "*** PRINTER TEST ***")
+	line(&b, "")
+
+	b.Write([]byte{esc, 'a', 0}) // left
+	divider(&b, w)
+	line(&b, leftRight("Width:", cfg.ReceiptWidth+"mm ("+strconv.Itoa(w)+" cols)", w))
+	line(&b, leftRight("Printed:", datetime.DateTime(time.Now()), w))
+	divider(&b, w)
+
+	b.Write([]byte{esc, 'a', 1}) // center
+	line(&b, "If you can read this,")
+	line(&b, "your printer is set up.")
+
+	b.Write([]byte{esc, 'd', feedBeforeCut})
+	b.Write([]byte{gs, 'V', 1})
 	return b.Bytes()
 }
 

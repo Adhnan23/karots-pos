@@ -28,7 +28,16 @@ templ StockTakePage(d StockTakeData) {
 	@layouts.Admin("Stock-take", d.UserName, "stocktake") {
 		<div class="flex items-center justify-between mb-2">
 			<h1 class="text-2xl font-bold">Stock-take / opening stock</h1>
-			<a href="/admin/stock" class="text-sm text-indigo-600 hover:underline">Stock &amp; movements →</a>
+			<div class="flex items-center gap-2">
+				<a href="/admin/stock/take/sheet" class="px-3 py-1.5 rounded-lg border text-slate-700 text-sm font-medium">↓ Count sheet</a>
+				<button
+					class="px-3 py-1.5 rounded-lg border text-slate-700 text-sm font-medium"
+					hx-get="/admin/stock/take/import"
+					hx-target="#modal-container"
+					hx-swap="innerHTML"
+				>Import CSV</button>
+				<a href="/admin/stock" class="text-sm text-indigo-600 hover:underline ml-1">Stock &amp; movements →</a>
+			</div>
 		</div>
 		<p class="text-sm text-slate-500 mb-4 max-w-3xl">
 			Enter the counted quantity for each product to set its on-hand level. Each change is recorded as an

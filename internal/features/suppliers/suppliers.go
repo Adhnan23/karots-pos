@@ -13,6 +13,7 @@ import (
 	"karots-pos/internal/config"
 	"karots-pos/internal/db"
 	"karots-pos/internal/middleware"
+	"karots-pos/internal/money"
 	"karots-pos/internal/response"
 
 	"github.com/jmoiron/sqlx"
@@ -28,6 +29,7 @@ type Supplier struct {
 	Address            *string         `db:"address"             json:"address,omitempty"`
 	CreditDays         int             `db:"credit_days"         json:"credit_days"`
 	OutstandingBalance decimal.Decimal `db:"outstanding_balance" json:"outstanding_balance"`
+	OpeningBalance     decimal.Decimal `db:"opening_balance"     json:"opening_balance"`
 	IsActive           bool            `db:"is_active"           json:"is_active"`
 	CreatedAt          time.Time       `db:"created_at"          json:"created_at"`
 }
@@ -38,6 +40,9 @@ type CreateInput struct {
 	Phone         *string `json:"phone"          form:"phone"          validate:"omitempty,max=15"`
 	Address       *string `json:"address"        form:"address"`
 	CreditDays    int     `json:"credit_days"    form:"credit_days"    validate:"gte=0"`
+	// OpeningBalance is the amount we already owed this supplier at onboarding.
+	// Applied once, at creation; Update never touches it.
+	OpeningBalance string `json:"opening_balance" form:"opening_balance"`
 }
 
 type UpdateInput = CreateInput
@@ -102,12 +107,12 @@ func (r *Repository) FindByName(ctx context.Context, name string) (*Supplier, er
 	return &s, nil
 }
 
-func (r *Repository) Create(ctx context.Context, in CreateInput) (*Supplier, error) {
+func (r *Repository) Create(ctx context.Context, in CreateInput, opening decimal.Decimal) (*Supplier, error) {
 	var s Supplier
 	err := r.q.GetContext(ctx, &s, `
-		INSERT INTO suppliers (name, contact_person, phone, address, credit_days)
-		VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-		in.Name, in.ContactPerson, in.Phone, in.Address, in.CreditDays)
+		INSERT INTO suppliers (name, contact_person, phone, address, credit_days, opening_balance, outstanding_balance)
+		VALUES ($1,$2,$3,$4,$5,$6,$6) RETURNING *`,
+		in.Name, in.ContactPerson, in.Phone, in.Address, in.CreditDays, opening)
 	if err != nil {
 		return nil, err
 	}
@@ -177,11 +182,28 @@ func (s *Service) Get(ctx context.Context, id int64) (*Supplier, error) {
 
 func (s *Service) Create(ctx context.Context, in CreateInput) (*Supplier, error) {
 	in.Name = strings.TrimSpace(in.Name)
-	sup, err := s.repo.Create(ctx, in)
+	opening, err := parseOpening(in.OpeningBalance)
+	if err != nil {
+		return nil, err
+	}
+	sup, err := s.repo.Create(ctx, in, opening)
 	if err != nil {
 		return nil, apperr.Internal("failed to create supplier", err)
 	}
 	return sup, nil
+}
+
+// parseOpening parses an optional opening-balance string (blank → 0), rejecting
+// negatives. We can't owe a supplier a negative amount at onboarding.
+func parseOpening(s string) (decimal.Decimal, error) {
+	if strings.TrimSpace(s) == "" {
+		return decimal.Zero, nil
+	}
+	v, err := money.Parse(s)
+	if err != nil || v.IsNegative() {
+		return decimal.Zero, apperr.Validation("opening balance must be a non-negative amount")
+	}
+	return v, nil
 }
 
 // FindOrCreateByName resolves a supplier by case-insensitive name, creating a
@@ -197,11 +219,52 @@ func (s *Service) FindOrCreateByName(ctx context.Context, name string) (*int64, 
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return nil, apperr.Internal("failed to resolve supplier", err)
 	}
-	sup, err := s.repo.Create(ctx, CreateInput{Name: name})
+	sup, err := s.repo.Create(ctx, CreateInput{Name: name}, decimal.Zero)
 	if err != nil {
 		return nil, apperr.Internal("failed to create supplier "+name, err)
 	}
 	return &sup.ID, nil
+}
+
+// ImportResult reports what one import row did, for the summary.
+type ImportResult struct {
+	Action string // "created" | "updated"
+	Note   string
+}
+
+// ImportOne upserts one supplier in a transaction, matching an existing active
+// supplier by case-insensitive name. The opening balance (already parsed into
+// in.OpeningBalance) is applied on create only, so re-imports never re-add it.
+func (s *Service) ImportOne(ctx context.Context, in CreateInput, opening decimal.Decimal) (ImportResult, error) {
+	in.Name = strings.TrimSpace(in.Name)
+	if in.Name == "" {
+		return ImportResult{}, apperr.Validation("name is required")
+	}
+	var res ImportResult
+	err := db.WithTx(ctx, s.db, func(tx *sqlx.Tx) error {
+		r := NewRepository(tx)
+		if existing, ferr := r.FindByName(ctx, in.Name); ferr == nil {
+			if uerr := r.Update(ctx, existing.ID, in); uerr != nil {
+				return uerr
+			}
+			res.Action = "updated"
+			if opening.IsPositive() {
+				res.Note = "opening balance skipped (existing supplier)"
+			}
+			return nil
+		} else if !errors.Is(ferr, sql.ErrNoRows) {
+			return ferr
+		}
+		if _, cerr := r.Create(ctx, in, opening); cerr != nil {
+			return cerr
+		}
+		res.Action = "created"
+		return nil
+	})
+	if err != nil {
+		return ImportResult{}, apperr.Internal("failed to import supplier", err)
+	}
+	return res, nil
 }
 
 func (s *Service) Update(ctx context.Context, id int64, in UpdateInput) error {
