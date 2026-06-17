@@ -317,7 +317,128 @@ func toWriteRow(in CreateInput) (writeRow, error) {
 		Reorder:    in.ReorderLevel,
 		TrackSerial:    in.TrackSerial,
 		WarrantyMonths: in.WarrantyMonths,
+		PreferredSupplier: in.PreferredSupplierID,
 	}, nil
+}
+
+// ImportRow is one resolved row of a bulk catalog import. Category/unit/supplier
+// are pre-resolved to IDs by the caller (the web import handler) so the products
+// service doesn't reach across features. OpeningQty seeds stock at OpeningCost.
+type ImportRow struct {
+	Name              string
+	NameSi            string
+	Barcode           string
+	CategoryID        int64
+	UnitID            int64
+	UserID            int64
+	PreferredSupplier *int64
+	Cost              decimal.Decimal
+	Selling           decimal.Decimal
+	Wholesale         decimal.Decimal
+	Tax               decimal.Decimal
+	Reorder           int
+	WarrantyMonths    int
+	TrackSerial       bool
+	OpeningQty        decimal.Decimal
+}
+
+// ImportResult reports what a single row did, for the import summary.
+type ImportResult struct {
+	Action string // "created" | "updated"
+	Note   string // optional caveat, e.g. opening stock skipped
+}
+
+// ImportOne upserts one catalog row in a single transaction. It matches an
+// existing product by barcode (when given) and updates its master fields;
+// otherwise it inserts a new product. Opening stock is seeded — at the real
+// cost — only for a brand-new product or one currently holding zero on-hand, so
+// re-running the same import never double-counts stock.
+func (s *Service) ImportOne(ctx context.Context, in ImportRow) (ImportResult, error) {
+	name := strings.TrimSpace(in.Name)
+	if name == "" {
+		return ImportResult{}, apperr.Validation("name is required")
+	}
+	w := writeRow{
+		Name:              name,
+		NameSi:            nullStr(strings.TrimSpace(in.NameSi)),
+		Barcode:           nullStr(strings.TrimSpace(in.Barcode)),
+		CategoryID:        in.CategoryID,
+		UnitID:            in.UnitID,
+		Cost:              in.Cost,
+		Selling:           in.Selling,
+		Wholesale:         in.Wholesale,
+		Tax:               in.Tax,
+		Reorder:           in.Reorder,
+		TrackSerial:       in.TrackSerial,
+		WarrantyMonths:    in.WarrantyMonths,
+		PreferredSupplier: in.PreferredSupplier,
+	}
+	var res ImportResult
+	err := appdb.WithTx(ctx, s.db, func(tx *sqlx.Tx) error {
+		repo := NewRepository(tx)
+		// Try to match an existing active product by barcode.
+		var existing *Product
+		if w.Barcode != nil {
+			if p, ferr := repo.FindByBarcode(ctx, *w.Barcode); ferr == nil {
+				existing = p
+			} else if !errors.Is(ferr, sql.ErrNoRows) {
+				return ferr
+			}
+		}
+		if existing != nil {
+			if uerr := repo.Update(ctx, existing.ID, w); uerr != nil {
+				return mapWriteErr(uerr)
+			}
+			res.Action = "updated"
+			if in.OpeningQty.IsPositive() {
+				if existing.StockQty.IsZero() {
+					if serr := seedOpeningStock(ctx, tx, existing.ID, in.OpeningQty, in.Cost, in.UserID); serr != nil {
+						return serr
+					}
+				} else {
+					res.Note = "opening stock skipped (already in stock)"
+				}
+			}
+			return nil
+		}
+		id, ierr := repo.Insert(ctx, w)
+		if ierr != nil {
+			return mapWriteErr(ierr)
+		}
+		res.Action = "created"
+		if in.OpeningQty.IsPositive() {
+			if serr := seedOpeningStock(ctx, tx, id, in.OpeningQty, in.Cost, in.UserID); serr != nil {
+				return serr
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return ImportResult{}, err
+	}
+	return res, nil
+}
+
+// seedOpeningStock mirrors the till quick-add opening seed (service.go QuickCreate)
+// but with a real cost: bump the cached quantity, open a costing batch, and log a
+// stock-adjust movement — all within the caller's transaction.
+func seedOpeningStock(ctx context.Context, tx *sqlx.Tx, productID int64, qty, cost decimal.Decimal, userID int64) error {
+	stk := stock.NewRepository(tx)
+	if err := stk.Increment(ctx, productID, qty); err != nil {
+		return apperr.Internal("failed to seed opening stock", err)
+	}
+	if _, err := stk.InsertBatch(ctx, stock.NewBatch{
+		ProductID: productID, Quantity: qty, CostPrice: cost, Source: "opening",
+	}); err != nil {
+		return apperr.Internal("failed to open stock batch", err)
+	}
+	note := "CSV import opening stock"
+	if err := stk.InsertMovement(ctx, stock.MovementInput{
+		ProductID: productID, Type: stock.MoveAdjust, Quantity: qty, UserID: userID, Note: &note,
+	}); err != nil {
+		return apperr.Internal("failed to record stock movement", err)
+	}
+	return nil
 }
 
 func mapWriteErr(err error) error {

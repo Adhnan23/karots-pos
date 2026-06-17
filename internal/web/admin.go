@@ -171,11 +171,15 @@ func (a *adminUI) ProductsTable(c echo.Context) error {
 
 func (a *adminUI) ProductForm(c echo.Context) error {
 	ctx := c.Request().Context()
-	cats, err := a.s.categories.List(ctx)
+	cats, err := a.s.categories.Tree(ctx)
 	if err != nil {
 		return err
 	}
 	us, err := a.s.units.List(ctx)
+	if err != nil {
+		return err
+	}
+	sups, err := a.s.suppliers.List(ctx, "")
 	if err != nil {
 		return err
 	}
@@ -189,7 +193,7 @@ func (a *adminUI) ProductForm(c echo.Context) error {
 			return err
 		}
 	}
-	return response.RenderFragment(c, adminfragments.ProductForm(p, cats, us))
+	return response.RenderFragment(c, adminfragments.ProductForm(p, cats, us, sups))
 }
 
 func (a *adminUI) ProductCreate(c echo.Context) error {

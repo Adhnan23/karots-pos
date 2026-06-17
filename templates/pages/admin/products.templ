@@ -24,12 +24,24 @@ templ ProductsPage(d ProductsData) {
 	@layouts.Admin("Products", d.UserName, "products") {
 		<div class="flex items-center justify-between mb-6">
 			<h1 class="text-2xl font-bold">Products</h1>
-			<button
-				class="px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium"
-				hx-get="/admin/products/form"
-				hx-target="#modal-container"
-				hx-swap="innerHTML"
-			>+ New Product</button>
+			<div class="flex gap-2">
+				<a
+					href="/admin/products/export"
+					class="px-4 py-2 rounded-lg border text-slate-700 font-medium"
+				>Export CSV</a>
+				<button
+					class="px-4 py-2 rounded-lg border text-slate-700 font-medium"
+					hx-get="/admin/products/import"
+					hx-target="#modal-container"
+					hx-swap="innerHTML"
+				>Import CSV</button>
+				<button
+					class="px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium"
+					hx-get="/admin/products/form"
+					hx-target="#modal-container"
+					hx-swap="innerHTML"
+				>+ New Product</button>
+			</div>
 		</div>
 
 		<div class="bg-white rounded-2xl shadow-sm p-6">
@@ -37,7 +49,7 @@ templ ProductsPage(d ProductsData) {
 				id="product-filter-form"
 				class="flex flex-wrap gap-3 mb-4"
 				hx-get="/admin/products/table"
-				hx-trigger="input changed delay:300ms from:input[name='search'], change from:select, reload-products from:body"
+				hx-trigger="input changed delay:300ms from:input[name='search'], change from:select, category-changed from:body, reload-products from:body"
 				hx-target="#product-list"
 				hx-swap="innerHTML"
 			>
@@ -48,12 +60,9 @@ templ ProductsPage(d ProductsData) {
 					placeholder="Search by name or barcode…"
 					class="flex-1 min-w-[14rem] max-w-sm border rounded-lg px-3 py-2"
 				/>
-				<select name="category_id" class="border rounded-lg px-3 py-2">
-					<option value="">All categories</option>
-					for _, c := range d.Categories {
-						@categoryFilterOption(c, d.CategoryID)
-					}
-				</select>
+				<div class="w-56">
+					@adminfragments.CategoryPicker(d.Categories, "category_id", d.CategoryID, true, "All categories", true)
+				</div>
 			</form>
 			<div id="product-list">
 				@ProductList(d)
@@ -81,14 +90,6 @@ templ ProductList(d ProductsData) {
 		</tbody>
 	</table>
 	@pager(d.Page, d.HasNext, "/admin/products/table", "#product-list", "#product-filter-form")
-}
-
-templ categoryFilterOption(c categories.TreeNode, selected string) {
-	if strconv.FormatInt(c.ID, 10) == selected {
-		<option value={ strconv.FormatInt(c.ID, 10) } selected>{ indent(c.Depth) }{ c.Name }</option>
-	} else {
-		<option value={ strconv.FormatInt(c.ID, 10) }>{ indent(c.Depth) }{ c.Name }</option>
-	}
 }
 
 // pager renders Prev/Next that reload `target` from `endpoint`, carrying the

@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"time"
 
 	"karots-pos/internal/apperr"
@@ -58,6 +59,26 @@ func (r *Repository) FindByID(ctx context.Context, id int64) (*Category, error) 
 	return &c, nil
 }
 
+// FindByNameParent looks up a category by case-insensitive name within a parent
+// (parentID nil = top level). Returns sql.ErrNoRows when absent.
+func (r *Repository) FindByNameParent(ctx context.Context, name string, parentID *int64) (*Category, error) {
+	var c Category
+	var err error
+	if parentID == nil {
+		err = r.db.GetContext(ctx, &c,
+			`SELECT id, name, parent_id, NULL::varchar AS parent_name, created_at
+			 FROM categories WHERE lower(name) = lower($1) AND parent_id IS NULL`, name)
+	} else {
+		err = r.db.GetContext(ctx, &c,
+			`SELECT id, name, parent_id, NULL::varchar AS parent_name, created_at
+			 FROM categories WHERE lower(name) = lower($1) AND parent_id = $2`, name, *parentID)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
 func (r *Repository) Create(ctx context.Context, name string, parentID *int64) (*Category, error) {
 	var c Category
 	err := r.db.GetContext(ctx, &c,
@@ -101,10 +122,15 @@ func (s *Service) List(ctx context.Context) ([]Category, error) {
 	return rows, nil
 }
 
-// TreeNode is a category plus its depth in the hierarchy, for indented display.
+// TreeNode is a category plus its position in the hierarchy, for indented and
+// collapsible display. Path holds the ancestor IDs (root first, excluding self)
+// so a collapsible UI can decide visibility without a DOM map; HasChildren drives
+// the expand/collapse toggle.
 type TreeNode struct {
 	Category
-	Depth int
+	Depth       int
+	HasChildren bool
+	Path        []int64
 }
 
 // Tree returns all categories ordered depth-first (parents before their
@@ -124,15 +150,22 @@ func (s *Service) Tree(ctx context.Context) ([]TreeNode, error) {
 		}
 	}
 	var out []TreeNode
-	var walk func(c Category, depth int)
-	walk = func(c Category, depth int) {
-		out = append(out, TreeNode{Category: c, Depth: depth})
+	var walk func(c Category, depth int, path []int64)
+	walk = func(c Category, depth int, path []int64) {
+		out = append(out, TreeNode{
+			Category:    c,
+			Depth:       depth,
+			HasChildren: len(children[c.ID]) > 0,
+			Path:        path,
+		})
+		// Copy so sibling branches don't share/overwrite the same backing array.
+		childPath := append(append([]int64{}, path...), c.ID)
 		for _, ch := range children[c.ID] {
-			walk(ch, depth+1)
+			walk(ch, depth+1, childPath)
 		}
 	}
 	for _, r := range roots {
-		walk(r, 0)
+		walk(r, 0, nil)
 	}
 	// Orphans (parent was deleted/SET NULL but still has a stale parent_id) — append.
 	seen := map[int64]bool{}
@@ -145,6 +178,40 @@ func (s *Service) Tree(ctx context.Context) ([]TreeNode, error) {
 		}
 	}
 	return out, nil
+}
+
+// FindOrCreateByPath resolves a "Parent > Child > Grandchild" path to a leaf
+// category ID, creating any missing levels. An empty path returns (0, nil) so the
+// caller can fall back to its own default. Used by the bulk product importer.
+func (s *Service) FindOrCreateByPath(ctx context.Context, path string) (int64, error) {
+	var parentID *int64
+	var leaf int64
+	any := false
+	for _, raw := range strings.Split(path, ">") {
+		name := strings.TrimSpace(raw)
+		if name == "" {
+			continue
+		}
+		any = true
+		existing, err := s.repo.FindByNameParent(ctx, name, parentID)
+		if err == nil {
+			leaf = existing.ID
+		} else if errors.Is(err, sql.ErrNoRows) {
+			created, cerr := s.repo.Create(ctx, name, parentID)
+			if cerr != nil {
+				return 0, apperr.Internal("failed to create category "+name, cerr)
+			}
+			leaf = created.ID
+		} else {
+			return 0, apperr.Internal("failed to resolve category "+name, err)
+		}
+		id := leaf
+		parentID = &id
+	}
+	if !any {
+		return 0, nil
+	}
+	return leaf, nil
 }
 
 func (s *Service) Get(ctx context.Context, id int64) (*Category, error) {

@@ -24,7 +24,7 @@ templ CategoriesPage(d CategoriesData) {
 				<thead class="text-left text-slate-500 border-b">
 					<tr><th class="py-2 px-3">Name</th><th class="py-2 px-3">Parent</th><th class="py-2 px-3"></th></tr>
 				</thead>
-				<tbody id="category-tbody" hx-get="/admin/categories/table" hx-trigger="reload-categories from:body" hx-target="#category-tbody" hx-swap="innerHTML">
+				<tbody id="category-tbody" x-data="categoryTree()" hx-get="/admin/categories/table" hx-trigger="reload-categories from:body" hx-target="#category-tbody" hx-swap="innerHTML">
 					@CategoryRows(d.Rows)
 				</tbody>
 			</table>
@@ -37,10 +37,27 @@ templ CategoryRows(rows []categories.TreeNode) {
 		<tr><td colspan="3" class="py-6 text-center text-slate-500">No categories yet.</td></tr>
 	} else {
 		for _, c := range rows {
-			<tr class="border-b last:border-0">
-				<td class="py-2 px-3 font-medium">
-					<span class="text-slate-300">{ indent(c.Depth) }</span>{ c.Name }
-				</td>
+			<tr class="border-b last:border-0" x-show={ "visible(" + jsIntArray(c.Path) + ")" } x-cloak>
+				if c.HasChildren {
+					<td class="py-2 px-3 font-medium cursor-pointer select-none" x-on:click={ "toggle(" + strconv.FormatInt(c.ID, 10) + ")" }>
+						<span class="inline-flex items-center">
+							<span class="text-slate-300">{ indent(c.Depth) }</span>
+							<span class="w-5 text-slate-500">
+								<span x-show={ "!expanded[" + strconv.FormatInt(c.ID, 10) + "]" }>▸</span>
+								<span x-show={ "expanded[" + strconv.FormatInt(c.ID, 10) + "]" } x-cloak>▾</span>
+							</span>
+							<span>{ c.Name }</span>
+						</span>
+					</td>
+				} else {
+					<td class="py-2 px-3 font-medium">
+						<span class="inline-flex items-center">
+							<span class="text-slate-300">{ indent(c.Depth) }</span>
+							<span class="inline-block w-5"></span>
+							<span>{ c.Name }</span>
+						</span>
+					</td>
+				}
 				<td class="py-2 px-3 text-slate-500">{ strOrEmpty(c.ParentName) }</td>
 				<td class="py-2 px-3 text-right whitespace-nowrap">
 					<button class="text-indigo-600 hover:underline" hx-get={ "/admin/categories/form/" + strconv.FormatInt(c.ID, 10) } hx-target="#modal-container" hx-swap="innerHTML">Edit</button>
@@ -93,4 +110,17 @@ func catName(c *categories.Category) string {
 		return ""
 	}
 	return c.Name
+}
+
+// jsIntArray renders ancestor IDs as a JS array literal (e.g. [3,7]) for the
+// collapsible tree's x-show="visible(...)" expression.
+func jsIntArray(ids []int64) string {
+	s := "["
+	for i, id := range ids {
+		if i > 0 {
+			s += ","
+		}
+		s += strconv.FormatInt(id, 10)
+	}
+	return s + "]"
 }

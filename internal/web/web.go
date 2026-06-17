@@ -158,6 +158,10 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	ag.POST("/products", admin.ProductCreate)
 	ag.PUT("/products/:id", admin.ProductUpdate)
 	ag.DELETE("/products/:id", admin.ProductDelete)
+	ag.GET("/products/import", admin.ProductImportModal)
+	ag.GET("/products/import/template", admin.ProductImportTemplate)
+	ag.GET("/products/export", admin.ProductExportCSV)
+	ag.POST("/products/import", admin.ProductImport)
 
 	ag.GET("/stock", admin.Stock)
 	ag.GET("/stock/movements", admin.StockMovements)

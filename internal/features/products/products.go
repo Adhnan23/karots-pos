@@ -27,17 +27,19 @@ type Product struct {
 	ReorderLevel   int             `db:"reorder_level"   json:"reorder_level"`
 	HasExpiry      bool            `db:"has_expiry"      json:"has_expiry"`
 	TrackSerial    bool            `db:"track_serial"    json:"track_serial"`
-	WarrantyMonths int             `db:"warranty_months" json:"warranty_months"`
-	IsActive       bool            `db:"is_active"       json:"is_active"`
-	NeedsReview    bool            `db:"needs_review"    json:"needs_review"`
-	CreatedBy      *int64          `db:"created_by"      json:"created_by,omitempty"`
-	CreatedAt      time.Time       `db:"created_at"      json:"created_at"`
+	WarrantyMonths      int             `db:"warranty_months"       json:"warranty_months"`
+	IsActive            bool            `db:"is_active"             json:"is_active"`
+	NeedsReview         bool            `db:"needs_review"          json:"needs_review"`
+	PreferredSupplierID *int64          `db:"preferred_supplier_id" json:"preferred_supplier_id,omitempty"`
+	CreatedBy           *int64          `db:"created_by"            json:"created_by,omitempty"`
+	CreatedAt           time.Time       `db:"created_at"            json:"created_at"`
 	// Joined, read-only:
-	CategoryName     string          `db:"category_name"      json:"category_name"`
-	UnitAbbr         string          `db:"unit_abbr"          json:"unit_abbr"`
-	UnitAllowDecimal bool            `db:"unit_allow_decimal" json:"unit_allow_decimal"`
-	StockQty         decimal.Decimal `db:"stock_qty"          json:"stock_qty"`
-	CreatedByName    *string         `db:"created_by_name"    json:"created_by_name,omitempty"`
+	CategoryName          string          `db:"category_name"           json:"category_name"`
+	UnitAbbr              string          `db:"unit_abbr"               json:"unit_abbr"`
+	UnitAllowDecimal      bool            `db:"unit_allow_decimal"      json:"unit_allow_decimal"`
+	StockQty              decimal.Decimal `db:"stock_qty"               json:"stock_qty"`
+	CreatedByName         *string         `db:"created_by_name"         json:"created_by_name,omitempty"`
+	PreferredSupplierName *string         `db:"preferred_supplier_name" json:"preferred_supplier_name,omitempty"`
 }
 
 // IsLowStock reports whether on-hand quantity is at or below the reorder level.
@@ -58,6 +60,9 @@ type CreateInput struct {
 	ReorderLevel   int     `json:"reorder_level"   form:"reorder_level"   validate:"gte=0"`
 	TrackSerial    bool    `json:"track_serial"    form:"track_serial"`
 	WarrantyMonths int     `json:"warranty_months" form:"warranty_months" validate:"gte=0,lte=600"`
+	// PreferredSupplierID is an optional default supplier (nil/0 = none). The form
+	// posts an empty string for "none"; bind to *int64 so 0 stays nil.
+	PreferredSupplierID *int64 `json:"preferred_supplier_id" form:"preferred_supplier_id"`
 }
 
 type UpdateInput = CreateInput
@@ -87,11 +92,13 @@ func (q ListQuery) offset() int { return (q.Page - 1) * q.Limit }
 const selectProduct = `
 	SELECT p.*, c.name AS category_name, u.abbreviation AS unit_abbr,
 	       u.allow_decimal AS unit_allow_decimal,
-	       COALESCE(s.quantity, 0) AS stock_qty
+	       COALESCE(s.quantity, 0) AS stock_qty,
+	       psup.name AS preferred_supplier_name
 	FROM products p
 	JOIN categories c ON c.id = p.category_id
 	JOIN units u      ON u.id = p.unit_id
-	LEFT JOIN stock s ON s.product_id = p.id`
+	LEFT JOIN stock s ON s.product_id = p.id
+	LEFT JOIN suppliers psup ON psup.id = p.preferred_supplier_id`
 
 type Repository struct{ db db.Queryer }
 
@@ -170,6 +177,7 @@ type writeRow struct {
 	WarrantyMonths                int
 	NeedsReview                   bool   // set by the till quick-add; false for normal creates
 	CreatedBy                     *int64 // the user who quick-added it (nil otherwise)
+	PreferredSupplier             *int64 // optional default supplier (nil = none)
 }
 
 func (r *Repository) Insert(ctx context.Context, w writeRow) (int64, error) {
@@ -178,12 +186,12 @@ func (r *Repository) Insert(ctx context.Context, w writeRow) (int64, error) {
 		INSERT INTO products
 			(name, name_si, barcode, category_id, unit_id,
 			 cost_price, selling_price, wholesale_price, tax_rate, reorder_level,
-			 track_serial, warranty_months, needs_review, created_by)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+			 track_serial, warranty_months, needs_review, created_by, preferred_supplier_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
 		RETURNING id`,
 		w.Name, w.NameSi, w.Barcode, w.CategoryID, w.UnitID,
 		w.Cost, w.Selling, w.Wholesale, w.Tax, w.Reorder,
-		w.TrackSerial, w.WarrantyMonths, w.NeedsReview, w.CreatedBy)
+		w.TrackSerial, w.WarrantyMonths, w.NeedsReview, w.CreatedBy, w.PreferredSupplier)
 	return id, err
 }
 
@@ -192,11 +200,11 @@ func (r *Repository) Update(ctx context.Context, id int64, w writeRow) error {
 		UPDATE products SET
 			name=$1, name_si=$2, barcode=$3, category_id=$4, unit_id=$5,
 			cost_price=$6, selling_price=$7, wholesale_price=$8, tax_rate=$9, reorder_level=$10,
-			track_serial=$11, warranty_months=$12
-		WHERE id=$13 AND is_active = true`,
+			track_serial=$11, warranty_months=$12, preferred_supplier_id=$13
+		WHERE id=$14 AND is_active = true`,
 		w.Name, w.NameSi, w.Barcode, w.CategoryID, w.UnitID,
 		w.Cost, w.Selling, w.Wholesale, w.Tax, w.Reorder,
-		w.TrackSerial, w.WarrantyMonths, id)
+		w.TrackSerial, w.WarrantyMonths, w.PreferredSupplier, id)
 	if err != nil {
 		return err
 	}

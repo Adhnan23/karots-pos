@@ -90,6 +90,18 @@ func (r *Repository) FindByID(ctx context.Context, id int64) (*Supplier, error) 
 	return &s, nil
 }
 
+// FindByName looks up an active supplier by case-insensitive name. Returns
+// sql.ErrNoRows when absent.
+func (r *Repository) FindByName(ctx context.Context, name string) (*Supplier, error) {
+	var s Supplier
+	err := r.q.GetContext(ctx, &s,
+		`SELECT * FROM suppliers WHERE lower(name) = lower($1) AND is_active = true ORDER BY id LIMIT 1`, name)
+	if err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
+
 func (r *Repository) Create(ctx context.Context, in CreateInput) (*Supplier, error) {
 	var s Supplier
 	err := r.q.GetContext(ctx, &s, `
@@ -170,6 +182,26 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (*Supplier, error)
 		return nil, apperr.Internal("failed to create supplier", err)
 	}
 	return sup, nil
+}
+
+// FindOrCreateByName resolves a supplier by case-insensitive name, creating a
+// bare supplier (name only) if none exists. An empty name returns (nil, nil) so
+// the caller can leave the link unset. Used by the bulk product importer.
+func (s *Service) FindOrCreateByName(ctx context.Context, name string) (*int64, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, nil
+	}
+	if sup, err := s.repo.FindByName(ctx, name); err == nil {
+		return &sup.ID, nil
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return nil, apperr.Internal("failed to resolve supplier", err)
+	}
+	sup, err := s.repo.Create(ctx, CreateInput{Name: name})
+	if err != nil {
+		return nil, apperr.Internal("failed to create supplier "+name, err)
+	}
+	return &sup.ID, nil
 }
 
 func (s *Service) Update(ctx context.Context, id int64, in UpdateInput) error {

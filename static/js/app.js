@@ -1168,3 +1168,63 @@ function cmdPalette(items) {
     },
   };
 }
+
+// Searchable, hierarchy-aware category picker. Replaces a native <select> that
+// can't show nesting (browsers collapse leading spaces in <option>) and gets
+// unwieldy with many categories. Backs a hidden <input> so it submits like a
+// normal field. cfg = { name, selected, options:[{id,name,depth}], includeAll,
+// allLabel, reload }. When reload is true (the products filter), picking
+// dispatches a bubbling "category-changed" event the filter form listens for.
+function categoryPicker(cfg) {
+  return {
+    open: false,
+    query: "",
+    selected: cfg.selected || "",
+    options: cfg.options || [],
+    includeAll: !!cfg.includeAll,
+    allLabel: cfg.allLabel || "All categories",
+    reload: !!cfg.reload,
+    placeholder: cfg.includeAll ? cfg.allLabel || "All categories" : "Select category…",
+    filtered() {
+      const q = this.query.trim().toLowerCase();
+      if (!q) return this.options;
+      return this.options.filter((o) => o.name.toLowerCase().includes(q));
+    },
+    label() {
+      const o = this.options.find((o) => String(o.id) === String(this.selected));
+      return o ? o.name : this.placeholder;
+    },
+    indent(o) {
+      return "padding-left:" + (0.75 + o.depth * 1.1) + "rem";
+    },
+    toggle() {
+      this.open = !this.open;
+      if (this.open) this.$nextTick(() => this.$refs.search && this.$refs.search.focus());
+    },
+    pick(o) {
+      this.selected = o ? String(o.id) : "";
+      this.open = false;
+      this.query = "";
+      if (this.reload) this.$nextTick(() => this.$dispatch("category-changed"));
+    },
+    clear() {
+      this.pick(null);
+    },
+  };
+}
+
+// Collapsible category tree for the admin Categories table. State is purely the
+// set of expanded IDs; a row is visible when every ancestor in its path is
+// expanded — so the default (nothing expanded) shows only top-level rows, and
+// the logic survives HTMX innerHTML swaps with no DOM map to rebuild.
+function categoryTree() {
+  return {
+    expanded: {},
+    toggle(id) {
+      this.expanded[id] = !this.expanded[id];
+    },
+    visible(path) {
+      return (path || []).every((id) => this.expanded[id]);
+    },
+  };
+}
