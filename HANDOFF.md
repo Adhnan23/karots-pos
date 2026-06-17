@@ -409,8 +409,12 @@ struct field in the same change.
 - Dev users: **Admin / 1234**, **Manager / 2222**, **Cashier / 1111**. Change
   before any real deploy. The seed (`cmd/server/seed.go`) is **entities only** —
   staff, shop settings, nested categories, 8 products + stock, 3 suppliers, 3
-  customers; no sample transactions. It skips if any users exist; reseed wants a
-  fresh DB (`docker compose down -v && make db-up && make seed`).
+  customers; no sample transactions. It skips if any users exist. For a populated
+  demo use `make demo` (`cmd/server/demo.go`: backdated purchases/sales/returns/
+  payments/cash-sessions/expenses; skips if any sale exists). Reseed wants a fresh
+  DB — `make reset` (`-reset`: `DROP SCHEMA` + re-migrate) does it in-place and
+  composes: `make reset-seed` / `make reset-demo` wipe then repopulate (works on
+  hosted DBs like Neon; refuses on `APP_ENV=production` without `-force`).
 - Run locally: `docker compose up -d postgres`, then
   `set -a && . ./.env && set +a && go run ./cmd/server`.
 

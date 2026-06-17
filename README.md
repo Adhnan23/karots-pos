@@ -26,6 +26,12 @@ reports start from a clean, zero-transaction state. It's idempotent: it skips if
 any users already exist (so reseeding wants a fresh database — see
 [Reset the database](#reset-the-database)).
 
+For a **populated demo** instead, run `make demo` in place of `make seed`: it seeds
+the same entities and then layers backdated sample transactions on top — purchases,
+~10 sales (retail/wholesale/credit, with discounts), a customer repayment, returns,
+cash-register sessions and expenses — so every report and chart shows realistic data.
+Like the seed it's idempotent (skips if any sale exists).
+
 Open <http://localhost:3000> and sign in with **phone number + PIN** — the server
 routes you to the admin panel or the cashier terminal automatically based on your
 role (there is no admin/cashier toggle on the login screen):
@@ -38,7 +44,26 @@ role (there is no admin/cashier toggle on the login screen):
 
 ### Reset the database
 
-The seed only runs on an empty database. To wipe everything and start fresh:
+The seed/demo only populate an empty database. To wipe everything and start fresh
+**in one command** — handy for re-running a demo, and for hosted databases (e.g.
+Neon) where there's no Docker volume to drop:
+
+```bash
+make reset                    # DROP SCHEMA + re-run migrations → empty DB
+make reset-seed               # …then re-seed entities
+make reset-demo               # …then re-seed the full demo dataset
+```
+
+These run `DROP SCHEMA public CASCADE` and let migrations rebuild everything, so
+they work against any Postgres over `DATABASE_URL`. **Stop the running server first**
+(the drop needs no competing connections). As a safety rail, `-reset` refuses when
+`APP_ENV=production` unless you also pass `-force`:
+
+```bash
+./bin/karots-pos -reset -demo -force
+```
+
+Alternatively, on the local Docker Postgres you can still drop the volume:
 
 ```bash
 docker compose down -v        # drop the Postgres volume (all data gone)
@@ -77,6 +102,13 @@ POS_ADMIN_NAME="Jane"  POS_ADMIN_PHONE=0771112222  POS_ADMIN_PIN=4321 \
 identity, a nested category tree, 8 stocked products, suppliers and customers) —
 **do not run it on a production install.** Both commands are idempotent (they skip
 if any users already exist) and exit without serving.
+
+`-demo` builds on `-seed` and adds backdated sample **transactions** (purchases,
+sales, returns, a customer repayment, cash-register sessions, expenses) for a
+fully-populated demo; it skips if any sale exists. `-reset` wipes the database
+(`DROP SCHEMA` + re-migrate) and can be combined: `-reset -seed` or `-reset -demo`
+repopulate in one step (see [Reset the database](#reset-the-database)). Both are
+**dev/demo only** — `-reset` refuses on `APP_ENV=production` unless given `-force`.
 
 ### Full stack in Docker
 
@@ -208,7 +240,7 @@ feature models`), which compiles and keeps a clean separation.
 | `receipt_no` had no atomic source | dedicated Postgres sequence `sales_receipt_seq` |
 | Sale not actually transactional | stock guard + movements + sale + items + payments + credit in **one tx** |
 | No CSRF story | `SameSite=Lax` httpOnly session cookie (blocks cross-site POST) |
-| `-migrate` flag referenced but missing | implemented (`-migrate`, plus `-seed`) |
+| `-migrate` flag referenced but missing | implemented (`-migrate`, plus `-seed` / `-demo` / `-reset`) |
 | No graceful shutdown, no PIN rate-limit, leaky errors | all added |
 
 Verified live: login → list → barcode lookup → retail sale (stock decrements,
@@ -218,7 +250,7 @@ change computed) → **oversell returns 409 with stock unchanged** → credit sa
 
 ## Make targets
 
-`db-up` · `migrate` · `seed` · `run` · `build` · `templ` · `test` · `docker-up` · `docker-down`
+`db-up` · `migrate` · `seed` · `demo` · `reset` · `reset-seed` · `reset-demo` · `run` · `build` · `templ` · `test` · `docker-up` · `docker-down`
 
 ## Notes for going further
 
