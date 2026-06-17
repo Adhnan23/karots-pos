@@ -47,7 +47,10 @@ import (
 func main() {
 	migrateOnly := flag.Bool("migrate", false, "run migrations and exit")
 	seedOnly := flag.Bool("seed", false, "seed development/demo data and exit")
+	demoOnly := flag.Bool("demo", false, "seed entities + sample transactions (purchases, sales, expenses…) and exit")
 	initOnly := flag.Bool("init", false, "create the initial admin account for a fresh shop and exit")
+	resetFlag := flag.Bool("reset", false, "drop ALL data and re-run migrations (optionally combine with -seed/-demo)")
+	forceFlag := flag.Bool("force", false, "allow -reset against a production database")
 	flag.Parse()
 
 	cfg := config.Load()
@@ -58,6 +61,18 @@ func main() {
 	}
 	defer sqlxDB.Close()
 
+	// Destructive wipe: drop the schema BEFORE migrating so the migration runner
+	// rebuilds it (and its seeded reference data) from scratch.
+	if *resetFlag {
+		if cfg.IsProd() && !*forceFlag {
+			log.Fatal("refusing -reset on a production database; pass -force to override")
+		}
+		log.Println("reset: dropping all data…")
+		if err := resetSchema(sqlxDB); err != nil {
+			log.Fatal(err)
+		}
+	}
+
 	if err := db.RunMigrations(sqlxDB.DB, migrations.FS); err != nil {
 		log.Fatal(err)
 	}
@@ -65,11 +80,24 @@ func main() {
 		log.Println("migrations applied")
 		return
 	}
+	// -reset on its own leaves a clean, empty migrated database; combined with
+	// -seed/-demo it falls through to those blocks to repopulate it.
+	if *resetFlag && !*seedOnly && !*demoOnly {
+		log.Println("reset complete: empty migrated database")
+		return
+	}
 	if *seedOnly {
 		if err := seed(sqlxDB); err != nil {
 			log.Fatal(err)
 		}
 		log.Println("seed complete")
+		return
+	}
+	if *demoOnly {
+		if err := demo(sqlxDB); err != nil {
+			log.Fatal(err)
+		}
+		log.Println("demo seed complete")
 		return
 	}
 	if *initOnly {

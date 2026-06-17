@@ -1,7 +1,7 @@
-.PHONY: help dev build build-windows run templ css test migrate seed db-up db-down docker-up docker-down tidy
+.PHONY: help dev build build-windows run templ css test migrate seed demo reset reset-seed reset-demo db-up db-down docker-up docker-down tidy
 
 help:
-	@echo "Targets: db-up, migrate, seed, dev, build, build-windows, run, test, templ, css, docker-up, docker-down"
+	@echo "Targets: db-up, migrate, seed, demo, reset, reset-seed, reset-demo, dev, build, build-windows, run, test, templ, css, docker-up, docker-down"
 
 # Generate Templ components and the stylesheet, then build a fully static,
 # self-contained binary (static assets + migrations are embedded; only the
@@ -36,9 +36,26 @@ test:
 migrate:
 	set -a && . ./.env && set +a && go run ./cmd/server -migrate
 
-# Seed starter data (admin/cashier users + sample products).
+# Seed starter data (admin/cashier users + sample products), entities only.
 seed:
 	set -a && . ./.env && set +a && go run ./cmd/server -seed
+
+# Seed a transaction-rich demo shop (entities + backdated purchases, sales,
+# expenses, returns, customer payment, cash register sessions).
+demo:
+	set -a && . ./.env && set +a && go run ./cmd/server -demo
+
+# Wipe the database (DROP SCHEMA) and re-run migrations. Stop the server first.
+# Combine with seed/demo to repopulate in one step. Refuses on APP_ENV=production
+# unless you also pass -force.
+reset:
+	set -a && . ./.env && set +a && go run ./cmd/server -reset
+
+reset-seed:
+	set -a && . ./.env && set +a && go run ./cmd/server -reset -seed
+
+reset-demo:
+	set -a && . ./.env && set +a && go run ./cmd/server -reset -demo
 
 # Start/stop just the Postgres container.
 db-up:
