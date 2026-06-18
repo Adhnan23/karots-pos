@@ -30,6 +30,7 @@ import (
 	"karots-pos/internal/features/units"
 	"karots-pos/internal/features/warranty"
 	"karots-pos/internal/middleware"
+	"karots-pos/internal/plugin"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/labstack/echo/v4"
@@ -338,4 +339,19 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	// Backup & restore (admin only — restore replaces all data).
 	ag.GET("/backup", admin.Backup, middleware.RequireRole(auth.RoleAdmin))
 	ag.POST("/restore", admin.Restore, middleware.RequireRole(auth.RoleAdmin))
+
+	// Plugins: hand each enabled plugin a registry over the frozen Core API and
+	// the scoped route Mux, then mount its routes. Plugin routes mount AFTER all
+	// core routes, so an exact-path plugin route overrides the core handler
+	// (echo last-write-wins for exact matches). Plugin cashier/admin routes
+	// inherit the same jwt/pinGuard/RequireRole middleware as their core peers.
+	// With no plugins compiled in this is a no-op.
+	core := plugin.Core{
+		DB: db, Cfg: cfg,
+		Audit: s.audit, Settings: s.settings, CashRegister: s.cashRegister,
+		Sales: s.sales, Expenses: s.expenses, Products: s.products,
+	}
+	reg := plugin.NewRegistry(core, plugin.NewMux(), e)
+	plugin.SetupAll(reg)
+	reg.Mux.Mount(e.Group(""), cg, ag)
 }
