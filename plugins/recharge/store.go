@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -53,6 +54,50 @@ func (s *Store) CarrierExists(ctx context.Context, name string) (bool, error) {
 	err := s.db.GetContext(ctx, &ok,
 		`SELECT EXISTS (SELECT 1 FROM recharge_carriers WHERE lower(name) = lower($1) AND is_active = true)`, name)
 	return ok, err
+}
+
+// Device is a physical SIM/phone/terminal under a carrier that holds a float
+// balance. Carrier is the joined carrier name (for admin listings).
+type Device struct {
+	ID        int64  `db:"id"         json:"id"`
+	CarrierID int64  `db:"carrier_id" json:"carrier_id"`
+	Label     string `db:"label"      json:"label"`
+	Number    string `db:"number"     json:"number"`
+	IsActive  bool   `db:"is_active"  json:"is_active"`
+	Carrier   string `db:"carrier"    json:"carrier"`
+}
+
+// Devices lists active devices joined with their carrier name, grouped by
+// carrier then label.
+func (s *Store) Devices(ctx context.Context) ([]Device, error) {
+	var ds []Device
+	err := s.db.SelectContext(ctx, &ds, `
+		SELECT d.id, d.carrier_id, d.label, COALESCE(d.number,'') AS number,
+		       d.is_active, c.name AS carrier
+		FROM recharge_devices d
+		JOIN recharge_carriers c ON c.id = d.carrier_id
+		WHERE d.is_active = true AND c.is_active = true
+		ORDER BY c.name, d.label`)
+	return ds, err
+}
+
+// CreateDevice adds a device under a carrier.
+func (s *Store) CreateDevice(ctx context.Context, carrierID int64, label, number string) (int64, error) {
+	var num *string
+	if strings.TrimSpace(number) != "" {
+		num = &number
+	}
+	var id int64
+	err := s.db.GetContext(ctx, &id,
+		`INSERT INTO recharge_devices (carrier_id, label, number) VALUES ($1,$2,$3) RETURNING id`,
+		carrierID, label, num)
+	return id, err
+}
+
+// DeactivateDevice retires a device (its history is preserved).
+func (s *Store) DeactivateDevice(ctx context.Context, id int64) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE recharge_devices SET is_active = false WHERE id = $1`, id)
+	return err
 }
 
 // serviceDefaults resolves a category id (ensuring a "Recharge" category exists)

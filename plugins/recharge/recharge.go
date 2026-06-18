@@ -35,17 +35,35 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 	reg.Admin().GET("/recharge/table", a.CarriersTable)
 	reg.Admin().POST("/recharge", a.CarrierCreate)
 	reg.Admin().POST("/recharge/:id/delete", a.CarrierDelete)
+	reg.Admin().POST("/recharge/devices", a.DeviceCreate)
+	reg.Admin().POST("/recharge/devices/:id/delete", a.DeviceDelete)
+	reg.Admin().GET("/recharge/report", a.Report)
 
 	ch := &cashierUI{p: p}
 	reg.Cashier().GET("/recharge/carriers", ch.Carriers)
+	reg.Cashier().GET("/recharge", ch.Recon)
+	reg.Cashier().POST("/recharge/open", ch.SaveOpening)
+	reg.Cashier().POST("/recharge/close", ch.SaveClosing)
+	reg.Cashier().POST("/recharge/tx", ch.Tx)
+	reg.Cashier().POST("/recharge/wallet", ch.Wallet)
 	reg.AddPosAction(plugin.PosAction{Component: ReloadButton()})
+	reg.AddCashierTab(plugin.CashierTab{Href: "/cashier/recharge", Label: "Recharge", Key: "recharge"})
+	reg.AddTenderMethod(plugin.TenderMethod{Value: "wallet", Label: "Wallet (eZ Cash / mCash)"})
 
 	reg.AddAdminNav(plugin.AdminNavEntry{
 		SectionLabel: "Recharge",
 		Icon:         "📶",
 		Href:         "/admin/recharge",
-		Label:        "Carriers",
+		Label:        "Carriers & devices",
 		Key:          "recharge-carriers",
-		Desc:         "Mobile-recharge carriers & reconciliation",
+		Desc:         "Mobile-recharge carriers, devices & reconciliation",
+	})
+	reg.AddAdminNav(plugin.AdminNavEntry{
+		SectionLabel: "Recharge",
+		Icon:         "📶",
+		Href:         "/admin/recharge/report",
+		Label:        "Report",
+		Key:          "recharge-report",
+		Desc:         "Reconciliation & money-movement ledger",
 	})
 }

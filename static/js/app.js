@@ -208,8 +208,9 @@ function pos(symbol, defaultType, promptAfterSale) {
     customerId: "",
     discount: 0,
     discountType: "fixed", // bill-level discount: "fixed" (Rs) or "percent" (%)
-    // Split tender: one or more payment lines (cash / card / online).
-    payments: [{ method: "cash", amount: 0, reference: "" }],
+    // Split tender: one or more payment lines (cash / card / online / wallet).
+    payments: [{ method: "cash", amount: 0, reference: "", carrierId: "" }],
+    walletCarriers: [], // recharge plugin tender: carriers a wallet payment can credit
     busy: false,
     session: null,
     summary: null,
@@ -731,12 +732,42 @@ function pos(symbol, defaultType, promptAfterSale) {
 
     // --- split-tender payments ---
     addPayment() {
-      this.payments.push({ method: "card", amount: 0, reference: "" });
+      this.payments.push({ method: "card", amount: 0, reference: "", carrierId: "" });
     },
     removePayment(idx) {
       this.payments.splice(idx, 1);
       if (this.payments.length === 0) {
-        this.payments.push({ method: "cash", amount: 0, reference: "" });
+        this.payments.push({ method: "cash", amount: 0, reference: "", carrierId: "" });
+      }
+    },
+    // Lazily load the carriers a wallet (eZ Cash / mCash) payment can credit.
+    // No-op (empty list) when the recharge plugin isn't installed.
+    async loadWalletCarriers() {
+      if (this.walletCarriers.length) return;
+      try {
+        const json = await apiFetch("GET", "/cashier/recharge/carriers", undefined, { silent: true });
+        this.walletCarriers = json.data || [];
+      } catch (_) {
+        /* recharge plugin not installed; leave list empty */
+      }
+    },
+    // After a sale, credit each wallet tender to its carrier's float (recharge
+    // plugin). Best-effort: the per-device closing count is authoritative anyway.
+    async attributeWallet(saleId) {
+      const ws = this.payments.filter(
+        (p) => p.method === "wallet" && Number(p.amount) > 0 && p.carrierId
+      );
+      for (const w of ws) {
+        try {
+          await apiFetch(
+            "POST",
+            "/cashier/recharge/wallet",
+            { sale_id: saleId, carrier_id: Number(w.carrierId), amount: String(w.amount) },
+            { silent: true }
+          );
+        } catch (_) {
+          /* leave float to be reconciled by the closing count */
+        }
       }
     },
     paidTotal() {
@@ -783,6 +814,13 @@ function pos(symbol, defaultType, promptAfterSale) {
           return;
         }
       }
+      // A wallet (eZ Cash / mCash) tender must name the carrier it credits.
+      for (const p of this.payments) {
+        if (p.method === "wallet" && Number(p.amount) > 0 && !p.carrierId) {
+          toast("Choose a carrier for the wallet payment", "error");
+          return;
+        }
+      }
       this.busy = true;
       try {
         const payload = {
@@ -811,6 +849,7 @@ function pos(symbol, defaultType, promptAfterSale) {
             })),
         };
         const json = await apiFetch("POST", "/api/sales", payload);
+        await this.attributeWallet(json.data.sale.id);
         toast("Sale complete", "success");
         if (this.promptAfterSale) {
           this.receipt = json.data; // show the Print / New Sale prompt
@@ -834,7 +873,7 @@ function pos(symbol, defaultType, promptAfterSale) {
       this.cart = [];
       this.discount = 0;
       this.discountType = "fixed";
-      this.payments = [{ method: "cash", amount: 0, reference: "" }];
+      this.payments = [{ method: "cash", amount: 0, reference: "", carrierId: "" }];
       this.customerId = "";
       this.receipt = null;
     },

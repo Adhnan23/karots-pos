@@ -44,6 +44,15 @@ type PaletteEntry struct {
 	Group string
 }
 
+// TenderMethod adds a payment method to the cashier POS split-tender selector.
+// Value must be a payment_method enum value the plugin's migration added (e.g.
+// "wallet"); Label is shown in the dropdown. The carrier picker and the
+// post-checkout attribution for the wallet tender are handled in the cashier JS.
+type TenderMethod struct {
+	Value string
+	Label string
+}
+
 // PosAction adds a control to the cashier POS screen's action bar (rendered
 // inside the pos() Alpine scope). A plugin action typically opens its own popup
 // and adds a service line to the cart by dispatching the window event
@@ -59,6 +68,7 @@ var (
 	dashboardCards []DashboardCard
 	paletteEntries []PaletteEntry
 	posActions     []PosAction
+	tenderMethods  []TenderMethod
 )
 
 // Hook registration — plugins call these from Setup.
@@ -68,6 +78,7 @@ func (r *Registry) AddSettingsSection(s SettingsSection) { settingsSecs = append
 func (r *Registry) AddDashboardCard(c DashboardCard)     { dashboardCards = append(dashboardCards, c) }
 func (r *Registry) AddPaletteEntry(p PaletteEntry)       { paletteEntries = append(paletteEntries, p) }
 func (r *Registry) AddPosAction(a PosAction)             { posActions = append(posActions, a) }
+func (r *Registry) AddTenderMethod(t TenderMethod)       { tenderMethods = append(tenderMethods, t) }
 
 // Getters for the template layer.
 func AdminNav() []AdminNavEntry           { return adminNav }
@@ -76,3 +87,4 @@ func SettingsSections() []SettingsSection { return settingsSecs }
 func DashboardCards() []DashboardCard     { return dashboardCards }
 func PaletteEntries() []PaletteEntry      { return paletteEntries }
 func PosActions() []PosAction             { return posActions }
+func TenderMethods() []TenderMethod       { return tenderMethods }

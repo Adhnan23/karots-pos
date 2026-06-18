@@ -50,7 +50,7 @@ type serialBatch struct {
 }
 
 type PaymentInput struct {
-	Method    string  `json:"method"    validate:"required,oneof=cash card online"`
+	Method    string  `json:"method"    validate:"required,oneof=cash card online wallet"`
 	Amount    string  `json:"amount"    validate:"required"`
 	Reference *string `json:"reference"`
 }

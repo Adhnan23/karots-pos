@@ -207,15 +207,26 @@ templ POS(d POSData) {
 						<!-- Split tender: cash / card / online lines -->
 						<div class="space-y-1.5">
 							<template x-for="(p, idx) in payments" x-bind:key="idx">
-								<div class="flex items-center gap-1.5">
-									<select x-model="p.method" class="border rounded px-1.5 py-1 text-sm">
+								<div class="flex flex-wrap items-center gap-1.5">
+									<select x-model="p.method" x-on:change="if(p.method==='wallet') loadWalletCarriers()" class="border rounded px-1.5 py-1 text-sm">
 										<option value="cash">Cash</option>
 										<option value="card">Card</option>
 										<option value="online">Online</option>
+										if len(plugin.TenderMethods()) > 0 {
+											for _, t := range plugin.TenderMethods() {
+												<option value={ t.Value }>{ t.Label }</option>
+											}
+										}
 									</select>
 									<input type="number" step="0.01" min="0" x-model.number="p.amount" class="w-24 border rounded px-2 py-1 text-right text-sm" placeholder="0.00"/>
 									<button type="button" x-on:click="fillRemaining(idx)" class="px-1.5 py-1 text-xs rounded border text-slate-500" title="Fill remaining balance">=</button>
-									<input x-show="p.method !== 'cash'" x-model="p.reference" class="flex-1 min-w-0 border rounded px-2 py-1 text-sm" placeholder="ref / last 4"/>
+									<input x-show="p.method !== 'cash' && p.method !== 'wallet'" x-model="p.reference" class="flex-1 min-w-0 border rounded px-2 py-1 text-sm" placeholder="ref / last 4"/>
+									<select x-show="p.method === 'wallet'" x-model="p.carrierId" class="flex-1 min-w-0 border rounded px-2 py-1 text-sm">
+										<option value="">Carrier…</option>
+										<template x-for="c in walletCarriers" x-bind:key="c.id">
+											<option x-bind:value="c.id" x-text="c.name"></option>
+										</template>
+									</select>
 									<button type="button" x-on:click="removePayment(idx)" class="text-red-500 px-1" x-show="payments.length > 1">✕</button>
 								</div>
 							</template>

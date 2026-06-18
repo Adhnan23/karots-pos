@@ -1,0 +1,202 @@
+package recharge
+
+import "karots-pos/templates/layouts"
+import "karots-pos/internal/money"
+import "strconv"
+import "github.com/shopspring/decimal"
+
+// ReconPage is the cashier recharge screen: per-device float open/close plus the
+// money-transaction form. Rendered inside the core cashier shell so it inherits
+// the terminal topbar, palette and styling.
+templ ReconPage(d ReconData) {
+	@layouts.Cashier("Recharge", d.UserName, d.Role, "recharge", d.ShowChangePin) {
+		<div class="max-w-5xl mx-auto p-4 sm:p-6">
+			<h1 class="text-2xl font-bold mb-4">Recharge & Mobile Money</h1>
+			@ReconBody(d)
+		</div>
+	}
+}
+
+// ReconBody is the HTMX-swappable inner body (re-rendered after every action).
+templ ReconBody(d ReconData) {
+	<div id="recon-body" class="space-y-6">
+		if d.Session == nil {
+			<div class="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-5">
+				Open your cash drawer first — recharge reconciliation is tied to the open cash session.
+			</div>
+		} else {
+			<div class="text-sm text-slate-500">
+				Cash session #{ strconv.FormatInt(d.Session.ID, 10) } · opened { d.Session.OpenedAt.Format("Mon 02 Jan, 15:04") }
+			</div>
+			@txForm(d)
+			if len(d.Rows) == 0 {
+				<div class="bg-white rounded-2xl shadow-sm p-6 text-slate-400 text-center">
+					No carriers set up. Add carriers and devices in Admin → Recharge.
+				</div>
+			} else {
+				<form id="recon-floats" class="space-y-5">
+					for _, cr := range d.Rows {
+						@carrierBlock(d.Symbol, cr)
+					}
+				</form>
+				<div class="flex flex-wrap gap-3">
+					<button
+						type="button"
+						hx-post="/cashier/recharge/open"
+						hx-include="#recon-floats"
+						hx-target="#recon-body"
+						hx-swap="outerHTML"
+						class="px-4 py-2.5 rounded-lg border border-indigo-300 text-indigo-700 font-medium hover:bg-indigo-50"
+					>Save opening floats</button>
+					<button
+						type="button"
+						hx-post="/cashier/recharge/close"
+						hx-include="#recon-floats"
+						hx-target="#recon-body"
+						hx-swap="outerHTML"
+						hx-confirm="Save the counted closing floats? This finalises each device for this session."
+						class="px-4 py-2.5 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700"
+					>Save closing & show bonus/loss</button>
+				</div>
+			}
+		}
+	</div>
+}
+
+// txForm is the money-transaction recorder (deposit / withdrawal / bill-pay / topup).
+templ txForm(d ReconData) {
+	<div class="bg-white rounded-2xl shadow-sm p-6">
+		<h2 class="text-lg font-semibold mb-4">Record a transaction</h2>
+		<form
+			hx-post="/cashier/recharge/tx"
+			hx-target="#recon-body"
+			hx-swap="outerHTML"
+			hx-on::after-request="if(event.detail.successful) this.reset()"
+			class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3"
+		>
+			<div>
+				<label class="block text-sm font-medium text-slate-600 mb-1">Type</label>
+				<select name="type" required class="w-full border rounded-lg px-3 py-2.5">
+					<option value="deposit">Deposit / cash-in (send to wallet)</option>
+					<option value="withdrawal">Withdrawal / cash-out (give cash)</option>
+					<option value="billpay">Bill payment</option>
+					<option value="topup">Supplier float top-up</option>
+				</select>
+			</div>
+			<div>
+				<label class="block text-sm font-medium text-slate-600 mb-1">Carrier</label>
+				<select name="carrier_id" required class="w-full border rounded-lg px-3 py-2.5">
+					for _, c := range d.Carriers {
+						<option value={ strconv.FormatInt(c.ID, 10) }>{ c.Name }</option>
+					}
+				</select>
+			</div>
+			<div>
+				<label class="block text-sm font-medium text-slate-600 mb-1">Amount</label>
+				<input type="number" name="amount" min="0" step="0.01" required placeholder="0.00" class="w-full border rounded-lg px-3 py-2.5 text-right"/>
+			</div>
+			<div>
+				<label class="block text-sm font-medium text-slate-600 mb-1">Device (optional)</label>
+				<select name="device_id" class="w-full border rounded-lg px-3 py-2.5">
+					<option value="">—</option>
+					for _, dev := range d.Devices {
+						<option value={ strconv.FormatInt(dev.ID, 10) }>{ dev.Carrier } · { dev.Label }</option>
+					}
+				</select>
+			</div>
+			<div>
+				<label class="block text-sm font-medium text-slate-600 mb-1">Reference (optional)</label>
+				<input type="text" name="reference" placeholder="txn / phone no." class="w-full border rounded-lg px-3 py-2.5"/>
+			</div>
+			<div class="flex items-end">
+				<button type="submit" class="w-full py-2.5 rounded-lg bg-emerald-600 text-white font-semibold hover:bg-emerald-700">Record & print</button>
+			</div>
+		</form>
+		<p class="text-xs text-slate-400 mt-3">Cash-in/out posts to your cash drawer automatically; top-ups also book a shop expense. A slip prints for deposit, withdrawal and bill payment.</p>
+	</div>
+}
+
+// carrierBlock shows one carrier's devices with opening/closing inputs and its
+// computed expected float and bonus/loss.
+templ carrierBlock(symbol string, cr CarrierRecon) {
+	<div class="bg-white rounded-2xl shadow-sm p-6">
+		<div class="flex items-center justify-between mb-3">
+			<h3 class="text-base font-semibold">{ cr.Carrier }</h3>
+			if cr.AllClosed {
+				<span class="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">closed</span>
+			}
+		</div>
+		if len(cr.Devices) == 0 {
+			<p class="text-sm text-slate-400">No devices. Add one in Admin → Recharge.</p>
+		} else {
+			<table class="w-full text-sm">
+				<thead class="text-left text-slate-500 border-b">
+					<tr>
+						<th class="py-2 pr-4">Device</th>
+						<th class="py-2 pr-4 text-right">Opening</th>
+						<th class="py-2 text-right">Closing</th>
+					</tr>
+				</thead>
+				<tbody>
+					for _, dev := range cr.Devices {
+						<tr class="border-b last:border-0">
+							<td class="py-2 pr-4">
+								{ dev.Label }
+								if dev.Number != "" {
+									<span class="text-slate-400">· { dev.Number }</span>
+								}
+							</td>
+							<td class="py-2 pr-4 text-right">
+								<input
+									type="number" min="0" step="0.01"
+									name={ "opening_" + strconv.FormatInt(dev.DeviceID, 10) }
+									value={ openingValue(dev) }
+									placeholder="0.00"
+									class="w-28 border rounded-lg px-2 py-1.5 text-right"
+								/>
+							</td>
+							<td class="py-2 text-right">
+								<input
+									type="number" min="0" step="0.01"
+									name={ "closing_" + strconv.FormatInt(dev.DeviceID, 10) }
+									value={ closingValue(dev) }
+									placeholder="0.00"
+									class="w-28 border rounded-lg px-2 py-1.5 text-right"
+								/>
+							</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+			<dl class="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-1 text-sm mt-4">
+				@stat("Opening", money.Format(symbol, cr.Opening))
+				@stat("Reload sold", money.Format(symbol, cr.Reload))
+				@stat("Float in", money.Format(symbol, cr.FloatIn))
+				@stat("Float out", money.Format(symbol, cr.FloatOut))
+				@stat("Expected close", money.Format(symbol, cr.Expected))
+				if cr.AllClosed {
+					@stat("Counted close", money.Format(symbol, cr.Closing))
+					@bonusStat(symbol, cr.BonusLoss)
+				}
+			</dl>
+		}
+	</div>
+}
+
+templ stat(label, value string) {
+	<div class="flex justify-between sm:block">
+		<dt class="text-slate-500">{ label }</dt>
+		<dd class="font-medium tabular-nums">{ value }</dd>
+	</div>
+}
+
+templ bonusStat(symbol string, v decimal.Decimal) {
+	<div class="flex justify-between sm:block">
+		<dt class="text-slate-500">Bonus / loss</dt>
+		if v.IsNegative() {
+			<dd class="font-semibold tabular-nums text-rose-600">{ money.Format(symbol, v) }</dd>
+		} else {
+			<dd class="font-semibold tabular-nums text-emerald-600">{ money.Format(symbol, v) }</dd>
+		}
+	</div>
+}
