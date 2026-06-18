@@ -35,6 +35,7 @@ import (
 	"karots-pos/internal/features/suppliers"
 	"karots-pos/internal/features/units"
 	appmw "karots-pos/internal/middleware"
+	"karots-pos/internal/plugin"
 	"karots-pos/internal/validator"
 	"karots-pos/internal/web"
 	"karots-pos/migrations"
@@ -75,6 +76,21 @@ func main() {
 
 	if err := db.RunMigrations(sqlxDB.DB, migrations.FS); err != nil {
 		log.Fatal(err)
+	}
+	// Per-plugin migrations: each enabled plugin (see enabled_plugins.go) owns its
+	// own goose version table, so this applies only that plugin's pending
+	// migrations onto the existing schema — the late-enable path (buy a plugin
+	// after go-live → migrate in + backfill, never a wipe). Idempotent; runs on
+	// every boot, including -migrate and after -reset.
+	for _, p := range plugin.All() {
+		pfs, suffix := p.Migrations()
+		if pfs == nil || suffix == "" {
+			continue
+		}
+		if err := db.RunMigrationsTable(sqlxDB.DB, pfs, "goose_db_version_"+suffix); err != nil {
+			log.Fatalf("plugin %q migrations: %v", p.Name(), err)
+		}
+		log.Printf("plugin %q: migrations applied (goose_db_version_%s)", p.Name(), suffix)
 	}
 	if *migrateOnly {
 		log.Println("migrations applied")

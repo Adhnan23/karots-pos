@@ -53,3 +53,27 @@ func RunMigrations(sqlDB *sql.DB, migrationsFS fs.FS) error {
 	}
 	return nil
 }
+
+// RunMigrationsTable applies a plugin's embedded migrations using a dedicated
+// goose version table (e.g. "goose_db_version_recharge") instead of the core
+// "goose_db_version". This keeps a plugin's schema versioning independent of
+// core and of every other plugin, which is what makes late-enabling a plugin on
+// an existing live database safe: only the plugin's own pending migrations are
+// applied; core (and other plugins') schema and data are never touched — no
+// wipe. It is idempotent — already-applied migrations are skipped — so it can be
+// run on every boot. Any data backfill belongs in the plugin's own migrations
+// (idempotent INSERT … SELECT … WHERE NOT EXISTS) or its Setup seeding.
+func RunMigrationsTable(sqlDB *sql.DB, migrationsFS fs.FS, table string) error {
+	goose.SetBaseFS(migrationsFS)
+	defer goose.SetBaseFS(nil)
+	// goose's table name is process-global; restore the core default after.
+	goose.SetTableName(table)
+	defer goose.SetTableName("goose_db_version")
+	if err := goose.SetDialect("postgres"); err != nil {
+		return fmt.Errorf("goose dialect: %w", err)
+	}
+	if err := goose.Up(sqlDB, "."); err != nil {
+		return fmt.Errorf("goose up (%s): %w", table, err)
+	}
+	return nil
+}
