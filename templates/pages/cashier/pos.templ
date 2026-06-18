@@ -1,6 +1,7 @@
 package cashierpages
 
 import "karots-pos/templates/layouts"
+import "karots-pos/internal/plugin"
 
 type POSData struct {
 	CashierName     string
@@ -22,6 +23,7 @@ templ POS(d POSData) {
 			x-data={ "pos('" + d.Symbol + "', '" + d.DefaultSaleType + "', " + jsBool(d.PromptAfterSale) + ")" }
 			x-init="init()"
 			x-on:keydown.window="onKey($event)"
+			x-on:pos-add-service.window="addServiceLine($event.detail.id, $event.detail.name, $event.detail.price)"
 		>
 			<!-- Register closed overlay: count the opening float by denomination -->
 			<div x-show="!session" x-cloak class="absolute inset-0 bg-slate-100/95 z-30 flex items-center justify-center p-4 overflow-auto">
@@ -86,6 +88,9 @@ templ POS(d POSData) {
 							title="Sell an item that isn't in the catalog yet"
 							class="shrink-0 px-3 py-2.5 rounded-lg border border-indigo-300 text-indigo-700 font-medium text-sm hover:bg-indigo-50"
 						>+ Quick item</button>
+						for _, a := range plugin.PosActions() {
+							@a.Component
+						}
 					</div>
 					<div class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3">
 						<template x-for="p in products" x-bind:key="p.id">

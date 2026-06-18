@@ -44,12 +44,21 @@ type PaletteEntry struct {
 	Group string
 }
 
+// PosAction adds a control to the cashier POS screen's action bar (rendered
+// inside the pos() Alpine scope). A plugin action typically opens its own popup
+// and adds a service line to the cart by dispatching the window event
+// "pos-add-service" with detail {id, name, price}, which the POS listens for.
+type PosAction struct {
+	Component templ.Component
+}
+
 var (
 	adminNav       []AdminNavEntry
 	cashierTabs    []CashierTab
 	settingsSecs   []SettingsSection
 	dashboardCards []DashboardCard
 	paletteEntries []PaletteEntry
+	posActions     []PosAction
 )
 
 // Hook registration — plugins call these from Setup.
@@ -58,6 +67,7 @@ func (r *Registry) AddCashierTab(t CashierTab)           { cashierTabs = append(
 func (r *Registry) AddSettingsSection(s SettingsSection) { settingsSecs = append(settingsSecs, s) }
 func (r *Registry) AddDashboardCard(c DashboardCard)     { dashboardCards = append(dashboardCards, c) }
 func (r *Registry) AddPaletteEntry(p PaletteEntry)       { paletteEntries = append(paletteEntries, p) }
+func (r *Registry) AddPosAction(a PosAction)             { posActions = append(posActions, a) }
 
 // Getters for the template layer.
 func AdminNav() []AdminNavEntry           { return adminNav }
@@ -65,3 +75,4 @@ func CashierTabs() []CashierTab           { return cashierTabs }
 func SettingsSections() []SettingsSection { return settingsSecs }
 func DashboardCards() []DashboardCard     { return dashboardCards }
 func PaletteEntries() []PaletteEntry      { return paletteEntries }
+func PosActions() []PosAction             { return posActions }

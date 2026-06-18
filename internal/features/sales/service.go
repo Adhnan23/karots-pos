@@ -133,6 +133,9 @@ func (s *Service) Create(ctx context.Context, in CreateInput, cashierID int64) (
 		taxTotal := decimal.Zero
 		itemDiscTotal := decimal.Zero
 		lines := make([]SaleItem, 0, len(in.Items))
+		// Service products (is_service) carry no inventory: they skip stock
+		// depletion above and the ledger movement below.
+		serviceProducts := map[int64]bool{}
 
 		warrRepo := warranty.NewRepository(tx)
 		serialSeen := map[string]bool{}
@@ -218,6 +221,9 @@ func (s *Service) Create(ctx context.Context, in CreateInput, cashierID int64) (
 			// Service lines (is_service) carry no inventory: skip the stock guard
 			// and batch depletion, and record zero COGS.
 			cost := decimal.Zero
+			if p.IsService {
+				serviceProducts[p.ID] = true
+			}
 			if !p.IsService {
 				// Atomic guard: prevents overselling under concurrency.
 				ok, err := stkRepo.DecrementGuarded(ctx, p.ID, qty)
@@ -320,6 +326,9 @@ func (s *Service) Create(ctx context.Context, in CreateInput, cashierID int64) (
 			lines[i].SaleID = saleID
 			if err := saleRepo.InsertItem(ctx, saleID, lines[i]); err != nil {
 				return apperr.Internal("failed to save sale item", err)
+			}
+			if serviceProducts[lines[i].ProductID] {
+				continue // service line: no inventory, no ledger movement
 			}
 			neg := lines[i].Quantity.Neg()
 			refType := "sale"
@@ -432,6 +441,14 @@ func (s *Service) Return(ctx context.Context, id int64, userID int64) (*Detail, 
 		if err != nil {
 			return apperr.Internal("failed to load sale items", err)
 		}
+		// Service lines (recharge/airtime) can't be returned. If the sale still has
+		// one outstanding, block the whole-sale return rather than silently dropping
+		// it — the cashier can line-return the other items.
+		for _, it := range items {
+			if it.IsService && it.Quantity.Sub(it.ReturnedQty).IsPositive() {
+				return apperr.Conflict("this sale includes a recharge item, which can't be returned")
+			}
+		}
 		ref := "sale"
 		for _, it := range items {
 			remaining := it.Quantity.Sub(it.ReturnedQty)
@@ -538,6 +555,9 @@ func (s *Service) PartialReturn(ctx context.Context, saleID int64, in PartialRet
 			it, err := saleRepo.FindItem(ctx, saleID, ln.SaleItemID)
 			if err != nil {
 				return apperr.Validation("sale line not found on this sale")
+			}
+			if it.IsService {
+				return apperr.Conflict(fmt.Sprintf("%s is a recharge item and can't be returned", it.ProductName))
 			}
 			if qty.GreaterThan(it.ReturnableQty()) {
 				return apperr.Conflict(fmt.Sprintf("cannot return %s of %s — only %s remain",

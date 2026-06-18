@@ -563,6 +563,29 @@ function pos(symbol, defaultType, promptAfterSale) {
       });
       this.syncSerials(this.cart[this.cart.length - 1]);
     },
+    // addServiceLine adds a non-stocked service line to the cart (e.g. a plugin
+    // recharge top-up). price is the per-line amount sent to the server as
+    // price_override; the server honours it only for is_service products. Each
+    // call is its own line (no qty merge) so several service sales can coexist.
+    addServiceLine(id, name, price) {
+      const amt = Number(price) || 0;
+      this.cart.push({
+        id: id,
+        name: name,
+        unit_price: amt,
+        tax_rate: 0,
+        qty: 1,
+        stock: Number.MAX_SAFE_INTEGER,
+        allowDecimal: false,
+        discount: 0,
+        discountType: "fixed",
+        track_serial: false,
+        warranty_months: 0,
+        serials: [],
+        is_service: true,
+        price_override: String(amt),
+      });
+    },
     // syncSerials keeps a serial-tracked line's serial inputs in step with its
     // quantity (one box per unit), preserving anything already typed.
     syncSerials(it) {
@@ -772,6 +795,9 @@ function pos(symbol, defaultType, promptAfterSale) {
             quantity: String(it.qty),
             discount: String(it.discount || 0),
             discount_type: it.discountType || "fixed",
+            // Service lines (plugin recharge) carry a per-line amount; ignored by
+            // the server for normal stocked products.
+            price_override: it.price_override || "",
             serials: it.track_serial
               ? (it.serials || []).map((s) => String(s || "").trim())
               : [],

@@ -1,0 +1,45 @@
+package recharge
+
+// ReloadButton is injected into the cashier POS action bar (via the PosAction
+// hook). It opens a carrier+amount popup and, on confirm, dispatches the generic
+// "pos-add-service" window event the core POS listens for — adding a recharge
+// service line to the existing cart so it sells through the normal checkout,
+// receipt and cash drawer. All state is self-contained inline Alpine; it never
+// reaches into the pos() component directly.
+templ ReloadButton() {
+	<div
+		x-data="{ open:false, carriers:[], cid:'', amount:'', async load(){ try{ const r=await fetch('/cashier/recharge/carriers'); const j=await r.json(); this.carriers=j.data||[]; if(this.carriers.length && !this.cid){ this.cid=String(this.carriers[0].id) } }catch(e){} }, add(){ const c=this.carriers.find(x=>String(x.id)===String(this.cid)); const amt=Number(this.amount); if(!c || !(amt>0)){ return } window.dispatchEvent(new CustomEvent('pos-add-service',{detail:{id:c.product_id, name:c.name+' Recharge', price:amt}})); this.open=false; this.amount=''; } }"
+		class="shrink-0"
+	>
+		<button
+			type="button"
+			x-on:click="open=true; load()"
+			title="Sell a mobile recharge"
+			class="px-3 py-2.5 rounded-lg border border-emerald-300 text-emerald-700 font-medium text-sm hover:bg-emerald-50"
+		>📶 Reload</button>
+		<div x-show="open" x-cloak class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" x-on:click.self="open=false">
+			<div class="bg-white rounded-2xl shadow-xl p-6 w-full max-w-sm" x-on:keydown.escape.window="open=false">
+				<h2 class="text-lg font-bold mb-4">Mobile Recharge</h2>
+				<div class="space-y-3">
+					<div>
+						<label class="block text-sm font-medium text-slate-600 mb-1">Carrier</label>
+						<select x-model="cid" class="w-full border rounded-lg px-3 py-2.5">
+							<template x-for="c in carriers" x-bind:key="c.id">
+								<option x-bind:value="c.id" x-text="c.name"></option>
+							</template>
+						</select>
+						<p x-show="carriers.length===0" class="text-xs text-rose-500 mt-1">No carriers set up. Add one in Admin → Recharge.</p>
+					</div>
+					<div>
+						<label class="block text-sm font-medium text-slate-600 mb-1">Amount</label>
+						<input type="number" min="0" step="0.01" x-model="amount" x-on:keydown.enter.prevent="add()" placeholder="100.00" class="w-full border rounded-lg px-3 py-2.5 text-right"/>
+					</div>
+				</div>
+				<div class="flex gap-2 mt-5">
+					<button type="button" x-on:click="open=false" class="flex-1 py-2.5 rounded-lg border text-slate-600">Cancel</button>
+					<button type="button" x-on:click="add()" x-bind:disabled="!(Number(amount)>0 && cid)" class="flex-1 py-2.5 rounded-lg bg-emerald-600 text-white font-semibold disabled:opacity-40">Add to cart</button>
+				</div>
+			</div>
+		</div>
+	</div>
+}

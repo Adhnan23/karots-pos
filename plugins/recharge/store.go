@@ -11,10 +11,10 @@ import (
 // Carrier is a recharge carrier (Dialog, Mobitel, …). ProductID is the hidden
 // is_service core product that carries this carrier's recharge sales.
 type Carrier struct {
-	ID        int64  `db:"id"`
-	Name      string `db:"name"`
-	ProductID int64  `db:"product_id"`
-	IsActive  bool   `db:"is_active"`
+	ID        int64  `db:"id"         json:"id"`
+	Name      string `db:"name"       json:"name"`
+	ProductID int64  `db:"product_id" json:"product_id"`
+	IsActive  bool   `db:"is_active"  json:"is_active"`
 }
 
 // Store is the recharge plugin's data access over the core database. Cross-table

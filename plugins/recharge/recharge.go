@@ -36,6 +36,10 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 	reg.Admin().POST("/recharge", a.CarrierCreate)
 	reg.Admin().POST("/recharge/:id/delete", a.CarrierDelete)
 
+	ch := &cashierUI{p: p}
+	reg.Cashier().GET("/recharge/carriers", ch.Carriers)
+	reg.AddPosAction(plugin.PosAction{Component: ReloadButton()})
+
 	reg.AddAdminNav(plugin.AdminNavEntry{
 		SectionLabel: "Recharge",
 		Icon:         "📶",

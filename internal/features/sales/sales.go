@@ -50,6 +50,7 @@ type SaleItem struct {
 	// joined
 	ProductName string `db:"product_name" json:"product_name"`
 	UnitAbbr    string `db:"unit_abbr"    json:"unit_abbr"`
+	IsService   bool   `db:"is_service"   json:"is_service"` // service line (e.g. recharge) — non-returnable, no stock
 }
 
 // ReturnableQty is how much of this line can still be sent back.
@@ -159,7 +160,7 @@ func (r *Repository) AddReturnedQty(ctx context.Context, itemID int64, qty decim
 func (r *Repository) FindItem(ctx context.Context, saleID, itemID int64) (*SaleItem, error) {
 	var it SaleItem
 	err := r.q.GetContext(ctx, &it, `
-		SELECT si.*, p.name AS product_name, u.abbreviation AS unit_abbr
+		SELECT si.*, p.name AS product_name, u.abbreviation AS unit_abbr, p.is_service AS is_service
 		FROM sale_items si
 		JOIN products p ON p.id = si.product_id
 		JOIN units u    ON u.id = p.unit_id
@@ -259,7 +260,7 @@ func (r *Repository) FindByID(ctx context.Context, id int64) (*Sale, error) {
 func (r *Repository) Items(ctx context.Context, saleID int64) ([]SaleItem, error) {
 	var rows []SaleItem
 	err := r.q.SelectContext(ctx, &rows, `
-		SELECT si.*, p.name AS product_name, u.abbreviation AS unit_abbr
+		SELECT si.*, p.name AS product_name, u.abbreviation AS unit_abbr, p.is_service AS is_service
 		FROM sale_items si
 		JOIN products p ON p.id = si.product_id
 		JOIN units u    ON u.id = p.unit_id
