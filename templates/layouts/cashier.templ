@@ -14,6 +14,9 @@ func cashierPalette(role string) []paletteEntry {
 		{"/cashier/labels", "Print Labels", "Terminal"},
 		{"/cashier/warranty", "Warranty", "Terminal"},
 	}
+	for _, t := range pluginCashierTabs() {
+		out = append(out, paletteEntry{t.Href, t.Label, "Terminal"})
+	}
 	if role == auth.RoleAdmin || role == auth.RoleManager {
 		out = append(out, paletteEntry{"/admin", "Admin", "Go"})
 	}
@@ -38,6 +41,9 @@ templ Cashier(title, userName, role, active string, showChangePin bool) {
 						@cashierTab("/cashier/receipts", "Receipts", active == "receipts")
 						@cashierTab("/cashier/labels", "Labels", active == "labels")
 						@cashierTab("/cashier/warranty", "Warranty", active == "warranty")
+						for _, t := range pluginCashierTabs() {
+							@cashierTab(t.Href, t.Label, active == t.Key)
+						}
 					</nav>
 					<button
 						type="button"

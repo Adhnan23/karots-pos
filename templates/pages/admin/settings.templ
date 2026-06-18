@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"karots-pos/internal/features/settings"
+	"karots-pos/internal/plugin"
 	"karots-pos/templates/layouts"
 )
 
@@ -212,6 +213,12 @@ templ SettingsPage(d SettingsData) {
 				<p class="text-xs text-slate-400 mt-2">Runs over the database connection — works whether Postgres is in Docker or on a VPS, with nothing extra to install.</p>
 			</form>
 		</div>
+		for _, sec := range plugin.SettingsSections() {
+			<div class="bg-white rounded-2xl shadow-sm p-6 max-w-2xl mt-6">
+				<h2 class="text-lg font-semibold mb-4">{ sec.Title }</h2>
+				@sec.Body
+			</div>
+		}
 	}
 }
 

@@ -5,7 +5,7 @@ package layouts
 // rendered standalone above the sections; Reports keeps its own rich hub page so
 // its Links are exposed only through the command palette.
 func AdminSections() []AdminSection {
-	return []AdminSection{
+	return withPluginSections([]AdminSection{
 		{"Sell", "/admin/sell", "sell", "🧾", []AdminLink{
 			{"/admin/sales", "Sales", "sales", "Browse and search past sales"},
 			{"/admin/customers", "Customers", "customers", "Accounts, credit limits & statements"},
@@ -39,7 +39,7 @@ func AdminSections() []AdminSection {
 			{"/admin/audit", "Audit Log", "audit", "System activity history"},
 			{"/admin/settings", "Settings", "settings", "Shop, receipt & printer settings"},
 		}},
-	}
+	})
 }
 
 // adminReportLinks are the individual report pages reachable from the Reports hub.
@@ -77,6 +77,7 @@ func adminPalette() []paletteEntry {
 			out = append(out, paletteEntry{l.Href, l.Label, s.Label})
 		}
 	}
+	out = append(out, pluginPalette()...)
 	out = append(out, paletteEntry{"/cashier", "Open Cashier", "Go"})
 	return out
 }

@@ -5,6 +5,7 @@ import (
 
 	"karots-pos/internal/features/sales"
 	"karots-pos/internal/money"
+	"karots-pos/internal/plugin"
 	"karots-pos/templates/layouts"
 
 	"github.com/shopspring/decimal"
@@ -54,6 +55,14 @@ templ Dashboard(d DashboardData) {
 			@statCardLink("Expiring Soon", strconv.Itoa(d.ExpiringCount), "rose", "/admin/reports/expiring")
 			@statCard("Customer Dues", money.Format(d.Symbol, d.OutstandingDue), "rose")
 		</div>
+
+		if cards := plugin.DashboardCards(); len(cards) > 0 {
+			<div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-8">
+				for _, c := range cards {
+					@c.Component
+				}
+			</div>
+		}
 
 		<div class="bg-white rounded-2xl shadow-sm p-6">
 			<h2 class="text-lg font-semibold mb-4">Recent Sales</h2>
