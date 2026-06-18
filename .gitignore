@@ -5,3 +5,6 @@
 /backups/
 *_templ.go
 *.log
+
+# Per-shop bootstrap build output
+dist/

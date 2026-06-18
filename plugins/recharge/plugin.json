@@ -1,0 +1,8 @@
+{
+  "key": "recharge",
+  "name": "Mobile Recharge",
+  "import": "karots-pos/plugins/recharge",
+  "version": "1.0.0",
+  "description": "Carrier mobile-money agent: airtime reload, cash-in/out, bill pay, supplier float top-ups, wallet tender for sales, and per-device float reconciliation.",
+  "env_sample": "env.sample"
+}

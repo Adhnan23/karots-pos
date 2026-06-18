@@ -11,6 +11,10 @@ module.exports = {
     "./templates/**/*.templ",
     "./templates/**/*.go",
     "./static/js/**/*.js",
+    // Plugin UI (compiled in per-shop by cmd/bootstrap) contributes its own
+    // class strings; scan plugin .templ sources and generated/helper .go too.
+    "./plugins/**/*.templ",
+    "./plugins/**/*.go",
   ],
   safelist: [
     "text-amber-600",
