@@ -32,6 +32,10 @@ type ItemInput struct {
 	Quantity     string `json:"quantity"      validate:"required"`
 	Discount     string `json:"discount"`
 	DiscountType string `json:"discount_type" validate:"omitempty,oneof=fixed percent"`
+	// PriceOverride sets the unit price for a service line (is_service products,
+	// e.g. a recharge top-up amount). Ignored for normal stocked products, whose
+	// price is always recomputed server-side from the catalogue.
+	PriceOverride string `json:"price_override"`
 	// Serials carries one unique serial number per unit for serial-tracked
 	// products (length must equal the quantity); ignored for other products.
 	Serials []string `json:"serials"`
@@ -189,7 +193,15 @@ func (s *Service) Create(ctx context.Context, in CreateInput, cashierID int64) (
 			discType := normDiscountType(it.DiscountType)
 
 			unitPrice := p.SellingPrice
-			if in.SaleType == "wholesale" && p.WholesalePrice.IsPositive() {
+			if p.IsService && strings.TrimSpace(it.PriceOverride) != "" {
+				// Service lines (e.g. recharge) carry a per-line amount, not a
+				// fixed catalogue price.
+				ov, err := money.Parse(it.PriceOverride)
+				if err != nil || ov.IsNegative() {
+					return apperr.Validation(fmt.Sprintf("price for %s is invalid", p.Name))
+				}
+				unitPrice = ov
+			} else if in.SaleType == "wholesale" && p.WholesalePrice.IsPositive() {
 				unitPrice = p.WholesalePrice
 			}
 			lineGross := qty.Mul(unitPrice).Round(2)
@@ -203,23 +215,28 @@ func (s *Service) Create(ctx context.Context, in CreateInput, cashierID int64) (
 			itemDiscTotal = itemDiscTotal.Add(disc)
 			taxTotal = taxTotal.Add(lineTax)
 
-			// Atomic guard: prevents overselling under concurrency.
-			ok, err := stkRepo.DecrementGuarded(ctx, p.ID, qty)
-			if err != nil {
-				return apperr.Internal("failed to update stock", err)
-			}
-			if !ok {
-				return apperr.Conflict(fmt.Sprintf("insufficient stock for %s", p.Name))
-			}
-			// Deplete batches FEFO; the weighted cost of the consumed units is the
-			// COGS snapshot for this line (more accurate than the product's current
-			// cost when batches have different costs).
-			cost, err := stkRepo.DepleteFEFO(ctx, p.ID, qty)
-			if err != nil {
-				return apperr.Internal("failed to deplete batches", err)
-			}
-			if cost.IsZero() {
-				cost = p.CostPrice
+			// Service lines (is_service) carry no inventory: skip the stock guard
+			// and batch depletion, and record zero COGS.
+			cost := decimal.Zero
+			if !p.IsService {
+				// Atomic guard: prevents overselling under concurrency.
+				ok, err := stkRepo.DecrementGuarded(ctx, p.ID, qty)
+				if err != nil {
+					return apperr.Internal("failed to update stock", err)
+				}
+				if !ok {
+					return apperr.Conflict(fmt.Sprintf("insufficient stock for %s", p.Name))
+				}
+				// Deplete batches FEFO; the weighted cost of the consumed units is the
+				// COGS snapshot for this line (more accurate than the product's current
+				// cost when batches have different costs).
+				cost, err = stkRepo.DepleteFEFO(ctx, p.ID, qty)
+				if err != nil {
+					return apperr.Internal("failed to deplete batches", err)
+				}
+				if cost.IsZero() {
+					cost = p.CostPrice
+				}
 			}
 
 			lines = append(lines, SaleItem{

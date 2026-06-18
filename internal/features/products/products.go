@@ -29,6 +29,7 @@ type Product struct {
 	TrackSerial    bool            `db:"track_serial"    json:"track_serial"`
 	WarrantyMonths      int             `db:"warranty_months"       json:"warranty_months"`
 	IsActive            bool            `db:"is_active"             json:"is_active"`
+	IsService           bool            `db:"is_service"            json:"is_service"`
 	NeedsReview         bool            `db:"needs_review"          json:"needs_review"`
 	PreferredSupplierID *int64          `db:"preferred_supplier_id" json:"preferred_supplier_id,omitempty"`
 	CreatedBy           *int64          `db:"created_by"            json:"created_by,omitempty"`
@@ -60,6 +61,9 @@ type CreateInput struct {
 	ReorderLevel   int     `json:"reorder_level"   form:"reorder_level"   validate:"gte=0"`
 	TrackSerial    bool    `json:"track_serial"    form:"track_serial"`
 	WarrantyMonths int     `json:"warranty_months" form:"warranty_months" validate:"gte=0,lte=600"`
+	// IsService marks a non-stocked service line. Not on the normal admin form
+	// (defaults false); set by plugins via the products service.
+	IsService bool `json:"is_service" form:"is_service"`
 	// PreferredSupplierID is an optional default supplier (nil/0 = none). The form
 	// posts an empty string for "none"; bind to *int64 so 0 stays nil.
 	PreferredSupplierID *int64 `json:"preferred_supplier_id" form:"preferred_supplier_id"`
@@ -116,7 +120,7 @@ const subcatsCTE = `
 func (r *Repository) List(ctx context.Context, q ListQuery) ([]Product, error) {
 	var rows []Product
 	err := r.db.SelectContext(ctx, &rows, subcatsCTE+selectProduct+`
-		WHERE p.is_active = true
+		WHERE p.is_active = true AND p.is_service = false
 		  AND ($1::text   IS NULL OR p.name ILIKE '%' || $1 || '%' OR p.barcode = $1)
 		  AND ($2::bigint IS NULL OR p.category_id IN (SELECT id FROM subcats))
 		  AND ($3 = false OR COALESCE(s.quantity,0) <= p.reorder_level)
@@ -131,7 +135,7 @@ func (r *Repository) Count(ctx context.Context, q ListQuery) (int, error) {
 	err := r.db.GetContext(ctx, &n, subcatsCTE+`
 		SELECT COUNT(*) FROM products p
 		LEFT JOIN stock s ON s.product_id = p.id
-		WHERE p.is_active = true
+		WHERE p.is_active = true AND p.is_service = false
 		  AND ($1::text   IS NULL OR p.name ILIKE '%' || $1 || '%' OR p.barcode = $1)
 		  AND ($2::bigint IS NULL OR p.category_id IN (SELECT id FROM subcats))
 		  AND ($3 = false OR COALESCE(s.quantity,0) <= p.reorder_level)`,
@@ -175,6 +179,7 @@ type writeRow struct {
 	Reorder                       int
 	TrackSerial                   bool
 	WarrantyMonths                int
+	IsService                     bool   // non-stocked service line (plugin seam)
 	NeedsReview                   bool   // set by the till quick-add; false for normal creates
 	CreatedBy                     *int64 // the user who quick-added it (nil otherwise)
 	PreferredSupplier             *int64 // optional default supplier (nil = none)
@@ -186,12 +191,14 @@ func (r *Repository) Insert(ctx context.Context, w writeRow) (int64, error) {
 		INSERT INTO products
 			(name, name_si, barcode, category_id, unit_id,
 			 cost_price, selling_price, wholesale_price, tax_rate, reorder_level,
-			 track_serial, warranty_months, needs_review, created_by, preferred_supplier_id)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+			 track_serial, warranty_months, needs_review, created_by, preferred_supplier_id,
+			 is_service)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
 		RETURNING id`,
 		w.Name, w.NameSi, w.Barcode, w.CategoryID, w.UnitID,
 		w.Cost, w.Selling, w.Wholesale, w.Tax, w.Reorder,
-		w.TrackSerial, w.WarrantyMonths, w.NeedsReview, w.CreatedBy, w.PreferredSupplier)
+		w.TrackSerial, w.WarrantyMonths, w.NeedsReview, w.CreatedBy, w.PreferredSupplier,
+		w.IsService)
 	return id, err
 }
 

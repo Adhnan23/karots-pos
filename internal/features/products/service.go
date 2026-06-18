@@ -317,6 +317,7 @@ func toWriteRow(in CreateInput) (writeRow, error) {
 		Reorder:    in.ReorderLevel,
 		TrackSerial:    in.TrackSerial,
 		WarrantyMonths: in.WarrantyMonths,
+		IsService:         in.IsService,
 		PreferredSupplier: in.PreferredSupplierID,
 	}, nil
 }
