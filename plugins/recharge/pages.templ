@@ -1,0 +1,69 @@
+package recharge
+
+import "karots-pos/templates/layouts"
+import "strconv"
+
+// CarriersPage is the recharge carrier management screen, rendered inside the
+// core admin shell so the plugin inherits the sidebar, palette and styling.
+templ CarriersPage(userName string, carriers []Carrier) {
+	@layouts.Admin("Recharge Carriers", userName, "recharge-carriers") {
+		<h1 class="text-2xl font-bold mb-6">Recharge Carriers</h1>
+		<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+			<div class="lg:col-span-2 bg-white rounded-2xl shadow-sm p-6">
+				<h2 class="text-lg font-semibold mb-4">Carriers</h2>
+				<table class="w-full text-sm">
+					<thead class="text-left text-slate-500 border-b">
+						<tr>
+							<th class="py-2 pr-4">Carrier</th>
+							<th class="py-2 pr-4">Service product</th>
+							<th class="py-2 text-right">Actions</th>
+						</tr>
+					</thead>
+					<tbody id="carrier-rows">
+						@CarrierRows(carriers)
+					</tbody>
+				</table>
+			</div>
+			<div class="bg-white rounded-2xl shadow-sm p-6">
+				<h2 class="text-lg font-semibold mb-4">Add a carrier</h2>
+				<form
+					hx-post="/admin/recharge"
+					hx-target="#carrier-rows"
+					hx-swap="innerHTML"
+					hx-on::after-request="if(event.detail.successful) this.reset()"
+					class="space-y-3"
+				>
+					<div>
+						<label class="block text-sm font-medium text-slate-600 mb-1">Carrier name</label>
+						<input type="text" name="name" required placeholder="Dialog" class="w-full border rounded-lg px-3 py-2.5"/>
+					</div>
+					<p class="text-xs text-slate-400">A hidden service product is created automatically so recharge sales flow through the normal till, receipt and cash drawer.</p>
+					<button type="submit" class="w-full py-2.5 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700">Add carrier</button>
+				</form>
+			</div>
+		</div>
+	}
+}
+
+// CarrierRows is the HTMX-swappable carrier table body.
+templ CarrierRows(carriers []Carrier) {
+	if len(carriers) == 0 {
+		<tr><td colspan="3" class="py-6 text-center text-slate-400">No carriers yet. Add one to start selling recharge.</td></tr>
+	} else {
+		for _, c := range carriers {
+			<tr class="border-b last:border-0">
+				<td class="py-2 pr-4 font-medium">{ c.Name }</td>
+				<td class="py-2 pr-4 text-slate-500">#{ strconv.FormatInt(c.ProductID, 10) }</td>
+				<td class="py-2 text-right">
+					<button
+						hx-post={ "/admin/recharge/" + strconv.FormatInt(c.ID, 10) + "/delete" }
+						hx-target="#carrier-rows"
+						hx-swap="innerHTML"
+						hx-confirm={ "Remove " + c.Name + "? Past sales are kept." }
+						class="text-rose-600 hover:text-rose-700 text-sm"
+					>Remove</button>
+				</td>
+			</tr>
+		}
+	}
+}
