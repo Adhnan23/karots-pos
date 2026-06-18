@@ -117,6 +117,61 @@ JWT_SECRET=$(openssl rand -hex 24) make docker-up   # postgres + server
 docker compose run --rm server -seed                # one-time seed
 ```
 
+## Plugins & per-shop builds
+
+The POS ships as a frozen **core**; optional features are **plugins** compiled in
+**per shop at build time** (still one static binary, no runtime `.so`). A plugin
+lives entirely under `plugins/<name>/` — its own Go package, Goose `migrations/`,
+Templ pages and a `plugin.json` manifest — and weaves into the core shell through
+additive hooks (admin nav, cashier tab, dashboard/settings cards, command
+palette, POS actions, **payment tenders**) plus whole-route overrides via the
+plugin Mux. Core stays untouched apart from a few tiny generic seams.
+
+**Late-enable, never a wipe.** Each plugin tracks its schema in its **own**
+`goose_db_version_<name>` table, independent of core. So a shop can buy/enable a
+plugin *after* going live: on the next boot only that plugin's migrations apply
+(additively, with idempotent backfill) on top of the existing data — core's
+migrations and data are never touched or re-created.
+
+The committed default (`cmd/server/enabled_plugins.go`) imports **no plugins** =
+a core-only binary. To build a shop's binary with plugins compiled in, use the
+**bootstrapper**:
+
+```bash
+make bootstrap                 # interactive: pick plugins + target OS
+
+# non-interactive (CI / scripted):
+make bootstrap ARGS="-plugins recharge -os linux  -name acme-pos"
+make bootstrap ARGS="-plugins all      -os windows -name acme-pos"
+go run ./cmd/bootstrap -plugins recharge -os darwin -name acme-pos -yes
+```
+
+It discovers `plugins/*/plugin.json`, rewrites `enabled_plugins.go` with the
+selected imports, runs `templ generate` + Tailwind + a static `CGO_ENABLED=0`
+build, merges each plugin's `env.sample` into `dist/.env.sample`, then **restores
+`enabled_plugins.go`**. Output lands in `dist/` (binary + `.env.sample`); deploy
+it exactly like the core binary (`-migrate` / `-init`, then serve). Flags:
+`-plugins` (keys or `all`), `-os` (`linux`/`windows`/`darwin`), `-arch`
+(`amd64`), `-name`, `-out` (`dist`), `-yes`.
+
+### Bundled plugin: Mobile Recharge (carrier mobile-money agent)
+
+`plugins/recharge` turns the till into a carrier agent (Dialog **eZ Cash**,
+Mobitel **mCash**, …). One shared **float per device** drives both airtime
+reload *and* the wallet payment system:
+
+- **Reload** at the POS (a hidden non-stocked service line — on the receipt,
+  counts as a sale, not returnable, no stock movement).
+- **Money transactions** on a dedicated cashier screen: cash-in/deposit,
+  cash-out/withdrawal, bill payment and supplier float top-up — each posts the
+  matching cash-drawer movement (top-ups also book an expense) and prints a slip.
+- **Wallet tender** — a customer can pay a normal product sale by wallet
+  transfer; it credits the carrier float and stays out of the cash drawer.
+- **Per-device reconciliation** — cashier enters each device's counted opening &
+  closing float; the system computes the per-carrier expected balance and the
+  bonus/loss (carrier commission is unpredictable, so it surfaces at close).
+- **Admin** — carrier & device management and a reconciliation/ledger report.
+
 ## Two surfaces
 
 | Surface | Path | Who | Does |
@@ -250,7 +305,7 @@ change computed) → **oversell returns 409 with stock unchanged** → credit sa
 
 ## Make targets
 
-`db-up` · `migrate` · `seed` · `demo` · `reset` · `reset-seed` · `reset-demo` · `run` · `build` · `templ` · `test` · `docker-up` · `docker-down`
+`db-up` · `migrate` · `seed` · `demo` · `reset` · `reset-seed` · `reset-demo` · `run` · `build` · `build-windows` · `bootstrap` · `templ` · `test` · `docker-up` · `docker-down`
 
 ## Notes for going further
 
