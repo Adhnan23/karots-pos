@@ -54,7 +54,7 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 	reg.Cashier().POST("/recharge/tx", ch.Tx)
 	reg.Cashier().POST("/recharge/reload", ch.Reload)
 	reg.Cashier().POST("/recharge/wallet", ch.Wallet)
-	reg.AddPosAction(plugin.PosAction{Component: ReloadButton()})
+	reg.AddQuickActionTab(plugin.QuickActionTab{Key: "reload", Label: "📶 Reload", Component: ReloadPanel()})
 	reg.AddCashierTab(plugin.CashierTab{Href: "/cashier/recharge", Label: "Reload & Bills", Key: "recharge"})
 	reg.AddTenderMethod(plugin.TenderMethod{Value: "wallet", Label: "Wallet (eZ Cash / mCash)"})
 

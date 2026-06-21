@@ -61,14 +61,26 @@ type PosAction struct {
 	Component templ.Component
 }
 
+// QuickActionTab adds a tab to the cashier POS quick-action strip rendered below
+// the product grid. Each plugin contributes one tab (Key unique, Label shown on
+// the tab button); its Component is the tab panel — typically a grid of cards that
+// dispatch the "pos-add-service" window event to add a line to the cart. The strip
+// is hidden entirely when no plugin registers a tab.
+type QuickActionTab struct {
+	Key       string
+	Label     string
+	Component templ.Component
+}
+
 var (
-	adminNav       []AdminNavEntry
-	cashierTabs    []CashierTab
-	settingsSecs   []SettingsSection
-	dashboardCards []DashboardCard
-	paletteEntries []PaletteEntry
-	posActions     []PosAction
-	tenderMethods  []TenderMethod
+	adminNav        []AdminNavEntry
+	cashierTabs     []CashierTab
+	settingsSecs    []SettingsSection
+	dashboardCards  []DashboardCard
+	paletteEntries  []PaletteEntry
+	posActions      []PosAction
+	quickActionTabs []QuickActionTab
+	tenderMethods   []TenderMethod
 )
 
 // Hook registration — plugins call these from Setup.
@@ -78,6 +90,7 @@ func (r *Registry) AddSettingsSection(s SettingsSection) { settingsSecs = append
 func (r *Registry) AddDashboardCard(c DashboardCard)     { dashboardCards = append(dashboardCards, c) }
 func (r *Registry) AddPaletteEntry(p PaletteEntry)       { paletteEntries = append(paletteEntries, p) }
 func (r *Registry) AddPosAction(a PosAction)             { posActions = append(posActions, a) }
+func (r *Registry) AddQuickActionTab(t QuickActionTab)   { quickActionTabs = append(quickActionTabs, t) }
 func (r *Registry) AddTenderMethod(t TenderMethod)       { tenderMethods = append(tenderMethods, t) }
 
 // Getters for the template layer.
@@ -87,4 +100,5 @@ func SettingsSections() []SettingsSection { return settingsSecs }
 func DashboardCards() []DashboardCard     { return dashboardCards }
 func PaletteEntries() []PaletteEntry      { return paletteEntries }
 func PosActions() []PosAction             { return posActions }
+func QuickActionTabs() []QuickActionTab   { return quickActionTabs }
 func TenderMethods() []TenderMethod       { return tenderMethods }
