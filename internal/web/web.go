@@ -250,8 +250,10 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	ag.GET("/recovery/form", admin.RecoveryForm)
 	ag.POST("/recovery", admin.RecoveryRecord)
 
-	// Finance / profit
+	// Finance / profit hub
 	ag.GET("/finance", admin.Finance)
+	ag.GET("/finance/profit", admin.FinanceProfit)
+	ag.GET("/finance/cashflow", admin.FinanceCashflow)
 
 	// Reports
 	ag.GET("/reports", admin.ReportsHub)

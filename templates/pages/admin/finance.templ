@@ -4,60 +4,98 @@ import (
 	"karots-pos/internal/features/reports"
 	"karots-pos/internal/money"
 	"karots-pos/templates/layouts"
+	"karots-pos/templates/shared"
 )
 
+// FinanceData drives the Finance & Profit hub (Overview / Profit / Cash flow).
+// Tab is the active sub-page key; Trend feeds the overview line chart and Cats
+// the profit-page bars.
 type FinanceData struct {
 	UserName string
 	Symbol   string
 	From     string
 	To       string
+	Preset   string
+	Tab      string
 	PL       reports.PL
+	Trend    []reports.DayRow
+	Cats     []reports.CategoryProfit
 }
 
-templ FinancePage(d FinanceData) {
+// financeShell is the common chrome: heading, sub-page tabs and the shared
+// quick-pick range bar (reused from the reports section).
+templ financeShell(d FinanceData, action string) {
+	<h1 class="text-2xl font-bold mb-4">Finance &amp; Profit</h1>
+	<div class="flex gap-1 mb-6 border-b">
+		@financeTab(d, "/admin/finance", "Overview", "overview")
+		@financeTab(d, "/admin/finance/profit", "Profit", "profit")
+		@financeTab(d, "/admin/finance/cashflow", "Cash flow", "cashflow")
+	</div>
+	@rptRangeForm(action, d.Preset, d.From, d.To) {
+	}
+	@rptPeriodLine(d.From, d.To)
+}
+
+templ financeTab(d FinanceData, href, label, key string) {
+	<a
+		if d.Tab == key {
+			href={ tabURL(href, d.Preset) }
+			class="px-4 py-2 -mb-px border-b-2 border-indigo-600 text-indigo-600 font-medium text-sm"
+		} else {
+			href={ tabURL(href, d.Preset) }
+			class="px-4 py-2 -mb-px border-b-2 border-transparent text-slate-500 hover:text-slate-700 text-sm"
+		}
+	>{ label }</a>
+}
+
+// tabURL keeps the active preset when switching sub-pages.
+func tabURL(href, preset string) templ.SafeURL {
+	if preset != "" {
+		return templ.SafeURL(href + "?preset=" + preset)
+	}
+	return templ.SafeURL(href)
+}
+
+// ---------------- Overview ----------------
+
+templ FinanceOverview(d FinanceData) {
 	@layouts.Admin("Finance", d.UserName, "finance") {
-		<h1 class="text-2xl font-bold mb-6">Finance & Profit</h1>
-
-		<form method="get" action="/admin/finance" class="flex items-end gap-3 mb-6 bg-white rounded-2xl shadow-sm p-4">
-			<div>
-				<label class="block text-xs text-slate-500 mb-1">From</label>
-				<input type="date" name="from" value={ d.From } class="border rounded-lg px-3 py-2"/>
-			</div>
-			<div>
-				<label class="block text-xs text-slate-500 mb-1">To</label>
-				<input type="date" name="to" value={ d.To } class="border rounded-lg px-3 py-2"/>
-			</div>
-			<button class="px-4 py-2 rounded-lg bg-slate-800 text-white">Apply</button>
-		</form>
-
+		@financeShell(d, "/admin/finance")
 		<div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-			@statCard("Gross Revenue", money.Format(d.Symbol, d.PL.GrossRevenue), "slate")
-			@statCard("Returns", money.Format(d.Symbol, d.PL.Returns), "rose")
+			@statCard("Net Revenue", money.Format(d.Symbol, d.PL.Revenue), "indigo")
+			@statCard("Gross Profit", money.Format(d.Symbol, d.PL.GrossProfit), "emerald")
+			@statCard("Net Profit", money.Format(d.Symbol, d.PL.NetProfit), profitColor(d.PL.NetProfit.IsNegative()))
+			@statCard("Cash Received", money.Format(d.Symbol, d.PL.Received), "slate")
+		</div>
+		<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+			<div class="lg:col-span-2">
+				@shared.ChartCard("Revenue & profit trend") {
+					{{ labels, series := trendChartData(d.Trend, d.Symbol, "day") }}
+					@shared.LineChart(labels, series)
+				}
+			</div>
+			@shared.ChartCard("Payments by method") {
+				@shared.Donut(paymentSlices(d.PL.ByPayment, d.Symbol))
+			}
+		</div>
+	}
+}
+
+// ---------------- Profit ----------------
+
+templ FinanceProfit(d FinanceData) {
+	@layouts.Admin("Finance — Profit", d.UserName, "finance") {
+		@financeShell(d, "/admin/finance/profit")
+		<div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
 			@statCard("Net Revenue", money.Format(d.Symbol, d.PL.Revenue), "indigo")
 			@statCard("COGS", money.Format(d.Symbol, d.PL.COGS), "slate")
-		</div>
-		<div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
 			@statCard("Gross Profit", money.Format(d.Symbol, d.PL.GrossProfit), "emerald")
-			@statCard("Gross Margin", money.Display(d.PL.GrossMargin) + "%", profitColor(d.PL.GrossMargin.IsNegative()))
-			@statCard("Expenses", money.Format(d.Symbol, d.PL.Expenses), "rose")
+			@statCard("Gross Margin", money.Display(d.PL.GrossMargin)+"%", profitColor(d.PL.GrossMargin.IsNegative()))
 		</div>
-		<div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-			@statCard("Losses (damage + warranty)", money.Format(d.Symbol, d.PL.Losses), "rose")
-			@statCard("Recoveries (supplier)", money.Format(d.Symbol, d.PL.Recoveries), "emerald")
-		</div>
-		<div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-			@statCard("Net Profit", money.Format(d.Symbol, d.PL.NetProfit), profitColor(d.PL.NetProfit.IsNegative()))
-			@statCard("Cash Received", money.Format(d.Symbol, d.PL.Received), "indigo")
-			@statCard("Receivables (dues)", money.Format(d.Symbol, d.PL.Receivables), "amber")
-			@statCard("Payables (suppliers)", money.Format(d.Symbol, d.PL.Payables), "amber")
-		</div>
-
-		<div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-			@statCard("Cash Withdrawn (drawer)", money.Format(d.Symbol, d.PL.CashWithdrawn), "slate")
-			@statCard("Register Over/Short", money.Format(d.Symbol, d.PL.RegisterDiff), profitColor(d.PL.RegisterDiff.IsNegative()))
-		</div>
-
 		<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+			@shared.ChartCard("Profit by category") {
+				@shared.HBarChart(catBars(d.Cats, d.Symbol))
+			}
 			<div class="bg-white rounded-2xl shadow-sm p-6">
 				<h2 class="text-lg font-semibold mb-4">Top Products</h2>
 				<table class="w-full text-sm">
@@ -80,28 +118,39 @@ templ FinancePage(d FinanceData) {
 					</tbody>
 				</table>
 			</div>
-			<div class="bg-white rounded-2xl shadow-sm p-6">
-				<h2 class="text-lg font-semibold mb-4">Payments by Method</h2>
-				<table class="w-full text-sm">
-					<thead class="text-left text-slate-500 border-b">
-						<tr><th class="py-2">Method</th><th class="py-2 text-right">Total</th></tr>
-					</thead>
-					<tbody>
-						if len(d.PL.ByPayment) == 0 {
-							<tr><td colspan="2" class="py-6 text-center text-slate-500">No payments in range.</td></tr>
-						} else {
-							for _, m := range d.PL.ByPayment {
-								<tr class="border-b last:border-0">
-									<td class="py-2 capitalize">{ m.Method }</td>
-									<td class="py-2 text-right">{ money.Format(d.Symbol, m.Total) }</td>
-								</tr>
-							}
-						}
-					</tbody>
-				</table>
-			</div>
 		</div>
 	}
+}
+
+// ---------------- Cash flow ----------------
+
+templ FinanceCashflow(d FinanceData) {
+	@layouts.Admin("Finance — Cash flow", d.UserName, "finance") {
+		@financeShell(d, "/admin/finance/cashflow")
+		<div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+			@statCard("Cash Received", money.Format(d.Symbol, d.PL.Received), "indigo")
+			@statCard("Cash Withdrawn (drawer)", money.Format(d.Symbol, d.PL.CashWithdrawn), "slate")
+			@statCard("Register Over/Short", money.Format(d.Symbol, d.PL.RegisterDiff), profitColor(d.PL.RegisterDiff.IsNegative()))
+		</div>
+		<div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+			@statCard("Receivables (customer dues)", money.Format(d.Symbol, d.PL.Receivables), "amber")
+			@statCard("Payables (supplier dues)", money.Format(d.Symbol, d.PL.Payables), "amber")
+			@statCard("Expenses", money.Format(d.Symbol, d.PL.Expenses), "rose")
+		</div>
+	}
+}
+
+// paymentSlices turns the payment-method breakdown into donut slices.
+func paymentSlices(rows []reports.MethodTotal, symbol string) []shared.ChartSlice {
+	out := make([]shared.ChartSlice, 0, len(rows))
+	for _, m := range rows {
+		out = append(out, shared.ChartSlice{
+			Label: m.Method,
+			Value: m.Total.InexactFloat64(),
+			Text:  money.Format(symbol, m.Total),
+		})
+	}
+	return out
 }
 
 func profitColor(negative bool) string {

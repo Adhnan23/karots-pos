@@ -421,23 +421,67 @@ func (a *adminUI) ExpenseCreate(c echo.Context) error {
 
 // ============================ Finance / Profit ============================
 
-func (a *adminUI) Finance(c echo.Context) error {
+// financeData resolves the shared range + P&L for the Finance hub sub-pages.
+func (a *adminUI) financeData(c echo.Context, tab string) (adminpages.FinanceData, error) {
 	ctx := c.Request().Context()
-	from, to, err := reports.ParseRange(c.QueryParam("from"), c.QueryParam("to"))
+	preset := c.QueryParam("preset")
+	from, to, fromStr, toStr, err := reports.ResolveRange(preset, c.QueryParam("from"), c.QueryParam("to"))
 	if err != nil {
-		return err
+		return adminpages.FinanceData{}, err
 	}
 	pl, err := a.s.reports.Compute(ctx, from, to)
 	if err != nil {
-		return err
+		return adminpages.FinanceData{}, err
 	}
-	return response.RenderPage(c, adminpages.FinancePage(adminpages.FinanceData{
+	return adminpages.FinanceData{
 		UserName: middleware.CurrentUserName(c),
 		Symbol:   a.symbol(ctx),
-		From:     c.QueryParam("from"),
-		To:       c.QueryParam("to"),
+		From:     fromStr,
+		To:       toStr,
+		Preset:   preset,
+		Tab:      tab,
 		PL:       *pl,
-	}))
+	}, nil
+}
+
+// Finance is the hub Overview: headline KPIs + a revenue/profit trend line and a
+// payment-mix donut.
+func (a *adminUI) Finance(c echo.Context) error {
+	ctx := c.Request().Context()
+	d, err := a.financeData(c, "overview")
+	if err != nil {
+		return err
+	}
+	trend, err := a.s.reports.SalesByPeriod(ctx, d.PL.From, d.PL.To, "day")
+	if err != nil {
+		return err
+	}
+	d.Trend = trend
+	return response.RenderPage(c, adminpages.FinanceOverview(d))
+}
+
+// FinanceProfit shows margins, profit-by-category bars and top products.
+func (a *adminUI) FinanceProfit(c echo.Context) error {
+	ctx := c.Request().Context()
+	d, err := a.financeData(c, "profit")
+	if err != nil {
+		return err
+	}
+	cats, err := a.s.reports.ProfitByCategory(ctx, d.PL.From, d.PL.To)
+	if err != nil {
+		return err
+	}
+	d.Cats = cats
+	return response.RenderPage(c, adminpages.FinanceProfit(d))
+}
+
+// FinanceCashflow shows cash received/withdrawn, register over/short and dues.
+func (a *adminUI) FinanceCashflow(c echo.Context) error {
+	d, err := a.financeData(c, "cashflow")
+	if err != nil {
+		return err
+	}
+	return response.RenderPage(c, adminpages.FinanceCashflow(d))
 }
 
 // ============================ Categories ============================
