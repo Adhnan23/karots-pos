@@ -23,22 +23,12 @@ func (a *adminUI) shopName(ctx context.Context) string {
 	return "Shop"
 }
 
-// rangeStrings resolves the from/to query params into the period (with `to`
-// exclusive of the end day) plus the user-facing date strings for the form.
-func rangeStrings(c echo.Context) (from, to time.Time, fromStr, toStr string, err error) {
-	fromQ, toQ := c.QueryParam("from"), c.QueryParam("to")
-	from, to, err = reports.ParseRange(fromQ, toQ)
-	if err != nil {
-		return
-	}
-	fromStr = fromQ
-	if fromStr == "" {
-		fromStr = from.Format("2006-01-02")
-	}
-	toStr = toQ
-	if toStr == "" {
-		toStr = to.AddDate(0, 0, -1).Format("2006-01-02")
-	}
+// rangeStrings resolves the quick-pick preset (or from/to query params) into the
+// period (with `to` exclusive of the end day) plus the user-facing date strings
+// and the active preset key (for highlighting the range-bar button).
+func rangeStrings(c echo.Context) (from, to time.Time, fromStr, toStr, preset string, err error) {
+	preset = c.QueryParam("preset")
+	from, to, fromStr, toStr, err = reports.ResolveRange(preset, c.QueryParam("from"), c.QueryParam("to"))
 	return
 }
 
@@ -50,18 +40,19 @@ func (a *adminUI) ReportsHub(c echo.Context) error {
 
 func (a *adminUI) SalesReport(c echo.Context) error {
 	ctx := c.Request().Context()
-	from, to, fromStr, toStr, err := rangeStrings(c)
+	from, to, fromStr, toStr, preset, err := rangeStrings(c)
 	if err != nil {
 		return err
 	}
 	status := c.QueryParam("status")
-	rows, err := a.s.sales.List(ctx, sales.ListFilter{From: &from, To: &to, Status: status, Limit: 10000})
+	method := c.QueryParam("method")
+	rows, err := a.s.sales.List(ctx, sales.ListFilter{From: &from, To: &to, Status: status, Method: method, Limit: 10000})
 	if err != nil {
 		return err
 	}
 	d := adminpages.SalesReportData{
 		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx),
-		From: fromStr, To: toStr, Status: status, Rows: rows, Count: len(rows),
+		From: fromStr, To: toStr, Preset: preset, Status: status, Method: method, Rows: rows, Count: len(rows),
 	}
 	for _, s := range rows {
 		d.Gross = d.Gross.Add(s.Subtotal)
@@ -84,7 +75,7 @@ func (a *adminUI) SalesReport(c echo.Context) error {
 
 func (a *adminUI) FinanceReport(c echo.Context) error {
 	ctx := c.Request().Context()
-	from, to, fromStr, toStr, err := rangeStrings(c)
+	from, to, fromStr, toStr, preset, err := rangeStrings(c)
 	if err != nil {
 		return err
 	}
@@ -110,13 +101,13 @@ func (a *adminUI) FinanceReport(c echo.Context) error {
 		return writeCSV(c, "finance_"+fromStr+"_"+toStr, []string{"Line", "Amount"}, out)
 	}
 	return response.RenderPage(c, adminpages.FinanceReport(adminpages.FinanceReportData{
-		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx), From: fromStr, To: toStr, PL: *pl,
+		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx), From: fromStr, To: toStr, Preset: preset, PL: *pl,
 	}))
 }
 
 func (a *adminUI) ReturnsReport(c echo.Context) error {
 	ctx := c.Request().Context()
-	from, to, fromStr, toStr, err := rangeStrings(c)
+	from, to, fromStr, toStr, preset, err := rangeStrings(c)
 	if err != nil {
 		return err
 	}
@@ -125,7 +116,7 @@ func (a *adminUI) ReturnsReport(c echo.Context) error {
 		return err
 	}
 	d := adminpages.ReturnsReportData{
-		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx), From: fromStr, To: toStr, Rows: rows,
+		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx), From: fromStr, To: toStr, Preset: preset, Rows: rows,
 	}
 	for _, r := range rows {
 		d.TotalRefund = d.TotalRefund.Add(r.RefundValue)
@@ -135,16 +126,22 @@ func (a *adminUI) ReturnsReport(c echo.Context) error {
 
 func (a *adminUI) ProfitByCategoryReport(c echo.Context) error {
 	ctx := c.Request().Context()
-	from, to, fromStr, toStr, err := rangeStrings(c)
+	from, to, fromStr, toStr, preset, err := rangeStrings(c)
 	if err != nil {
 		return err
 	}
-	rows, err := a.s.reports.ProfitByCategory(ctx, from, to)
+	cats := c.QueryParams()["category"]
+	rows, err := a.s.reports.ProfitByCategory(ctx, from, to, cats...)
+	if err != nil {
+		return err
+	}
+	allCats, err := a.s.reports.CategoryNames(ctx)
 	if err != nil {
 		return err
 	}
 	d := adminpages.CategoryProfitData{
-		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx), From: fromStr, To: toStr, Rows: rows,
+		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx), From: fromStr, To: toStr, Preset: preset,
+		Rows: rows, AllCats: allCats, SelCats: cats,
 	}
 	for _, r := range rows {
 		d.TotalRevenue = d.TotalRevenue.Add(r.Revenue)
@@ -155,16 +152,20 @@ func (a *adminUI) ProfitByCategoryReport(c echo.Context) error {
 
 func (a *adminUI) SalesTrendReport(c echo.Context) error {
 	ctx := c.Request().Context()
-	from, to, fromStr, toStr, err := rangeStrings(c)
+	from, to, fromStr, toStr, preset, err := rangeStrings(c)
 	if err != nil {
 		return err
 	}
-	rows, err := a.s.reports.DailySales(ctx, from, to)
+	group := c.QueryParam("group")
+	if group == "" {
+		group = "day"
+	}
+	rows, err := a.s.reports.SalesByPeriod(ctx, from, to, group)
 	if err != nil {
 		return err
 	}
 	d := adminpages.SalesTrendData{
-		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx), From: fromStr, To: toStr, Rows: rows,
+		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx), From: fromStr, To: toStr, Preset: preset, Group: group, Rows: rows,
 	}
 	for _, r := range rows {
 		d.TotalRevenue = d.TotalRevenue.Add(r.Revenue)
@@ -178,7 +179,7 @@ func (a *adminUI) SalesTrendReport(c echo.Context) error {
 
 func (a *adminUI) WarrantyReport(c echo.Context) error {
 	ctx := c.Request().Context()
-	from, to, fromStr, toStr, err := rangeStrings(c)
+	from, to, fromStr, toStr, preset, err := rangeStrings(c)
 	if err != nil {
 		return err
 	}
@@ -187,13 +188,13 @@ func (a *adminUI) WarrantyReport(c echo.Context) error {
 		return err
 	}
 	return response.RenderPage(c, adminpages.WarrantyReport(adminpages.WarrantyReportData{
-		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx), From: fromStr, To: toStr, Summary: *sum,
+		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx), From: fromStr, To: toStr, Preset: preset, Summary: *sum,
 	}))
 }
 
 func (a *adminUI) CashRegisterReport(c echo.Context) error {
 	ctx := c.Request().Context()
-	from, to, fromStr, toStr, err := rangeStrings(c)
+	from, to, fromStr, toStr, preset, err := rangeStrings(c)
 	if err != nil {
 		return err
 	}
@@ -202,7 +203,7 @@ func (a *adminUI) CashRegisterReport(c echo.Context) error {
 		return err
 	}
 	d := adminpages.CashReportData{
-		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx), From: fromStr, To: toStr, Rows: rows,
+		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx), From: fromStr, To: toStr, Preset: preset, Rows: rows,
 	}
 	for _, s := range rows {
 		d.Opening = d.Opening.Add(s.OpeningCash)
@@ -221,7 +222,7 @@ func (a *adminUI) CashRegisterReport(c echo.Context) error {
 
 func (a *adminUI) PurchasesReport(c echo.Context) error {
 	ctx := c.Request().Context()
-	from, to, fromStr, toStr, err := rangeStrings(c)
+	from, to, fromStr, toStr, preset, err := rangeStrings(c)
 	if err != nil {
 		return err
 	}
@@ -230,7 +231,7 @@ func (a *adminUI) PurchasesReport(c echo.Context) error {
 		return err
 	}
 	d := adminpages.PurchasesReportData{
-		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx), From: fromStr, To: toStr,
+		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx), From: fromStr, To: toStr, Preset: preset,
 	}
 	for _, p := range all {
 		if p.CreatedAt.Before(from) || !p.CreatedAt.Before(to) {
@@ -321,7 +322,7 @@ func (a *adminUI) SupplierDuesReport(c echo.Context) error {
 
 func (a *adminUI) TaxReport(c echo.Context) error {
 	ctx := c.Request().Context()
-	from, to, fromStr, toStr, err := rangeStrings(c)
+	from, to, fromStr, toStr, preset, err := rangeStrings(c)
 	if err != nil {
 		return err
 	}
@@ -340,7 +341,7 @@ func (a *adminUI) TaxReport(c echo.Context) error {
 			[]string{"Date", "Sales", "Taxable base", "Tax"}, out)
 	}
 	return response.RenderPage(c, adminpages.TaxReport(adminpages.TaxReportData{
-		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx), From: fromStr, To: toStr, Summary: *sum,
+		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx), From: fromStr, To: toStr, Preset: preset, Summary: *sum,
 	}))
 }
 

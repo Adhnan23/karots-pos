@@ -13,6 +13,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	"github.com/labstack/echo/v4"
+	"github.com/lib/pq"
 	"github.com/shopspring/decimal"
 )
 
@@ -212,8 +213,9 @@ type CategoryProfit struct {
 	Profit   decimal.Decimal `db:"profit"   json:"profit"`
 }
 
-// ProfitByCategory groups net sales by product category for the period.
-func (s *Service) ProfitByCategory(ctx context.Context, from, to time.Time) ([]CategoryProfit, error) {
+// ProfitByCategory groups net sales by product category for the period. When
+// `cats` is non-empty, only those category names are included.
+func (s *Service) ProfitByCategory(ctx context.Context, from, to time.Time, cats ...string) ([]CategoryProfit, error) {
 	var rows []CategoryProfit
 	if err := s.db.SelectContext(ctx, &rows, `
 		SELECT cat.name AS category,
@@ -226,12 +228,22 @@ func (s *Service) ProfitByCategory(ctx context.Context, from, to time.Time) ([]C
 		JOIN products p  ON p.id = si.product_id
 		JOIN categories cat ON cat.id = p.category_id
 		WHERE s.status <> 'void' AND s.created_at >= $1 AND s.created_at < $2
+		  AND ($3::text[] IS NULL OR cardinality($3::text[]) = 0 OR cat.name = ANY($3::text[]))
 		GROUP BY cat.name
 		HAVING SUM(si.quantity - si.returned_qty) > 0
-		ORDER BY profit DESC`, from, to); err != nil {
+		ORDER BY profit DESC`, from, to, pq.Array(cats)); err != nil {
 		return nil, apperr.Internal("failed to load category profit", err)
 	}
 	return rows, nil
+}
+
+// CategoryNames lists all category names (for the report's category filter).
+func (s *Service) CategoryNames(ctx context.Context) ([]string, error) {
+	var names []string
+	if err := s.db.SelectContext(ctx, &names, `SELECT name FROM categories ORDER BY name`); err != nil {
+		return nil, apperr.Internal("failed to load categories", err)
+	}
+	return names, nil
 }
 
 // DayRow is one day's net sales for the trend report.
@@ -244,11 +256,23 @@ type DayRow struct {
 
 // DailySales is per-day net revenue and profit for the period.
 func (s *Service) DailySales(ctx context.Context, from, to time.Time) ([]DayRow, error) {
+	return s.SalesByPeriod(ctx, from, to, "day")
+}
+
+// SalesByPeriod is net revenue/profit grouped by day, week or month. `gran` must
+// be one of day/week/month; anything else falls back to day. Each row's Day is
+// the period start (truncated date).
+func (s *Service) SalesByPeriod(ctx context.Context, from, to time.Time, gran string) ([]DayRow, error) {
+	switch gran {
+	case "day", "week", "month":
+	default:
+		gran = "day"
+	}
 	var rows []DayRow
 	if err := s.db.SelectContext(ctx, &rows, `
 		SELECT d.day, d.count, d.revenue, d.revenue - d.cogs AS profit
 		FROM (
-			SELECT date_trunc('day', s.created_at) AS day,
+			SELECT date_trunc($3, s.created_at) AS day,
 			       COUNT(DISTINCT s.id) AS count,
 			       COALESCE(SUM( (si.subtotal / NULLIF(si.quantity,0)) * (si.quantity - si.returned_qty) ),0) AS revenue,
 			       COALESCE(SUM( (si.quantity - si.returned_qty) * si.cost_price ),0) AS cogs
@@ -257,8 +281,8 @@ func (s *Service) DailySales(ctx context.Context, from, to time.Time) ([]DayRow,
 			WHERE s.status <> 'void' AND s.created_at >= $1 AND s.created_at < $2
 			GROUP BY 1
 		) d
-		ORDER BY d.day`, from, to); err != nil {
-		return nil, apperr.Internal("failed to load daily sales", err)
+		ORDER BY d.day`, from, to, gran); err != nil {
+		return nil, apperr.Internal("failed to load sales by period", err)
 	}
 	return rows, nil
 }
@@ -396,6 +420,64 @@ func ParseRange(fromStr, toStr string) (time.Time, time.Time, error) {
 		to = t.AddDate(0, 0, 1)
 	}
 	return from, to, nil
+}
+
+// ResolveRange turns an optional quick-pick preset (today, this-week, this-month,
+// last-week, last-month, this-year) into a [from, to) range plus the inclusive
+// YYYY-MM-DD display strings for the form. A non-empty preset wins; otherwise it
+// falls back to ParseRange(fromStr, toStr). Weeks run Monday–Sunday. The returned
+// `to` is exclusive (start of the day after the last day in range).
+func ResolveRange(preset, fromStr, toStr string) (from, to time.Time, fromOut, toOut string, err error) {
+	if preset == "" {
+		from, to, err = ParseRange(fromStr, toStr)
+		if err != nil {
+			return
+		}
+		fromOut = fromStr
+		if fromOut == "" {
+			fromOut = from.Format("2006-01-02")
+		}
+		toOut = toStr
+		if toOut == "" {
+			toOut = to.AddDate(0, 0, -1).Format("2006-01-02")
+		}
+		return
+	}
+
+	now := time.Now()
+	loc := now.Location()
+	day := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+	switch preset {
+	case "today":
+		from, to = day, day.AddDate(0, 0, 1)
+	case "this-week":
+		from = weekStart(day)
+		to = from.AddDate(0, 0, 7)
+	case "last-week":
+		to = weekStart(day)
+		from = to.AddDate(0, 0, -7)
+	case "this-month":
+		from = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, loc)
+		to = from.AddDate(0, 1, 0)
+	case "last-month":
+		to = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, loc)
+		from = to.AddDate(0, -1, 0)
+	case "this-year":
+		from = time.Date(now.Year(), 1, 1, 0, 0, 0, 0, loc)
+		to = from.AddDate(1, 0, 0)
+	default:
+		err = apperr.BadRequest("unknown preset")
+		return
+	}
+	fromOut = from.Format("2006-01-02")
+	toOut = to.AddDate(0, 0, -1).Format("2006-01-02")
+	return
+}
+
+// weekStart returns the Monday 00:00 of the week containing d.
+func weekStart(d time.Time) time.Time {
+	off := (int(d.Weekday()) + 6) % 7 // Mon=0 … Sun=6
+	return d.AddDate(0, 0, -off)
 }
 
 func RegisterAPI(e *echo.Echo, db *sqlx.DB, cfg *config.Config) {

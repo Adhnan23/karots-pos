@@ -6,22 +6,41 @@ import (
 	"karots-pos/internal/features/reports"
 	"karots-pos/internal/money"
 	"karots-pos/templates/layouts"
+	"karots-pos/templates/shared"
 )
 
+// taxBars builds the daily-tax vertical-bar chart input.
+func taxBars(rows []reports.TaxDayRow, symbol string) []shared.ChartBar {
+	bars := make([]shared.ChartBar, 0, len(rows))
+	for _, r := range rows {
+		bars = append(bars, shared.ChartBar{
+			Label: r.Day.Format("Jan 02"),
+			Value: r.Tax.InexactFloat64(),
+			Text:  money.Format(symbol, r.Tax),
+		})
+	}
+	return bars
+}
+
 type TaxReportData struct {
-	ShopName, Symbol, From, To string
+	ShopName, Symbol, From, To, Preset string
 	Summary                    reports.TaxSummary
 }
 
 templ TaxReport(d TaxReportData) {
 	@layouts.Report("Tax Summary", d.ShopName) {
-		@rptRangeForm("/admin/reports/tax", d.From, d.To) {
+		@rptRangeForm("/admin/reports/tax", d.Preset, d.From, d.To) {
 			<a
 				class="no-print px-4 py-1.5 rounded-lg border text-sm"
 				href={ templ.SafeURL("/admin/reports/tax?format=csv&from=" + d.From + "&to=" + d.To) }
 			>Download CSV</a>
 		}
 		@rptPeriodLine(d.From, d.To)
+		if len(d.Summary.Rows) > 0 {
+			<div class="mb-6">
+				@shared.BarChart(taxBars(d.Summary.Rows, d.Symbol))
+			</div>
+		}
 		<table class="w-full text-sm">
 			<thead class="text-left text-slate-500 border-b">
 				<tr>

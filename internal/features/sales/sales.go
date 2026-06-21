@@ -282,6 +282,7 @@ type ListFilter struct {
 	CashierID *int64
 	Status    string
 	Receipt   string // receipt-number substring match (blank = any)
+	Method    string // payment method on the sale (blank = any)
 	Limit     int
 	Offset    int
 }
@@ -298,6 +299,10 @@ func (r *Repository) List(ctx context.Context, f ListFilter) ([]Sale, error) {
 	if f.Receipt != "" {
 		receipt = &f.Receipt
 	}
+	var method *string
+	if f.Method != "" {
+		method = &f.Method
+	}
 	var rows []Sale
 	err := r.q.SelectContext(ctx, &rows, `
 		SELECT s.*, u.name AS cashier_name, c.name AS customer_name
@@ -309,7 +314,9 @@ func (r *Repository) List(ctx context.Context, f ListFilter) ([]Sale, error) {
 		  AND ($3::bigint IS NULL OR s.cashier_id = $3)
 		  AND ($4::text IS NULL OR s.status = $4::sale_status)
 		  AND ($5::text IS NULL OR s.receipt_no ILIKE '%' || $5 || '%')
+		  AND ($8::text IS NULL OR EXISTS (
+		      SELECT 1 FROM payments p WHERE p.sale_id = s.id AND p.method = $8::payment_method))
 		ORDER BY s.created_at DESC
-		LIMIT $6 OFFSET $7`, f.From, f.To, f.CashierID, status, receipt, f.Limit, f.Offset)
+		LIMIT $6 OFFSET $7`, f.From, f.To, f.CashierID, status, receipt, f.Limit, f.Offset, method)
 	return rows, err
 }

@@ -58,20 +58,43 @@ templ reportCard(href, title, desc string) {
 	</a>
 }
 
-// Shared date-range filter (hidden when printing).
-templ rptRangeForm(action, from, to string) {
-	<form method="get" action={ templ.SafeURL(action) } class="no-print flex flex-wrap items-end gap-3 mb-5">
-		<div>
-			<label class="block text-xs text-slate-500 mb-1">From</label>
-			<input type="date" name="from" value={ from } class="border rounded-lg px-3 py-1.5"/>
+// Shared date-range filter (hidden when printing): a row of quick-pick preset
+// buttons above the explicit From/To form. The active preset is highlighted.
+templ rptRangeForm(action, preset, from, to string) {
+	<div class="no-print mb-5 space-y-3">
+		<div class="flex flex-wrap gap-2">
+			@presetBtn(action, "today", "Today", preset)
+			@presetBtn(action, "this-week", "This week", preset)
+			@presetBtn(action, "this-month", "This month", preset)
+			@presetBtn(action, "last-week", "Last week", preset)
+			@presetBtn(action, "last-month", "Last month", preset)
+			@presetBtn(action, "this-year", "This year", preset)
 		</div>
-		<div>
-			<label class="block text-xs text-slate-500 mb-1">To</label>
-			<input type="date" name="to" value={ to } class="border rounded-lg px-3 py-1.5"/>
-		</div>
-		{ children... }
-		<button class="px-4 py-1.5 rounded-lg bg-slate-800 text-white text-sm">Apply</button>
-	</form>
+		<form method="get" action={ templ.SafeURL(action) } class="flex flex-wrap items-end gap-3">
+			<div>
+				<label class="block text-xs text-slate-500 mb-1">From</label>
+				<input type="date" name="from" value={ from } class="border rounded-lg px-3 py-1.5"/>
+			</div>
+			<div>
+				<label class="block text-xs text-slate-500 mb-1">To</label>
+				<input type="date" name="to" value={ to } class="border rounded-lg px-3 py-1.5"/>
+			</div>
+			{ children... }
+			<button class="px-4 py-1.5 rounded-lg bg-slate-800 text-white text-sm">Apply</button>
+		</form>
+	</div>
+}
+
+// presetBtn is one quick-pick range link; highlighted when it's the active preset.
+templ presetBtn(action, key, label, active string) {
+	<a
+		href={ templ.SafeURL(action + "?preset=" + key) }
+		if active == key {
+			class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-sm font-medium"
+		} else {
+			class="px-3 py-1.5 rounded-lg bg-white border text-slate-600 text-sm hover:bg-slate-50"
+		}
+	>{ label }</a>
 }
 
 templ rptPeriodLine(from, to string) {
@@ -81,7 +104,7 @@ templ rptPeriodLine(from, to string) {
 // ============================ Sales report ============================
 
 type SalesReportData struct {
-	ShopName, Symbol, From, To, Status string
+	ShopName, Symbol, From, To, Status, Method, Preset string
 	Rows                               []sales.Sale
 	Count                              int
 	Gross, Discount, Net               decimal.Decimal
@@ -89,7 +112,7 @@ type SalesReportData struct {
 
 templ SalesReport(d SalesReportData) {
 	@layouts.Report("Sales Report", d.ShopName) {
-		@rptRangeForm("/admin/reports/sales", d.From, d.To) {
+		@rptRangeForm("/admin/reports/sales", d.Preset, d.From, d.To) {
 			<div>
 				<label class="block text-xs text-slate-500 mb-1">Status</label>
 				<select name="status" class="border rounded-lg px-3 py-1.5">
@@ -100,9 +123,19 @@ templ SalesReport(d SalesReportData) {
 					@statusOpt("returned", "Returned", d.Status)
 				</select>
 			</div>
+			<div>
+				<label class="block text-xs text-slate-500 mb-1">Payment</label>
+				<select name="method" class="border rounded-lg px-3 py-1.5">
+					@statusOpt("", "All", d.Method)
+					@statusOpt("cash", "Cash", d.Method)
+					@statusOpt("card", "Card", d.Method)
+					@statusOpt("online", "Online", d.Method)
+					@statusOpt("wallet", "Wallet", d.Method)
+				</select>
+			</div>
 			<a
 				class="no-print px-4 py-1.5 rounded-lg border text-sm"
-				href={ templ.SafeURL("/admin/reports/sales?format=csv&from=" + d.From + "&to=" + d.To + "&status=" + d.Status) }
+				href={ templ.SafeURL("/admin/reports/sales?format=csv&from=" + d.From + "&to=" + d.To + "&status=" + d.Status + "&method=" + d.Method) }
 			>Download CSV</a>
 		}
 		@rptPeriodLine(d.From, d.To)
@@ -147,13 +180,13 @@ templ statusOpt(val, label, cur string) {
 // ============================ Finance report ============================
 
 type FinanceReportData struct {
-	ShopName, Symbol, From, To string
+	ShopName, Symbol, From, To, Preset string
 	PL                         reports.PL
 }
 
 templ FinanceReport(d FinanceReportData) {
 	@layouts.Report("Finance / Profit & Loss", d.ShopName) {
-		@rptRangeForm("/admin/reports/finance", d.From, d.To) {
+		@rptRangeForm("/admin/reports/finance", d.Preset, d.From, d.To) {
 			<a
 				class="no-print px-4 py-1.5 rounded-lg border text-sm"
 				href={ templ.SafeURL("/admin/reports/finance?format=csv&from=" + d.From + "&to=" + d.To) }
@@ -222,14 +255,14 @@ templ plMoney(symbol, label string, v decimal.Decimal, negate bool) {
 // ============================ Cash register report ============================
 
 type CashReportData struct {
-	ShopName, Symbol, From, To              string
+	ShopName, Symbol, From, To, Preset      string
 	Rows                                    []cashregister.SessionRow
 	Opening, Expected, Counted, OverShort   decimal.Decimal
 }
 
 templ CashRegisterReport(d CashReportData) {
 	@layouts.Report("Cash Register Report", d.ShopName) {
-		@rptRangeForm("/admin/reports/cash-register", d.From, d.To) {
+		@rptRangeForm("/admin/reports/cash-register", d.Preset, d.From, d.To) {
 		}
 		@rptPeriodLine(d.From, d.To)
 		<table class="w-full text-sm">
@@ -274,14 +307,14 @@ templ CashRegisterReport(d CashReportData) {
 // ============================ Purchases report ============================
 
 type PurchasesReportData struct {
-	ShopName, Symbol, From, To string
+	ShopName, Symbol, From, To, Preset string
 	Rows                       []purchases.Purchase
 	Total, Paid, Due           decimal.Decimal
 }
 
 templ PurchasesReport(d PurchasesReportData) {
 	@layouts.Report("Purchases Report", d.ShopName) {
-		@rptRangeForm("/admin/reports/purchases", d.From, d.To) {
+		@rptRangeForm("/admin/reports/purchases", d.Preset, d.From, d.To) {
 		}
 		@rptPeriodLine(d.From, d.To)
 		<table class="w-full text-sm">

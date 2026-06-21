@@ -2,26 +2,86 @@ package adminpages
 
 import (
 	"strconv"
+	"time"
 
-	"karots-pos/internal/datetime"
 	"karots-pos/internal/features/reports"
 	"karots-pos/internal/money"
 	"karots-pos/templates/layouts"
+	"karots-pos/templates/shared"
 
 	"github.com/shopspring/decimal"
 )
 
+// containsStr reports whether xs contains v.
+func containsStr(xs []string, v string) bool {
+	for _, x := range xs {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}
+
+// catFilterLabel summarises the selected-category set for the dropdown summary.
+func catFilterLabel(sel []string) string {
+	switch len(sel) {
+	case 0:
+		return "All categories"
+	case 1:
+		return sel[0]
+	default:
+		return strconv.Itoa(len(sel)) + " selected"
+	}
+}
+
+// catBars builds horizontal-bar chart input (profit per category) for the chart.
+func catBars(rows []reports.CategoryProfit, symbol string) []shared.ChartBar {
+	bars := make([]shared.ChartBar, 0, len(rows))
+	for _, r := range rows {
+		bars = append(bars, shared.ChartBar{
+			Label: r.Category,
+			Value: r.Profit.InexactFloat64(),
+			Text:  money.Format(symbol, r.Profit),
+		})
+	}
+	return bars
+}
+
+// trendChartData builds the x labels + revenue/profit line series for the trend.
+func trendChartData(rows []reports.DayRow, symbol, gran string) ([]string, []shared.LineSeries) {
+	labels := make([]string, 0, len(rows))
+	var rev, prof []float64
+	for _, r := range rows {
+		labels = append(labels, periodLabel(r.Day, gran))
+		rev = append(rev, r.Revenue.InexactFloat64())
+		prof = append(prof, r.Profit.InexactFloat64())
+	}
+	return labels, []shared.LineSeries{
+		{Name: "Net revenue", Color: shared.Palette[0], Values: rev},
+		{Name: "Profit", Color: shared.Palette[1], Values: prof},
+	}
+}
+
+// periodLabel formats a period-start date for the chart x-axis given the
+// grouping granularity (month → "Jan 2006", day/week → short date).
+func periodLabel(t time.Time, gran string) string {
+	if gran == "month" {
+		return t.Format("Jan 2006")
+	}
+	return t.Format("Jan 02")
+}
+
 // ============================ Returns / refunds report ============================
 
 type ReturnsReportData struct {
-	ShopName, Symbol, From, To string
+	ShopName, Symbol, From, To, Preset string
 	Rows                       []reports.ReturnRow
 	TotalRefund                decimal.Decimal
 }
 
 templ ReturnsReport(d ReturnsReportData) {
 	@layouts.Report("Returns / Refunds", d.ShopName) {
-		@rptRangeForm("/admin/reports/returns", d.From, d.To) {
+		@rptRangeForm("/admin/reports/returns", d.Preset, d.From, d.To) {
 		}
 		@rptPeriodLine(d.From, d.To)
 		<table class="w-full text-sm">
@@ -53,16 +113,39 @@ templ ReturnsReport(d ReturnsReportData) {
 // ============================ Profit by category ============================
 
 type CategoryProfitData struct {
-	ShopName, Symbol, From, To string
+	ShopName, Symbol, From, To, Preset string
 	Rows                       []reports.CategoryProfit
 	TotalRevenue, TotalProfit  decimal.Decimal
+	AllCats                    []string
+	SelCats                    []string
 }
 
 templ ProfitByCategoryReport(d CategoryProfitData) {
 	@layouts.Report("Profit by Category", d.ShopName) {
-		@rptRangeForm("/admin/reports/profit-by-category", d.From, d.To) {
+		@rptRangeForm("/admin/reports/profit-by-category", d.Preset, d.From, d.To) {
+			<div>
+				<label class="block text-xs text-slate-500 mb-1">Categories</label>
+				<details class="relative">
+					<summary class="border rounded-lg px-3 py-1.5 cursor-pointer select-none text-sm list-none">
+						{ catFilterLabel(d.SelCats) }
+					</summary>
+					<div class="absolute z-10 mt-1 bg-white border rounded-lg shadow-lg p-2 max-h-64 overflow-auto w-56">
+						for _, name := range d.AllCats {
+							<label class="flex items-center gap-2 px-2 py-1 text-sm hover:bg-slate-50 rounded">
+								<input type="checkbox" name="category" value={ name } checked?={ containsStr(d.SelCats, name) }/>
+								<span>{ name }</span>
+							</label>
+						}
+					</div>
+				</details>
+			</div>
 		}
 		@rptPeriodLine(d.From, d.To)
+		if len(d.Rows) > 0 {
+			<div class="mb-6">
+				@shared.HBarChart(catBars(d.Rows, d.Symbol))
+			</div>
+		}
 		<table class="w-full text-sm">
 			<thead class="text-left text-slate-500 border-b">
 				<tr><th class="py-1.5">Category</th><th class="py-1.5 text-right">Net revenue</th><th class="py-1.5 text-right">COGS</th><th class="py-1.5 text-right">Profit</th><th class="py-1.5 text-right">Margin</th></tr>
@@ -97,24 +180,39 @@ templ ProfitByCategoryReport(d CategoryProfitData) {
 // ============================ Daily sales trend ============================
 
 type SalesTrendData struct {
-	ShopName, Symbol, From, To              string
+	ShopName, Symbol, From, To, Preset      string
+	Group                                   string
 	Rows                                    []reports.DayRow
 	TotalRevenue, TotalProfit, MaxRevenue   decimal.Decimal
 }
 
 templ SalesTrendReport(d SalesTrendData) {
-	@layouts.Report("Daily Sales Trend", d.ShopName) {
-		@rptRangeForm("/admin/reports/sales-trend", d.From, d.To) {
+	@layouts.Report("Sales Trend", d.ShopName) {
+		@rptRangeForm("/admin/reports/sales-trend", d.Preset, d.From, d.To) {
+			<div>
+				<label class="block text-xs text-slate-500 mb-1">Group by</label>
+				<select name="group" class="border rounded-lg px-3 py-1.5">
+					@statusOpt("day", "Day", d.Group)
+					@statusOpt("week", "Week", d.Group)
+					@statusOpt("month", "Month", d.Group)
+				</select>
+			</div>
 		}
 		@rptPeriodLine(d.From, d.To)
+		if len(d.Rows) > 0 {
+			<div class="mb-6">
+				{{ labels, series := trendChartData(d.Rows, d.Symbol, d.Group) }}
+				@shared.LineChart(labels, series)
+			</div>
+		}
 		<table class="w-full text-sm">
 			<thead class="text-left text-slate-500 border-b">
-				<tr><th class="py-1.5">Day</th><th class="py-1.5 text-right">Sales</th><th class="py-1.5 text-right">Net revenue</th><th class="py-1.5 text-right">Profit</th><th class="py-1.5 w-1/3">&nbsp;</th></tr>
+				<tr><th class="py-1.5">Period</th><th class="py-1.5 text-right">Sales</th><th class="py-1.5 text-right">Net revenue</th><th class="py-1.5 text-right">Profit</th><th class="py-1.5 w-1/3">&nbsp;</th></tr>
 			</thead>
 			<tbody>
 				for _, r := range d.Rows {
 					<tr class="border-b last:border-0">
-						<td class="py-1.5 font-medium">{ datetime.Date(r.Day) }</td>
+						<td class="py-1.5 font-medium">{ periodLabel(r.Day, d.Group) }</td>
 						<td class="py-1.5 text-right">{ strconv.Itoa(r.Count) }</td>
 						<td class="py-1.5 text-right">{ money.Format(d.Symbol, r.Revenue) }</td>
 						<td class="py-1.5 text-right">{ money.Format(d.Symbol, r.Profit) }</td>
@@ -145,13 +243,13 @@ templ SalesTrendReport(d SalesTrendData) {
 // ============================ Warranty & recovery ============================
 
 type WarrantyReportData struct {
-	ShopName, Symbol, From, To string
+	ShopName, Symbol, From, To, Preset string
 	Summary                    reports.WarrantySummary
 }
 
 templ WarrantyReport(d WarrantyReportData) {
 	@layouts.Report("Warranty & Recovery", d.ShopName) {
-		@rptRangeForm("/admin/reports/warranty", d.From, d.To) {
+		@rptRangeForm("/admin/reports/warranty", d.Preset, d.From, d.To) {
 		}
 		@rptPeriodLine(d.From, d.To)
 		<h3 class="font-semibold mb-2">Stock losses</h3>

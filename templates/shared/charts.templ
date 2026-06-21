@@ -1,0 +1,115 @@
+package shared
+
+// Server-rendered SVG charts. Each component computes its geometry via the Go
+// helpers in charts.go, then emits plain SVG (no JS) so it prints cleanly inside
+// the report → PDF flow. Wrap a chart in a titled card with @ChartCard.
+
+// ChartCard is a white panel with a heading; put a chart (or anything) inside.
+templ ChartCard(title string) {
+	<div class="bg-white rounded-2xl shadow-sm p-6">
+		if title != "" {
+			<h2 class="text-lg font-semibold mb-4">{ title }</h2>
+		}
+		{ children... }
+	</div>
+}
+
+templ chartEmpty(msg string) {
+	<div class="py-10 text-center text-sm text-slate-400">{ msg }</div>
+}
+
+// HBarChart renders horizontal bars — best for named categories.
+templ HBarChart(bars []ChartBar) {
+	if len(bars) == 0 {
+		@chartEmpty("No data in this period.")
+	} else {
+		{{ v := buildHBars(bars) }}
+		<svg viewBox={ "0 0 " + f(v.Width) + " " + f(v.Height) } class="w-full" style="max-height:420px" role="img">
+			for _, r := range v.Rows {
+				<text x="0" y={ f(r.LabelY) } class="fill-slate-600" style="font-size:13px">{ truncLabel(r.Label) }</text>
+				<rect x={ f(v.GutterX) } y={ f(r.Y) } width={ f(r.BarW) } height="22" rx="4" fill={ r.Color }></rect>
+				<text x={ f(r.TextX) } y={ f(r.LabelY) } class="fill-slate-700" style="font-size:12px" text-anchor={ r.TextAnchor }>{ r.Text }</text>
+			}
+		</svg>
+	}
+}
+
+// BarChart renders vertical bars — best for day-by-day series (e.g. daily tax).
+templ BarChart(bars []ChartBar) {
+	if len(bars) == 0 {
+		@chartEmpty("No data in this period.")
+	} else {
+		{{ v := buildVBars(bars) }}
+		<svg viewBox={ "0 0 " + f(v.Width) + " " + f(v.Height) } class="w-full" style="max-height:300px" role="img">
+			<line x1="8" y1={ f(v.BaseY) } x2={ f(v.Width - 8) } y2={ f(v.BaseY) } stroke="#e2e8f0" stroke-width="1"></line>
+			for _, c := range v.Cols {
+				<rect x={ f(c.X) } y={ f(c.Y) } width={ f(c.W) } height={ f(c.H) } rx="3" fill={ c.Color }></rect>
+				<text x={ f(c.LabelX) } y={ f(v.BaseY + 16) } class="fill-slate-500" style="font-size:11px" text-anchor="middle">{ c.Label }</text>
+			}
+		</svg>
+	}
+}
+
+// LineChart plots one or more series sharing the same x labels, with a legend.
+templ LineChart(labels []string, series []LineSeries) {
+	if len(labels) == 0 {
+		@chartEmpty("No data in this period.")
+	} else {
+		{{ v := buildLine(labels, series) }}
+		<svg viewBox={ "0 0 " + f(v.Width) + " " + f(v.Height) } class="w-full" style="max-height:300px" role="img">
+			<line x1="8" y1={ f(v.BaseY) } x2={ f(v.Width - 8) } y2={ f(v.BaseY) } stroke="#e2e8f0" stroke-width="1"></line>
+			for _, s := range v.Series {
+				<polyline points={ s.Points } fill="none" stroke={ s.Color } stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"></polyline>
+				<circle cx={ f(s.DotX) } cy={ f(s.DotY) } r="3.5" fill={ s.Color }></circle>
+			}
+			for _, l := range v.Labels {
+				<text x={ f(l.X) } y={ f(v.BaseY + 16) } class="fill-slate-500" style="font-size:11px" text-anchor="middle">{ l.Text }</text>
+			}
+		</svg>
+		<div class="flex flex-wrap gap-4 mt-3 text-sm">
+			for _, s := range v.Series {
+				<span class="inline-flex items-center gap-1.5">
+					<span class="inline-block w-3 h-3 rounded-sm" style={ "background:" + s.Color }></span>
+					<span class="text-slate-600">{ s.Name }</span>
+				</span>
+			}
+		</div>
+	}
+}
+
+// Donut renders a ring of slices with a legend listing label + value.
+templ Donut(slices []ChartSlice) {
+	{{ v := buildDonut(slices) }}
+	if v.Empty {
+		@chartEmpty("No data in this period.")
+	} else {
+		<div class="flex flex-wrap items-center gap-6">
+			<svg viewBox={ "0 0 " + f(v.Size) + " " + f(v.Size) } class="w-44 h-44 shrink-0" role="img">
+				<g transform={ "rotate(-90 " + f(v.CX) + " " + f(v.CY) + ")" }>
+					for _, a := range v.Arcs {
+						<circle
+							cx={ f(v.CX) }
+							cy={ f(v.CY) }
+							r={ f(v.R) }
+							fill="none"
+							stroke={ a.Color }
+							stroke-width={ f(v.Stroke) }
+							stroke-dasharray={ f(a.DashLen) + " " + f(v.Circ) }
+							stroke-dashoffset={ f(a.DashOffset) }
+						></circle>
+					}
+				</g>
+			</svg>
+			<div class="space-y-1.5 text-sm">
+				for _, a := range v.Arcs {
+					<div class="flex items-center gap-2">
+						<span class="inline-block w-3 h-3 rounded-sm" style={ "background:" + a.Color }></span>
+						<span class="text-slate-600 capitalize">{ a.Label }</span>
+						<span class="text-slate-400">{ a.Pct }</span>
+						<span class="ml-auto font-medium text-slate-700">{ a.Text }</span>
+					</div>
+				}
+			</div>
+		</div>
+	}
+}

@@ -20,7 +20,7 @@ func (s *Server) logAudit(c echo.Context, action, entity, entityID, detail strin
 // AuditLog shows the activity trail, filterable by entity and date range.
 func (a *adminUI) AuditLog(c echo.Context) error {
 	ctx := c.Request().Context()
-	from, to, fromStr, toStr, err := rangeStrings(c)
+	from, to, fromStr, toStr, _, err := rangeStrings(c)
 	if err != nil {
 		return err
 	}
