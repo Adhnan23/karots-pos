@@ -39,6 +39,16 @@ func (s *Service) List(ctx context.Context, q ListQuery) ([]Product, int, error)
 	return rows, total, nil
 }
 
+// DefaultGrid returns the cashier's opening product grid (pinned first, then best
+// sellers). limit ≤ 0 applies a sensible default.
+func (s *Service) DefaultGrid(ctx context.Context, limit int) ([]Product, error) {
+	rows, err := s.repo.DefaultGrid(ctx, limit)
+	if err != nil {
+		return nil, apperr.Internal("failed to load default products", err)
+	}
+	return rows, nil
+}
+
 func (s *Service) Get(ctx context.Context, id int64) (*Product, error) {
 	p, err := s.repo.FindByID(ctx, id)
 	if err != nil {
@@ -318,6 +328,7 @@ func toWriteRow(in CreateInput) (writeRow, error) {
 		TrackSerial:    in.TrackSerial,
 		WarrantyMonths: in.WarrantyMonths,
 		IsService:         in.IsService,
+		IsPinned:          in.IsPinned,
 		PreferredSupplier: in.PreferredSupplierID,
 	}, nil
 }

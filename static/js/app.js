@@ -328,8 +328,17 @@ function pos(symbol, defaultType, promptAfterSale) {
     },
 
     async loadProducts() {
+      // Empty search shows the default grid (pinned first, then best sellers);
+      // typing switches to a live name/barcode search.
+      if (!this.search || !this.search.trim()) {
+        return this.loadDefaultGrid();
+      }
       const q = encodeURIComponent(this.search);
       const json = await apiFetch("GET", `/api/products?limit=100&search=${q}`);
+      this.products = json.data || [];
+    },
+    async loadDefaultGrid() {
+      const json = await apiFetch("GET", "/api/products/default");
       this.products = json.data || [];
     },
     async loadCustomers() {

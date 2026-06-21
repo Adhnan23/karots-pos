@@ -195,6 +195,12 @@ templ ProductForm(p *products.Product, cats []categories.TreeNode, us []units.Un
 						<input name="warranty_months" type="number" min="0" value={ valOf(p, fWarrantyMonths) } placeholder="0 = none" class="w-full border rounded-lg px-3 py-2"/>
 					</div>
 				</div>
+				<!-- Pin to cashier: pinned products lead the till's default grid (best
+				     sellers fill the rest), so common items are one tap away. -->
+				<label class="flex items-center gap-2">
+					<input type="checkbox" name="is_pinned" value="true" checked?={ p != nil && p.IsPinned }/>
+					<span class="text-sm font-medium">Pin to cashier (show first on the till)</span>
+				</label>
 				<div class="flex justify-end gap-3 pt-2">
 					<button type="button" class="px-4 py-2 rounded-lg border" x-on:click="$dispatch('close-modal')">Cancel</button>
 					<button type="submit" class="px-4 py-2 rounded-lg bg-indigo-600 text-white">Save</button>
