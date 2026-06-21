@@ -249,7 +249,24 @@ func (a *adminUI) TxView(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	return response.RenderPage(c, TxSlipPage(middleware.CurrentUserName(c), a.symbol(ctx), t))
+	return response.RenderPage(c, TxSlipPage(middleware.CurrentUserName(c), a.symbol(ctx), a.shopInfo(ctx), t))
+}
+
+// shopInfo resolves the shop header (name/address/phone) for the HTML slip view,
+// matching the printed receipt. Empty on error.
+func (a *adminUI) shopInfo(ctx context.Context) ShopInfo {
+	cfg, err := a.p.core.Settings.Get(ctx)
+	if err != nil || cfg == nil {
+		return ShopInfo{}
+	}
+	s := ShopInfo{Name: cfg.ShopName}
+	if cfg.Address != nil {
+		s.Address = *cfg.Address
+	}
+	if cfg.Phone != nil {
+		s.Phone = *cfg.Phone
+	}
+	return s
 }
 
 // TxPrint reprints a transaction slip to the receipt printer.

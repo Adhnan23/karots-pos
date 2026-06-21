@@ -362,11 +362,28 @@ templ slipActions(id int64) {
 	>Reprint</button>
 }
 
+// ShopInfo carries the shop header (name/address/phone) onto the HTML slip so the
+// on-screen view matches the printed receipt.
+type ShopInfo struct {
+	Name    string
+	Address string
+	Phone   string
+}
+
 // TxSlipPage is a printable HTML view of one transaction slip, with a reprint
 // button (parity with the core sale receipt view).
-templ TxSlipPage(userName, symbol string, t TxRow) {
+templ TxSlipPage(userName, symbol string, shop ShopInfo, t TxRow) {
 	@layouts.Admin("Reload & Bills — Slip", userName, "recharge-ledger") {
 		<div class="max-w-sm mx-auto bg-white rounded-2xl shadow-sm p-6 my-6">
+			<div class="text-center border-b pb-3 mb-3">
+				<div class="text-lg font-bold">{ shop.Name }</div>
+				if shop.Address != "" {
+					<div class="text-xs text-slate-500">{ shop.Address }</div>
+				}
+				if shop.Phone != "" {
+					<div class="text-xs text-slate-500">{ shop.Phone }</div>
+				}
+			</div>
 			<div class="text-center text-xl font-bold capitalize">{ txLabel(t.Type) }</div>
 			<div class="text-center text-slate-400 text-xs mb-5">{ t.CreatedAt.Format("2006-01-02 15:04") }</div>
 			<dl class="text-sm divide-y">
