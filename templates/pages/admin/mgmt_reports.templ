@@ -47,6 +47,9 @@ templ ReportsHub(d ReportsHubData) {
 			@reportCard("/admin/reports/low-stock", "Low Stock", "Items at or below reorder level")
 			@reportCard("/admin/reports/expiring", "Expiring Stock", "Batches expiring soon")
 			@reportCard("/admin/damage", "Damage Report", "Damaged/written-off stock & recovery")
+			for _, rc := range layouts.PluginReportCards() {
+				@reportCard(rc.Href, rc.Label, rc.Desc)
+			}
 		</div>
 	}
 }

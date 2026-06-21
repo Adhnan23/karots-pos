@@ -13,12 +13,15 @@ import (
 	"karots-pos/internal/features/cashregister"
 	"karots-pos/internal/features/expenses"
 	"karots-pos/internal/features/products"
+	"karots-pos/internal/features/reports"
 	"karots-pos/internal/middleware"
 	"karots-pos/internal/money"
 	"karots-pos/internal/response"
 	"karots-pos/templates/layouts"
+	"karots-pos/templates/shared"
 
 	"github.com/labstack/echo/v4"
+	"github.com/shopspring/decimal"
 )
 
 type adminUI struct{ p *Plugin }
@@ -156,7 +159,63 @@ func (a *adminUI) Report(c echo.Context) error {
 		}
 		blocks = append(blocks, SessionRecon{Session: s, Rows: rows})
 	}
-	return response.RenderPage(c, ReportPage(middleware.CurrentUserName(c), a.symbol(ctx), balances, blocks))
+
+	// Range-scoped summary: service charge earned + value moved by type.
+	preset := c.QueryParam("preset")
+	from, to, fromStr, toStr, err := reports.ResolveRange(preset, c.QueryParam("from"), c.QueryParam("to"))
+	if err != nil {
+		return err
+	}
+	led, err := a.p.store.Ledger(ctx, LedgerFilter{From: &from, To: &to, Limit: 100000})
+	if err != nil {
+		return err
+	}
+	symbol := a.symbol(ctx)
+	vm := ReportVM{
+		UserName:      middleware.CurrentUserName(c),
+		Symbol:        symbol,
+		Preset:        preset,
+		From:          fromStr,
+		To:            toStr,
+		Balances:      balances,
+		Blocks:        blocks,
+		ServiceEarned: sumServiceCharge(led),
+		FloatOnHand:   sumBalances(balances),
+		TypeBars:      typeValueBars(led, symbol),
+	}
+	return response.RenderPage(c, ReportPage(vm))
+}
+
+// sumBalances totals the live float across all tracked devices.
+func sumBalances(bs []DeviceBalanceNow) decimal.Decimal {
+	t := decimal.Zero
+	for _, b := range bs {
+		t = t.Add(b.Balance)
+	}
+	return t
+}
+
+// typeValueBars aggregates ledger value by transaction type into chart bars, in a
+// stable, human order.
+func typeValueBars(rows []TxRow, symbol string) []shared.ChartBar {
+	order := []string{"deposit", "withdrawal", "billpay", "topup", "wallet_in", "reload", "refill"}
+	sums := map[string]decimal.Decimal{}
+	for _, r := range rows {
+		sums[r.Type] = sums[r.Type].Add(r.Amount)
+	}
+	var bars []shared.ChartBar
+	for _, t := range order {
+		v, ok := sums[t]
+		if !ok || v.IsZero() {
+			continue
+		}
+		bars = append(bars, shared.ChartBar{
+			Label: txLabel(t),
+			Value: v.InexactFloat64(),
+			Text:  money.Format(symbol, v),
+		})
+	}
+	return bars
 }
 
 // symbol resolves the configured currency symbol (empty on error).

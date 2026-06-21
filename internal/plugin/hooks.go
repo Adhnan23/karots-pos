@@ -44,6 +44,14 @@ type PaletteEntry struct {
 	Group string
 }
 
+// ReportCard adds a card to the core Reports hub (/admin/reports). Registered by
+// a plugin so its report shows alongside the built-in ones when it's enabled.
+type ReportCard struct {
+	Href  string
+	Label string
+	Desc  string
+}
+
 // TenderMethod adds a payment method to the cashier POS split-tender selector.
 // Value must be a payment_method enum value the plugin's migration added (e.g.
 // "wallet"); Label is shown in the dropdown. The carrier picker and the
@@ -78,6 +86,7 @@ var (
 	settingsSecs    []SettingsSection
 	dashboardCards  []DashboardCard
 	paletteEntries  []PaletteEntry
+	reportCards     []ReportCard
 	posActions      []PosAction
 	quickActionTabs []QuickActionTab
 	tenderMethods   []TenderMethod
@@ -89,6 +98,7 @@ func (r *Registry) AddCashierTab(t CashierTab)           { cashierTabs = append(
 func (r *Registry) AddSettingsSection(s SettingsSection) { settingsSecs = append(settingsSecs, s) }
 func (r *Registry) AddDashboardCard(c DashboardCard)     { dashboardCards = append(dashboardCards, c) }
 func (r *Registry) AddPaletteEntry(p PaletteEntry)       { paletteEntries = append(paletteEntries, p) }
+func (r *Registry) AddReportCard(rc ReportCard)          { reportCards = append(reportCards, rc) }
 func (r *Registry) AddPosAction(a PosAction)             { posActions = append(posActions, a) }
 func (r *Registry) AddQuickActionTab(t QuickActionTab)   { quickActionTabs = append(quickActionTabs, t) }
 func (r *Registry) AddTenderMethod(t TenderMethod)       { tenderMethods = append(tenderMethods, t) }
@@ -99,6 +109,7 @@ func CashierTabs() []CashierTab           { return cashierTabs }
 func SettingsSections() []SettingsSection { return settingsSecs }
 func DashboardCards() []DashboardCard     { return dashboardCards }
 func PaletteEntries() []PaletteEntry      { return paletteEntries }
+func ReportCards() []ReportCard           { return reportCards }
 func PosActions() []PosAction             { return posActions }
 func QuickActionTabs() []QuickActionTab   { return quickActionTabs }
 func TenderMethods() []TenderMethod       { return tenderMethods }

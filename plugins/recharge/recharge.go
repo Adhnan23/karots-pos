@@ -59,6 +59,13 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 	reg.AddCashierTab(plugin.CashierTab{Href: "/cashier/recharge", Label: "Reload & Bills", Key: "recharge"})
 	reg.AddTenderMethod(plugin.TenderMethod{Value: "wallet", Label: "Wallet (eZ Cash / mCash)"})
 
+	// Surface the Reload & Bills report in the core Reports hub too.
+	reg.AddReportCard(plugin.ReportCard{
+		Href:  "/admin/recharge/report",
+		Label: "📶 Reload & Bills",
+		Desc:  "Float on hand, service charge earned & movement by type",
+	})
+
 	// The first entry defines the section's sidebar target — the hub page, which
 	// lists the links below as cards (matching the core admin sections).
 	reg.AddAdminNav(plugin.AdminNavEntry{

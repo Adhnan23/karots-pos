@@ -1,8 +1,10 @@
 package recharge
 
 import "karots-pos/templates/layouts"
+import "karots-pos/templates/shared"
 import "karots-pos/internal/money"
 import "strconv"
+import "github.com/shopspring/decimal"
 
 // HubPage is the Reload & Bills section landing page: it lists the section's
 // sub-pages as cards (skipping the hub's own self-link), mirroring the core admin
@@ -195,27 +197,78 @@ templ CarrierRows(carriers []Carrier) {
 // ReportPage is the admin recharge report: live per-device float balances, a
 // supplier float-refill form, and a per-session reconciliation. The detailed
 // money-movement log lives on the Ledger page.
-templ ReportPage(userName, symbol string, balances []DeviceBalanceNow, blocks []SessionRecon) {
-	@layouts.Admin("Reload & Bills — Report", userName, "recharge-report") {
+// ReportVM is the view model for the Reload & Bills report (range-scoped summary
+// + live balances + session reconciliation).
+type ReportVM struct {
+	UserName, Symbol string
+	Preset, From, To string
+	Balances         []DeviceBalanceNow
+	Blocks           []SessionRecon
+	ServiceEarned    decimal.Decimal
+	FloatOnHand      decimal.Decimal
+	TypeBars         []shared.ChartBar
+}
+
+templ ReportPage(d ReportVM) {
+	@layouts.Admin("Reload & Bills — Report", d.UserName, "recharge-report") {
 		<h1 class="text-2xl font-bold mb-6">Reload & Bills — Report</h1>
 		<div class="space-y-6">
+			<form method="get" action="/admin/recharge/report" class="flex flex-wrap gap-2 items-end">
+				@rptPreset("today", "Today", d.Preset)
+				@rptPreset("this-week", "This week", d.Preset)
+				@rptPreset("this-month", "This month", d.Preset)
+				@rptPreset("last-week", "Last week", d.Preset)
+				@rptPreset("last-month", "Last month", d.Preset)
+				@rptPreset("this-year", "This year", d.Preset)
+			</form>
+			<div class="text-sm text-slate-500">Period: <span class="font-medium">{ d.From }</span> to <span class="font-medium">{ d.To }</span></div>
+			<div class="grid grid-cols-2 lg:grid-cols-3 gap-4">
+				@kpi("Service charge earned", money.Format(d.Symbol, d.ServiceEarned), "emerald")
+				@kpi("Float on hand (all devices)", money.Format(d.Symbol, d.FloatOnHand), "indigo")
+				@kpi("Movements in range", strconv.Itoa(len(d.TypeBars))+" types", "slate")
+			</div>
+			<div class="bg-white rounded-2xl shadow-sm p-6">
+				<h2 class="text-lg font-semibold mb-4">Value moved by type</h2>
+				@shared.HBarChart(d.TypeBars)
+			</div>
 			<div id="balance-panel">
-				@BalancePanel(symbol, balances)
+				@BalancePanel(d.Symbol, d.Balances)
 			</div>
 			<div class="bg-white rounded-2xl shadow-sm p-6">
 				<h2 class="text-lg font-semibold mb-4">Reconciliation by session</h2>
-				if len(blocks) == 0 {
+				if len(d.Blocks) == 0 {
 					<p class="text-slate-400 text-sm">No cash sessions yet.</p>
 				} else {
 					<div class="space-y-5">
-						for _, b := range blocks {
-							@reportSession(symbol, b)
+						for _, b := range d.Blocks {
+							@reportSession(d.Symbol, b)
 						}
 					</div>
 				}
 			</div>
 		</div>
 	}
+}
+
+// rptPreset is a quick-pick range button for the report (GET link).
+templ rptPreset(key, label, active string) {
+	<a
+		href={ templ.SafeURL("/admin/recharge/report?preset=" + key) }
+		if active == key {
+			class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-sm font-medium"
+		} else {
+			class="px-3 py-1.5 rounded-lg bg-white border text-slate-600 text-sm hover:bg-slate-50"
+		}
+	>{ label }</a>
+}
+
+// kpi is a compact stat card for the report summary (mirrors the core statCard
+// colour pattern, so the text-{color}-600 classes are already in the CSS).
+templ kpi(label, value, color string) {
+	<div class="bg-white rounded-2xl shadow-sm p-5">
+		<div class="text-sm text-slate-500">{ label }</div>
+		<div class={ "text-2xl font-bold mt-1 text-" + color + "-600" }>{ value }</div>
+	</div>
 }
 
 // BalancePanel is the live per-device float balance table (HTMX-swappable so a

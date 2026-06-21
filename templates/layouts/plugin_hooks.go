@@ -62,6 +62,24 @@ func pluginPalette() []paletteEntry {
 	return out
 }
 
+// reportCardView is a plugin report card adapted for the Reports hub.
+type reportCardView struct {
+	Href, Label, Desc string
+}
+
+// PluginReportCards exposes plugin-contributed report cards to the Reports hub.
+func PluginReportCards() []reportCardView {
+	rc := plugin.ReportCards()
+	if len(rc) == 0 {
+		return nil
+	}
+	out := make([]reportCardView, 0, len(rc))
+	for _, r := range rc {
+		out = append(out, reportCardView{Href: r.Href, Label: r.Label, Desc: r.Desc})
+	}
+	return out
+}
+
 // navTab is a plugin cashier tab adapted for the cashier shell.
 type navTab struct {
 	Href, Label, Key string
