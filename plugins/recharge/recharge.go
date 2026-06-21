@@ -38,13 +38,16 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 	reg.Admin().POST("/recharge/devices", a.DeviceCreate)
 	reg.Admin().POST("/recharge/devices/:id/delete", a.DeviceDelete)
 	reg.Admin().GET("/recharge/report", a.Report)
+	reg.Admin().GET("/recharge/ledger", a.Ledger)
 
 	ch := &cashierUI{p: p}
 	reg.Cashier().GET("/recharge/carriers", ch.Carriers)
+	reg.Cashier().GET("/recharge/devices", ch.Devices)
 	reg.Cashier().GET("/recharge", ch.Recon)
 	reg.Cashier().POST("/recharge/open", ch.SaveOpening)
 	reg.Cashier().POST("/recharge/close", ch.SaveClosing)
 	reg.Cashier().POST("/recharge/tx", ch.Tx)
+	reg.Cashier().POST("/recharge/reload", ch.Reload)
 	reg.Cashier().POST("/recharge/wallet", ch.Wallet)
 	reg.AddPosAction(plugin.PosAction{Component: ReloadButton()})
 	reg.AddCashierTab(plugin.CashierTab{Href: "/cashier/recharge", Label: "Recharge", Key: "recharge"})
@@ -64,6 +67,14 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 		Href:         "/admin/recharge/report",
 		Label:        "Report",
 		Key:          "recharge-report",
-		Desc:         "Reconciliation & money-movement ledger",
+		Desc:         "Float balances & per-session reconciliation",
+	})
+	reg.AddAdminNav(plugin.AdminNavEntry{
+		SectionLabel: "Recharge",
+		Icon:         "📶",
+		Href:         "/admin/recharge/ledger",
+		Label:        "Ledger",
+		Key:          "recharge-ledger",
+		Desc:         "Filterable money-movement log + CSV export",
 	})
 }

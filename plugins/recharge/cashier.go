@@ -67,7 +67,7 @@ func (h *cashierUI) reconData(c echo.Context) (ReconData, error) {
 		d.Symbol = cfg.CurrencySymbol
 	}
 	if sess != nil {
-		if d.Rows, err = h.p.store.Reconciliation(ctx, sess.ID, uid, sess.OpenedAt); err != nil {
+		if d.Rows, err = h.p.store.Reconciliation(ctx, sess.ID); err != nil {
 			return d, err
 		}
 	}
@@ -163,12 +163,12 @@ func (h *cashierUI) Tx(c echo.Context) error {
 
 	typ := c.FormValue("type")
 	kind, ok := txKinds[typ]
-	if !ok || typ == "wallet_in" { // wallet_in only via the sale path
+	if !ok || typ == "wallet_in" || typ == "reload" { // wallet_in/reload only via the sale path
 		return apperr.BadRequest("invalid transaction type")
 	}
-	carrierID, err := strconv.ParseInt(c.FormValue("carrier_id"), 10, 64)
-	if err != nil {
-		return apperr.Validation("choose a carrier")
+	deviceID, err := strconv.ParseInt(c.FormValue("device_id"), 10, 64)
+	if err != nil || deviceID == 0 {
+		return apperr.Validation("choose a device")
 	}
 	amt, err := money.Parse(c.FormValue("amount"))
 	if err != nil || !amt.IsPositive() {
@@ -176,17 +176,32 @@ func (h *cashierUI) Tx(c echo.Context) error {
 	}
 	ref := strings.TrimSpace(c.FormValue("reference"))
 	note := strings.TrimSpace(c.FormValue("note"))
-	var deviceID *int64
-	if v := strings.TrimSpace(c.FormValue("device_id")); v != "" {
-		if id, e := strconv.ParseInt(v, 10, 64); e == nil {
-			deviceID = &id
-		}
-	}
 
+	// The device is the unit of float — derive the carrier from it so they can't
+	// disagree.
+	carrierID, err := h.p.store.CarrierOfDevice(ctx, deviceID)
+	if err != nil {
+		return err
+	}
+	if carrierID == 0 {
+		return apperr.Validation("unknown device")
+	}
 	carrier := h.carrierName(ctx, carrierID)
 	if carrier == "" {
 		return apperr.Validation("unknown carrier")
 	}
+
+	// Hard-block: a deposit/bill-pay that would push the device float below zero.
+	if decreasesFloat(typ) {
+		over, err := h.p.store.wouldOverdraw(ctx, sess.ID, deviceID, amt)
+		if err != nil {
+			return err
+		}
+		if over {
+			return apperr.Conflict("not enough float on this device")
+		}
+	}
+
 	reason := carrier + " " + txLabel(typ)
 	if ref != "" {
 		reason += " #" + ref
@@ -233,10 +248,29 @@ func (h *cashierUI) Tx(c echo.Context) error {
 	return h.reconFragment(c, response.Toast(carrier+" "+txLabel(typ)+" recorded", "success"))
 }
 
-// Wallet credits a carrier's float when a product sale was paid by a wallet
-// transfer (eZ Cash / mCash). Posted by the POS after checkout. No cash drawer
-// movement — the e-money landed in the carrier float, not the till.
-func (h *cashierUI) Wallet(c echo.Context) error {
+// Devices lists active devices with their live float balance for the dynamic
+// pickers (reload popup, wallet tender, tx form). With carrier_id it narrows to
+// one carrier; without, it returns every carrier's devices (the flat wallet
+// picker + checkout overdraw map). Requires an open drawer — the balance is
+// relative to the current session.
+func (h *cashierUI) Devices(c echo.Context) error {
+	sess, err := h.requireSession(c)
+	if err != nil {
+		return err
+	}
+	carrierID, _ := strconv.ParseInt(c.QueryParam("carrier_id"), 10, 64) // 0 = all
+	rows, err := h.p.store.DevicesWithBalance(c.Request().Context(), sess.ID, carrierID)
+	if err != nil {
+		return err
+	}
+	return c.JSON(http.StatusOK, map[string]any{"data": rows})
+}
+
+// Reload records the float decrease for an airtime sale, attributed to a specific
+// device. Posted by the POS after the core sale commits (the cash was collected
+// by the sale's payment, so this ledger row is cash-neutral). The overdraw
+// hard-block runs client-side before checkout.
+func (h *cashierUI) Reload(c echo.Context) error {
 	ctx := c.Request().Context()
 	uid := middleware.CurrentUserID(c)
 	sess, err := h.requireSession(c)
@@ -244,9 +278,9 @@ func (h *cashierUI) Wallet(c echo.Context) error {
 		return err
 	}
 	var in struct {
-		SaleID    int64  `json:"sale_id"`
-		CarrierID int64  `json:"carrier_id"`
-		Amount    string `json:"amount"`
+		SaleID   int64  `json:"sale_id"`
+		DeviceID int64  `json:"device_id"`
+		Amount   string `json:"amount"`
 	}
 	if err := c.Bind(&in); err != nil {
 		return apperr.BadRequest("invalid request body")
@@ -255,20 +289,71 @@ func (h *cashierUI) Wallet(c echo.Context) error {
 	if err != nil || !amt.IsPositive() {
 		return apperr.Validation("amount must be positive")
 	}
-	if in.CarrierID == 0 {
-		return apperr.Validation("carrier is required")
-	}
-	var saleID *int64
-	if in.SaleID != 0 {
-		saleID = &in.SaleID
+	carrierID, saleID, err := h.deviceTender(ctx, in.DeviceID, in.SaleID)
+	if err != nil {
+		return err
 	}
 	if _, err := h.p.store.RecordTransaction(ctx, TxInput{
-		SessionID: sess.ID, CarrierID: in.CarrierID, Type: "wallet_in",
+		SessionID: sess.ID, CarrierID: carrierID, DeviceID: in.DeviceID, Type: "reload",
 		Amount: amt, SaleID: saleID, CreatedBy: uid,
 	}); err != nil {
 		return err
 	}
 	return c.JSON(http.StatusOK, map[string]any{"ok": true})
+}
+
+// Wallet credits a device's float when a product sale was paid by a wallet
+// transfer (eZ Cash / mCash). Posted by the POS after checkout. No cash drawer
+// movement — the e-money landed in the device float, not the till.
+func (h *cashierUI) Wallet(c echo.Context) error {
+	ctx := c.Request().Context()
+	uid := middleware.CurrentUserID(c)
+	sess, err := h.requireSession(c)
+	if err != nil {
+		return err
+	}
+	var in struct {
+		SaleID   int64  `json:"sale_id"`
+		DeviceID int64  `json:"device_id"`
+		Amount   string `json:"amount"`
+	}
+	if err := c.Bind(&in); err != nil {
+		return apperr.BadRequest("invalid request body")
+	}
+	amt, err := money.Parse(in.Amount)
+	if err != nil || !amt.IsPositive() {
+		return apperr.Validation("amount must be positive")
+	}
+	carrierID, saleID, err := h.deviceTender(ctx, in.DeviceID, in.SaleID)
+	if err != nil {
+		return err
+	}
+	if _, err := h.p.store.RecordTransaction(ctx, TxInput{
+		SessionID: sess.ID, CarrierID: carrierID, DeviceID: in.DeviceID, Type: "wallet_in",
+		Amount: amt, SaleID: saleID, CreatedBy: uid,
+	}); err != nil {
+		return err
+	}
+	return c.JSON(http.StatusOK, map[string]any{"ok": true})
+}
+
+// deviceTender validates a device-attributed post from the POS (reload/wallet):
+// it resolves the carrier from the device and normalises the optional sale id.
+func (h *cashierUI) deviceTender(ctx context.Context, deviceID, sale int64) (carrierID int64, saleID *int64, err error) {
+	if deviceID == 0 {
+		return 0, nil, apperr.Validation("device is required")
+	}
+	carrierID, err = h.p.store.CarrierOfDevice(ctx, deviceID)
+	if err != nil {
+		return 0, nil, err
+	}
+	if carrierID == 0 {
+		return 0, nil, apperr.Validation("unknown device")
+	}
+	if sale != 0 {
+		saleID = &sale
+	}
+	return carrierID, saleID, nil
 }
 
 func (h *cashierUI) carrierName(ctx context.Context, id int64) string {

@@ -209,8 +209,8 @@ function pos(symbol, defaultType, promptAfterSale) {
     discount: 0,
     discountType: "fixed", // bill-level discount: "fixed" (Rs) or "percent" (%)
     // Split tender: one or more payment lines (cash / card / online / wallet).
-    payments: [{ method: "cash", amount: 0, reference: "", carrierId: "" }],
-    walletCarriers: [], // recharge plugin tender: carriers a wallet payment can credit
+    payments: [{ method: "cash", amount: 0, reference: "", deviceId: "" }],
+    walletDevices: [], // recharge plugin tender: devices a wallet payment can credit (with live balance)
     busy: false,
     session: null,
     summary: null,
@@ -515,7 +515,7 @@ function pos(symbol, defaultType, promptAfterSale) {
       this.customerId = h.customer_id ? String(h.customer_id) : "";
       this.discount = Number(h.discount) || 0;
       this.discountType = h.discount_type || "fixed";
-      this.payments = [{ method: "cash", amount: 0, reference: "" }];
+      this.payments = [{ method: "cash", amount: 0, reference: "", deviceId: "" }];
       this.receipt = null;
       this.showHolds = false;
       await this.deleteHold(h.id, true);
@@ -568,7 +568,7 @@ function pos(symbol, defaultType, promptAfterSale) {
     // recharge top-up). price is the per-line amount sent to the server as
     // price_override; the server honours it only for is_service products. Each
     // call is its own line (no qty merge) so several service sales can coexist.
-    addServiceLine(id, name, price) {
+    addServiceLine(id, name, price, deviceId) {
       const amt = Number(price) || 0;
       this.cart.push({
         id: id,
@@ -585,6 +585,9 @@ function pos(symbol, defaultType, promptAfterSale) {
         serials: [],
         is_service: true,
         price_override: String(amt),
+        // Recharge plugin: the device whose float this reload draws down. Recorded
+        // in the device ledger after checkout via /cashier/recharge/reload.
+        recharge_device_id: Number(deviceId) || 0,
       });
     },
     // syncSerials keeps a serial-tracked line's serial inputs in step with its
@@ -732,37 +735,85 @@ function pos(symbol, defaultType, promptAfterSale) {
 
     // --- split-tender payments ---
     addPayment() {
-      this.payments.push({ method: "card", amount: 0, reference: "", carrierId: "" });
+      this.payments.push({ method: "card", amount: 0, reference: "", deviceId: "" });
     },
     removePayment(idx) {
       this.payments.splice(idx, 1);
       if (this.payments.length === 0) {
-        this.payments.push({ method: "cash", amount: 0, reference: "", carrierId: "" });
+        this.payments.push({ method: "cash", amount: 0, reference: "", deviceId: "" });
       }
     },
-    // Lazily load the carriers a wallet (eZ Cash / mCash) payment can credit.
+    // Lazily load the devices a wallet (eZ Cash / mCash) payment can credit, each
+    // with its live float balance. Flat list across all carriers (carrier_id=0).
     // No-op (empty list) when the recharge plugin isn't installed.
-    async loadWalletCarriers() {
-      if (this.walletCarriers.length) return;
+    async loadWalletDevices() {
+      if (this.walletDevices.length) return;
       try {
-        const json = await apiFetch("GET", "/cashier/recharge/carriers", undefined, { silent: true });
-        this.walletCarriers = json.data || [];
+        const json = await apiFetch("GET", "/cashier/recharge/devices?carrier_id=0", undefined, { silent: true });
+        this.walletDevices = json.data || [];
       } catch (_) {
         /* recharge plugin not installed; leave list empty */
       }
     },
-    // After a sale, credit each wallet tender to its carrier's float (recharge
+    // After a sale, credit each wallet tender to its device's float (recharge
     // plugin). Best-effort: the per-device closing count is authoritative anyway.
     async attributeWallet(saleId) {
       const ws = this.payments.filter(
-        (p) => p.method === "wallet" && Number(p.amount) > 0 && p.carrierId
+        (p) => p.method === "wallet" && Number(p.amount) > 0 && p.deviceId
       );
       for (const w of ws) {
         try {
           await apiFetch(
             "POST",
             "/cashier/recharge/wallet",
-            { sale_id: saleId, carrier_id: Number(w.carrierId), amount: String(w.amount) },
+            { sale_id: saleId, device_id: Number(w.deviceId), amount: String(w.amount) },
+            { silent: true }
+          );
+        } catch (_) {
+          /* leave float to be reconciled by the closing count */
+        }
+      }
+    },
+    // reloadFloatOK re-fetches fresh device balances and blocks checkout if the
+    // reload lines in the cart would push any device's float below zero. Reload's
+    // ledger decrease only lands after the sale, so this client guard is the till.
+    async reloadFloatOK() {
+      const loads = this.cart.filter((it) => Number(it.recharge_device_id) > 0);
+      if (!loads.length) return true;
+      // Sum pending reload amount per device.
+      const want = {};
+      for (const it of loads) {
+        const d = Number(it.recharge_device_id);
+        want[d] = (want[d] || 0) + this.lineNet(it);
+      }
+      let bal = {};
+      try {
+        const json = await apiFetch("GET", "/cashier/recharge/devices?carrier_id=0", undefined, { silent: true });
+        for (const d of json.data || []) bal[d.id] = Number(d.balance);
+      } catch (_) {
+        toast("Couldn't verify recharge float — try again", "error");
+        return false;
+      }
+      for (const id of Object.keys(want)) {
+        if (want[id] > (bal[id] || 0)) {
+          const dev = (this.walletDevices.find((x) => String(x.id) === id) || {});
+          toast(`Not enough float on ${dev.label || "device #" + id} for this reload`, "error");
+          return false;
+        }
+      }
+      return true;
+    },
+    // After a sale, record each reload line in the device ledger (float −). The
+    // amount was already collected by the core sale's payment, so this row is
+    // cash-neutral. Best-effort, mirroring attributeWallet.
+    async attributeReloads(saleId) {
+      const loads = this.cart.filter((it) => Number(it.recharge_device_id) > 0);
+      for (const it of loads) {
+        try {
+          await apiFetch(
+            "POST",
+            "/cashier/recharge/reload",
+            { sale_id: saleId, device_id: Number(it.recharge_device_id), amount: String(this.lineNet(it)) },
             { silent: true }
           );
         } catch (_) {
@@ -814,13 +865,17 @@ function pos(symbol, defaultType, promptAfterSale) {
           return;
         }
       }
-      // A wallet (eZ Cash / mCash) tender must name the carrier it credits.
+      // A wallet (eZ Cash / mCash) tender must name the device it credits.
       for (const p of this.payments) {
-        if (p.method === "wallet" && Number(p.amount) > 0 && !p.carrierId) {
-          toast("Choose a carrier for the wallet payment", "error");
+        if (p.method === "wallet" && Number(p.amount) > 0 && !p.deviceId) {
+          toast("Choose a device for the wallet payment", "error");
           return;
         }
       }
+      // Hard-block: reload lines draw a device's float down. Re-check each device's
+      // fresh balance against the sum of pending reloads for it before selling,
+      // since the float decrease is attributed only after the sale commits.
+      if (!(await this.reloadFloatOK())) return;
       this.busy = true;
       try {
         const payload = {
@@ -850,6 +905,7 @@ function pos(symbol, defaultType, promptAfterSale) {
         };
         const json = await apiFetch("POST", "/api/sales", payload);
         await this.attributeWallet(json.data.sale.id);
+        await this.attributeReloads(json.data.sale.id);
         toast("Sale complete", "success");
         if (this.promptAfterSale) {
           this.receipt = json.data; // show the Print / New Sale prompt
@@ -873,7 +929,7 @@ function pos(symbol, defaultType, promptAfterSale) {
       this.cart = [];
       this.discount = 0;
       this.discountType = "fixed";
-      this.payments = [{ method: "cash", amount: 0, reference: "", carrierId: "" }];
+      this.payments = [{ method: "cash", amount: 0, reference: "", deviceId: "" }];
       this.customerId = "";
       this.receipt = null;
     },

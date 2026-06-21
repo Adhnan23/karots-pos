@@ -64,8 +64,15 @@ templ ReconBody(d ReconData) {
 }
 
 // txForm is the money-transaction recorder (deposit / withdrawal / bill-pay / topup).
+// The device picker is dynamic (loads the chosen carrier's devices with live
+// balances) and mandatory; deposit/bill-pay are blocked client-side when the
+// amount exceeds the device's float (the server re-checks authoritatively).
 templ txForm(d ReconData) {
-	<div class="bg-white rounded-2xl shadow-sm p-6">
+	<div
+		class="bg-white rounded-2xl shadow-sm p-6"
+		x-data="{ type:'deposit', cid:'', did:'', amount:'', devices:[], async loadDevices(){ this.devices=[]; this.did=''; if(!this.cid){ return } try{ const r=await fetch('/cashier/recharge/devices?carrier_id='+encodeURIComponent(this.cid)); const j=await r.json(); this.devices=j.data||[]; if(this.devices.length){ this.did=String(this.devices[0].id) } }catch(e){} }, dev(){ return this.devices.find(x=>String(x.id)===String(this.did)) }, bal(){ const x=this.dev(); return x?Number(x.balance):0 }, decreases(){ return this.type==='deposit'||this.type==='billpay' }, over(){ return this.decreases() && Number(this.amount)>this.bal() } }"
+		x-init="cid=$el.querySelector('[data-first-carrier]')?.value || ''; loadDevices()"
+	>
 		<h2 class="text-lg font-semibold mb-4">Record a transaction</h2>
 		<form
 			hx-post="/cashier/recharge/tx"
@@ -76,7 +83,7 @@ templ txForm(d ReconData) {
 		>
 			<div>
 				<label class="block text-sm font-medium text-slate-600 mb-1">Type</label>
-				<select name="type" required class="w-full border rounded-lg px-3 py-2.5">
+				<select name="type" x-model="type" required class="w-full border rounded-lg px-3 py-2.5">
 					<option value="deposit">Deposit / cash-in (send to wallet)</option>
 					<option value="withdrawal">Withdrawal / cash-out (give cash)</option>
 					<option value="billpay">Bill payment</option>
@@ -85,31 +92,37 @@ templ txForm(d ReconData) {
 			</div>
 			<div>
 				<label class="block text-sm font-medium text-slate-600 mb-1">Carrier</label>
-				<select name="carrier_id" required class="w-full border rounded-lg px-3 py-2.5">
-					for _, c := range d.Carriers {
-						<option value={ strconv.FormatInt(c.ID, 10) }>{ c.Name }</option>
+				<select x-model="cid" x-on:change="loadDevices()" required class="w-full border rounded-lg px-3 py-2.5">
+					for i, c := range d.Carriers {
+						if i == 0 {
+							<option value={ strconv.FormatInt(c.ID, 10) } data-first-carrier>{ c.Name }</option>
+						} else {
+							<option value={ strconv.FormatInt(c.ID, 10) }>{ c.Name }</option>
+						}
 					}
 				</select>
+			</div>
+			<div>
+				<label class="block text-sm font-medium text-slate-600 mb-1">Device</label>
+				<select name="device_id" x-model="did" required class="w-full border rounded-lg px-3 py-2.5">
+					<template x-for="dev in devices" x-bind:key="dev.id">
+						<option x-bind:value="dev.id" x-text="dev.label + (dev.number ? ' · '+dev.number : '')"></option>
+					</template>
+				</select>
+				<p x-show="cid && devices.length===0" class="text-xs text-rose-500 mt-1">No devices for this carrier.</p>
+				<p x-show="dev()" class="text-xs text-slate-500 mt-1">Float balance: <span class="font-semibold tabular-nums" x-text="bal().toFixed(2)"></span></p>
 			</div>
 			<div>
 				<label class="block text-sm font-medium text-slate-600 mb-1">Amount</label>
-				<input type="number" name="amount" min="0" step="0.01" required placeholder="0.00" class="w-full border rounded-lg px-3 py-2.5 text-right"/>
-			</div>
-			<div>
-				<label class="block text-sm font-medium text-slate-600 mb-1">Device (optional)</label>
-				<select name="device_id" class="w-full border rounded-lg px-3 py-2.5">
-					<option value="">—</option>
-					for _, dev := range d.Devices {
-						<option value={ strconv.FormatInt(dev.ID, 10) }>{ dev.Carrier } · { dev.Label }</option>
-					}
-				</select>
+				<input type="number" name="amount" min="0" step="0.01" x-model="amount" required placeholder="0.00" class="w-full border rounded-lg px-3 py-2.5 text-right"/>
+				<p x-show="over()" class="text-xs text-rose-500 mt-1">Amount exceeds this device's float balance.</p>
 			</div>
 			<div>
 				<label class="block text-sm font-medium text-slate-600 mb-1">Reference (optional)</label>
 				<input type="text" name="reference" placeholder="txn / phone no." class="w-full border rounded-lg px-3 py-2.5"/>
 			</div>
 			<div class="flex items-end">
-				<button type="submit" class="w-full py-2.5 rounded-lg bg-emerald-600 text-white font-semibold hover:bg-emerald-700">Record & print</button>
+				<button type="submit" x-bind:disabled="!did || over()" class="w-full py-2.5 rounded-lg bg-emerald-600 text-white font-semibold hover:bg-emerald-700 disabled:opacity-40">Record & print</button>
 			</div>
 		</form>
 		<p class="text-xs text-slate-400 mt-3">Cash-in/out posts to your cash drawer automatically; top-ups also book a shop expense. A slip prints for deposit, withdrawal and bill payment.</p>
@@ -170,7 +183,6 @@ templ carrierBlock(symbol string, cr CarrierRecon) {
 			</table>
 			<dl class="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-1 text-sm mt-4">
 				@stat("Opening", money.Format(symbol, cr.Opening))
-				@stat("Reload sold", money.Format(symbol, cr.Reload))
 				@stat("Float in", money.Format(symbol, cr.FloatIn))
 				@stat("Float out", money.Format(symbol, cr.FloatOut))
 				@stat("Expected close", money.Format(symbol, cr.Expected))

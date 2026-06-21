@@ -23,7 +23,7 @@ templ POS(d POSData) {
 			x-data={ "pos('" + d.Symbol + "', '" + d.DefaultSaleType + "', " + jsBool(d.PromptAfterSale) + ")" }
 			x-init="init()"
 			x-on:keydown.window="onKey($event)"
-			x-on:pos-add-service.window="addServiceLine($event.detail.id, $event.detail.name, $event.detail.price)"
+			x-on:pos-add-service.window="addServiceLine($event.detail.id, $event.detail.name, $event.detail.price, $event.detail.deviceId)"
 		>
 			<!-- Register closed overlay: count the opening float by denomination -->
 			<div x-show="!session" x-cloak class="absolute inset-0 bg-slate-100/95 z-30 flex items-center justify-center p-4 overflow-auto">
@@ -208,7 +208,7 @@ templ POS(d POSData) {
 						<div class="space-y-1.5">
 							<template x-for="(p, idx) in payments" x-bind:key="idx">
 								<div class="flex flex-wrap items-center gap-1.5">
-									<select x-model="p.method" x-on:change="if(p.method==='wallet') loadWalletCarriers()" class="border rounded px-1.5 py-1 text-sm">
+									<select x-model="p.method" x-on:change="if(p.method==='wallet') loadWalletDevices()" class="border rounded px-1.5 py-1 text-sm">
 										<option value="cash">Cash</option>
 										<option value="card">Card</option>
 										<option value="online">Online</option>
@@ -221,10 +221,10 @@ templ POS(d POSData) {
 									<input type="number" step="0.01" min="0" x-model.number="p.amount" class="w-24 border rounded px-2 py-1 text-right text-sm" placeholder="0.00"/>
 									<button type="button" x-on:click="fillRemaining(idx)" class="px-1.5 py-1 text-xs rounded border text-slate-500" title="Fill remaining balance">=</button>
 									<input x-show="p.method !== 'cash' && p.method !== 'wallet'" x-model="p.reference" class="flex-1 min-w-0 border rounded px-2 py-1 text-sm" placeholder="ref / last 4"/>
-									<select x-show="p.method === 'wallet'" x-model="p.carrierId" class="flex-1 min-w-0 border rounded px-2 py-1 text-sm">
-										<option value="">Carrier…</option>
-										<template x-for="c in walletCarriers" x-bind:key="c.id">
-											<option x-bind:value="c.id" x-text="c.name"></option>
+									<select x-show="p.method === 'wallet'" x-model="p.deviceId" class="flex-1 min-w-0 border rounded px-2 py-1 text-sm">
+										<option value="">Device…</option>
+										<template x-for="d in walletDevices" x-bind:key="d.id">
+											<option x-bind:value="d.id" x-text="d.carrier + ' · ' + d.label + ' (' + Number(d.balance).toFixed(2) + ')'"></option>
 										</template>
 									</select>
 									<button type="button" x-on:click="removePayment(idx)" class="text-red-500 px-1" x-show="payments.length > 1">✕</button>

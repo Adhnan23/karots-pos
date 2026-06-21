@@ -100,6 +100,19 @@ func (s *Store) DeactivateDevice(ctx context.Context, id int64) error {
 	return err
 }
 
+// CarrierOfDevice returns the carrier id owning an active device (0 if none).
+// Handlers derive the carrier from the chosen device so the two can never
+// disagree — the device is the unit of float.
+func (s *Store) CarrierOfDevice(ctx context.Context, deviceID int64) (int64, error) {
+	var cid int64
+	err := s.db.GetContext(ctx, &cid,
+		`SELECT carrier_id FROM recharge_devices WHERE id = $1 AND is_active = true`, deviceID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	return cid, err
+}
+
 // serviceDefaults resolves a category id (ensuring a "Recharge" category exists)
 // and a unit id (any existing unit) for the hidden service product. It touches
 // core reference tables additively only — it never alters their schema.

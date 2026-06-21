@@ -8,7 +8,7 @@ package recharge
 // reaches into the pos() component directly.
 templ ReloadButton() {
 	<div
-		x-data="{ open:false, carriers:[], cid:'', amount:'', async load(){ try{ const r=await fetch('/cashier/recharge/carriers'); const j=await r.json(); this.carriers=j.data||[]; if(this.carriers.length && !this.cid){ this.cid=String(this.carriers[0].id) } }catch(e){} }, add(){ const c=this.carriers.find(x=>String(x.id)===String(this.cid)); const amt=Number(this.amount); if(!c || !(amt>0)){ return } window.dispatchEvent(new CustomEvent('pos-add-service',{detail:{id:c.product_id, name:c.name+' Recharge', price:amt}})); this.open=false; this.amount=''; } }"
+		x-data="{ open:false, carriers:[], devices:[], cid:'', did:'', amount:'', async load(){ try{ const r=await fetch('/cashier/recharge/carriers'); const j=await r.json(); this.carriers=j.data||[]; if(this.carriers.length && !this.cid){ this.cid=String(this.carriers[0].id) } await this.loadDevices(); }catch(e){} }, async loadDevices(){ this.devices=[]; this.did=''; if(!this.cid){ return } try{ const r=await fetch('/cashier/recharge/devices?carrier_id='+encodeURIComponent(this.cid)); const j=await r.json(); this.devices=j.data||[]; if(this.devices.length){ this.did=String(this.devices[0].id) } }catch(e){} }, dev(){ return this.devices.find(x=>String(x.id)===String(this.did)) }, bal(){ const d=this.dev(); return d?Number(d.balance):0 }, over(){ return Number(this.amount)>this.bal() }, add(){ const c=this.carriers.find(x=>String(x.id)===String(this.cid)); const d=this.dev(); const amt=Number(this.amount); if(!c || !d || !(amt>0) || this.over()){ return } window.dispatchEvent(new CustomEvent('pos-add-service',{detail:{id:c.product_id, name:c.name+' Recharge', price:amt, deviceId:Number(d.id)}})); this.open=false; this.amount=''; } }"
 		class="shrink-0"
 	>
 		<button
@@ -23,7 +23,7 @@ templ ReloadButton() {
 				<div class="space-y-3">
 					<div>
 						<label class="block text-sm font-medium text-slate-600 mb-1">Carrier</label>
-						<select x-model="cid" class="w-full border rounded-lg px-3 py-2.5">
+						<select x-model="cid" x-on:change="loadDevices()" class="w-full border rounded-lg px-3 py-2.5">
 							<template x-for="c in carriers" x-bind:key="c.id">
 								<option x-bind:value="c.id" x-text="c.name"></option>
 							</template>
@@ -31,13 +31,24 @@ templ ReloadButton() {
 						<p x-show="carriers.length===0" class="text-xs text-rose-500 mt-1">No carriers set up. Add one in Admin → Recharge.</p>
 					</div>
 					<div>
+						<label class="block text-sm font-medium text-slate-600 mb-1">Device</label>
+						<select x-model="did" class="w-full border rounded-lg px-3 py-2.5">
+							<template x-for="d in devices" x-bind:key="d.id">
+								<option x-bind:value="d.id" x-text="d.label + (d.number ? ' · '+d.number : '')"></option>
+							</template>
+						</select>
+						<p x-show="cid && devices.length===0" class="text-xs text-rose-500 mt-1">No devices for this carrier. Add one in Admin → Recharge.</p>
+						<p x-show="dev()" class="text-xs text-slate-500 mt-1">Float balance: <span class="font-semibold tabular-nums" x-text="bal().toFixed(2)"></span></p>
+					</div>
+					<div>
 						<label class="block text-sm font-medium text-slate-600 mb-1">Amount</label>
 						<input type="number" min="0" step="0.01" x-model="amount" x-on:keydown.enter.prevent="add()" placeholder="100.00" class="w-full border rounded-lg px-3 py-2.5 text-right"/>
+						<p x-show="over()" class="text-xs text-rose-500 mt-1">Amount exceeds this device's float balance.</p>
 					</div>
 				</div>
 				<div class="flex gap-2 mt-5">
 					<button type="button" x-on:click="open=false" class="flex-1 py-2.5 rounded-lg border text-slate-600">Cancel</button>
-					<button type="button" x-on:click="add()" x-bind:disabled="!(Number(amount)>0 && cid)" class="flex-1 py-2.5 rounded-lg bg-emerald-600 text-white font-semibold disabled:opacity-40">Add to cart</button>
+					<button type="button" x-on:click="add()" x-bind:disabled="!(Number(amount)>0 && did && !over())" class="flex-1 py-2.5 rounded-lg bg-emerald-600 text-white font-semibold disabled:opacity-40">Add to cart</button>
 				</div>
 			</div>
 		</div>

@@ -144,12 +144,44 @@ templ CarrierRows(carriers []Carrier) {
 	}
 }
 
-// ReportPage is the admin recharge report: per-session reconciliation plus the
-// money-movement ledger.
-templ ReportPage(userName, symbol string, txs []TxRow, blocks []SessionRecon) {
+// ReportPage is the admin recharge report: live per-device float balances plus a
+// per-session reconciliation. The money-movement log lives on the Ledger page.
+templ ReportPage(userName, symbol string, balances []DeviceBalanceNow, blocks []SessionRecon) {
 	@layouts.Admin("Recharge Report", userName, "recharge-report") {
 		<h1 class="text-2xl font-bold mb-6">Recharge Report</h1>
 		<div class="space-y-6">
+			<div class="bg-white rounded-2xl shadow-sm p-6">
+				<div class="flex items-center justify-between mb-4">
+					<h2 class="text-lg font-semibold">Current device float balances</h2>
+					<a href="/admin/recharge/ledger" class="text-sm text-indigo-600 font-medium hover:text-indigo-700">Open ledger →</a>
+				</div>
+				<table class="w-full text-sm">
+					<thead class="text-left text-slate-500 border-b">
+						<tr>
+							<th class="py-2 pr-4">Carrier</th>
+							<th class="py-2 pr-4">Device</th>
+							<th class="py-2 pr-4">Number</th>
+							<th class="py-2 pr-4 text-right">Balance</th>
+							<th class="py-2">Last movement</th>
+						</tr>
+					</thead>
+					<tbody>
+						if len(balances) == 0 {
+							<tr><td colspan="5" class="py-6 text-center text-slate-400">No devices yet.</td></tr>
+						} else {
+							for _, b := range balances {
+								<tr class="border-b last:border-0">
+									<td class="py-2 pr-4 text-slate-500">{ b.Carrier }</td>
+									<td class="py-2 pr-4 font-medium">{ b.Label }</td>
+									<td class="py-2 pr-4 text-slate-500">{ b.Number }</td>
+									<td class="py-2 pr-4 text-right tabular-nums font-semibold">{ money.Format(symbol, b.Balance) }</td>
+									<td class="py-2 text-slate-500">{ lastAt(b.LastAt) }</td>
+								</tr>
+							}
+						}
+					</tbody>
+				</table>
+			</div>
 			<div class="bg-white rounded-2xl shadow-sm p-6">
 				<h2 class="text-lg font-semibold mb-4">Reconciliation by session</h2>
 				if len(blocks) == 0 {
@@ -162,40 +194,109 @@ templ ReportPage(userName, symbol string, txs []TxRow, blocks []SessionRecon) {
 					</div>
 				}
 			</div>
-			<div class="bg-white rounded-2xl shadow-sm p-6">
-				<h2 class="text-lg font-semibold mb-4">Recent transactions</h2>
-				<table class="w-full text-sm">
-					<thead class="text-left text-slate-500 border-b">
-						<tr>
-							<th class="py-2 pr-4">When</th>
-							<th class="py-2 pr-4">Carrier</th>
-							<th class="py-2 pr-4">Type</th>
-							<th class="py-2 pr-4 text-right">Amount</th>
-							<th class="py-2 pr-4 text-right">Cash</th>
-							<th class="py-2 pr-4 text-right">Float</th>
-							<th class="py-2">Ref</th>
-						</tr>
-					</thead>
-					<tbody>
-						if len(txs) == 0 {
-							<tr><td colspan="7" class="py-6 text-center text-slate-400">No transactions yet.</td></tr>
-						} else {
-							for _, t := range txs {
-								<tr class="border-b last:border-0">
-									<td class="py-2 pr-4 text-slate-500">{ t.CreatedAt.Format("02 Jan 15:04") }</td>
-									<td class="py-2 pr-4">{ t.Carrier }</td>
-									<td class="py-2 pr-4">{ txLabel(t.Type) }</td>
-									<td class="py-2 pr-4 text-right tabular-nums">{ money.Format(symbol, t.Amount) }</td>
-									<td class="py-2 pr-4 text-right tabular-nums">{ money.Format(symbol, t.CashDelta) }</td>
-									<td class="py-2 pr-4 text-right tabular-nums">{ money.Format(symbol, t.FloatDelta) }</td>
-									<td class="py-2 text-slate-500">{ refText(t.Reference) }</td>
-								</tr>
+		</div>
+	}
+}
+
+// LedgerPage is the admin money-movement ledger: filterable by date / carrier /
+// device / type, with a CSV export of the current filter.
+templ LedgerPage(userName, symbol string, f LedgerForm, carriers []Carrier, devices []Device, rows []TxRow) {
+	@layouts.Admin("Recharge Ledger", userName, "recharge-ledger") {
+		<h1 class="text-2xl font-bold mb-6">Recharge Ledger</h1>
+		<div class="bg-white rounded-2xl shadow-sm p-6">
+			<form method="get" action="/admin/recharge/ledger" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-5 items-end">
+				<div>
+					<label class="block text-sm font-medium text-slate-600 mb-1">From</label>
+					<input type="date" name="from" value={ f.From } class="w-full border rounded-lg px-3 py-2.5"/>
+				</div>
+				<div>
+					<label class="block text-sm font-medium text-slate-600 mb-1">To</label>
+					<input type="date" name="to" value={ f.To } class="w-full border rounded-lg px-3 py-2.5"/>
+				</div>
+				<div>
+					<label class="block text-sm font-medium text-slate-600 mb-1">Carrier</label>
+					<select name="carrier_id" class="w-full border rounded-lg px-3 py-2.5">
+						<option value="0">All</option>
+						for _, c := range carriers {
+							if c.ID == f.CarrierID {
+								<option value={ strconv.FormatInt(c.ID, 10) } selected>{ c.Name }</option>
+							} else {
+								<option value={ strconv.FormatInt(c.ID, 10) }>{ c.Name }</option>
 							}
 						}
-					</tbody>
-				</table>
-			</div>
+					</select>
+				</div>
+				<div>
+					<label class="block text-sm font-medium text-slate-600 mb-1">Device</label>
+					<select name="device_id" class="w-full border rounded-lg px-3 py-2.5">
+						<option value="0">All</option>
+						for _, dv := range devices {
+							if dv.ID == f.DeviceID {
+								<option value={ strconv.FormatInt(dv.ID, 10) } selected>{ dv.Carrier } · { dv.Label }</option>
+							} else {
+								<option value={ strconv.FormatInt(dv.ID, 10) }>{ dv.Carrier } · { dv.Label }</option>
+							}
+						}
+					</select>
+				</div>
+				<div>
+					<label class="block text-sm font-medium text-slate-600 mb-1">Type</label>
+					<select name="type" class="w-full border rounded-lg px-3 py-2.5">
+						@typeOption("", "All", f.Type)
+						@typeOption("reload", "Reload", f.Type)
+						@typeOption("wallet_in", "Wallet in", f.Type)
+						@typeOption("deposit", "Deposit", f.Type)
+						@typeOption("withdrawal", "Withdrawal", f.Type)
+						@typeOption("billpay", "Bill payment", f.Type)
+						@typeOption("topup", "Top-up", f.Type)
+					</select>
+				</div>
+				<div class="flex gap-2">
+					<button type="submit" class="flex-1 py-2.5 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700">Filter</button>
+					<a href={ templ.SafeURL("/admin/recharge/ledger?format=csv&" + ledgerQuery(f)) } class="py-2.5 px-3 rounded-lg border text-slate-600 hover:bg-slate-50" title="Download CSV">CSV</a>
+				</div>
+			</form>
+			<table class="w-full text-sm">
+				<thead class="text-left text-slate-500 border-b">
+					<tr>
+						<th class="py-2 pr-4">When</th>
+						<th class="py-2 pr-4">Carrier</th>
+						<th class="py-2 pr-4">Device</th>
+						<th class="py-2 pr-4">Type</th>
+						<th class="py-2 pr-4 text-right">Amount</th>
+						<th class="py-2 pr-4 text-right">Cash</th>
+						<th class="py-2 pr-4 text-right">Float</th>
+						<th class="py-2">Ref</th>
+					</tr>
+				</thead>
+				<tbody>
+					if len(rows) == 0 {
+						<tr><td colspan="8" class="py-6 text-center text-slate-400">No transactions match.</td></tr>
+					} else {
+						for _, t := range rows {
+							<tr class="border-b last:border-0">
+								<td class="py-2 pr-4 text-slate-500">{ t.CreatedAt.Format("02 Jan 15:04") }</td>
+								<td class="py-2 pr-4">{ t.Carrier }</td>
+								<td class="py-2 pr-4 text-slate-500">{ t.Device }</td>
+								<td class="py-2 pr-4">{ txLabel(t.Type) }</td>
+								<td class="py-2 pr-4 text-right tabular-nums">{ money.Format(symbol, t.Amount) }</td>
+								<td class="py-2 pr-4 text-right tabular-nums">{ money.Format(symbol, t.CashDelta) }</td>
+								<td class="py-2 pr-4 text-right tabular-nums">{ money.Format(symbol, t.FloatDelta) }</td>
+								<td class="py-2 text-slate-500">{ refText(t.Reference) }</td>
+							</tr>
+						}
+					}
+				</tbody>
+			</table>
 		</div>
+	}
+}
+
+templ typeOption(value, label, current string) {
+	if value == current {
+		<option value={ value } selected>{ label }</option>
+	} else {
+		<option value={ value }>{ label }</option>
 	}
 }
 
@@ -219,8 +320,8 @@ templ reportSession(symbol string, b SessionRecon) {
 				<thead class="text-left text-slate-500 border-b">
 					<tr>
 						<th class="py-1.5 pr-4">Carrier</th>
+						<th class="py-1.5 pr-4">Device</th>
 						<th class="py-1.5 pr-4 text-right">Opening</th>
-						<th class="py-1.5 pr-4 text-right">Reload</th>
 						<th class="py-1.5 pr-4 text-right">In</th>
 						<th class="py-1.5 pr-4 text-right">Out</th>
 						<th class="py-1.5 pr-4 text-right">Expected</th>
@@ -231,21 +332,30 @@ templ reportSession(symbol string, b SessionRecon) {
 				<tbody>
 					for _, cr := range b.Rows {
 						if hasActivity(cr) {
-							<tr class="border-b last:border-0">
-								<td class="py-1.5 pr-4 font-medium">{ cr.Carrier }</td>
-								<td class="py-1.5 pr-4 text-right tabular-nums">{ money.Format(symbol, cr.Opening) }</td>
-								<td class="py-1.5 pr-4 text-right tabular-nums">{ money.Format(symbol, cr.Reload) }</td>
-								<td class="py-1.5 pr-4 text-right tabular-nums">{ money.Format(symbol, cr.FloatIn) }</td>
-								<td class="py-1.5 pr-4 text-right tabular-nums">{ money.Format(symbol, cr.FloatOut) }</td>
-								<td class="py-1.5 pr-4 text-right tabular-nums">{ money.Format(symbol, cr.Expected) }</td>
-								if cr.AllClosed {
-									<td class="py-1.5 pr-4 text-right tabular-nums">{ money.Format(symbol, cr.Closing) }</td>
-									<td class="py-1.5 text-right tabular-nums">{ money.Format(symbol, cr.BonusLoss) }</td>
-								} else {
-									<td class="py-1.5 pr-4 text-right text-slate-300">—</td>
-									<td class="py-1.5 text-right text-slate-300">—</td>
-								}
-							</tr>
+							for di, dv := range cr.Devices {
+								<tr class="border-b last:border-0">
+									if di == 0 {
+										<td class="py-1.5 pr-4 font-medium align-top" rowspan={ strconv.Itoa(len(cr.Devices)) }>{ cr.Carrier }</td>
+									}
+									<td class="py-1.5 pr-4">
+										{ dv.Label }
+										if dv.Number != "" {
+											<span class="text-slate-400">· { dv.Number }</span>
+										}
+									</td>
+									<td class="py-1.5 pr-4 text-right tabular-nums">{ money.Format(symbol, dv.Opening) }</td>
+									<td class="py-1.5 pr-4 text-right tabular-nums">{ money.Format(symbol, dv.FloatIn) }</td>
+									<td class="py-1.5 pr-4 text-right tabular-nums">{ money.Format(symbol, dv.FloatOut) }</td>
+									<td class="py-1.5 pr-4 text-right tabular-nums">{ money.Format(symbol, dv.Expected) }</td>
+									if dv.Closed && dv.Closing != nil {
+										<td class="py-1.5 pr-4 text-right tabular-nums">{ money.Format(symbol, *dv.Closing) }</td>
+										<td class="py-1.5 text-right tabular-nums">{ bonusText(symbol, dv.BonusLoss) }</td>
+									} else {
+										<td class="py-1.5 pr-4 text-right text-slate-300">—</td>
+										<td class="py-1.5 text-right text-slate-300">—</td>
+									}
+								</tr>
+							}
 						}
 					}
 				</tbody>
