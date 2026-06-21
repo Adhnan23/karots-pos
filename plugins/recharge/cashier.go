@@ -174,6 +174,14 @@ func (h *cashierUI) Tx(c echo.Context) error {
 	if err != nil || !amt.IsPositive() {
 		return apperr.Validation("amount must be positive")
 	}
+	// Optional service charge — always collected in cash on top of the principal.
+	svc := decimal.Zero
+	if v := strings.TrimSpace(c.FormValue("service_charge")); v != "" {
+		svc, err = money.Parse(v)
+		if err != nil || svc.IsNegative() {
+			return apperr.Validation("service charge must be zero or more")
+		}
+	}
 	ref := strings.TrimSpace(c.FormValue("reference"))
 	note := strings.TrimSpace(c.FormValue("note"))
 
@@ -227,6 +235,13 @@ func (h *cashierUI) Tx(c echo.Context) error {
 		}
 	}
 
+	// 1b) The service charge is extra cash into the drawer (shop earnings).
+	if svc.IsPositive() {
+		if _, err := h.p.core.CashRegister.PayIn(ctx, uid, cashregister.MovementInput{Amount: svc.String(), Reason: reason + " service charge"}); err != nil {
+			return err
+		}
+	}
+
 	// 2) A supplier float top-up is also a shop expense.
 	var expenseID *int64
 	if typ == "topup" {
@@ -244,14 +259,14 @@ func (h *cashierUI) Tx(c echo.Context) error {
 	if _, err := h.p.store.RecordTransaction(ctx, TxInput{
 		SessionID: sess.ID, CarrierID: carrierID, DeviceID: deviceID, Type: typ,
 		Amount: amt, ExpenseID: expenseID, Reference: ref, Note: note, CreatedBy: uid,
-		Untracked: !tracksFloat,
+		Untracked: !tracksFloat, ServiceCharge: svc,
 	}); err != nil {
 		return err
 	}
 
 	// 4) Print a slip for the cash-handling types.
 	if typ == "deposit" || typ == "withdrawal" || typ == "billpay" {
-		h.p.printSlip(ctx, typ, carrier, amt, ref)
+		h.p.printSlip(ctx, typ, carrier, amt, svc, ref)
 	}
 
 	return h.reconFragment(c, response.Toast(carrier+" "+txLabel(typ)+" recorded", "success"))

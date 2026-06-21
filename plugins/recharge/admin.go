@@ -214,12 +214,13 @@ func (a *adminUI) ledgerCSV(c echo.Context, rows []TxRow) error {
 	c.Response().Header().Set(echo.HeaderContentDisposition, `attachment; filename="recharge-ledger.csv"`)
 	c.Response().WriteHeader(http.StatusOK)
 	w := csv.NewWriter(c.Response())
-	_ = w.Write([]string{"When", "Carrier", "Device", "Type", "Amount", "Cash", "Float", "Reference"})
+	_ = w.Write([]string{"When", "Carrier", "Device", "Type", "Amount", "Service", "Cash", "Float", "Reference"})
 	for _, t := range rows {
 		_ = w.Write([]string{
 			t.CreatedAt.Format("2006-01-02 15:04"),
 			t.Carrier, t.Device, t.Type,
-			t.Amount.StringFixed(2), t.CashDelta.StringFixed(2), t.FloatDelta.StringFixed(2),
+			t.Amount.StringFixed(2), t.ServiceCharge.StringFixed(2),
+			t.CashDelta.StringFixed(2), t.FloatDelta.StringFixed(2),
 			refText(t.Reference),
 		})
 	}

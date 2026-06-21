@@ -17,7 +17,7 @@ import (
 // is swallowed so the transaction itself still succeeds. It builds raw ESC/POS
 // bytes directly — the core printing transport (printing.Raw) is reused, and no
 // core printing/escpos code is touched.
-func (p *Plugin) printSlip(ctx context.Context, kind, carrier string, amount decimal.Decimal, reference string) {
+func (p *Plugin) printSlip(ctx context.Context, kind, carrier string, amount, serviceCharge decimal.Decimal, reference string) {
 	cfg, err := p.core.Settings.Get(ctx)
 	if err != nil || strings.TrimSpace(cfg.ReceiptPrinter) == "" {
 		return
@@ -61,6 +61,10 @@ func (p *Plugin) printSlip(ctx context.Context, kind, carrier string, amount dec
 	left()
 	line("Carrier : " + carrier)
 	line("Amount  : " + money.Format(cfg.CurrencySymbol, amount))
+	if serviceCharge.IsPositive() {
+		line("Service : " + money.Format(cfg.CurrencySymbol, serviceCharge))
+		line("Total   : " + money.Format(cfg.CurrencySymbol, amount.Add(serviceCharge)))
+	}
 	if strings.TrimSpace(reference) != "" {
 		line("Ref     : " + reference)
 	}

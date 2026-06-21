@@ -346,6 +346,7 @@ templ LedgerPage(userName, symbol string, f LedgerForm, carriers []Carrier, devi
 						<th class="py-2 pr-4">Device</th>
 						<th class="py-2 pr-4">Type</th>
 						<th class="py-2 pr-4 text-right">Amount</th>
+						<th class="py-2 pr-4 text-right">Service</th>
 						<th class="py-2 pr-4 text-right">Cash</th>
 						<th class="py-2 pr-4 text-right">Float</th>
 						<th class="py-2">Ref</th>
@@ -353,7 +354,7 @@ templ LedgerPage(userName, symbol string, f LedgerForm, carriers []Carrier, devi
 				</thead>
 				<tbody>
 					if len(rows) == 0 {
-						<tr><td colspan="8" class="py-6 text-center text-slate-400">No transactions match.</td></tr>
+						<tr><td colspan="9" class="py-6 text-center text-slate-400">No transactions match.</td></tr>
 					} else {
 						for _, t := range rows {
 							<tr class="border-b last:border-0">
@@ -362,11 +363,17 @@ templ LedgerPage(userName, symbol string, f LedgerForm, carriers []Carrier, devi
 								<td class="py-2 pr-4 text-slate-500">{ t.Device }</td>
 								<td class="py-2 pr-4">{ txLabel(t.Type) }</td>
 								<td class="py-2 pr-4 text-right tabular-nums">{ money.Format(symbol, t.Amount) }</td>
+								<td class="py-2 pr-4 text-right tabular-nums">{ serviceText(symbol, t.ServiceCharge) }</td>
 								<td class="py-2 pr-4 text-right tabular-nums">{ money.Format(symbol, t.CashDelta) }</td>
 								<td class="py-2 pr-4 text-right tabular-nums">{ money.Format(symbol, t.FloatDelta) }</td>
 								<td class="py-2 text-slate-500">{ refText(t.Reference) }</td>
 							</tr>
 						}
+						<tr class="border-t-2 font-semibold">
+							<td class="py-2 pr-4" colspan="5">Service charge earned (filtered)</td>
+							<td class="py-2 pr-4 text-right tabular-nums">{ money.Format(symbol, sumServiceCharge(rows)) }</td>
+							<td colspan="3"></td>
+						</tr>
 					}
 				</tbody>
 			</table>

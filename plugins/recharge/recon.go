@@ -40,17 +40,18 @@ func Deltas(typ string, amount decimal.Decimal) (cashDelta, floatDelta decimal.D
 // movement (PayIn/Withdraw) and any expense are handled by the caller. DeviceID
 // is mandatory — the float lives on a specific device.
 type TxInput struct {
-	SessionID int64
-	CarrierID int64
-	DeviceID  int64
-	Type      string
-	Amount    decimal.Decimal
-	SaleID    *int64
-	ExpenseID *int64
-	Reference string
-	Note      string
-	CreatedBy int64
-	Untracked bool // bank card: record cash movement but no float delta
+	SessionID     int64
+	CarrierID     int64
+	DeviceID      int64
+	Type          string
+	Amount        decimal.Decimal
+	SaleID        *int64
+	ExpenseID     *int64
+	Reference     string
+	Note          string
+	CreatedBy     int64
+	Untracked     bool            // bank card: record cash movement but no float delta
+	ServiceCharge decimal.Decimal // shop fee collected in cash on top of the principal
 }
 
 // RecordTransaction inserts a money movement, deriving its cash/float deltas.
@@ -65,10 +66,10 @@ func (s *Store) RecordTransaction(ctx context.Context, in TxInput) (int64, error
 	err := s.db.GetContext(ctx, &id, `
 		INSERT INTO recharge_transactions
 		  (session_id, carrier_id, device_id, type, amount, cash_delta, float_delta,
-		   sale_id, expense_id, reference, note, created_by)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+		   sale_id, expense_id, reference, note, created_by, service_charge)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
 		in.SessionID, in.CarrierID, in.DeviceID, in.Type, in.Amount, cashDelta, floatDelta,
-		in.SaleID, in.ExpenseID, nullStr(in.Reference), nullStr(in.Note), in.CreatedBy)
+		in.SaleID, in.ExpenseID, nullStr(in.Reference), nullStr(in.Note), in.CreatedBy, in.ServiceCharge)
 	return id, err
 }
 
@@ -394,6 +395,23 @@ func lastAt(t *time.Time) string {
 	return t.Format("02 Jan 15:04")
 }
 
+// serviceText renders a service charge for the ledger ("—" when none).
+func serviceText(symbol string, v decimal.Decimal) string {
+	if v.IsZero() {
+		return "—"
+	}
+	return money.Format(symbol, v)
+}
+
+// sumServiceCharge totals the service charge across ledger rows (filtered total).
+func sumServiceCharge(rows []TxRow) decimal.Decimal {
+	t := decimal.Zero
+	for _, r := range rows {
+		t = t.Add(r.ServiceCharge)
+	}
+	return t
+}
+
 // refText renders an optional reference for the report.
 func refText(ref *string) string {
 	if ref == nil || *ref == "" {
@@ -404,14 +422,16 @@ func refText(ref *string) string {
 
 // TxRow is one ledger entry for the admin report/ledger.
 type TxRow struct {
-	CreatedAt  time.Time       `db:"created_at"`
-	Carrier    string          `db:"carrier"`
-	Device     string          `db:"device"`
-	Type       string          `db:"type"`
-	Amount     decimal.Decimal `db:"amount"`
-	CashDelta  decimal.Decimal `db:"cash_delta"`
-	FloatDelta decimal.Decimal `db:"float_delta"`
-	Reference  *string         `db:"reference"`
+	ID            int64           `db:"id"`
+	CreatedAt     time.Time       `db:"created_at"`
+	Carrier       string          `db:"carrier"`
+	Device        string          `db:"device"`
+	Type          string          `db:"type"`
+	Amount        decimal.Decimal `db:"amount"`
+	ServiceCharge decimal.Decimal `db:"service_charge"`
+	CashDelta     decimal.Decimal `db:"cash_delta"`
+	FloatDelta    decimal.Decimal `db:"float_delta"`
+	Reference     *string         `db:"reference"`
 }
 
 // LedgerFilter narrows the admin ledger query (zero values = no filter).
@@ -427,8 +447,8 @@ type LedgerFilter struct {
 // Ledger lists money movements matching a filter, newest first.
 func (s *Store) Ledger(ctx context.Context, f LedgerFilter) ([]TxRow, error) {
 	q := `
-		SELECT t.created_at, c.name AS carrier, COALESCE(d.label,'—') AS device, t.type,
-		       t.amount, t.cash_delta, t.float_delta, t.reference
+		SELECT t.id, t.created_at, c.name AS carrier, COALESCE(d.label,'—') AS device, t.type,
+		       t.amount, t.service_charge, t.cash_delta, t.float_delta, t.reference
 		FROM recharge_transactions t
 		JOIN recharge_carriers c ON c.id = t.carrier_id
 		LEFT JOIN recharge_devices d ON d.id = t.device_id
