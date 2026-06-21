@@ -9,9 +9,9 @@ import "github.com/shopspring/decimal"
 // money-transaction form. Rendered inside the core cashier shell so it inherits
 // the terminal topbar, palette and styling.
 templ ReconPage(d ReconData) {
-	@layouts.Cashier("Recharge", d.UserName, d.Role, "recharge", d.ShowChangePin) {
+	@layouts.Cashier("Reload & Bills", d.UserName, d.Role, "recharge", d.ShowChangePin) {
 		<div class="max-w-5xl mx-auto p-4 sm:p-6">
-			<h1 class="text-2xl font-bold mb-4">Recharge & Mobile Money</h1>
+			<h1 class="text-2xl font-bold mb-4">Reload & Bills</h1>
 			@ReconBody(d)
 		</div>
 	}
@@ -22,7 +22,7 @@ templ ReconBody(d ReconData) {
 	<div id="recon-body" class="space-y-6">
 		if d.Session == nil {
 			<div class="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-5">
-				Open your cash drawer first — recharge reconciliation is tied to the open cash session.
+				Open your cash drawer first — float reconciliation is tied to the open cash session.
 			</div>
 		} else {
 			<div class="text-sm text-slate-500">
@@ -31,7 +31,7 @@ templ ReconBody(d ReconData) {
 			@txForm(d)
 			if len(d.Rows) == 0 {
 				<div class="bg-white rounded-2xl shadow-sm p-6 text-slate-400 text-center">
-					No carriers set up. Add carriers and devices in Admin → Recharge.
+					No carriers set up. Add carriers and devices in Admin → Reload & Bills.
 				</div>
 			} else {
 				<form id="recon-floats" class="space-y-5">
@@ -140,7 +140,7 @@ templ carrierBlock(symbol string, cr CarrierRecon) {
 			}
 		</div>
 		if len(cr.Devices) == 0 {
-			<p class="text-sm text-slate-400">No devices. Add one in Admin → Recharge.</p>
+			<p class="text-sm text-slate-400">No devices. Add one in Admin → Reload & Bills.</p>
 		} else {
 			<table class="w-full text-sm">
 				<thead class="text-left text-slate-500 border-b">

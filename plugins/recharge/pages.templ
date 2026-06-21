@@ -7,8 +7,8 @@ import "strconv"
 // CarriersPage is the recharge carrier management screen, rendered inside the
 // core admin shell so the plugin inherits the sidebar, palette and styling.
 templ CarriersPage(userName string, carriers []Carrier, devices []Device) {
-	@layouts.Admin("Recharge Carriers", userName, "recharge-carriers") {
-		<h1 class="text-2xl font-bold mb-6">Recharge Carriers & Devices</h1>
+	@layouts.Admin("Reload & Bills — Carriers", userName, "recharge-carriers") {
+		<h1 class="text-2xl font-bold mb-6">Carriers, Devices & Bank cards</h1>
 		<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
 			<div class="lg:col-span-2 bg-white rounded-2xl shadow-sm p-6">
 				<h2 class="text-lg font-semibold mb-4">Carriers</h2>
@@ -162,8 +162,8 @@ templ CarrierRows(carriers []Carrier) {
 // supplier float-refill form, and a per-session reconciliation. The detailed
 // money-movement log lives on the Ledger page.
 templ ReportPage(userName, symbol string, balances []DeviceBalanceNow, blocks []SessionRecon) {
-	@layouts.Admin("Recharge Report", userName, "recharge-report") {
-		<h1 class="text-2xl font-bold mb-6">Recharge Report</h1>
+	@layouts.Admin("Reload & Bills — Report", userName, "recharge-report") {
+		<h1 class="text-2xl font-bold mb-6">Reload & Bills — Report</h1>
 		<div class="space-y-6">
 			<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
 				<div id="balance-panel" class="lg:col-span-2">
@@ -276,8 +276,8 @@ templ refillCard() {
 // LedgerPage is the admin money-movement ledger: filterable by date / carrier /
 // device / type, with a CSV export of the current filter.
 templ LedgerPage(userName, symbol string, f LedgerForm, carriers []Carrier, devices []Device, rows []TxRow) {
-	@layouts.Admin("Recharge Ledger", userName, "recharge-ledger") {
-		<h1 class="text-2xl font-bold mb-6">Recharge Ledger</h1>
+	@layouts.Admin("Reload & Bills — Ledger", userName, "recharge-ledger") {
+		<h1 class="text-2xl font-bold mb-6">Reload & Bills — Ledger</h1>
 		<div class="bg-white rounded-2xl shadow-sm p-6">
 			<form method="get" action="/admin/recharge/ledger" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-5 items-end">
 				<div>

@@ -20,7 +20,7 @@ type Plugin struct {
 	store *Store
 }
 
-func (p *Plugin) Name() string { return "Mobile Recharge" }
+func (p *Plugin) Name() string { return "Reload & Bills" }
 
 // Migrations runs under goose_db_version_recharge, independent of core.
 func (p *Plugin) Migrations() (fs.FS, string) { return migrations.FS, "recharge" }
@@ -52,19 +52,19 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 	reg.Cashier().POST("/recharge/reload", ch.Reload)
 	reg.Cashier().POST("/recharge/wallet", ch.Wallet)
 	reg.AddPosAction(plugin.PosAction{Component: ReloadButton()})
-	reg.AddCashierTab(plugin.CashierTab{Href: "/cashier/recharge", Label: "Recharge", Key: "recharge"})
+	reg.AddCashierTab(plugin.CashierTab{Href: "/cashier/recharge", Label: "Reload & Bills", Key: "recharge"})
 	reg.AddTenderMethod(plugin.TenderMethod{Value: "wallet", Label: "Wallet (eZ Cash / mCash)"})
 
 	reg.AddAdminNav(plugin.AdminNavEntry{
-		SectionLabel: "Recharge",
+		SectionLabel: "Reload & Bills",
 		Icon:         "📶",
 		Href:         "/admin/recharge",
-		Label:        "Carriers & devices",
+		Label:        "Carriers, devices & cards",
 		Key:          "recharge-carriers",
-		Desc:         "Mobile-recharge carriers, devices & reconciliation",
+		Desc:         "Carriers, devices, bank cards & reconciliation",
 	})
 	reg.AddAdminNav(plugin.AdminNavEntry{
-		SectionLabel: "Recharge",
+		SectionLabel: "Reload & Bills",
 		Icon:         "📶",
 		Href:         "/admin/recharge/report",
 		Label:        "Report",
@@ -72,7 +72,7 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 		Desc:         "Float balances & per-session reconciliation",
 	})
 	reg.AddAdminNav(plugin.AdminNavEntry{
-		SectionLabel: "Recharge",
+		SectionLabel: "Reload & Bills",
 		Icon:         "📶",
 		Href:         "/admin/recharge/ledger",
 		Label:        "Ledger",
