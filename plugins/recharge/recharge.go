@@ -39,6 +39,8 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 	reg.Admin().POST("/recharge/devices/:id/delete", a.DeviceDelete)
 	reg.Admin().GET("/recharge/report", a.Report)
 	reg.Admin().GET("/recharge/ledger", a.Ledger)
+	reg.Admin().GET("/recharge/devices/balances", a.Devices)
+	reg.Admin().POST("/recharge/refill", a.Refill)
 
 	ch := &cashierUI{p: p}
 	reg.Cashier().GET("/recharge/carriers", ch.Carriers)

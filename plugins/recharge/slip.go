@@ -89,6 +89,10 @@ func txLabel(t string) string {
 		return "float top-up"
 	case "wallet_in":
 		return "wallet payment"
+	case "reload":
+		return "reload"
+	case "refill":
+		return "supplier refill"
 	}
 	return t
 }

@@ -22,6 +22,7 @@ var txKinds = map[string]txKind{
 	"topup":      {cashSign: -1, floatSign: +1}, // buy float from supplier (money out)
 	"wallet_in":  {cashSign: 0, floatSign: +1},  // customer pays a sale by wallet transfer
 	"reload":     {cashSign: 0, floatSign: -1},  // airtime sold (cash handled by the sale)
+	"refill":     {cashSign: 0, floatSign: +1},  // admin buys float from supplier (no drawer; expense booked)
 }
 
 // decreasesFloat reports whether a positive-amount transaction of this type
@@ -74,14 +75,21 @@ func (s *Store) RecordTransaction(ctx context.Context, in TxInput) (int64, error
 func (s *Store) DeviceBalance(ctx context.Context, sessionID, deviceID int64) (decimal.Decimal, error) {
 	var v decimal.Decimal
 	err := s.db.GetContext(ctx, &v, `
-		SELECT
-		  COALESCE(
-		    (SELECT opening FROM recharge_device_sessions WHERE session_id=$1 AND device_id=$2),
-		    (SELECT closing FROM recharge_device_sessions WHERE device_id=$2 AND closed_at IS NOT NULL
-		       ORDER BY closed_at DESC LIMIT 1),
-		    0)
-		  + COALESCE(
-		    (SELECT SUM(float_delta) FROM recharge_transactions WHERE session_id=$1 AND device_id=$2), 0)`,
+		SELECT (CASE WHEN os.opening IS NOT NULL THEN os.opening
+		             ELSE COALESCE(lc.closing,0) + COALESCE(carry.v,0) END)
+		       + COALESCE(tx.net, 0) AS balance
+		FROM recharge_devices d
+		LEFT JOIN recharge_device_sessions os ON os.session_id=$1 AND os.device_id=d.id
+		LEFT JOIN LATERAL (
+		  SELECT closing, closed_at FROM recharge_device_sessions
+		  WHERE device_id=d.id AND closed_at IS NOT NULL ORDER BY closed_at DESC LIMIT 1) lc ON true
+		LEFT JOIN LATERAL (
+		  SELECT SUM(float_delta) AS v FROM recharge_transactions
+		  WHERE device_id=d.id AND session_id=0 AND (lc.closed_at IS NULL OR created_at > lc.closed_at)) carry ON true
+		LEFT JOIN LATERAL (
+		  SELECT SUM(float_delta) AS net FROM recharge_transactions
+		  WHERE session_id=$1 AND device_id=d.id) tx ON true
+		WHERE d.id=$2`,
 		sessionID, deviceID)
 	return v, err
 }
@@ -115,13 +123,18 @@ func (s *Store) DevicesWithBalance(ctx context.Context, sessionID, carrierID int
 	var rows []DeviceBalanceRow
 	err := s.db.SelectContext(ctx, &rows, `
 		SELECT d.id, d.carrier_id, c.name AS carrier, d.label, COALESCE(d.number,'') AS number,
-		       COALESCE(os.opening, lc.closing, 0) + COALESCE(tx.net, 0) AS balance
+		       (CASE WHEN os.opening IS NOT NULL THEN os.opening
+		             ELSE COALESCE(lc.closing,0) + COALESCE(carry.v,0) END)
+		       + COALESCE(tx.net, 0) AS balance
 		FROM recharge_devices d
 		JOIN recharge_carriers c ON c.id = d.carrier_id
 		LEFT JOIN recharge_device_sessions os ON os.session_id=$1 AND os.device_id=d.id
 		LEFT JOIN LATERAL (
-		  SELECT closing FROM recharge_device_sessions
+		  SELECT closing, closed_at FROM recharge_device_sessions
 		  WHERE device_id=d.id AND closed_at IS NOT NULL ORDER BY closed_at DESC LIMIT 1) lc ON true
+		LEFT JOIN LATERAL (
+		  SELECT SUM(float_delta) AS v FROM recharge_transactions
+		  WHERE device_id=d.id AND session_id=0 AND (lc.closed_at IS NULL OR created_at > lc.closed_at)) carry ON true
 		LEFT JOIN LATERAL (
 		  SELECT SUM(float_delta) AS net FROM recharge_transactions
 		  WHERE session_id=$1 AND device_id=d.id) tx ON true
@@ -134,12 +147,13 @@ func (s *Store) DevicesWithBalance(ctx context.Context, sessionID, carrierID int
 // "where's my money" panel: last counted closing carried forward plus every
 // float movement since that close.
 type DeviceBalanceNow struct {
-	CarrierID int64           `db:"carrier_id"`
-	Carrier   string          `db:"carrier"`
-	Label     string          `db:"label"`
-	Number    string          `db:"number"`
-	Balance   decimal.Decimal `db:"balance"`
-	LastAt    *time.Time      `db:"last_at"`
+	ID        int64           `db:"id"         json:"id"`
+	CarrierID int64           `db:"carrier_id" json:"carrier_id"`
+	Carrier   string          `db:"carrier"    json:"carrier"`
+	Label     string          `db:"label"      json:"label"`
+	Number    string          `db:"number"     json:"number"`
+	Balance   decimal.Decimal `db:"balance"    json:"balance"`
+	LastAt    *time.Time      `db:"last_at"    json:"last_at"`
 }
 
 // DeviceBalances returns every active device's current float balance, session-
@@ -148,7 +162,7 @@ type DeviceBalanceNow struct {
 func (s *Store) DeviceBalances(ctx context.Context) ([]DeviceBalanceNow, error) {
 	var rows []DeviceBalanceNow
 	err := s.db.SelectContext(ctx, &rows, `
-		SELECT d.carrier_id, c.name AS carrier, d.label, COALESCE(d.number,'') AS number,
+		SELECT d.id, d.carrier_id, c.name AS carrier, d.label, COALESCE(d.number,'') AS number,
 		       COALESCE(lc.closing,0) + COALESCE(tx.net,0) AS balance, lm.last_at
 		FROM recharge_devices d
 		JOIN recharge_carriers c ON c.id = d.carrier_id
@@ -241,7 +255,8 @@ func (s *Store) Reconciliation(ctx context.Context, sessionID int64) ([]CarrierR
 		SELECT d.id AS device_id, d.carrier_id, c.name AS carrier,
 		       d.label, COALESCE(d.number,'') AS number,
 		       (os.device_id IS NOT NULL) AS started,
-		       COALESCE(os.opening, lc.closing, 0) AS opening_base,
+		       (CASE WHEN os.opening IS NOT NULL THEN os.opening
+		             ELSE COALESCE(lc.closing,0) + COALESCE(carry.v,0) END) AS opening_base,
 		       os.closing, (os.closed_at IS NOT NULL) AS closed,
 		       COALESCE(tin.v, 0)  AS float_in,
 		       COALESCE(tout.v, 0) AS float_out
@@ -249,8 +264,11 @@ func (s *Store) Reconciliation(ctx context.Context, sessionID int64) ([]CarrierR
 		JOIN recharge_carriers c ON c.id = d.carrier_id
 		LEFT JOIN recharge_device_sessions os ON os.session_id=$1 AND os.device_id=d.id
 		LEFT JOIN LATERAL (
-		  SELECT closing FROM recharge_device_sessions
+		  SELECT closing, closed_at FROM recharge_device_sessions
 		  WHERE device_id=d.id AND closed_at IS NOT NULL ORDER BY closed_at DESC LIMIT 1) lc ON true
+		LEFT JOIN LATERAL (
+		  SELECT SUM(float_delta) AS v FROM recharge_transactions
+		  WHERE device_id=d.id AND session_id=0 AND (lc.closed_at IS NULL OR created_at > lc.closed_at)) carry ON true
 		LEFT JOIN LATERAL (
 		  SELECT SUM(float_delta) AS v FROM recharge_transactions
 		  WHERE session_id=$1 AND device_id=d.id AND float_delta>0) tin ON true

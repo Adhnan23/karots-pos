@@ -11,8 +11,10 @@ import (
 
 	"karots-pos/internal/apperr"
 	"karots-pos/internal/features/cashregister"
+	"karots-pos/internal/features/expenses"
 	"karots-pos/internal/features/products"
 	"karots-pos/internal/middleware"
+	"karots-pos/internal/money"
 	"karots-pos/internal/response"
 
 	"github.com/labstack/echo/v4"
@@ -223,6 +225,83 @@ func (a *adminUI) ledgerCSV(c echo.Context, rows []TxRow) error {
 	}
 	w.Flush()
 	return w.Error()
+}
+
+// Devices returns active devices with their current (session-independent) float
+// balance for the admin refill picker, optionally narrowed to one carrier.
+func (a *adminUI) Devices(c echo.Context) error {
+	ctx := c.Request().Context()
+	rows, err := a.p.store.DeviceBalances(ctx)
+	if err != nil {
+		return err
+	}
+	if carrierID, _ := strconv.ParseInt(c.QueryParam("carrier_id"), 10, 64); carrierID != 0 {
+		out := make([]DeviceBalanceNow, 0, len(rows))
+		for _, r := range rows {
+			if r.CarrierID == carrierID {
+				out = append(out, r)
+			}
+		}
+		rows = out
+	}
+	return c.JSON(http.StatusOK, map[string]any{"data": rows})
+}
+
+// Refill records an admin supplier float top-up: it increases a device's float
+// and books a shop expense, WITHOUT touching any cash drawer (the admin pays the
+// supplier directly). It attributes to the current open cash session if there is
+// one (so it shows live and in that shift's reconciliation); otherwise it is
+// recorded session-less and carried into the next session's opening.
+func (a *adminUI) Refill(c echo.Context) error {
+	ctx := c.Request().Context()
+	uid := middleware.CurrentUserID(c)
+
+	deviceID, err := strconv.ParseInt(c.FormValue("device_id"), 10, 64)
+	if err != nil || deviceID == 0 {
+		return apperr.Validation("choose a device")
+	}
+	amt, err := money.Parse(c.FormValue("amount"))
+	if err != nil || !amt.IsPositive() {
+		return apperr.Validation("enter a valid amount")
+	}
+	carrierID, err := a.p.store.CarrierOfDevice(ctx, deviceID)
+	if err != nil {
+		return err
+	}
+	if carrierID == 0 {
+		return apperr.Validation("unknown device")
+	}
+	ref := strings.TrimSpace(c.FormValue("reference"))
+	note := strings.TrimSpace(c.FormValue("note"))
+
+	// Book the supplier purchase as a shop expense (no drawer movement).
+	desc := a.p.store.CarrierName(ctx, carrierID) + " supplier float refill"
+	exp, err := a.p.core.Expenses.Create(ctx, expenses.CreateInput{
+		Category: "Float top-up", Amount: amt.String(), Description: &desc,
+	}, uid)
+	if err != nil {
+		return err
+	}
+
+	// Attribute to the current open cash session if one exists; else session-less
+	// (sessionID 0), which the opening-carry picks up for the next shift.
+	var sessionID int64
+	if sess, err := a.p.core.CashRegister.Current(ctx, uid); err == nil && sess != nil {
+		sessionID = sess.ID
+	}
+	expID := exp.ID
+	if _, err := a.p.store.RecordTransaction(ctx, TxInput{
+		SessionID: sessionID, CarrierID: carrierID, DeviceID: deviceID, Type: "refill",
+		Amount: amt, ExpenseID: &expID, Reference: ref, Note: note, CreatedBy: uid,
+	}); err != nil {
+		return err
+	}
+
+	balances, err := a.p.store.DeviceBalances(ctx)
+	if err != nil {
+		return err
+	}
+	return response.RenderFragment(c, BalancePanel(a.symbol(ctx), balances), response.Toast("Float refilled", "success"))
 }
 
 // DeviceCreate adds a device under a carrier.

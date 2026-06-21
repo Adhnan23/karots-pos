@@ -113,6 +113,13 @@ func (s *Store) CarrierOfDevice(ctx context.Context, deviceID int64) (int64, err
 	return cid, err
 }
 
+// CarrierName returns a carrier's display name ("" when unknown).
+func (s *Store) CarrierName(ctx context.Context, id int64) string {
+	var n string
+	_ = s.db.GetContext(ctx, &n, `SELECT name FROM recharge_carriers WHERE id = $1`, id)
+	return n
+}
+
 // serviceDefaults resolves a category id (ensuring a "Recharge" category exists)
 // and a unit id (any existing unit) for the hidden service product. It touches
 // core reference tables additively only — it never alters their schema.
