@@ -23,26 +23,45 @@ templ ReloadButton() {
 				<div class="space-y-3">
 					<div>
 						<label class="block text-sm font-medium text-slate-600 mb-1">Carrier</label>
-						<select x-model="cid" x-on:change="loadDevices()" class="w-full border rounded-lg px-3 py-2.5">
+						<div class="grid grid-cols-2 gap-2">
 							<template x-for="c in carriers" x-bind:key="c.id">
-								<option x-bind:value="c.id" x-text="c.name"></option>
+								<button
+									type="button"
+									x-on:click="cid=String(c.id); loadDevices()"
+									x-bind:class="String(cid)===String(c.id) ? 'ring-2 ring-emerald-500 bg-emerald-50' : 'border border-slate-200'"
+									class="px-3 py-2.5 rounded-lg text-sm font-medium text-left"
+									x-text="c.name"
+								></button>
 							</template>
-						</select>
+						</div>
 						<p x-show="carriers.length===0" class="text-xs text-rose-500 mt-1">No carriers set up. Add one in Admin → Reload & Bills.</p>
 					</div>
 					<div>
 						<label class="block text-sm font-medium text-slate-600 mb-1">Device</label>
-						<select x-model="did" class="w-full border rounded-lg px-3 py-2.5">
+						<div class="grid grid-cols-2 gap-2">
 							<template x-for="d in devices" x-bind:key="d.id">
-								<option x-bind:value="d.id" x-text="d.label + (d.number ? ' · '+d.number : '')"></option>
+								<button
+									type="button"
+									x-on:click="did=String(d.id)"
+									x-bind:class="String(did)===String(d.id) ? 'ring-2 ring-emerald-500 bg-emerald-50' : 'border border-slate-200'"
+									class="px-3 py-2.5 rounded-lg text-left"
+								>
+									<div class="font-medium text-sm" x-text="d.label"></div>
+									<div class="text-xs text-slate-400" x-text="'Bal: '+Number(d.balance).toFixed(2)"></div>
+								</button>
 							</template>
-						</select>
+						</div>
 						<p x-show="cid && devices.length===0" class="text-xs text-rose-500 mt-1">No devices for this carrier. Add one in Admin → Reload & Bills.</p>
-						<p x-show="dev()" class="text-xs text-slate-500 mt-1">Float balance: <span class="font-semibold tabular-nums" x-text="bal().toFixed(2)"></span></p>
 					</div>
 					<div>
 						<label class="block text-sm font-medium text-slate-600 mb-1">Amount</label>
+						<div class="grid grid-cols-4 gap-2 mb-2">
+							<template x-for="q in [50,100,200,500]" x-bind:key="q">
+								<button type="button" x-on:click="amount=String(q)" class="px-2 py-2 rounded-lg border border-slate-200 text-sm font-medium hover:bg-slate-50" x-text="q"></button>
+							</template>
+						</div>
 						<input type="number" min="0" step="0.01" x-model="amount" x-on:keydown.enter.prevent="add()" placeholder="100.00" class="w-full border rounded-lg px-3 py-2.5 text-right"/>
+						<p x-show="dev()" class="text-xs text-slate-500 mt-1">Float balance: <span class="font-semibold tabular-nums" x-text="bal().toFixed(2)"></span></p>
 						<p x-show="over()" class="text-xs text-rose-500 mt-1">Amount exceeds this device's float balance.</p>
 					</div>
 				</div>

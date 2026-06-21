@@ -81,36 +81,50 @@ templ txForm(d ReconData) {
 			hx-on::after-request="if(event.detail.successful) this.reset()"
 			class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3"
 		>
-			<div>
+			<div class="col-span-full">
 				<label class="block text-sm font-medium text-slate-600 mb-1">Type</label>
-				<select name="type" x-model="type" required class="w-full border rounded-lg px-3 py-2.5">
-					<option value="deposit">Deposit / cash-in (send to wallet)</option>
-					<option value="withdrawal">Withdrawal / cash-out (give cash)</option>
-					<option value="billpay">Bill payment</option>
-					<option value="topup">Supplier float top-up</option>
-				</select>
+				<input type="hidden" name="type" x-model="type"/>
+				<div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+					@typeCard("deposit", "Deposit", "cash-in → wallet")
+					@typeCard("withdrawal", "Withdrawal", "give cash out")
+					@typeCard("billpay", "Bill payment", "pay a bill")
+					@typeCard("topup", "Float top-up", "buy from supplier")
+				</div>
 			</div>
-			<div>
+			<div class="col-span-full">
 				<label class="block text-sm font-medium text-slate-600 mb-1">Carrier</label>
-				<select x-model="cid" x-on:change="loadDevices()" required class="w-full border rounded-lg px-3 py-2.5">
+				<div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
 					for i, c := range d.Carriers {
-						if i == 0 {
-							<option value={ strconv.FormatInt(c.ID, 10) } data-first-carrier>{ c.Name }</option>
-						} else {
-							<option value={ strconv.FormatInt(c.ID, 10) }>{ c.Name }</option>
-						}
+						<button
+							type="button"
+							value={ strconv.FormatInt(c.ID, 10) }
+							if i == 0 {
+								data-first-carrier
+							}
+							x-on:click={ "cid='" + strconv.FormatInt(c.ID, 10) + "'; loadDevices()" }
+							x-bind:class={ "cid==='" + strconv.FormatInt(c.ID, 10) + "' ? 'ring-2 ring-indigo-500 bg-indigo-50' : 'border border-slate-200'" }
+							class="px-3 py-2.5 rounded-lg text-sm font-medium text-left"
+						>{ c.Name }</button>
 					}
-				</select>
+				</div>
 			</div>
-			<div>
+			<div class="col-span-full">
 				<label class="block text-sm font-medium text-slate-600 mb-1">Device</label>
-				<select name="device_id" x-model="did" required class="w-full border rounded-lg px-3 py-2.5">
-					<template x-for="dev in devices" x-bind:key="dev.id">
-						<option x-bind:value="dev.id" x-text="dev.label + (dev.number ? ' · '+dev.number : '')"></option>
+				<input type="hidden" name="device_id" x-model="did"/>
+				<div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+					<template x-for="dv in devices" x-bind:key="dv.id">
+						<button
+							type="button"
+							x-on:click="did=String(dv.id)"
+							x-bind:class="String(did)===String(dv.id) ? 'ring-2 ring-indigo-500 bg-indigo-50' : 'border border-slate-200'"
+							class="px-3 py-2.5 rounded-lg text-left"
+						>
+							<div class="font-medium text-sm" x-text="dv.label"></div>
+							<div class="text-xs text-slate-400" x-text="dv.tracks_float===false ? 'Bank card' : ('Bal: '+Number(dv.balance).toFixed(2))"></div>
+						</button>
 					</template>
-				</select>
+				</div>
 				<p x-show="cid && devices.length===0" class="text-xs text-rose-500 mt-1">No devices for this carrier.</p>
-				<p x-show="dev() && tracked()" class="text-xs text-slate-500 mt-1">Float balance: <span class="font-semibold tabular-nums" x-text="bal().toFixed(2)"></span></p>
 				<p x-show="dev() && !tracked()" class="text-xs text-indigo-500 mt-1">Bank card — no float limit.</p>
 			</div>
 			<div>
@@ -199,6 +213,20 @@ templ carrierBlock(symbol string, cr CarrierRecon) {
 			</dl>
 		}
 	</div>
+}
+
+// typeCard is one tap-to-select transaction-type card in the tx form. value is
+// the txKinds key; the selected card is highlighted via the Alpine `type` model.
+templ typeCard(value, title, sub string) {
+	<button
+		type="button"
+		x-on:click={ "type='" + value + "'" }
+		x-bind:class={ "type==='" + value + "' ? 'ring-2 ring-emerald-500 bg-emerald-50' : 'border border-slate-200'" }
+		class="px-3 py-2.5 rounded-lg text-left"
+	>
+		<div class="font-medium text-sm">{ title }</div>
+		<div class="text-xs text-slate-400">{ sub }</div>
+	</button>
 }
 
 templ stat(label, value string) {
