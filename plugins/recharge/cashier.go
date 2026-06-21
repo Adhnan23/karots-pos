@@ -191,8 +191,16 @@ func (h *cashierUI) Tx(c echo.Context) error {
 		return apperr.Validation("unknown carrier")
 	}
 
-	// Hard-block: a deposit/bill-pay that would push the device float below zero.
-	if decreasesFloat(typ) {
+	// A bank card holds no tracked float: the cash still moves, but there is no
+	// float to decrease and no overdraw to guard against.
+	tracksFloat, err := h.p.store.DeviceTracksFloat(ctx, deviceID)
+	if err != nil {
+		return err
+	}
+
+	// Hard-block: a deposit/bill-pay that would push the device float below zero
+	// (skipped for bank cards, which have no float balance).
+	if tracksFloat && decreasesFloat(typ) {
 		over, err := h.p.store.wouldOverdraw(ctx, sess.ID, deviceID, amt)
 		if err != nil {
 			return err
@@ -236,6 +244,7 @@ func (h *cashierUI) Tx(c echo.Context) error {
 	if _, err := h.p.store.RecordTransaction(ctx, TxInput{
 		SessionID: sess.ID, CarrierID: carrierID, DeviceID: deviceID, Type: typ,
 		Amount: amt, ExpenseID: expenseID, Reference: ref, Note: note, CreatedBy: uid,
+		Untracked: !tracksFloat,
 	}); err != nil {
 		return err
 	}

@@ -750,7 +750,8 @@ function pos(symbol, defaultType, promptAfterSale) {
       if (this.walletDevices.length) return;
       try {
         const json = await apiFetch("GET", "/cashier/recharge/devices?carrier_id=0&for=money", undefined, { silent: true });
-        this.walletDevices = json.data || [];
+        // Bank cards hold no float — a wallet transfer can only credit a tracked float.
+        this.walletDevices = (json.data || []).filter((d) => d.tracks_float !== false);
       } catch (_) {
         /* recharge plugin not installed; leave list empty */
       }

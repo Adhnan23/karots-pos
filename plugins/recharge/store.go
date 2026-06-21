@@ -67,6 +67,7 @@ type Device struct {
 	Carrier     string `db:"carrier"      json:"carrier"`
 	ForRecharge bool   `db:"for_recharge" json:"for_recharge"`
 	ForMoney    bool   `db:"for_money"    json:"for_money"`
+	TracksFloat bool   `db:"tracks_float" json:"tracks_float"` // false = bank card (no float balance)
 }
 
 // Devices lists active devices joined with their carrier name, grouped by
@@ -75,7 +76,7 @@ func (s *Store) Devices(ctx context.Context) ([]Device, error) {
 	var ds []Device
 	err := s.db.SelectContext(ctx, &ds, `
 		SELECT d.id, d.carrier_id, d.label, COALESCE(d.number,'') AS number,
-		       d.is_active, c.name AS carrier, d.for_recharge, d.for_money
+		       d.is_active, c.name AS carrier, d.for_recharge, d.for_money, d.tracks_float
 		FROM recharge_devices d
 		JOIN recharge_carriers c ON c.id = d.carrier_id
 		WHERE d.is_active = true AND c.is_active = true
@@ -83,19 +84,33 @@ func (s *Store) Devices(ctx context.Context) ([]Device, error) {
 	return ds, err
 }
 
+// DeviceTracksFloat reports whether a device holds a tracked float (false for a
+// bank card). Unknown/inactive devices default to true (the safe path that keeps
+// the overdraw guard on). Used by the tx handler to skip the float guard and zero
+// the float delta for bank-card money movements.
+func (s *Store) DeviceTracksFloat(ctx context.Context, deviceID int64) (bool, error) {
+	var tracks bool
+	err := s.db.GetContext(ctx, &tracks,
+		`SELECT tracks_float FROM recharge_devices WHERE id = $1 AND is_active = true`, deviceID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return true, nil
+	}
+	return tracks, err
+}
+
 // CreateDevice adds a device under a carrier. forRecharge/forMoney tag which
 // pickers it appears in (a device can hold a recharge float, a money float, or
-// both).
-func (s *Store) CreateDevice(ctx context.Context, carrierID int64, label, number string, forRecharge, forMoney bool) (int64, error) {
+// both); tracksFloat=false marks a bank card with no float balance to track.
+func (s *Store) CreateDevice(ctx context.Context, carrierID int64, label, number string, forRecharge, forMoney, tracksFloat bool) (int64, error) {
 	var num *string
 	if strings.TrimSpace(number) != "" {
 		num = &number
 	}
 	var id int64
 	err := s.db.GetContext(ctx, &id,
-		`INSERT INTO recharge_devices (carrier_id, label, number, for_recharge, for_money)
-		 VALUES ($1,$2,$3,$4,$5) RETURNING id`,
-		carrierID, label, num, forRecharge, forMoney)
+		`INSERT INTO recharge_devices (carrier_id, label, number, for_recharge, for_money, tracks_float)
+		 VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+		carrierID, label, num, forRecharge, forMoney, tracksFloat)
 	return id, err
 }
 

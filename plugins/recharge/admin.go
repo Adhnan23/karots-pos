@@ -315,12 +315,15 @@ func (a *adminUI) DeviceCreate(c echo.Context) error {
 	if label == "" {
 		return apperr.Validation("device label is required")
 	}
-	forRecharge := c.FormValue("for_recharge") != ""
-	forMoney := c.FormValue("for_money") != ""
+	// A bank card is a money source with no float to track: it is always
+	// money-only (never airtime) and skips reconciliation/refill.
+	bankCard := c.FormValue("bank_card") != ""
+	forRecharge := c.FormValue("for_recharge") != "" && !bankCard
+	forMoney := c.FormValue("for_money") != "" || bankCard
 	if !forRecharge && !forMoney {
 		return apperr.Validation("choose at least one use (recharge and/or money transfer)")
 	}
-	if _, err := a.p.store.CreateDevice(ctx, carrierID, label, strings.TrimSpace(c.FormValue("number")), forRecharge, forMoney); err != nil {
+	if _, err := a.p.store.CreateDevice(ctx, carrierID, label, strings.TrimSpace(c.FormValue("number")), forRecharge, forMoney, !bankCard); err != nil {
 		return err
 	}
 	ds, err := a.p.store.Devices(ctx)

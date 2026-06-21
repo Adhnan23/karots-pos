@@ -50,11 +50,17 @@ type TxInput struct {
 	Reference string
 	Note      string
 	CreatedBy int64
+	Untracked bool // bank card: record cash movement but no float delta
 }
 
 // RecordTransaction inserts a money movement, deriving its cash/float deltas.
+// For an untracked device (bank card) the float delta is forced to zero — the
+// cash side still posts, but there is no float to move.
 func (s *Store) RecordTransaction(ctx context.Context, in TxInput) (int64, error) {
 	cashDelta, floatDelta := Deltas(in.Type, in.Amount)
+	if in.Untracked {
+		floatDelta = decimal.Zero
+	}
 	var id int64
 	err := s.db.GetContext(ctx, &id, `
 		INSERT INTO recharge_transactions
@@ -106,13 +112,16 @@ func (s *Store) wouldOverdraw(ctx context.Context, sessionID, deviceID int64, am
 }
 
 // DeviceBalanceRow is a device + its live balance, for the dynamic pickers.
+// TracksFloat=false (a bank card) means Balance is meaningless: the picker shows
+// it without a balance and never blocks on overdraw.
 type DeviceBalanceRow struct {
-	ID        int64           `db:"id"         json:"id"`
-	CarrierID int64           `db:"carrier_id" json:"carrier_id"`
-	Carrier   string          `db:"carrier"    json:"carrier"`
-	Label     string          `db:"label"      json:"label"`
-	Number    string          `db:"number"     json:"number"`
-	Balance   decimal.Decimal `db:"balance"    json:"balance"`
+	ID          int64           `db:"id"           json:"id"`
+	CarrierID   int64           `db:"carrier_id"   json:"carrier_id"`
+	Carrier     string          `db:"carrier"      json:"carrier"`
+	Label       string          `db:"label"        json:"label"`
+	Number      string          `db:"number"       json:"number"`
+	Balance     decimal.Decimal `db:"balance"      json:"balance"`
+	TracksFloat bool            `db:"tracks_float" json:"tracks_float"`
 }
 
 // DevicesWithBalance lists active devices with their live balance in the given
@@ -126,7 +135,7 @@ func (s *Store) DevicesWithBalance(ctx context.Context, sessionID, carrierID int
 		SELECT d.id, d.carrier_id, c.name AS carrier, d.label, COALESCE(d.number,'') AS number,
 		       (CASE WHEN os.opening IS NOT NULL THEN os.opening
 		             ELSE COALESCE(lc.closing,0) + COALESCE(carry.v,0) END)
-		       + COALESCE(tx.net, 0) AS balance
+		       + COALESCE(tx.net, 0) AS balance, d.tracks_float
 		FROM recharge_devices d
 		JOIN recharge_carriers c ON c.id = d.carrier_id
 		LEFT JOIN recharge_device_sessions os ON os.session_id=$1 AND os.device_id=d.id
@@ -140,7 +149,7 @@ func (s *Store) DevicesWithBalance(ctx context.Context, sessionID, carrierID int
 		  SELECT SUM(float_delta) AS net FROM recharge_transactions
 		  WHERE session_id=$1 AND device_id=d.id) tx ON true
 		WHERE d.is_active=true AND c.is_active=true AND ($2=0 OR d.carrier_id=$2)
-		  AND (CASE WHEN $3='recharge' THEN d.for_recharge
+		  AND (CASE WHEN $3='recharge' THEN (d.for_recharge AND d.tracks_float)
 		            WHEN $3='money' THEN d.for_money
 		            ELSE true END)
 		ORDER BY c.name, d.label`, sessionID, carrierID, purpose)
@@ -178,7 +187,7 @@ func (s *Store) DeviceBalances(ctx context.Context) ([]DeviceBalanceNow, error) 
 		  WHERE device_id=d.id AND (lc.closed_at IS NULL OR created_at > lc.closed_at)) tx ON true
 		LEFT JOIN LATERAL (
 		  SELECT MAX(created_at) AS last_at FROM recharge_transactions WHERE device_id=d.id) lm ON true
-		WHERE d.is_active=true AND c.is_active=true
+		WHERE d.is_active=true AND c.is_active=true AND d.tracks_float
 		ORDER BY c.name, d.label`)
 	return rows, err
 }
@@ -279,7 +288,7 @@ func (s *Store) Reconciliation(ctx context.Context, sessionID int64) ([]CarrierR
 		LEFT JOIN LATERAL (
 		  SELECT SUM(-float_delta) AS v FROM recharge_transactions
 		  WHERE session_id=$1 AND device_id=d.id AND float_delta<0) tout ON true
-		WHERE d.is_active=true AND c.is_active=true
+		WHERE d.is_active=true AND c.is_active=true AND d.tracks_float
 		ORDER BY c.name, d.label`, sessionID)
 	if err != nil {
 		return nil, err
@@ -363,6 +372,9 @@ func bonusText(symbol string, v *decimal.Decimal) string {
 
 // usedFor renders a device's purpose tags for the admin device table.
 func usedFor(d Device) string {
+	if !d.TracksFloat {
+		return "Bank card (no float)"
+	}
 	switch {
 	case d.ForRecharge && d.ForMoney:
 		return "Recharge + Money"
