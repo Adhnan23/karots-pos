@@ -53,6 +53,7 @@ templ CarriersPage(userName string, carriers []Carrier, devices []Device) {
 							<th class="py-2 pr-4">Carrier</th>
 							<th class="py-2 pr-4">Device</th>
 							<th class="py-2 pr-4">Number</th>
+							<th class="py-2 pr-4">Used for</th>
 							<th class="py-2 text-right">Actions</th>
 						</tr>
 					</thead>
@@ -89,6 +90,18 @@ templ CarriersPage(userName string, carriers []Carrier, devices []Device) {
 							<label class="block text-sm font-medium text-slate-600 mb-1">Number (optional)</label>
 							<input type="text" name="number" placeholder="07XXXXXXXX" class="w-full border rounded-lg px-3 py-2.5"/>
 						</div>
+						<div>
+							<span class="block text-sm font-medium text-slate-600 mb-1">Used for</span>
+							<label class="flex items-center gap-2 text-sm text-slate-700 py-1">
+								<input type="checkbox" name="for_recharge" value="1" checked class="rounded border-slate-300"/>
+								Recharge (airtime reload)
+							</label>
+							<label class="flex items-center gap-2 text-sm text-slate-700 py-1">
+								<input type="checkbox" name="for_money" value="1" checked class="rounded border-slate-300"/>
+								Money transfer (deposit / withdrawal / bill-pay / wallet)
+							</label>
+							<p class="text-xs text-slate-400 mt-1">Uncheck one if this SIM holds a separate float for only the other (e.g. a Mobitel money-only line). Add it twice with different names for two floats on one number.</p>
+						</div>
 						<button type="submit" class="w-full py-2.5 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700">Add device</button>
 					</form>
 				}
@@ -100,13 +113,14 @@ templ CarriersPage(userName string, carriers []Carrier, devices []Device) {
 // DeviceRows is the HTMX-swappable device table body.
 templ DeviceRows(devices []Device) {
 	if len(devices) == 0 {
-		<tr><td colspan="4" class="py-6 text-center text-slate-400">No devices yet.</td></tr>
+		<tr><td colspan="5" class="py-6 text-center text-slate-400">No devices yet.</td></tr>
 	} else {
 		for _, d := range devices {
 			<tr class="border-b last:border-0">
 				<td class="py-2 pr-4 text-slate-500">{ d.Carrier }</td>
 				<td class="py-2 pr-4 font-medium">{ d.Label }</td>
 				<td class="py-2 pr-4 text-slate-500">{ d.Number }</td>
+				<td class="py-2 pr-4 text-slate-500">{ usedFor(d) }</td>
 				<td class="py-2 text-right">
 					<button
 						hx-post={ "/admin/recharge/devices/" + strconv.FormatInt(d.ID, 10) + "/delete" }

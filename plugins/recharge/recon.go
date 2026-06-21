@@ -118,8 +118,9 @@ type DeviceBalanceRow struct {
 // DevicesWithBalance lists active devices with their live balance in the given
 // session. carrierID 0 returns every carrier's devices (the flat wallet picker
 // and the checkout overdraw map); a non-zero id narrows to one carrier (the
-// reload popup and tx form). Powers all the dynamic device pickers.
-func (s *Store) DevicesWithBalance(ctx context.Context, sessionID, carrierID int64) ([]DeviceBalanceRow, error) {
+// reload popup and tx form). purpose "recharge"/"money" narrows to devices
+// tagged for that use (""=all). Powers all the dynamic device pickers.
+func (s *Store) DevicesWithBalance(ctx context.Context, sessionID, carrierID int64, purpose string) ([]DeviceBalanceRow, error) {
 	var rows []DeviceBalanceRow
 	err := s.db.SelectContext(ctx, &rows, `
 		SELECT d.id, d.carrier_id, c.name AS carrier, d.label, COALESCE(d.number,'') AS number,
@@ -139,7 +140,10 @@ func (s *Store) DevicesWithBalance(ctx context.Context, sessionID, carrierID int
 		  SELECT SUM(float_delta) AS net FROM recharge_transactions
 		  WHERE session_id=$1 AND device_id=d.id) tx ON true
 		WHERE d.is_active=true AND c.is_active=true AND ($2=0 OR d.carrier_id=$2)
-		ORDER BY c.name, d.label`, sessionID, carrierID)
+		  AND (CASE WHEN $3='recharge' THEN d.for_recharge
+		            WHEN $3='money' THEN d.for_money
+		            ELSE true END)
+		ORDER BY c.name, d.label`, sessionID, carrierID, purpose)
 	return rows, err
 }
 
@@ -355,6 +359,19 @@ func bonusText(symbol string, v *decimal.Decimal) string {
 		return "—"
 	}
 	return money.Format(symbol, *v)
+}
+
+// usedFor renders a device's purpose tags for the admin device table.
+func usedFor(d Device) string {
+	switch {
+	case d.ForRecharge && d.ForMoney:
+		return "Recharge + Money"
+	case d.ForRecharge:
+		return "Recharge"
+	case d.ForMoney:
+		return "Money"
+	}
+	return "—"
 }
 
 // lastAt renders an optional "last movement" timestamp.

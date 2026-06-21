@@ -59,12 +59,14 @@ func (s *Store) CarrierExists(ctx context.Context, name string) (bool, error) {
 // Device is a physical SIM/phone/terminal under a carrier that holds a float
 // balance. Carrier is the joined carrier name (for admin listings).
 type Device struct {
-	ID        int64  `db:"id"         json:"id"`
-	CarrierID int64  `db:"carrier_id" json:"carrier_id"`
-	Label     string `db:"label"      json:"label"`
-	Number    string `db:"number"     json:"number"`
-	IsActive  bool   `db:"is_active"  json:"is_active"`
-	Carrier   string `db:"carrier"    json:"carrier"`
+	ID          int64  `db:"id"           json:"id"`
+	CarrierID   int64  `db:"carrier_id"   json:"carrier_id"`
+	Label       string `db:"label"        json:"label"`
+	Number      string `db:"number"       json:"number"`
+	IsActive    bool   `db:"is_active"    json:"is_active"`
+	Carrier     string `db:"carrier"      json:"carrier"`
+	ForRecharge bool   `db:"for_recharge" json:"for_recharge"`
+	ForMoney    bool   `db:"for_money"    json:"for_money"`
 }
 
 // Devices lists active devices joined with their carrier name, grouped by
@@ -73,7 +75,7 @@ func (s *Store) Devices(ctx context.Context) ([]Device, error) {
 	var ds []Device
 	err := s.db.SelectContext(ctx, &ds, `
 		SELECT d.id, d.carrier_id, d.label, COALESCE(d.number,'') AS number,
-		       d.is_active, c.name AS carrier
+		       d.is_active, c.name AS carrier, d.for_recharge, d.for_money
 		FROM recharge_devices d
 		JOIN recharge_carriers c ON c.id = d.carrier_id
 		WHERE d.is_active = true AND c.is_active = true
@@ -81,16 +83,19 @@ func (s *Store) Devices(ctx context.Context) ([]Device, error) {
 	return ds, err
 }
 
-// CreateDevice adds a device under a carrier.
-func (s *Store) CreateDevice(ctx context.Context, carrierID int64, label, number string) (int64, error) {
+// CreateDevice adds a device under a carrier. forRecharge/forMoney tag which
+// pickers it appears in (a device can hold a recharge float, a money float, or
+// both).
+func (s *Store) CreateDevice(ctx context.Context, carrierID int64, label, number string, forRecharge, forMoney bool) (int64, error) {
 	var num *string
 	if strings.TrimSpace(number) != "" {
 		num = &number
 	}
 	var id int64
 	err := s.db.GetContext(ctx, &id,
-		`INSERT INTO recharge_devices (carrier_id, label, number) VALUES ($1,$2,$3) RETURNING id`,
-		carrierID, label, num)
+		`INSERT INTO recharge_devices (carrier_id, label, number, for_recharge, for_money)
+		 VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+		carrierID, label, num, forRecharge, forMoney)
 	return id, err
 }
 

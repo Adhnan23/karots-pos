@@ -259,7 +259,8 @@ func (h *cashierUI) Devices(c echo.Context) error {
 		return err
 	}
 	carrierID, _ := strconv.ParseInt(c.QueryParam("carrier_id"), 10, 64) // 0 = all
-	rows, err := h.p.store.DevicesWithBalance(c.Request().Context(), sess.ID, carrierID)
+	purpose := c.QueryParam("for")                                       // "recharge" | "money" | "" (all)
+	rows, err := h.p.store.DevicesWithBalance(c.Request().Context(), sess.ID, carrierID, purpose)
 	if err != nil {
 		return err
 	}

@@ -315,7 +315,12 @@ func (a *adminUI) DeviceCreate(c echo.Context) error {
 	if label == "" {
 		return apperr.Validation("device label is required")
 	}
-	if _, err := a.p.store.CreateDevice(ctx, carrierID, label, strings.TrimSpace(c.FormValue("number"))); err != nil {
+	forRecharge := c.FormValue("for_recharge") != ""
+	forMoney := c.FormValue("for_money") != ""
+	if !forRecharge && !forMoney {
+		return apperr.Validation("choose at least one use (recharge and/or money transfer)")
+	}
+	if _, err := a.p.store.CreateDevice(ctx, carrierID, label, strings.TrimSpace(c.FormValue("number")), forRecharge, forMoney); err != nil {
 		return err
 	}
 	ds, err := a.p.store.Devices(ctx)

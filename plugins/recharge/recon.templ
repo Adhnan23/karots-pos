@@ -70,7 +70,7 @@ templ ReconBody(d ReconData) {
 templ txForm(d ReconData) {
 	<div
 		class="bg-white rounded-2xl shadow-sm p-6"
-		x-data="{ type:'deposit', cid:'', did:'', amount:'', devices:[], async loadDevices(){ this.devices=[]; this.did=''; if(!this.cid){ return } try{ const r=await fetch('/cashier/recharge/devices?carrier_id='+encodeURIComponent(this.cid)); const j=await r.json(); this.devices=j.data||[]; if(this.devices.length){ this.did=String(this.devices[0].id) } }catch(e){} }, dev(){ return this.devices.find(x=>String(x.id)===String(this.did)) }, bal(){ const x=this.dev(); return x?Number(x.balance):0 }, decreases(){ return this.type==='deposit'||this.type==='billpay' }, over(){ return this.decreases() && Number(this.amount)>this.bal() } }"
+		x-data="{ type:'deposit', cid:'', did:'', amount:'', devices:[], async loadDevices(){ this.devices=[]; this.did=''; if(!this.cid){ return } try{ const r=await fetch('/cashier/recharge/devices?for=money&carrier_id='+encodeURIComponent(this.cid)); const j=await r.json(); this.devices=j.data||[]; if(this.devices.length){ this.did=String(this.devices[0].id) } }catch(e){} }, dev(){ return this.devices.find(x=>String(x.id)===String(this.did)) }, bal(){ const x=this.dev(); return x?Number(x.balance):0 }, decreases(){ return this.type==='deposit'||this.type==='billpay' }, over(){ return this.decreases() && Number(this.amount)>this.bal() } }"
 		x-init="cid=$el.querySelector('[data-first-carrier]')?.value || ''; loadDevices()"
 	>
 		<h2 class="text-lg font-semibold mb-4">Record a transaction</h2>

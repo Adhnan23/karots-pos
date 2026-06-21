@@ -749,7 +749,7 @@ function pos(symbol, defaultType, promptAfterSale) {
     async loadWalletDevices() {
       if (this.walletDevices.length) return;
       try {
-        const json = await apiFetch("GET", "/cashier/recharge/devices?carrier_id=0", undefined, { silent: true });
+        const json = await apiFetch("GET", "/cashier/recharge/devices?carrier_id=0&for=money", undefined, { silent: true });
         this.walletDevices = json.data || [];
       } catch (_) {
         /* recharge plugin not installed; leave list empty */
@@ -788,7 +788,7 @@ function pos(symbol, defaultType, promptAfterSale) {
       }
       let bal = {};
       try {
-        const json = await apiFetch("GET", "/cashier/recharge/devices?carrier_id=0", undefined, { silent: true });
+        const json = await apiFetch("GET", "/cashier/recharge/devices?carrier_id=0&for=recharge", undefined, { silent: true });
         for (const d of json.data || []) bal[d.id] = Number(d.balance);
       } catch (_) {
         toast("Couldn't verify recharge float — try again", "error");
