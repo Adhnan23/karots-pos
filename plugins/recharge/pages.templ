@@ -172,11 +172,8 @@ templ ReportPage(userName, symbol string, balances []DeviceBalanceNow, blocks []
 	@layouts.Admin("Reload & Bills — Report", userName, "recharge-report") {
 		<h1 class="text-2xl font-bold mb-6">Reload & Bills — Report</h1>
 		<div class="space-y-6">
-			<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-				<div id="balance-panel" class="lg:col-span-2">
-					@BalancePanel(symbol, balances)
-				</div>
-				@refillCard()
+			<div id="balance-panel">
+				@BalancePanel(symbol, balances)
 			</div>
 			<div class="bg-white rounded-2xl shadow-sm p-6">
 				<h2 class="text-lg font-semibold mb-4">Reconciliation by session</h2>
@@ -280,6 +277,103 @@ templ refillCard() {
 	</div>
 }
 
+// RefillsPage is the dedicated supplier float-refill screen: the refill form, the
+// live device balances (HTMX-updated after a refill), and the refill history.
+templ RefillsPage(userName, symbol string, balances []DeviceBalanceNow, refills []TxRow) {
+	@layouts.Admin("Reload & Bills — Float refills", userName, "recharge-refills") {
+		<h1 class="text-2xl font-bold mb-6">Float refills</h1>
+		<div class="space-y-6">
+			<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+				<div id="balance-panel" class="lg:col-span-2">
+					@BalancePanel(symbol, balances)
+				</div>
+				@refillCard()
+			</div>
+			<div class="bg-white rounded-2xl shadow-sm p-6">
+				<h2 class="text-lg font-semibold mb-4">Refill history</h2>
+				<table class="w-full text-sm">
+					<thead class="text-left text-slate-500 border-b">
+						<tr>
+							<th class="py-2 pr-4">When</th>
+							<th class="py-2 pr-4">Carrier</th>
+							<th class="py-2 pr-4">Device</th>
+							<th class="py-2 pr-4 text-right">Amount</th>
+							<th class="py-2 pr-4">Ref</th>
+							<th class="py-2 text-right">Slip</th>
+						</tr>
+					</thead>
+					<tbody>
+						if len(refills) == 0 {
+							<tr><td colspan="6" class="py-6 text-center text-slate-400">No refills yet.</td></tr>
+						} else {
+							for _, t := range refills {
+								<tr class="border-b last:border-0">
+									<td class="py-2 pr-4 text-slate-500">{ t.CreatedAt.Format("02 Jan 15:04") }</td>
+									<td class="py-2 pr-4">{ t.Carrier }</td>
+									<td class="py-2 pr-4 text-slate-500">{ t.Device }</td>
+									<td class="py-2 pr-4 text-right tabular-nums">{ money.Format(symbol, t.Amount) }</td>
+									<td class="py-2 pr-4 text-slate-500">{ refText(t.Reference) }</td>
+									<td class="py-2 text-right">
+										@slipActions(t.ID)
+									</td>
+								</tr>
+							}
+						}
+					</tbody>
+				</table>
+			</div>
+		</div>
+	}
+}
+
+// slipActions renders the View / Reprint controls for one transaction row.
+templ slipActions(id int64) {
+	<a href={ templ.SafeURL("/admin/recharge/tx/" + strconv.FormatInt(id, 10)) } class="text-indigo-600 hover:text-indigo-700 mr-3">View</a>
+	<button
+		hx-post={ "/admin/recharge/tx/" + strconv.FormatInt(id, 10) + "/print" }
+		class="text-slate-500 hover:text-slate-700"
+	>Reprint</button>
+}
+
+// TxSlipPage is a printable HTML view of one transaction slip, with a reprint
+// button (parity with the core sale receipt view).
+templ TxSlipPage(userName, symbol string, t TxRow) {
+	@layouts.Admin("Reload & Bills — Slip", userName, "recharge-ledger") {
+		<div class="max-w-sm mx-auto bg-white rounded-2xl shadow-sm p-6 my-6">
+			<div class="text-center text-xl font-bold capitalize">{ txLabel(t.Type) }</div>
+			<div class="text-center text-slate-400 text-xs mb-5">{ t.CreatedAt.Format("2006-01-02 15:04") }</div>
+			<dl class="text-sm divide-y">
+				@slipRow("Carrier", t.Carrier)
+				if t.Device != "—" {
+					@slipRow("Device", t.Device)
+				}
+				@slipRow("Amount", money.Format(symbol, t.Amount))
+				if t.ServiceCharge.IsPositive() {
+					@slipRow("Service charge", money.Format(symbol, t.ServiceCharge))
+					@slipRow("Total", money.Format(symbol, t.Amount.Add(t.ServiceCharge)))
+				}
+				if t.Reference != nil && *t.Reference != "" {
+					@slipRow("Reference", *t.Reference)
+				}
+			</dl>
+			<div class="mt-6 flex gap-2">
+				<button
+					hx-post={ "/admin/recharge/tx/" + strconv.FormatInt(t.ID, 10) + "/print" }
+					class="flex-1 py-2.5 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700"
+				>Reprint slip</button>
+				<a href="/admin/recharge/ledger" class="py-2.5 px-4 rounded-lg border text-slate-600 hover:bg-slate-50">Back</a>
+			</div>
+		</div>
+	}
+}
+
+templ slipRow(label, value string) {
+	<div class="flex justify-between py-2">
+		<dt class="text-slate-500">{ label }</dt>
+		<dd class="font-medium tabular-nums">{ value }</dd>
+	</div>
+}
+
 // LedgerPage is the admin money-movement ledger: filterable by date / carrier /
 // device / type, with a CSV export of the current filter.
 templ LedgerPage(userName, symbol string, f LedgerForm, carriers []Carrier, devices []Device, rows []TxRow) {
@@ -349,12 +443,13 @@ templ LedgerPage(userName, symbol string, f LedgerForm, carriers []Carrier, devi
 						<th class="py-2 pr-4 text-right">Service</th>
 						<th class="py-2 pr-4 text-right">Cash</th>
 						<th class="py-2 pr-4 text-right">Float</th>
-						<th class="py-2">Ref</th>
+						<th class="py-2 pr-4">Ref</th>
+						<th class="py-2 text-right">Slip</th>
 					</tr>
 				</thead>
 				<tbody>
 					if len(rows) == 0 {
-						<tr><td colspan="9" class="py-6 text-center text-slate-400">No transactions match.</td></tr>
+						<tr><td colspan="10" class="py-6 text-center text-slate-400">No transactions match.</td></tr>
 					} else {
 						for _, t := range rows {
 							<tr class="border-b last:border-0">
@@ -366,13 +461,16 @@ templ LedgerPage(userName, symbol string, f LedgerForm, carriers []Carrier, devi
 								<td class="py-2 pr-4 text-right tabular-nums">{ serviceText(symbol, t.ServiceCharge) }</td>
 								<td class="py-2 pr-4 text-right tabular-nums">{ money.Format(symbol, t.CashDelta) }</td>
 								<td class="py-2 pr-4 text-right tabular-nums">{ money.Format(symbol, t.FloatDelta) }</td>
-								<td class="py-2 text-slate-500">{ refText(t.Reference) }</td>
+								<td class="py-2 pr-4 text-slate-500">{ refText(t.Reference) }</td>
+								<td class="py-2 text-right">
+									@slipActions(t.ID)
+								</td>
 							</tr>
 						}
 						<tr class="border-t-2 font-semibold">
 							<td class="py-2 pr-4" colspan="5">Service charge earned (filtered)</td>
 							<td class="py-2 pr-4 text-right tabular-nums">{ money.Format(symbol, sumServiceCharge(rows)) }</td>
-							<td colspan="3"></td>
+							<td colspan="4"></td>
 						</tr>
 					}
 				</tbody>

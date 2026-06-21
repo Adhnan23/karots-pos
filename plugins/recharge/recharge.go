@@ -39,6 +39,9 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 	reg.Admin().POST("/recharge/devices/:id/delete", a.DeviceDelete)
 	reg.Admin().GET("/recharge/report", a.Report)
 	reg.Admin().GET("/recharge/ledger", a.Ledger)
+	reg.Admin().GET("/recharge/refills", a.Refills)
+	reg.Admin().GET("/recharge/tx/:id", a.TxView)
+	reg.Admin().POST("/recharge/tx/:id/print", a.TxPrint)
 	reg.Admin().GET("/recharge/devices/balances", a.Devices)
 	reg.Admin().POST("/recharge/refill", a.Refill)
 
@@ -78,5 +81,13 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 		Label:        "Ledger",
 		Key:          "recharge-ledger",
 		Desc:         "Filterable money-movement log + CSV export",
+	})
+	reg.AddAdminNav(plugin.AdminNavEntry{
+		SectionLabel: "Reload & Bills",
+		Icon:         "📶",
+		Href:         "/admin/recharge/refills",
+		Label:        "Float refills",
+		Key:          "recharge-refills",
+		Desc:         "Refill device float from a supplier + refill history",
 	})
 }

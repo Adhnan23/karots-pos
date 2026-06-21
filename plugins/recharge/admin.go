@@ -228,6 +228,57 @@ func (a *adminUI) ledgerCSV(c echo.Context, rows []TxRow) error {
 	return w.Error()
 }
 
+// TxView renders a single transaction slip as a printable HTML page (parity with
+// the core sale receipt view).
+func (a *adminUI) TxView(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	ctx := c.Request().Context()
+	t, err := a.p.store.TxByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	return response.RenderPage(c, TxSlipPage(middleware.CurrentUserName(c), a.symbol(ctx), t))
+}
+
+// TxPrint reprints a transaction slip to the receipt printer.
+func (a *adminUI) TxPrint(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	ctx := c.Request().Context()
+	t, err := a.p.store.TxByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	// A reprint is best-effort: an offline/unconfigured printer reports a warning
+	// toast rather than a 500 (the ledger row is unaffected).
+	if err := a.p.reprintTx(ctx, t); err != nil {
+		c.Response().Header().Set("HX-Trigger", response.Toast("Could not reach the printer", "error"))
+		return response.NoContent(c)
+	}
+	c.Response().Header().Set("HX-Trigger", response.Toast("Slip sent to printer", "success"))
+	return response.NoContent(c)
+}
+
+// Refills renders the dedicated supplier float-refill page: the refill form, the
+// live device balances, and the history of past refills.
+func (a *adminUI) Refills(c echo.Context) error {
+	ctx := c.Request().Context()
+	balances, err := a.p.store.DeviceBalances(ctx)
+	if err != nil {
+		return err
+	}
+	rows, err := a.p.store.Ledger(ctx, LedgerFilter{Type: "refill", Limit: 200})
+	if err != nil {
+		return err
+	}
+	return response.RenderPage(c, RefillsPage(middleware.CurrentUserName(c), a.symbol(ctx), balances, rows))
+}
+
 // Devices returns active devices with their current (session-independent) float
 // balance for the admin refill picker, optionally narrowed to one carrier.
 func (a *adminUI) Devices(c echo.Context) error {

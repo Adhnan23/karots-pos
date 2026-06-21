@@ -444,6 +444,20 @@ type LedgerFilter struct {
 	Limit     int
 }
 
+// TxByID loads one ledger entry (carrier/device names joined) for the slip view
+// and reprint endpoints.
+func (s *Store) TxByID(ctx context.Context, id int64) (TxRow, error) {
+	var t TxRow
+	err := s.db.GetContext(ctx, &t, `
+		SELECT t.id, t.created_at, c.name AS carrier, COALESCE(d.label,'—') AS device, t.type,
+		       t.amount, t.service_charge, t.cash_delta, t.float_delta, t.reference
+		FROM recharge_transactions t
+		JOIN recharge_carriers c ON c.id = t.carrier_id
+		LEFT JOIN recharge_devices d ON d.id = t.device_id
+		WHERE t.id = $1`, id)
+	return t, err
+}
+
 // Ledger lists money movements matching a filter, newest first.
 func (s *Store) Ledger(ctx context.Context, f LedgerFilter) ([]TxRow, error) {
 	q := `
