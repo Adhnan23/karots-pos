@@ -4,6 +4,33 @@ import "karots-pos/templates/layouts"
 import "karots-pos/internal/money"
 import "strconv"
 
+// HubPage is the Reload & Bills section landing page: it lists the section's
+// sub-pages as cards (skipping the hub's own self-link), mirroring the core admin
+// section hubs so every sub-page is reachable from the sidebar entry.
+templ HubPage(userName string, sec layouts.AdminSection) {
+	@layouts.Admin("Reload & Bills", userName, "recharge-hub") {
+		<div class="mb-6">
+			<h1 class="text-2xl font-bold">📶 Reload & Bills</h1>
+			<p class="text-sm text-slate-500">Carriers &amp; bank cards, float refills, reports and the money-movement log.</p>
+		</div>
+		<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+			for _, l := range sec.Links {
+				if l.Key != "recharge-hub" {
+					@hubCard(l.Href, l.Label, l.Desc)
+				}
+			}
+		</div>
+	}
+}
+
+// hubCard is one navigable card on the Reload & Bills hub.
+templ hubCard(href, label, desc string) {
+	<a href={ templ.SafeURL(href) } class="block bg-white rounded-2xl shadow-sm p-5 hover:ring-2 hover:ring-indigo-400 transition">
+		<div class="font-semibold text-slate-800">{ label }</div>
+		<div class="text-sm text-slate-500 mt-1">{ desc }</div>
+	</a>
+}
+
 // CarriersPage is the recharge carrier management screen, rendered inside the
 // core admin shell so the plugin inherits the sidebar, palette and styling.
 templ CarriersPage(userName string, carriers []Carrier, devices []Device) {

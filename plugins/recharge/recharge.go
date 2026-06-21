@@ -31,7 +31,8 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 	p.store = NewStore(reg.Core.DB)
 
 	a := &adminUI{p: p}
-	reg.Admin().GET("/recharge", a.Carriers)
+	reg.Admin().GET("/recharge", a.Hub)
+	reg.Admin().GET("/recharge/carriers", a.Carriers)
 	reg.Admin().GET("/recharge/table", a.CarriersTable)
 	reg.Admin().POST("/recharge", a.CarrierCreate)
 	reg.Admin().POST("/recharge/:id/delete", a.CarrierDelete)
@@ -58,13 +59,23 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 	reg.AddCashierTab(plugin.CashierTab{Href: "/cashier/recharge", Label: "Reload & Bills", Key: "recharge"})
 	reg.AddTenderMethod(plugin.TenderMethod{Value: "wallet", Label: "Wallet (eZ Cash / mCash)"})
 
+	// The first entry defines the section's sidebar target — the hub page, which
+	// lists the links below as cards (matching the core admin sections).
 	reg.AddAdminNav(plugin.AdminNavEntry{
 		SectionLabel: "Reload & Bills",
 		Icon:         "📶",
 		Href:         "/admin/recharge",
+		Label:        "Reload & Bills",
+		Key:          "recharge-hub",
+		Desc:         "Reload, bills & float — overview",
+	})
+	reg.AddAdminNav(plugin.AdminNavEntry{
+		SectionLabel: "Reload & Bills",
+		Icon:         "📶",
+		Href:         "/admin/recharge/carriers",
 		Label:        "Carriers, devices & cards",
 		Key:          "recharge-carriers",
-		Desc:         "Carriers, devices, bank cards & reconciliation",
+		Desc:         "Carriers, devices, bank cards & reconciliation setup",
 	})
 	reg.AddAdminNav(plugin.AdminNavEntry{
 		SectionLabel: "Reload & Bills",

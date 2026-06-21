@@ -16,11 +16,20 @@ import (
 	"karots-pos/internal/middleware"
 	"karots-pos/internal/money"
 	"karots-pos/internal/response"
+	"karots-pos/templates/layouts"
 
 	"github.com/labstack/echo/v4"
 )
 
 type adminUI struct{ p *Plugin }
+
+// Hub is the Reload & Bills landing page: it lists the section's sub-pages as
+// cards (carriers/devices, report, ledger, float refills), mirroring the core
+// admin section hubs so the sidebar link opens a navigable hub.
+func (a *adminUI) Hub(c echo.Context) error {
+	sec, _ := layouts.SectionByKey("Reload & Bills")
+	return response.RenderPage(c, HubPage(middleware.CurrentUserName(c), sec))
+}
 
 // Carriers renders the carrier & device management page.
 func (a *adminUI) Carriers(c echo.Context) error {
