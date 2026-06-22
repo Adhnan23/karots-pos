@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"strconv"
 	"strings"
@@ -176,9 +177,17 @@ func (a *adminUI) DraftPOPrint(c echo.Context) error {
 	if mode != "separate" {
 		mode = "combined"
 	}
-	orders, err := a.s.purchases.GetMany(ctx, ids)
+	details, err := a.s.purchases.GetMany(ctx, ids)
 	if err != nil {
 		return err
+	}
+	orders := make([]adminpages.POOrder, 0, len(details))
+	for _, det := range details {
+		o := adminpages.POOrder{Detail: det}
+		if sup, err := a.s.suppliers.Get(ctx, det.Purchase.SupplierID); err == nil && sup != nil {
+			o.Supplier = *sup
+		}
+		orders = append(orders, o)
 	}
 	d := adminpages.POPrintData{
 		ShopName: a.shopName(ctx),
@@ -187,15 +196,45 @@ func (a *adminUI) DraftPOPrint(c echo.Context) error {
 		IDs:      c.QueryParam("ids"),
 		Orders:   orders,
 	}
+	d.Address, d.Phone = a.shopContact(ctx)
+	return response.RenderPage(c, adminpages.POPrintPage(d))
+}
+
+// GRNPrint renders the goods-received slip for a received purchase.
+func (a *adminUI) GRNPrint(c echo.Context) error {
+	ctx := c.Request().Context()
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	det, err := a.s.purchases.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	o := adminpages.POOrder{Detail: *det}
+	if sup, err := a.s.suppliers.Get(ctx, det.Purchase.SupplierID); err == nil && sup != nil {
+		o.Supplier = *sup
+	}
+	d := adminpages.GRNPrintData{
+		ShopName: a.shopName(ctx),
+		Symbol:   a.symbol(ctx),
+		Order:    o,
+	}
+	d.Address, d.Phone = a.shopContact(ctx)
+	return response.RenderPage(c, adminpages.GRNPrintPage(d))
+}
+
+// shopContact returns the shop address + phone from settings (blank when unset).
+func (a *adminUI) shopContact(ctx context.Context) (address, phone string) {
 	if cfg, err := a.s.settings.Get(ctx); err == nil && cfg != nil {
 		if cfg.Address != nil {
-			d.Address = *cfg.Address
+			address = *cfg.Address
 		}
 		if cfg.Phone != nil {
-			d.Phone = *cfg.Phone
+			phone = *cfg.Phone
 		}
 	}
-	return response.RenderPage(c, adminpages.POPrintPage(d))
+	return address, phone
 }
 
 // --- helpers ---
@@ -243,11 +282,16 @@ func entryConfigJSON(d purchases.Detail) string {
 	if d.Purchase.Notes != nil {
 		notes = *d.Purchase.Notes
 	}
+	expected := ""
+	if d.Purchase.ExpectedDate != nil {
+		expected = d.Purchase.ExpectedDate.Format("2006-01-02")
+	}
 	b, _ := json.Marshal(map[string]any{
-		"editId":     d.Purchase.ID,
-		"supplierId": strconv.FormatInt(d.Purchase.SupplierID, 10),
-		"notes":      notes,
-		"lines":      lines,
+		"editId":       d.Purchase.ID,
+		"supplierId":   strconv.FormatInt(d.Purchase.SupplierID, 10),
+		"expectedDate": expected,
+		"notes":        notes,
+		"lines":        lines,
 	})
 	return string(b)
 }

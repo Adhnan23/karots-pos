@@ -115,6 +115,9 @@ templ PurchaseDetailPage(d PurchaseDetailData) {
 			<div class="flex items-center gap-3">
 				if d.Detail.Purchase.Status == "draft" {
 					<a href={ templ.SafeURL("/admin/purchases/" + strconv.FormatInt(d.Detail.Purchase.ID, 10) + "/receive") } class="px-4 py-2 rounded-lg bg-emerald-600 text-white font-medium">Receive</a>
+					<a target="_blank" href={ templ.SafeURL("/admin/purchases/po/print?mode=combined&ids=" + strconv.FormatInt(d.Detail.Purchase.ID, 10)) } class="px-4 py-2 rounded-lg border font-medium">Print PO</a>
+				} else {
+					<a target="_blank" href={ templ.SafeURL("/admin/purchases/" + strconv.FormatInt(d.Detail.Purchase.ID, 10) + "/grn") } class="px-4 py-2 rounded-lg border font-medium">Print GRN</a>
 				}
 				<a href="/admin/purchases" class="text-slate-500 hover:underline">← Back</a>
 			</div>
@@ -130,6 +133,9 @@ templ PurchaseDetailPage(d PurchaseDetailData) {
 				<div><span class="text-slate-400">Status:</span> <span class="capitalize">{ d.Detail.Purchase.Status }</span></div>
 				<div><span class="text-slate-400">Created:</span> { d.Detail.Purchase.CreatedAt.Format("2006-01-02 15:04") }</div>
 				<div><span class="text-slate-400">By:</span> { strOrEmpty(d.Detail.Purchase.ReceivedByName) }</div>
+				if d.Detail.Purchase.ExpectedDate != nil {
+					<div><span class="text-slate-400">Expected:</span> { d.Detail.Purchase.ExpectedDate.Format("2006-01-02") }</div>
+				}
 				if d.Detail.Purchase.DueDate != nil {
 					<div><span class="text-slate-400">Due:</span> { d.Detail.Purchase.DueDate.Format("2006-01-02") }</div>
 				}
@@ -203,7 +209,7 @@ templ PurchaseEntryPage(d PurchaseEntryData) {
 			<a href="/admin/purchases" class="text-slate-500 hover:underline">← Back</a>
 		</div>
 		<div class="bg-white rounded-2xl shadow-sm p-6" x-data={ "grn('" + d.Symbol + "', " + d.ConfigJSON + ")" } x-on:keydown.window="onKey($event)">
-			<div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+			<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
 				<div>
 					<label class="block text-sm font-medium mb-1">Supplier</label>
 					<select x-model="supplierId" class="w-full border rounded-lg px-3 py-2">
@@ -212,6 +218,10 @@ templ PurchaseEntryPage(d PurchaseEntryData) {
 							<option value={ strconv.FormatInt(s.ID, 10) }>{ s.Name }</option>
 						}
 					</select>
+				</div>
+				<div>
+					<label class="block text-sm font-medium mb-1">Expected delivery</label>
+					<input type="date" x-model="expectedDate" class="w-full border rounded-lg px-3 py-2"/>
 				</div>
 				<div>
 					<label class="block text-sm font-medium mb-1">Notes</label>
@@ -345,7 +355,11 @@ templ PurchaseReceivePage(d PurchaseReceiveData) {
 				</tbody>
 			</table>
 			<button type="button" class="text-indigo-600 text-sm mb-3" x-on:click="addNewLine()">+ Add forgotten / extra item</button>
-			<p class="text-xs text-amber-600 mb-4" x-show="hasVariance()">Some received quantities differ from what was ordered — only the received quantity updates stock.</p>
+			<p class="text-xs text-amber-600 mb-2" x-show="hasVariance()">Some received quantities differ from what was ordered — only the received quantity updates stock.</p>
+			<label class="flex items-center gap-2 text-sm mb-4" x-show="hasShortfall()">
+				<input type="checkbox" x-model="keepRemainder"/>
+				<span>Keep the un-received quantity as a new draft PO (rest of the order arriving later)</span>
+			</label>
 
 			<div class="flex items-center justify-end border-t pt-4">
 				<div class="text-right">
@@ -358,6 +372,12 @@ templ PurchaseReceivePage(d PurchaseReceiveData) {
 	}
 }
 
+// POOrder pairs a purchase detail with its full supplier record for the printed doc.
+type POOrder struct {
+	Detail   purchases.Detail
+	Supplier suppliers.Supplier
+}
+
 type POPrintData struct {
 	ShopName string
 	Address  string
@@ -365,7 +385,7 @@ type POPrintData struct {
 	Symbol   string
 	Mode     string
 	IDs      string
-	Orders   []purchases.Detail
+	Orders   []POOrder
 }
 
 templ POPrintPage(d POPrintData) {
@@ -383,30 +403,54 @@ templ POPrintPage(d POPrintData) {
 		</div>
 		for i, o := range d.Orders {
 			<div class={ templ.KV("po-break", d.Mode == "separate" && i < len(d.Orders)-1) }>
-				@poDoc(o, d.Symbol, d.Address, d.Phone)
+				@poDoc(o, d.Symbol, d.ShopName, d.Address, d.Phone)
 			</div>
 		}
 	}
 }
 
+// fromTo renders the buyer (shop) and supplier blocks at the top of a PO / GRN.
+templ fromTo(shopName, address, phone string, sup suppliers.Supplier) {
+	<div class="grid grid-cols-2 gap-6 mb-4 text-sm">
+		<div>
+			<div class="text-slate-400 text-xs uppercase tracking-wide">From</div>
+			<div class="font-semibold">{ shopName }</div>
+			if address != "" {
+				<div>{ address }</div>
+			}
+			if phone != "" {
+				<div>Tel: { phone }</div>
+			}
+		</div>
+		<div>
+			<div class="text-slate-400 text-xs uppercase tracking-wide">To — Supplier</div>
+			<div class="font-semibold">{ sup.Name }</div>
+			if sup.ContactPerson != nil && *sup.ContactPerson != "" {
+				<div>Attn: { *sup.ContactPerson }</div>
+			}
+			if sup.Phone != nil && *sup.Phone != "" {
+				<div>Tel: { *sup.Phone }</div>
+			}
+			if sup.Address != nil && *sup.Address != "" {
+				<div>{ *sup.Address }</div>
+			}
+		</div>
+	</div>
+}
+
 // poDoc renders one supplier's order document.
-templ poDoc(o purchases.Detail, symbol, address, phone string) {
+templ poDoc(o POOrder, symbol, shopName, address, phone string) {
 	<div class="mb-8">
-		<div class="flex items-start justify-between mb-3">
-			<div class="text-sm text-slate-600">
-				if address != "" {
-					<div>{ address }</div>
+		@fromTo(shopName, address, phone, o.Supplier)
+		<div class="flex items-center justify-between text-sm mb-3 border-t pt-3">
+			<div class="font-semibold text-base">Purchase Order #{ strconv.FormatInt(o.Detail.Purchase.ID, 10) }</div>
+			<div class="text-right text-slate-500">
+				<div>Date: { o.Detail.Purchase.CreatedAt.Format("2006-01-02") }</div>
+				if o.Detail.Purchase.ExpectedDate != nil {
+					<div>Expected: { o.Detail.Purchase.ExpectedDate.Format("2006-01-02") }</div>
 				}
-				if phone != "" {
-					<div>Tel: { phone }</div>
-				}
-			</div>
-			<div class="text-right text-sm">
-				<div class="font-semibold">Purchase Order #{ strconv.FormatInt(o.Purchase.ID, 10) }</div>
-				<div class="text-slate-500">{ o.Purchase.CreatedAt.Format("2006-01-02") }</div>
 			</div>
 		</div>
-		<div class="mb-3"><span class="text-slate-400 text-sm">Supplier:</span> <span class="font-semibold">{ o.Purchase.SupplierName }</span></div>
 		<table class="w-full text-sm border-t">
 			<thead class="text-left text-slate-500 border-b">
 				<tr>
@@ -417,7 +461,7 @@ templ poDoc(o purchases.Detail, symbol, address, phone string) {
 				</tr>
 			</thead>
 			<tbody>
-				for _, it := range o.Items {
+				for _, it := range o.Detail.Items {
 					<tr class="border-b">
 						<td class="py-2">{ it.ProductName }</td>
 						<td class="py-2 text-right">
@@ -435,12 +479,77 @@ templ poDoc(o purchases.Detail, symbol, address, phone string) {
 			<tfoot>
 				<tr class="font-bold border-t">
 					<td class="py-2" colspan="3">Total</td>
-					<td class="py-2 text-right">{ money.Format(symbol, o.Purchase.Total) }</td>
+					<td class="py-2 text-right">{ money.Format(symbol, o.Detail.Purchase.Total) }</td>
 				</tr>
 			</tfoot>
 		</table>
-		if o.Purchase.Notes != nil && *o.Purchase.Notes != "" {
-			<p class="mt-3 text-sm text-slate-500">Notes: { *o.Purchase.Notes }</p>
+		if o.Detail.Purchase.Notes != nil && *o.Detail.Purchase.Notes != "" {
+			<p class="mt-3 text-sm text-slate-500">Notes: { *o.Detail.Purchase.Notes }</p>
 		}
 	</div>
+}
+
+type GRNPrintData struct {
+	ShopName string
+	Address  string
+	Phone    string
+	Symbol   string
+	Order    POOrder
+}
+
+// GRNPrintPage is the goods-received slip for a received purchase.
+templ GRNPrintPage(d GRNPrintData) {
+	@layouts.Report("Goods Received Note", d.ShopName) {
+		@fromTo(d.ShopName, d.Address, d.Phone, d.Order.Supplier)
+		<div class="flex items-center justify-between text-sm mb-3 border-t pt-3">
+			<div class="font-semibold text-base">GRN #{ strconv.FormatInt(d.Order.Detail.Purchase.ID, 10) }</div>
+			<div class="text-right text-slate-500">
+				<div>Received: { d.Order.Detail.Purchase.CreatedAt.Format("2006-01-02 15:04") }</div>
+				<div>Invoice: { strOrEmpty(d.Order.Detail.Purchase.InvoiceNo) }</div>
+				<div>By: { strOrEmpty(d.Order.Detail.Purchase.ReceivedByName) }</div>
+			</div>
+		</div>
+		<table class="w-full text-sm border-t">
+			<thead class="text-left text-slate-500 border-b">
+				<tr>
+					<th class="py-2">Product</th>
+					<th class="py-2 text-right w-24">Ordered</th>
+					<th class="py-2 text-right w-24">Received</th>
+					<th class="py-2 text-right w-28">Unit cost</th>
+					<th class="py-2 text-right w-32">Line total</th>
+				</tr>
+			</thead>
+			<tbody>
+				for _, it := range d.Order.Detail.Items {
+					<tr class="border-b">
+						<td class="py-2">{ it.ProductName }</td>
+						<td class="py-2 text-right text-slate-500">
+							if it.OrderedQty != nil {
+								{ money.Display(*it.OrderedQty) }
+							} else {
+								—
+							}
+						</td>
+						<td class="py-2 text-right">{ money.Display(it.Quantity) }</td>
+						<td class="py-2 text-right">{ money.Format(d.Symbol, it.CostPrice) }</td>
+						<td class="py-2 text-right">{ money.Format(d.Symbol, it.Subtotal) }</td>
+					</tr>
+				}
+			</tbody>
+			<tfoot>
+				<tr class="border-t">
+					<td class="py-2" colspan="4">Total</td>
+					<td class="py-2 text-right font-bold">{ money.Format(d.Symbol, d.Order.Detail.Purchase.Total) }</td>
+				</tr>
+				<tr>
+					<td class="py-1" colspan="4">Paid</td>
+					<td class="py-1 text-right">{ money.Format(d.Symbol, d.Order.Detail.Purchase.PaidAmount) }</td>
+				</tr>
+				<tr class="font-semibold">
+					<td class="py-1" colspan="4">Balance</td>
+					<td class="py-1 text-right">{ money.Format(d.Symbol, d.Order.Detail.Purchase.Balance()) }</td>
+				</tr>
+			</tfoot>
+		</table>
+	}
 }

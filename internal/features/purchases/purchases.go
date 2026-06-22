@@ -22,6 +22,7 @@ type Purchase struct {
 	Total      decimal.Decimal `db:"total"       json:"total"`
 	PaidAmount decimal.Decimal `db:"paid_amount" json:"paid_amount"`
 	DueDate    *time.Time      `db:"due_date"    json:"due_date,omitempty"`
+	ExpectedDate *time.Time    `db:"expected_date" json:"expected_date,omitempty"`
 	ReceivedBy *int64          `db:"received_by" json:"received_by,omitempty"`
 	Notes      *string         `db:"notes"       json:"notes,omitempty"`
 	CreatedAt  time.Time       `db:"created_at"  json:"created_at"`
@@ -56,25 +57,26 @@ type Repository struct{ q db.Queryer }
 func NewRepository(q db.Queryer) *Repository { return &Repository{q: q} }
 
 type purchaseRow struct {
-	SupplierID int64
-	InvoiceNo  *string
-	Status     string
-	Subtotal   decimal.Decimal
-	Discount   decimal.Decimal
-	Total      decimal.Decimal
-	Paid       decimal.Decimal
-	DueDate    *time.Time
-	ReceivedBy int64
-	Notes      *string
+	SupplierID   int64
+	InvoiceNo    *string
+	Status       string
+	Subtotal     decimal.Decimal
+	Discount     decimal.Decimal
+	Total        decimal.Decimal
+	Paid         decimal.Decimal
+	DueDate      *time.Time
+	ExpectedDate *time.Time
+	ReceivedBy   int64
+	Notes        *string
 }
 
 func (r *Repository) InsertPurchase(ctx context.Context, p purchaseRow) (int64, error) {
 	var id int64
 	err := r.q.GetContext(ctx, &id, `
 		INSERT INTO purchases
-			(supplier_id, invoice_no, status, subtotal, discount, total, paid_amount, due_date, received_by, notes)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
-		p.SupplierID, p.InvoiceNo, p.Status, p.Subtotal, p.Discount, p.Total, p.Paid, p.DueDate, p.ReceivedBy, p.Notes)
+			(supplier_id, invoice_no, status, subtotal, discount, total, paid_amount, due_date, expected_date, received_by, notes)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
+		p.SupplierID, p.InvoiceNo, p.Status, p.Subtotal, p.Discount, p.Total, p.Paid, p.DueDate, p.ExpectedDate, p.ReceivedBy, p.Notes)
 	return id, err
 }
 
@@ -207,9 +209,9 @@ func (r *Repository) UpdateHeader(ctx context.Context, id int64, h purchaseRow) 
 	_, err := r.q.ExecContext(ctx, `
 		UPDATE purchases
 		SET invoice_no = $2, status = $3, subtotal = $4, discount = $5,
-		    total = $6, paid_amount = $7, due_date = $8, received_by = $9, notes = $10
+		    total = $6, paid_amount = $7, due_date = $8, expected_date = $9, received_by = $10, notes = $11
 		WHERE id = $1`,
-		id, h.InvoiceNo, h.Status, h.Subtotal, h.Discount, h.Total, h.Paid, h.DueDate, h.ReceivedBy, h.Notes)
+		id, h.InvoiceNo, h.Status, h.Subtotal, h.Discount, h.Total, h.Paid, h.DueDate, h.ExpectedDate, h.ReceivedBy, h.Notes)
 	return err
 }
 

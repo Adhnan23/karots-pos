@@ -985,6 +985,7 @@ function grn(symbol, config) {
     sym: symbol,
     editId: Number(config.editId) || 0,
     supplierId: config.supplierId || "",
+    expectedDate: config.expectedDate || "",
     notes: config.notes || "",
     lines: [],
     busy: false,
@@ -994,6 +995,10 @@ function grn(symbol, config) {
     },
     choose(l, r) {
       poProductChoose(l, r);
+      // Default the supplier to the product's preferred supplier (if none chosen yet).
+      if (!this.supplierId && r.preferred_supplier_id) {
+        this.supplierId = String(r.preferred_supplier_id);
+      }
     },
 
     init() {
@@ -1072,6 +1077,7 @@ function grn(symbol, config) {
           supplier_id: Number(this.supplierId),
           discount: "0",
           paid_amount: "0",
+          expected_date: this.expectedDate || "",
           notes: this.notes || null,
           items: items,
         });
@@ -1097,6 +1103,7 @@ function grnReceive(symbol, config) {
     dueDate: "",
     discount: 0,
     paid: 0,
+    keepRemainder: true,
     busy: false,
     lines: (config.lines || []).map((l) => ({
       product_id: Number(l.product_id) || 0,
@@ -1147,6 +1154,11 @@ function grnReceive(symbol, config) {
     hasVariance() {
       return this.lines.some((l) => Number(l.quantity) !== Number(l.ordered));
     },
+    // hasShortfall is true when any ordered line was received short (rest can be
+    // kept on order as a new draft).
+    hasShortfall() {
+      return this.lines.some((l) => !l._new && Number(l.quantity) < Number(l.ordered));
+    },
     // suggestSell proposes a selling price that keeps the product's previous
     // markup against the new received cost (falls back to a 20% markup).
     suggestSell(l) {
@@ -1188,6 +1200,7 @@ function grnReceive(symbol, config) {
           discount: String(this.discount || 0),
           paid_amount: String(this.paid || 0),
           due_date: this.dueDate || "",
+          keep_remainder: !!this.keepRemainder && this.hasShortfall(),
           items: items,
         });
         toast("Goods received", "success");

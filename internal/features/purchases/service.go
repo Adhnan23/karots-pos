@@ -40,13 +40,26 @@ type ItemInput struct {
 }
 
 type CreateInput struct {
-	SupplierID int64       `json:"supplier_id" validate:"required,gt=0"`
-	InvoiceNo  *string     `json:"invoice_no"`
-	Discount   string      `json:"discount"`
-	PaidAmount string      `json:"paid_amount"`
-	DueDate    string      `json:"due_date"`
-	Notes      *string     `json:"notes"`
-	Items      []ItemInput `json:"items" validate:"required,min=1,dive"`
+	SupplierID   int64       `json:"supplier_id" validate:"required,gt=0"`
+	InvoiceNo    *string     `json:"invoice_no"`
+	Discount     string      `json:"discount"`
+	PaidAmount   string      `json:"paid_amount"`
+	DueDate      string      `json:"due_date"`
+	ExpectedDate string      `json:"expected_date"`
+	Notes        *string     `json:"notes"`
+	Items        []ItemInput `json:"items" validate:"required,min=1,dive"`
+}
+
+// parseDate parses an optional YYYY-MM-DD date (nil when blank).
+func parseDate(s string) (*time.Time, error) {
+	if s == "" {
+		return nil, nil
+	}
+	d, err := time.Parse("2006-01-02", s)
+	if err != nil {
+		return nil, apperr.Validation("date must be YYYY-MM-DD")
+	}
+	return &d, nil
 }
 
 func (s *Service) Create(ctx context.Context, in CreateInput, userID int64) (*Detail, error) {
@@ -235,13 +248,13 @@ func createDraftTx(ctx context.Context, tx *sqlx.Tx, in CreateInput, userID int6
 	if err != nil || discount.IsNegative() {
 		discount = decimal.Zero
 	}
-	var dueDate *time.Time
-	if in.DueDate != "" {
-		d, err := time.Parse("2006-01-02", in.DueDate)
-		if err != nil {
-			return 0, apperr.Validation("due date must be YYYY-MM-DD")
-		}
-		dueDate = &d
+	dueDate, err := parseDate(in.DueDate)
+	if err != nil {
+		return 0, err
+	}
+	expected, err := parseDate(in.ExpectedDate)
+	if err != nil {
+		return 0, err
 	}
 	lines, subtotal, err := parseLines(in.Items)
 	if err != nil {
@@ -254,7 +267,7 @@ func createDraftTx(ctx context.Context, tx *sqlx.Tx, in CreateInput, userID int6
 	id, err := repo.InsertPurchase(ctx, purchaseRow{
 		SupplierID: in.SupplierID, InvoiceNo: in.InvoiceNo, Status: "draft",
 		Subtotal: subtotal, Discount: discount, Total: total, Paid: decimal.Zero,
-		DueDate: dueDate, ReceivedBy: userID, Notes: in.Notes,
+		DueDate: dueDate, ExpectedDate: expected, ReceivedBy: userID, Notes: in.Notes,
 	})
 	if err != nil {
 		return 0, mapErr(err)
@@ -351,13 +364,13 @@ func (s *Service) UpdateDraft(ctx context.Context, id int64, in CreateInput, use
 	if err != nil || discount.IsNegative() {
 		discount = decimal.Zero
 	}
-	var dueDate *time.Time
-	if in.DueDate != "" {
-		d, err := time.Parse("2006-01-02", in.DueDate)
-		if err != nil {
-			return nil, apperr.Validation("due date must be YYYY-MM-DD")
-		}
-		dueDate = &d
+	dueDate, err := parseDate(in.DueDate)
+	if err != nil {
+		return nil, err
+	}
+	expected, err := parseDate(in.ExpectedDate)
+	if err != nil {
+		return nil, err
 	}
 	var detail *Detail
 	err = appdb.WithTx(ctx, s.db, func(tx *sqlx.Tx) error {
@@ -386,7 +399,7 @@ func (s *Service) UpdateDraft(ctx context.Context, id int64, in CreateInput, use
 		if err := repo.UpdateHeader(ctx, id, purchaseRow{
 			InvoiceNo: in.InvoiceNo, Status: "draft", Subtotal: subtotal,
 			Discount: discount, Total: total, Paid: decimal.Zero,
-			DueDate: dueDate, ReceivedBy: userID, Notes: in.Notes,
+			DueDate: dueDate, ExpectedDate: expected, ReceivedBy: userID, Notes: in.Notes,
 		}); err != nil {
 			return apperr.Internal("failed to update draft", err)
 		}
@@ -411,6 +424,9 @@ type ReceiveInput struct {
 	DueDate    string      `json:"due_date"`
 	Notes      *string     `json:"notes"`
 	Items      []ItemInput `json:"items" validate:"required,min=1,dive"`
+	// KeepRemainder, when true, spins the still-unreceived quantities (ordered −
+	// received, where positive) into a new draft PO so the rest stays on order.
+	KeepRemainder bool `json:"keep_remainder"`
 }
 
 // parseReceiveLines parses the received lines, carrying each line's ordered_qty.
@@ -443,13 +459,9 @@ func (s *Service) Receive(ctx context.Context, id int64, in ReceiveInput, userID
 	if err != nil || paid.IsNegative() {
 		return nil, apperr.Validation("paid amount must be a non-negative amount")
 	}
-	var dueDate *time.Time
-	if in.DueDate != "" {
-		d, err := time.Parse("2006-01-02", in.DueDate)
-		if err != nil {
-			return nil, apperr.Validation("due date must be YYYY-MM-DD")
-		}
-		dueDate = &d
+	dueDate, err := parseDate(in.DueDate)
+	if err != nil {
+		return nil, err
 	}
 	var detail *Detail
 	err = appdb.WithTx(ctx, s.db, func(tx *sqlx.Tx) error {
@@ -483,12 +495,36 @@ func (s *Service) Receive(ctx context.Context, id int64, in ReceiveInput, userID
 		if err := repo.UpdateHeader(ctx, id, purchaseRow{
 			InvoiceNo: in.InvoiceNo, Status: receivedStatus(paid, total), Subtotal: subtotal,
 			Discount: discount, Total: total, Paid: paid, DueDate: dueDate,
-			ReceivedBy: userID, Notes: notes,
+			ExpectedDate: cur.ExpectedDate, ReceivedBy: userID, Notes: notes,
 		}); err != nil {
 			return apperr.Internal("failed to update purchase", err)
 		}
 		if err := applyReceivedLines(ctx, repo, stk, sup, id, cur.SupplierID, lines, total.Sub(paid), userID); err != nil {
 			return err
+		}
+		// Partial receipt: carry the still-unreceived quantities into a new draft PO.
+		if in.KeepRemainder {
+			rem := make([]ItemInput, 0, len(lines))
+			for _, ln := range lines {
+				if ln.OrderedQty == nil {
+					continue // an extra item that wasn't ordered — nothing left to order
+				}
+				short := ln.OrderedQty.Sub(ln.Quantity)
+				if short.IsPositive() {
+					rem = append(rem, ItemInput{
+						ProductID: ln.ProductID, Quantity: short.String(),
+						CostPrice: ln.CostPrice.String(), SellingPrice: ln.SellingPrice.String(),
+					})
+				}
+			}
+			if len(rem) > 0 {
+				if _, err := createDraftTx(ctx, tx, CreateInput{
+					SupplierID: cur.SupplierID, Discount: "0", PaidAmount: "0",
+					Notes: cur.Notes, Items: rem,
+				}, userID); err != nil {
+					return err
+				}
+			}
 		}
 		d, err := s.loadDetail(ctx, repo, id)
 		if err != nil {
