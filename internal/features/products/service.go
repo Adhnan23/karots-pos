@@ -329,8 +329,20 @@ func toWriteRow(in CreateInput) (writeRow, error) {
 		WarrantyMonths: in.WarrantyMonths,
 		IsService:         in.IsService,
 		IsPinned:          in.IsPinned,
-		PreferredSupplier: in.PreferredSupplierID,
+		PreferredSupplier: nilIfZero(in.PreferredSupplierID),
 	}, nil
+}
+
+// nilIfZero maps a 0 (or nil) supplier id to nil. The product form's "— none —"
+// option posts an empty value, which the form binder turns into a *int64 of 0;
+// stored as-is that 0 violates the preferred_supplier_id foreign key. Treating 0
+// as "no supplier" keeps the field genuinely optional (create products first,
+// attach a supplier later).
+func nilIfZero(p *int64) *int64 {
+	if p == nil || *p == 0 {
+		return nil
+	}
+	return p
 }
 
 // ImportRow is one resolved row of a bulk catalog import. Category/unit/supplier
@@ -383,7 +395,7 @@ func (s *Service) ImportOne(ctx context.Context, in ImportRow) (ImportResult, er
 		Reorder:           in.Reorder,
 		TrackSerial:       in.TrackSerial,
 		WarrantyMonths:    in.WarrantyMonths,
-		PreferredSupplier: in.PreferredSupplier,
+		PreferredSupplier: nilIfZero(in.PreferredSupplier),
 	}
 	var res ImportResult
 	err := appdb.WithTx(ctx, s.db, func(tx *sqlx.Tx) error {
