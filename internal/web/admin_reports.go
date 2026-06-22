@@ -177,6 +177,58 @@ func (a *adminUI) SalesTrendReport(c echo.Context) error {
 	return response.RenderPage(c, adminpages.SalesTrendReport(d))
 }
 
+// ProductSalesReport charts one product's units sold over time, with a same-period
+// last-year overlay — the per-product view that feeds reorder intuition.
+func (a *adminUI) ProductSalesReport(c echo.Context) error {
+	ctx := c.Request().Context()
+	from, to, fromStr, toStr, preset, err := rangeStrings(c)
+	if err != nil {
+		return err
+	}
+	group := c.QueryParam("group")
+	if group == "" {
+		group = "month"
+	}
+	prods, _, err := a.s.products.List(ctx, products.ListQuery{Limit: 1000})
+	if err != nil {
+		return err
+	}
+	var pid int64
+	if v := c.QueryParam("product"); v != "" {
+		pid, _ = strconv.ParseInt(v, 10, 64)
+	}
+	if pid == 0 && len(prods) > 0 {
+		pid = prods[0].ID
+	}
+	d := adminpages.ProductSalesData{
+		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx),
+		From: fromStr, To: toStr, Preset: preset, Group: group,
+		Products: prods, ProductID: pid,
+	}
+	if pid > 0 {
+		rows, err := a.s.reports.ProductSalesByPeriod(ctx, pid, from, to, group)
+		if err != nil {
+			return err
+		}
+		ly, err := a.s.reports.ProductSalesByPeriod(ctx, pid, from.AddDate(-1, 0, 0), to.AddDate(-1, 0, 0), group)
+		if err != nil {
+			return err
+		}
+		d.Rows = rows
+		d.LastYear = ly
+		for _, r := range rows {
+			d.TotalQty = d.TotalQty.Add(r.Qty)
+			d.TotalRevenue = d.TotalRevenue.Add(r.Revenue)
+		}
+		for _, p := range prods {
+			if p.ID == pid {
+				d.ProductName = p.Name
+			}
+		}
+	}
+	return response.RenderPage(c, adminpages.ProductSalesReport(d))
+}
+
 func (a *adminUI) WarrantyReport(c echo.Context) error {
 	ctx := c.Request().Context()
 	from, to, fromStr, toStr, preset, err := rangeStrings(c)

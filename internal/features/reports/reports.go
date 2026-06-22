@@ -287,6 +287,63 @@ func (s *Service) SalesByPeriod(ctx context.Context, from, to time.Time, gran st
 	return rows, nil
 }
 
+// ProductPeriodRow is one product's net qty + revenue for a single period.
+type ProductPeriodRow struct {
+	Day     time.Time       `db:"day"     json:"day"`
+	Qty     decimal.Decimal `db:"qty"     json:"qty"`
+	Revenue decimal.Decimal `db:"revenue" json:"revenue"`
+}
+
+// ProductSalesByPeriod is one product's net units + revenue grouped by day/week/
+// month over [from,to). Powers the per-product sales graph (with a last-year
+// overlay obtained by calling it again over the shifted range).
+func (s *Service) ProductSalesByPeriod(ctx context.Context, productID int64, from, to time.Time, gran string) ([]ProductPeriodRow, error) {
+	switch gran {
+	case "day", "week", "month":
+	default:
+		gran = "day"
+	}
+	var rows []ProductPeriodRow
+	if err := s.db.SelectContext(ctx, &rows, `
+		SELECT date_trunc($4, s.created_at) AS day,
+		       COALESCE(SUM(si.quantity - si.returned_qty),0) AS qty,
+		       COALESCE(SUM( (si.subtotal / NULLIF(si.quantity,0)) * (si.quantity - si.returned_qty) ),0) AS revenue
+		FROM sales s
+		JOIN sale_items si ON si.sale_id = s.id
+		WHERE s.status <> 'void' AND si.product_id = $1
+		  AND s.created_at >= $2 AND s.created_at < $3
+		GROUP BY 1 ORDER BY 1`, productID, from, to, gran); err != nil {
+		return nil, apperr.Internal("failed to load product sales", err)
+	}
+	return rows, nil
+}
+
+// ProductQtySold returns net units sold per product over [from,to) for the given
+// product ids — the demand input for reorder forecasting.
+func (s *Service) ProductQtySold(ctx context.Context, ids []int64, from, to time.Time) (map[int64]decimal.Decimal, error) {
+	out := make(map[int64]decimal.Decimal, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	var rows []struct {
+		ProductID int64           `db:"product_id"`
+		Qty       decimal.Decimal `db:"qty"`
+	}
+	if err := s.db.SelectContext(ctx, &rows, `
+		SELECT si.product_id, COALESCE(SUM(si.quantity - si.returned_qty),0) AS qty
+		FROM sale_items si
+		JOIN sales s ON s.id = si.sale_id
+		WHERE s.status <> 'void' AND si.product_id = ANY($1)
+		  AND s.created_at >= $2 AND s.created_at < $3
+		GROUP BY si.product_id`, pq.Array(ids), from, to); err != nil {
+		return nil, apperr.Internal("failed to load product demand", err)
+	}
+	for _, r := range rows {
+		out[r.ProductID] = r.Qty
+	}
+	return out, nil
+}
+
 // WarrantySummary is the periodised warranty-cost vs supplier-recovery picture.
 type WarrantySummary struct {
 	ReplacementCount int             `json:"replacement_count"`

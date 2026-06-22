@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"strconv"
 	"strings"
 	"time"
@@ -969,7 +970,45 @@ func (a *adminUI) LowStockReport(c echo.Context) error {
 		Symbol:    a.symbol(ctx),
 		Rows:      rows,
 		Suppliers: sups,
+		Demand:    a.reorderDemand(ctx, rows),
 	}))
+}
+
+// reorderDemand computes a demand-based reorder hint per low-stock product:
+// suggested qty = ceil(avg daily sales over the last 90 days × 14-day lead −
+// on-hand) when there's sales history, plus units sold in the same 90-day window
+// a year ago (seasonality). Products with no recent sales get an empty Suggested
+// so the page falls back to the simple 2× reorder-level rule.
+func (a *adminUI) reorderDemand(ctx context.Context, rows []products.Product) map[int64]adminpages.ReorderInfo {
+	const trailingDays, leadDays = 90, 14
+	ids := make([]int64, 0, len(rows))
+	for _, p := range rows {
+		ids = append(ids, p.ID)
+	}
+	now := time.Now()
+	sold90, err := a.s.reports.ProductQtySold(ctx, ids, now.AddDate(0, 0, -trailingDays), now)
+	if err != nil {
+		return nil
+	}
+	lyTo := now.AddDate(-1, 0, 0)
+	soldLY, _ := a.s.reports.ProductQtySold(ctx, ids, lyTo.AddDate(0, 0, -trailingDays), lyTo)
+	out := make(map[int64]adminpages.ReorderInfo, len(rows))
+	for _, p := range rows {
+		var info adminpages.ReorderInfo
+		if v, ok := soldLY[p.ID]; ok {
+			info.SoldLastYear = money.Display(v)
+		}
+		if s90, ok := sold90[p.ID]; ok && s90.IsPositive() {
+			avgDaily := s90.Div(decimal.NewFromInt(trailingDays))
+			need := avgDaily.Mul(decimal.NewFromInt(leadDays)).Sub(p.StockQty).Ceil()
+			if need.IsNegative() {
+				need = decimal.Zero
+			}
+			info.Suggested = need.String()
+		}
+		out[p.ID] = info
+	}
+	return out
 }
 
 // ============================ Staff Users ============================

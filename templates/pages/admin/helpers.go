@@ -11,25 +11,43 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+// ReorderInfo is the demand-derived hint for one low-stock product: a suggested
+// order qty (from trailing-average demand × lead time) and units sold in the same
+// period last year. Empty Suggested means "no sales history — use the fallback".
+type ReorderInfo struct {
+	Suggested    string
+	SoldLastYear string
+}
+
 // lowStockConfigJSON serialises the low-stock rows for the reorder PO builder's
-// Alpine state: a suggested order qty (target ≈ 2× reorder level minus on-hand),
-// the product's default cost, and its preferred supplier (0 when none).
-func lowStockConfigJSON(rows []products.Product) string {
+// Alpine state. The suggested order qty is demand-based when sales history exists
+// (ReorderInfo.Suggested), otherwise falls back to ≈ 2× reorder level − on-hand.
+func lowStockConfigJSON(rows []products.Product, demand map[int64]ReorderInfo) string {
 	type line struct {
-		ProductID  int64  `json:"product_id"`
-		Name       string `json:"name"`
-		OnHand     string `json:"on_hand"`
-		Unit       string `json:"unit"`
-		Suggested  string `json:"suggested"`
-		Cost       string `json:"cost"`
-		SupplierID int64  `json:"supplier_id"`
-		Selected   bool   `json:"selected"`
+		ProductID    int64  `json:"product_id"`
+		Name         string `json:"name"`
+		OnHand       string `json:"on_hand"`
+		Unit         string `json:"unit"`
+		Suggested    string `json:"suggested"`
+		SoldLastYear string `json:"sold_last_year"`
+		Cost         string `json:"cost"`
+		SupplierID   int64  `json:"supplier_id"`
+		Selected     bool   `json:"selected"`
 	}
 	out := make([]line, 0, len(rows))
 	for _, p := range rows {
-		need := decimal.NewFromInt(int64(p.ReorderLevel * 2)).Sub(p.StockQty).Ceil()
-		if need.IsNegative() {
-			need = decimal.Zero
+		info := demand[p.ID]
+		suggested := info.Suggested
+		if suggested == "" {
+			need := decimal.NewFromInt(int64(p.ReorderLevel * 2)).Sub(p.StockQty).Ceil()
+			if need.IsNegative() {
+				need = decimal.Zero
+			}
+			suggested = need.String()
+		}
+		soldLY := info.SoldLastYear
+		if soldLY == "" {
+			soldLY = "0"
 		}
 		var sup int64
 		if p.PreferredSupplierID != nil {
@@ -37,7 +55,7 @@ func lowStockConfigJSON(rows []products.Product) string {
 		}
 		out = append(out, line{
 			ProductID: p.ID, Name: p.Name, OnHand: p.StockQty.String(), Unit: p.UnitAbbr,
-			Suggested: need.String(), Cost: p.CostPrice.String(), SupplierID: sup,
+			Suggested: suggested, SoldLastYear: soldLY, Cost: p.CostPrice.String(), SupplierID: sup,
 		})
 	}
 	b, _ := json.Marshal(out)

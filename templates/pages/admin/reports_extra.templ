@@ -1,9 +1,11 @@
 package adminpages
 
 import (
+	"sort"
 	"strconv"
 	"time"
 
+	"karots-pos/internal/features/products"
 	"karots-pos/internal/features/reports"
 	"karots-pos/internal/money"
 	"karots-pos/templates/layouts"
@@ -11,6 +13,47 @@ import (
 
 	"github.com/shopspring/decimal"
 )
+
+// productChartData builds the x labels + this-year/last-year unit series for the
+// per-product graph. Last-year periods are shifted +1 year so they line up with
+// the same calendar period this year; missing periods plot as 0.
+func productChartData(rows, lastYear []reports.ProductPeriodRow, gran string) ([]string, []shared.LineSeries) {
+	curByKey := map[string]float64{}
+	lyByKey := map[string]float64{}
+	keys := map[string]time.Time{}
+	key := func(t time.Time) string { return t.Format("2006-01-02") }
+	for _, r := range rows {
+		k := key(r.Day)
+		curByKey[k] = r.Qty.InexactFloat64()
+		keys[k] = r.Day
+	}
+	for _, r := range lastYear {
+		shifted := r.Day.AddDate(1, 0, 0)
+		k := key(shifted)
+		lyByKey[k] = r.Qty.InexactFloat64()
+		if _, ok := keys[k]; !ok {
+			keys[k] = shifted
+		}
+	}
+	sorted := make([]time.Time, 0, len(keys))
+	for _, t := range keys {
+		sorted = append(sorted, t)
+	}
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Before(sorted[j]) })
+	labels := make([]string, 0, len(sorted))
+	cur := make([]float64, 0, len(sorted))
+	ly := make([]float64, 0, len(sorted))
+	for _, t := range sorted {
+		k := key(t)
+		labels = append(labels, periodLabel(t, gran))
+		cur = append(cur, curByKey[k])
+		ly = append(ly, lyByKey[k])
+	}
+	return labels, []shared.LineSeries{
+		{Name: "This period", Color: shared.Palette[0], Values: cur},
+		{Name: "Last year", Color: shared.Palette[3], Values: ly},
+	}
+}
 
 // containsStr reports whether xs contains v.
 func containsStr(xs []string, v string) bool {
@@ -293,4 +336,73 @@ func pctOf(part, whole decimal.Decimal) string {
 		return "0"
 	}
 	return part.Div(whole).Mul(decimal.NewFromInt(100)).Round(0).String()
+}
+
+// ============================ Per-product sales report ============================
+
+type ProductSalesData struct {
+	ShopName, Symbol, From, To, Preset, Group string
+	Products                                  []products.Product
+	ProductID                                 int64
+	ProductName                               string
+	Rows, LastYear                            []reports.ProductPeriodRow
+	TotalQty, TotalRevenue                    decimal.Decimal
+}
+
+templ ProductSalesReport(d ProductSalesData) {
+	@layouts.Report("Product Sales", d.ShopName) {
+		@rptRangeForm("/admin/reports/product-sales", d.Preset, d.From, d.To) {
+			<div>
+				<label class="block text-xs text-slate-500 mb-1">Product</label>
+				<select name="product" onchange="this.form.submit()" class="border rounded-lg px-3 py-1.5 max-w-xs">
+					for _, p := range d.Products {
+						<option value={ strconv.FormatInt(p.ID, 10) } selected?={ p.ID == d.ProductID }>{ p.Name }</option>
+					}
+				</select>
+			</div>
+			<div>
+				<label class="block text-xs text-slate-500 mb-1">Group by</label>
+				<select name="group" onchange="this.form.submit()" class="border rounded-lg px-3 py-1.5">
+					@statusOpt("day", "Day", d.Group)
+					@statusOpt("week", "Week", d.Group)
+					@statusOpt("month", "Month", d.Group)
+				</select>
+			</div>
+		}
+		@rptPeriodLine(d.From, d.To)
+		<div class="mb-2 text-lg font-semibold">{ d.ProductName }</div>
+		<div class="grid grid-cols-2 gap-4 mb-6">
+			@statCard("Units sold (period)", money.Display(d.TotalQty), "indigo")
+			@statCard("Revenue (period)", money.Format(d.Symbol, d.TotalRevenue), "emerald")
+		</div>
+		if len(d.Rows) > 0 || len(d.LastYear) > 0 {
+			<div class="mb-6">
+				{{ labels, series := productChartData(d.Rows, d.LastYear, d.Group) }}
+				@shared.LineChart(labels, series)
+			</div>
+		} else {
+			<p class="py-6 text-center text-slate-400">No sales for this product in the range.</p>
+		}
+		<table class="w-full text-sm">
+			<thead class="text-left text-slate-500 border-b">
+				<tr><th class="py-1.5">Period</th><th class="py-1.5 text-right">Units</th><th class="py-1.5 text-right">Revenue</th></tr>
+			</thead>
+			<tbody>
+				for _, r := range d.Rows {
+					<tr class="border-b last:border-0">
+						<td class="py-1.5 font-medium">{ periodLabel(r.Day, d.Group) }</td>
+						<td class="py-1.5 text-right">{ money.Display(r.Qty) }</td>
+						<td class="py-1.5 text-right">{ money.Format(d.Symbol, r.Revenue) }</td>
+					</tr>
+				}
+			</tbody>
+			<tfoot class="border-t-2 font-semibold">
+				<tr>
+					<td class="py-2">Total</td>
+					<td class="py-2 text-right">{ money.Display(d.TotalQty) }</td>
+					<td class="py-2 text-right">{ money.Format(d.Symbol, d.TotalRevenue) }</td>
+				</tr>
+			</tfoot>
+		</table>
+	}
 }

@@ -91,6 +91,7 @@ type LowStockData struct {
 	Symbol    string
 	Rows      []products.Product
 	Suppliers []suppliers.Supplier
+	Demand    map[int64]ReorderInfo
 }
 
 templ LowStockPage(d LowStockData) {
@@ -99,17 +100,18 @@ templ LowStockPage(d LowStockData) {
 			<h1 class="text-2xl font-bold">Low Stock / Reorder</h1>
 			<a href="/admin/purchases/new" class="text-sm text-slate-500 hover:underline">Manual purchase order →</a>
 		</div>
-		<div class="bg-white rounded-2xl shadow-sm p-6" x-data={ "poBuilder(" + lowStockConfigJSON(d.Rows) + ")" }>
+		<div class="bg-white rounded-2xl shadow-sm p-6" x-data={ "poBuilder(" + lowStockConfigJSON(d.Rows, d.Demand) + ")" }>
 			if len(d.Rows) == 0 {
 				<p class="py-6 text-center text-slate-500">All products are above their reorder level. 🎉</p>
 			} else {
-				<p class="text-sm text-slate-500 mb-4">Tick the items to reorder, set the quantity and supplier, then build the purchase order(s). They are saved as drafts and a printable order opens — choose “all together” or one per supplier on the print page.</p>
+				<p class="text-sm text-slate-500 mb-4">Tick the items to reorder, set the quantity and supplier, then build the purchase order(s). The suggested quantity is demand-based (last 90 days of sales projected over a 2-week lead time); “Sold last yr” shows the same 90-day window a year ago for seasonality.</p>
 				<table class="w-full text-sm">
 					<thead class="text-left text-slate-500 border-b">
 						<tr>
 							<th class="py-2 px-3 w-8"><input type="checkbox" x-on:change="toggleAll($event.target.checked)" aria-label="Select all"/></th>
 							<th class="py-2 px-3">Product</th>
 							<th class="py-2 px-3 text-right">On hand</th>
+							<th class="py-2 px-3 text-right">Sold last yr</th>
 							<th class="py-2 px-3 w-28 text-right">Order qty</th>
 							<th class="py-2 px-3 w-56">Supplier</th>
 						</tr>
@@ -120,6 +122,7 @@ templ LowStockPage(d LowStockData) {
 								<td class="py-2 px-3"><input type="checkbox" x-model="l.selected"/></td>
 								<td class="py-2 px-3 font-medium" x-text="l.name"></td>
 								<td class="py-2 px-3 text-right"><span x-text="l.on_hand"></span> <span class="text-slate-400" x-text="l.unit"></span></td>
+								<td class="py-2 px-3 text-right text-slate-500" x-text="l.sold_last_year"></td>
 								<td class="py-2 px-3"><input type="number" step="0.001" min="0" x-model.number="l.suggested" class="w-full border rounded px-2 py-1 text-right"/></td>
 								<td class="py-2 px-3">
 									<select x-model.number="l.supplier_id" class="w-full border rounded px-2 py-1">
