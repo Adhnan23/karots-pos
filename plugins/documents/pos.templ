@@ -1,0 +1,91 @@
+package documents
+
+// JobPanel is the "🖨 Photocopy" tab in the cashier POS quick-action strip. It
+// builds a document job (metered: size/colour/side/qty priced server-side and
+// consuming paper; custom: typed price + worker labour) and dispatches the generic
+// "pos-add-service" event the core POS listens for, carrying the job's components
+// (for the consume-on-sale seam), a receipt description, and labour metadata
+// (recorded after checkout via /cashier/documents/record).
+templ JobPanel() {
+	<div
+		class="bg-white rounded-2xl border border-slate-200 p-4"
+		x-data="{
+			services:[], workers:[], svc:null, prices:[],
+			size:'', color:false, double:false, qty:1,
+			price:'', workerId:'', labour:'', quote:null,
+			async load(){ try{ const r=await fetch('/cashier/documents/services'); const j=await r.json(); this.services=j.data||[]; const w=await fetch('/cashier/documents/workers'); this.workers=(await w.json()).data||[]; }catch(e){} },
+			async pick(s){ this.svc=s; this.quote=null; this.prices=[]; this.size=''; this.color=false; this.double=false; this.qty=1; this.price=''; this.workerId=''; this.labour=''; if(s.kind==='metered'){ try{ const r=await fetch('/cashier/documents/prices?service='+s.id); this.prices=(await r.json()).data||[]; const sz=this.sizes(); if(sz.length){ this.size=sz[0] } }catch(e){} this.refresh() } },
+			sizes(){ return [...new Set(this.prices.filter(p=>p.size).map(p=>p.size))] },
+			hasColor(){ return this.prices.some(p=>p.color) },
+			hasDouble(){ return this.prices.some(p=>p.double_side) },
+			async refresh(){ if(!this.svc||this.svc.kind!=='metered'||!(Number(this.qty)>0)){ this.quote=null; return } const u='/cashier/documents/quote?service='+this.svc.id+'&size='+encodeURIComponent(this.size)+'&color='+(this.color?1:0)+'&double='+(this.double?1:0)+'&qty='+Number(this.qty); try{ const r=await apiFetch('GET',u,undefined,{silent:true}); this.quote=r.data }catch(e){ this.quote=null } },
+			addMetered(){ if(!this.quote){ return } window.dispatchEvent(new CustomEvent('pos-add-service',{detail:{ id:this.quote.product_id, name:this.quote.description, price:Number(this.quote.line_total), components:this.quote.components, docJob:{ service_id:this.svc.id, description:this.quote.description, qty:String(this.qty), unit_price:this.quote.unit_price, line_total:this.quote.line_total, consumable_cost:this.quote.consumable_cost } }})); this.quote=null },
+			workerName(){ const w=this.workers.find(x=>String(x.id)===String(this.workerId)); return w?w.name:'' },
+			addCustom(){ const amt=Number(this.price); if(!this.svc||!(amt>0)){ return } const desc=this.svc.name+(this.workerName()?' ('+this.workerName()+')':''); window.dispatchEvent(new CustomEvent('pos-add-service',{detail:{ id:this.svc.product_id, name:desc, price:amt, components:[], docJob:{ service_id:this.svc.id, description:desc, qty:'1', unit_price:String(amt), line_total:String(amt), consumable_cost:'0', labour_worker_id:Number(this.workerId)||null, labour_amount:String(Number(this.labour)||0) } }})); this.price=''; this.labour='' }
+		}"
+		x-init="load()"
+	>
+		<template x-if="services.length===0">
+			<p class="text-sm text-slate-400">No services set up. Add them in Admin → Communication Store.</p>
+		</template>
+		<div x-show="services.length>0" class="space-y-3">
+			<div>
+				<label class="block text-xs font-medium text-slate-500 mb-1">Service</label>
+				<div class="grid grid-cols-3 sm:grid-cols-4 gap-2">
+					<template x-for="s in services" x-bind:key="s.id">
+						<button type="button" x-on:click="pick(s)" x-bind:class="svc && svc.id===s.id ? 'ring-2 ring-emerald-500 bg-emerald-50' : 'border border-slate-200'" class="px-3 py-2.5 rounded-lg text-sm font-medium text-left" x-text="s.name"></button>
+					</template>
+				</div>
+			</div>
+			<!-- Metered builder -->
+			<div x-show="svc && svc.kind==='metered'" class="space-y-3">
+				<div x-show="sizes().length>0">
+					<label class="block text-xs font-medium text-slate-500 mb-1">Size</label>
+					<div class="flex flex-wrap gap-2">
+						<template x-for="sz in sizes()" x-bind:key="sz">
+							<button type="button" x-on:click="size=sz; refresh()" x-bind:class="size===sz ? 'ring-2 ring-emerald-500 bg-emerald-50' : 'border border-slate-200'" class="px-3 py-2 rounded-lg text-sm" x-text="sz"></button>
+						</template>
+					</div>
+				</div>
+				<div class="flex flex-wrap items-center gap-4">
+					<label x-show="hasColor()" class="flex items-center gap-2 text-sm"><input type="checkbox" x-model="color" x-on:change="refresh()"/> Colour</label>
+					<label x-show="hasDouble()" class="flex items-center gap-2 text-sm"><input type="checkbox" x-model="double" x-on:change="refresh()"/> Double-side</label>
+					<div class="flex items-center gap-2">
+						<label class="text-xs font-medium text-slate-500">Qty</label>
+						<input type="number" min="1" step="1" x-model="qty" x-on:input="refresh()" class="w-24 border rounded-lg px-3 py-2 text-right"/>
+					</div>
+				</div>
+				<div class="flex items-center justify-between border-t pt-3">
+					<div class="text-sm text-slate-500">
+						<template x-if="quote"><span>Total <span class="font-semibold tabular-nums" x-text="Number(quote.line_total).toFixed(2)"></span></span></template>
+						<template x-if="!quote"><span class="text-rose-500">Set a valid size/qty</span></template>
+					</div>
+					<button type="button" x-on:click="addMetered()" x-bind:disabled="!quote" class="px-4 py-2.5 rounded-lg bg-emerald-600 text-white font-semibold disabled:opacity-40">Add to cart</button>
+				</div>
+			</div>
+			<!-- Custom / labour builder -->
+			<div x-show="svc && svc.kind==='custom'" class="space-y-3">
+				<div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+					<div>
+						<label class="block text-xs font-medium text-slate-500 mb-1">Price</label>
+						<input type="number" min="0" step="0.01" x-model="price" placeholder="0.00" class="w-full border rounded-lg px-3 py-2.5 text-right"/>
+					</div>
+					<div>
+						<label class="block text-xs font-medium text-slate-500 mb-1">Worker</label>
+						<select x-model="workerId" class="w-full border rounded-lg px-3 py-2.5">
+							<option value="">—</option>
+							<template x-for="w in workers" x-bind:key="w.id"><option x-bind:value="w.id" x-text="w.name"></option></template>
+						</select>
+					</div>
+					<div>
+						<label class="block text-xs font-medium text-slate-500 mb-1">Worker pay</label>
+						<input type="number" min="0" step="0.01" x-model="labour" placeholder="0.00" class="w-full border rounded-lg px-3 py-2.5 text-right"/>
+					</div>
+				</div>
+				<div class="flex justify-end border-t pt-3">
+					<button type="button" x-on:click="addCustom()" x-bind:disabled="!(Number(price)>0)" class="px-4 py-2.5 rounded-lg bg-emerald-600 text-white font-semibold disabled:opacity-40">Add to cart</button>
+				</div>
+			</div>
+		</div>
+	</div>
+}

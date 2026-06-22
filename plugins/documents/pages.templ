@@ -1,0 +1,312 @@
+package documents
+
+import "karots-pos/templates/layouts"
+import "karots-pos/internal/money"
+import "karots-pos/internal/features/products"
+import "strconv"
+
+// HubPage is the Communication Store management screen: services (with their
+// price matrix + consumable mappings for metered work) and an add-service form,
+// rendered inside the core admin shell.
+templ HubPage(d HubData) {
+	@layouts.Admin("Communication Store", d.UserName, "documents-hub") {
+		<div class="mb-6 flex items-start justify-between gap-4">
+			<div>
+				<h1 class="text-2xl font-bold">🖨 Communication Store</h1>
+				<p class="text-sm text-slate-500">Photocopy / print / laminate / bind pricing &amp; the paper they consume, plus custom labour jobs.</p>
+			</div>
+		</div>
+		<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+			<div class="lg:col-span-2 space-y-5">
+				if len(d.Services) == 0 {
+					<div class="bg-white rounded-2xl shadow-sm p-6 text-sm text-slate-400">No services yet. Add one on the right.</div>
+				}
+				for _, vm := range d.Services {
+					@serviceCard(d.Symbol, vm, d.Products)
+				}
+			</div>
+			<div class="bg-white rounded-2xl shadow-sm p-6 h-fit">
+				<h2 class="text-lg font-semibold mb-4">Add a service</h2>
+				<form
+					hx-post="/admin/documents/services"
+					hx-swap="none"
+					hx-on::after-request="if(event.detail.successful) this.reset()"
+					class="space-y-3"
+				>
+					<div>
+						<label class="block text-sm font-medium text-slate-600 mb-1">Name</label>
+						<input type="text" name="name" required placeholder="Photocopy" class="w-full border rounded-lg px-3 py-2.5"/>
+					</div>
+					<div>
+						<label class="block text-sm font-medium text-slate-600 mb-1">Type</label>
+						<select name="kind" class="w-full border rounded-lg px-3 py-2.5">
+							<option value="metered">Metered (size/colour/side priced)</option>
+							<option value="custom">Custom labour (typed price)</option>
+						</select>
+					</div>
+					<div>
+						<label class="block text-sm font-medium text-slate-600 mb-1">Category</label>
+						<select name="category" class="w-full border rounded-lg px-3 py-2.5">
+							<option value="copy">Copy</option>
+							<option value="print">Print</option>
+							<option value="laminate">Laminate</option>
+							<option value="bind">Bind</option>
+							<option value="other">Other</option>
+						</select>
+					</div>
+					<p class="text-xs text-slate-400">A hidden service product is created automatically so jobs flow through the till, receipt and cash drawer.</p>
+					<button type="submit" class="w-full py-2.5 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700">Add service</button>
+				</form>
+			</div>
+		</div>
+	}
+}
+
+// serviceCard is one service with its pricing tiers + consumable mappings.
+templ serviceCard(symbol string, vm ServiceVM, prods []products.Product) {
+	<div class="bg-white rounded-2xl shadow-sm p-6">
+		<div class="flex items-center justify-between mb-4">
+			<div>
+				<div class="font-semibold text-slate-800">{ vm.Service.Name }</div>
+				<div class="text-xs text-slate-400">{ vm.Service.Kind } · { vm.Service.Category }</div>
+			</div>
+			<button
+				type="button"
+				hx-post={ "/admin/documents/services/" + strconv.FormatInt(vm.Service.ID, 10) + "/delete" }
+				hx-confirm="Remove this service?"
+				hx-swap="none"
+				class="text-sm text-rose-600 hover:text-rose-700"
+			>Remove</button>
+		</div>
+		if vm.Service.Kind == "metered" {
+			<div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+				<div>
+					<h3 class="text-sm font-semibold text-slate-600 mb-2">Price matrix</h3>
+					<table class="w-full text-sm mb-3">
+						<thead class="text-left text-slate-400 border-b">
+							<tr>
+								<th class="py-1 pr-2">Size</th>
+								<th class="py-1 pr-2">Opt</th>
+								<th class="py-1 pr-2">Min</th>
+								<th class="py-1 pr-2 text-right">Unit</th>
+								<th class="py-1"></th>
+							</tr>
+						</thead>
+						<tbody>
+							if len(vm.Prices) == 0 {
+								<tr><td colspan="5" class="py-2 text-slate-400">No prices.</td></tr>
+							}
+							for _, p := range vm.Prices {
+								<tr class="border-b last:border-0">
+									<td class="py-1 pr-2">{ sizeLabel(p.Size) }</td>
+									<td class="py-1 pr-2">{ optLabel(p.Color, p.DoubleSide) }</td>
+									<td class="py-1 pr-2">{ strconv.Itoa(p.MinQty) }+</td>
+									<td class="py-1 pr-2 text-right tabular-nums">{ money.Format(symbol, p.UnitPrice) }</td>
+									<td class="py-1 text-right">
+										<button type="button" hx-post={ "/admin/documents/price/" + strconv.FormatInt(p.ID, 10) + "/delete" } hx-swap="none" class="text-rose-500 hover:text-rose-700">✕</button>
+									</td>
+								</tr>
+							}
+						</tbody>
+					</table>
+					<form
+						hx-post={ "/admin/documents/services/" + strconv.FormatInt(vm.Service.ID, 10) + "/price" }
+						hx-swap="none"
+						hx-on::after-request="if(event.detail.successful) this.reset()"
+						class="flex flex-wrap items-end gap-2"
+					>
+						<input type="text" name="size" placeholder="Size (A4)" class="w-20 border rounded-lg px-2 py-1.5 text-sm"/>
+						<label class="flex items-center gap-1 text-xs"><input type="checkbox" name="color" value="1"/> Colour</label>
+						<label class="flex items-center gap-1 text-xs"><input type="checkbox" name="double_side" value="1"/> 2-side</label>
+						<input type="number" name="min_qty" min="1" value="1" class="w-16 border rounded-lg px-2 py-1.5 text-sm" title="Min qty for this tier"/>
+						<input type="number" name="unit_price" step="0.01" min="0" placeholder="Unit" required class="w-20 border rounded-lg px-2 py-1.5 text-sm text-right"/>
+						<button type="submit" class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-sm font-medium">Add</button>
+					</form>
+				</div>
+				<div>
+					<h3 class="text-sm font-semibold text-slate-600 mb-2">Consumes (paper / film)</h3>
+					<table class="w-full text-sm mb-3">
+						<thead class="text-left text-slate-400 border-b">
+							<tr>
+								<th class="py-1 pr-2">Size</th>
+								<th class="py-1 pr-2">Product</th>
+								<th class="py-1 pr-2 text-right">Per unit</th>
+								<th class="py-1"></th>
+							</tr>
+						</thead>
+						<tbody>
+							if len(vm.Consumables) == 0 {
+								<tr><td colspan="4" class="py-2 text-slate-400">None mapped.</td></tr>
+							}
+							for _, cm := range vm.Consumables {
+								<tr class="border-b last:border-0">
+									<td class="py-1 pr-2">{ sizeLabel(cm.Size) }</td>
+									<td class="py-1 pr-2">{ cm.ProductName }</td>
+									<td class="py-1 pr-2 text-right tabular-nums">{ cm.QtyPerUnit.String() }</td>
+									<td class="py-1 text-right">
+										<button type="button" hx-post={ "/admin/documents/consumable/" + strconv.FormatInt(cm.ID, 10) + "/delete" } hx-swap="none" class="text-rose-500 hover:text-rose-700">✕</button>
+									</td>
+								</tr>
+							}
+						</tbody>
+					</table>
+					<form
+						hx-post={ "/admin/documents/services/" + strconv.FormatInt(vm.Service.ID, 10) + "/consumable" }
+						hx-swap="none"
+						hx-on::after-request="if(event.detail.successful) this.reset()"
+						class="flex flex-wrap items-end gap-2"
+					>
+						<input type="text" name="size" placeholder="Size" class="w-16 border rounded-lg px-2 py-1.5 text-sm"/>
+						<select name="product_id" required class="border rounded-lg px-2 py-1.5 text-sm">
+							<option value="">Product…</option>
+							for _, pr := range prods {
+								<option value={ strconv.FormatInt(pr.ID, 10) }>{ pr.Name }</option>
+							}
+						</select>
+						<input type="number" name="qty_per_unit" step="0.01" min="0" value="1" class="w-16 border rounded-lg px-2 py-1.5 text-sm text-right" title="Sheets per impression"/>
+						<button type="submit" class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-sm font-medium">Add</button>
+					</form>
+				</div>
+			</div>
+		} else {
+			<p class="text-sm text-slate-400">Custom labour job — the cashier types the price and (optionally) a worker's mini-salary at the till.</p>
+		}
+	</div>
+}
+
+// ReportPage shows revenue / consumable cost / labour and a per-service breakdown.
+templ ReportPage(d ReportData) {
+	@layouts.Admin("Communication Store — Report", d.UserName, "documents-report") {
+		<h1 class="text-2xl font-bold mb-6">🖨 Communication Store — Report</h1>
+		<div class="space-y-6">
+			<form method="get" action="/admin/documents/report" class="flex flex-wrap gap-2 items-end">
+				@docPreset("today", "Today", d.Preset)
+				@docPreset("this-week", "This week", d.Preset)
+				@docPreset("this-month", "This month", d.Preset)
+				@docPreset("last-week", "Last week", d.Preset)
+				@docPreset("last-month", "Last month", d.Preset)
+				@docPreset("this-year", "This year", d.Preset)
+			</form>
+			<div class="text-sm text-slate-500">Period: <span class="font-medium">{ d.From }</span> to <span class="font-medium">{ d.To }</span></div>
+			<div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+				@docKpi("Revenue", money.Format(d.Symbol, d.Revenue), "emerald")
+				@docKpi("Paper / film cost", money.Format(d.Symbol, d.Consumables), "amber")
+				@docKpi("Labour", money.Format(d.Symbol, d.Labour), "indigo")
+				@docKpi("Gross profit", money.Format(d.Symbol, d.Revenue.Sub(d.Consumables).Sub(d.Labour)), "slate")
+			</div>
+			<div class="bg-white rounded-2xl shadow-sm p-6">
+				<h2 class="text-lg font-semibold mb-4">By service</h2>
+				<table class="w-full text-sm">
+					<thead class="text-left text-slate-500 border-b">
+						<tr>
+							<th class="py-2 pr-4">Category</th>
+							<th class="py-2 pr-4">Service</th>
+							<th class="py-2 pr-4 text-right">Jobs</th>
+							<th class="py-2 pr-4 text-right">Revenue</th>
+							<th class="py-2 pr-4 text-right">Consumed</th>
+							<th class="py-2 pr-4 text-right">Labour</th>
+							<th class="py-2 text-right">Profit</th>
+						</tr>
+					</thead>
+					<tbody>
+						if len(d.Rows) == 0 {
+							<tr><td colspan="7" class="py-3 text-slate-400">No jobs in this period.</td></tr>
+						}
+						for _, r := range d.Rows {
+							<tr class="border-b last:border-0">
+								<td class="py-2 pr-4">{ r.Category }</td>
+								<td class="py-2 pr-4">{ r.Name }</td>
+								<td class="py-2 pr-4 text-right tabular-nums">{ strconv.Itoa(r.Jobs) }</td>
+								<td class="py-2 pr-4 text-right tabular-nums">{ money.Format(d.Symbol, r.Revenue) }</td>
+								<td class="py-2 pr-4 text-right tabular-nums">{ money.Format(d.Symbol, r.Consumables) }</td>
+								<td class="py-2 pr-4 text-right tabular-nums">{ money.Format(d.Symbol, r.Labour) }</td>
+								<td class="py-2 text-right tabular-nums font-medium">{ money.Format(d.Symbol, r.Revenue.Sub(r.Consumables).Sub(r.Labour)) }</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			</div>
+		</div>
+	}
+}
+
+// PayoutsPage lists workers with outstanding labour and a settle button.
+templ PayoutsPage(d PayoutsData) {
+	@layouts.Admin("Communication Store — Worker payouts", d.UserName, "documents-payouts") {
+		<h1 class="text-2xl font-bold mb-6">🖨 Worker payouts</h1>
+		<div class="bg-white rounded-2xl shadow-sm p-6">
+			<p class="text-sm text-slate-500 mb-4">Unpaid labour ("mini salary") accrued from custom jobs. Paying a worker books a core expense and marks their jobs settled.</p>
+			<table class="w-full text-sm">
+				<thead class="text-left text-slate-500 border-b">
+					<tr>
+						<th class="py-2 pr-4">Worker</th>
+						<th class="py-2 pr-4 text-right">Jobs</th>
+						<th class="py-2 pr-4 text-right">Outstanding</th>
+						<th class="py-2 text-right">Action</th>
+					</tr>
+				</thead>
+				<tbody>
+					if len(d.Rows) == 0 {
+						<tr><td colspan="4" class="py-3 text-slate-400">Nothing outstanding.</td></tr>
+					}
+					for _, r := range d.Rows {
+						<tr class="border-b last:border-0">
+							<td class="py-2 pr-4">{ r.Name }</td>
+							<td class="py-2 pr-4 text-right tabular-nums">{ strconv.Itoa(r.Jobs) }</td>
+							<td class="py-2 pr-4 text-right tabular-nums font-medium">{ money.Format(d.Symbol, r.Unpaid) }</td>
+							<td class="py-2 text-right">
+								<button
+									type="button"
+									hx-post={ "/admin/documents/payouts/" + strconv.FormatInt(r.WorkerID, 10) + "/pay" }
+									hx-confirm={ "Pay " + r.Name + " " + money.Format(d.Symbol, r.Unpaid) + "?" }
+									hx-swap="none"
+									class="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700"
+								>Pay worker</button>
+							</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+		</div>
+	}
+}
+
+// --- small shared templ helpers ---
+
+templ docPreset(key, label, active string) {
+	<a
+		href={ templ.SafeURL("/admin/documents/report?preset=" + key) }
+		if active == key {
+			class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-sm font-medium"
+		} else {
+			class="px-3 py-1.5 rounded-lg bg-white border text-slate-600 text-sm hover:bg-slate-50"
+		}
+	>{ label }</a>
+}
+
+templ docKpi(label, value, color string) {
+	<div class="bg-white rounded-2xl shadow-sm p-5">
+		<div class="text-sm text-slate-500">{ label }</div>
+		<div class={ "text-2xl font-bold mt-1 text-" + color + "-600" }>{ value }</div>
+	</div>
+}
+
+// sizeLabel renders a nullable size ("any" when unset / flat-priced).
+func sizeLabel(s *string) string {
+	if s == nil || *s == "" {
+		return "any"
+	}
+	return *s
+}
+
+// optLabel renders the colour/side option as a short tag.
+func optLabel(color, double bool) string {
+	c := "B&W"
+	if color {
+		c = "colour"
+	}
+	if double {
+		return c + " 2-side"
+	}
+	return c + " 1-side"
+}
