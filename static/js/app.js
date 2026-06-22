@@ -577,11 +577,12 @@ function pos(symbol, defaultType, promptAfterSale) {
     // recharge top-up). price is the per-line amount sent to the server as
     // price_override; the server honours it only for is_service products. Each
     // call is its own line (no qty merge) so several service sales can coexist.
-    addServiceLine(id, name, price, deviceId) {
-      const amt = Number(price) || 0;
+    addServiceLine(detail) {
+      detail = detail || {};
+      const amt = Number(detail.price) || 0;
       this.cart.push({
-        id: id,
-        name: name,
+        id: detail.id,
+        name: detail.name,
         unit_price: amt,
         tax_rate: 0,
         qty: 1,
@@ -594,9 +595,17 @@ function pos(symbol, defaultType, promptAfterSale) {
         serials: [],
         is_service: true,
         price_override: String(amt),
+        // Optional per-line label shown on the receipt (e.g. "A4 colour x20").
+        description: detail.description || "",
+        // Stock this service line consumes (e.g. paper for a document job):
+        // [{product_id, quantity}]. The server depletes these FEFO and sets COGS.
+        components: Array.isArray(detail.components) ? detail.components : [],
         // Recharge plugin: the device whose float this reload draws down. Recorded
         // in the device ledger after checkout via /cashier/recharge/reload.
-        recharge_device_id: Number(deviceId) || 0,
+        recharge_device_id: Number(detail.deviceId) || 0,
+        // Documents plugin: job metadata recorded after checkout via
+        // /cashier/documents/record (service, labour worker/amount).
+        doc_job: detail.docJob || null,
       });
     },
     // syncSerials keeps a serial-tracked line's serial inputs in step with its
@@ -831,6 +840,24 @@ function pos(symbol, defaultType, promptAfterSale) {
         }
       }
     },
+    // After a sale, record each document-job cart line (sale_id + job metadata) so
+    // the documents plugin writes its doc_job ledger (analytics + worker labour).
+    // Paper/film stock was already depleted in the sale tx via the consume-on-sale
+    // seam; this call is purely the plugin's bookkeeping. Best-effort.
+    async recordDocJobs(saleId) {
+      const jobs = this.cart.filter((it) => it.doc_job).map((it) => it.doc_job);
+      if (!jobs.length) return;
+      try {
+        await apiFetch(
+          "POST",
+          "/cashier/documents/record",
+          { sale_id: saleId, jobs },
+          { silent: true }
+        );
+      } catch (_) {
+        /* analytics-only; the sale itself already succeeded */
+      }
+    },
     paidTotal() {
       return this.payments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
     },
@@ -901,6 +928,9 @@ function pos(symbol, defaultType, promptAfterSale) {
             // Service lines (plugin recharge) carry a per-line amount; ignored by
             // the server for normal stocked products.
             price_override: it.price_override || "",
+            // Optional per-line label + consumables for service lines.
+            description: it.description || "",
+            components: Array.isArray(it.components) ? it.components : [],
             serials: it.track_serial
               ? (it.serials || []).map((s) => String(s || "").trim())
               : [],
@@ -916,6 +946,7 @@ function pos(symbol, defaultType, promptAfterSale) {
         const json = await apiFetch("POST", "/api/sales", payload);
         await this.attributeWallet(json.data.sale.id);
         await this.attributeReloads(json.data.sale.id);
+        await this.recordDocJobs(json.data.sale.id);
         toast("Sale complete", "success");
         if (this.promptAfterSale) {
           this.receipt = json.data; // show the Print / New Sale prompt

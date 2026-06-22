@@ -47,6 +47,7 @@ type SaleItem struct {
 	DiscountValue decimal.Decimal `db:"discount_value" json:"discount_value"`
 	Subtotal    decimal.Decimal `db:"subtotal"     json:"subtotal"`
 	ReturnedQty decimal.Decimal `db:"returned_qty" json:"returned_qty"`
+	Description *string         `db:"description"  json:"description,omitempty"`
 	// joined
 	ProductName string `db:"product_name" json:"product_name"`
 	UnitAbbr    string `db:"unit_abbr"    json:"unit_abbr"`
@@ -118,9 +119,9 @@ func (r *Repository) InsertSale(ctx context.Context, s saleRow) (int64, error) {
 
 func (r *Repository) InsertItem(ctx context.Context, saleID int64, it SaleItem) error {
 	_, err := r.q.ExecContext(ctx, `
-		INSERT INTO sale_items (sale_id, product_id, quantity, unit_price, cost_price, discount, discount_type, discount_value, subtotal)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-		saleID, it.ProductID, it.Quantity, it.UnitPrice, it.CostPrice, it.Discount, it.DiscountType, it.DiscountValue, it.Subtotal)
+		INSERT INTO sale_items (sale_id, product_id, quantity, unit_price, cost_price, discount, discount_type, discount_value, subtotal, description)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+		saleID, it.ProductID, it.Quantity, it.UnitPrice, it.CostPrice, it.Discount, it.DiscountType, it.DiscountValue, it.Subtotal, it.Description)
 	return err
 }
 

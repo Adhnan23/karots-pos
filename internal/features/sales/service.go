@@ -39,6 +39,26 @@ type ItemInput struct {
 	// Serials carries one unique serial number per unit for serial-tracked
 	// products (length must equal the quantity); ignored for other products.
 	Serials []string `json:"serials"`
+	// Description is an optional per-line label shown on the receipt/history
+	// instead of the product name (e.g. a plugin service line "A4 colour x20").
+	Description string `json:"description"`
+	// Components lists stock to deplete for a service line (e.g. a document job
+	// consuming paper). Honoured only for is_service products; the line's
+	// cost_price becomes the summed FEFO cost of the consumed components.
+	Components []ServiceComponent `json:"components"`
+}
+
+// ServiceComponent is one consumable a service line draws down from stock.
+type ServiceComponent struct {
+	ProductID int64  `json:"product_id"`
+	Quantity  string `json:"quantity"`
+}
+
+// ServiceComponentParsed is a validated component (qty parsed), used to record the
+// stock movement for a service line's consumption after the sale id is known.
+type ServiceComponentParsed struct {
+	ProductID int64
+	Qty       decimal.Decimal
 }
 
 // serialBatch holds the captured serials for one serial-tracked line, recorded
@@ -136,6 +156,10 @@ func (s *Service) Create(ctx context.Context, in CreateInput, cashierID int64) (
 		// Service products (is_service) carry no inventory: they skip stock
 		// depletion above and the ledger movement below.
 		serviceProducts := map[int64]bool{}
+		// componentMoves holds, per line index, the consumables a service line drew
+		// down (e.g. paper for a document job) — recorded as movements once the sale
+		// id exists.
+		componentMoves := map[int][]ServiceComponentParsed{}
 
 		warrRepo := warranty.NewRepository(tx)
 		serialSeen := map[string]bool{}
@@ -218,11 +242,42 @@ func (s *Service) Create(ctx context.Context, in CreateInput, cashierID int64) (
 			itemDiscTotal = itemDiscTotal.Add(disc)
 			taxTotal = taxTotal.Add(lineTax)
 
-			// Service lines (is_service) carry no inventory: skip the stock guard
-			// and batch depletion, and record zero COGS.
+			// Service lines (is_service) carry no inventory of their own. They may
+			// still declare components to consume (e.g. paper for a document job):
+			// deplete those FEFO and use their summed cost as the line COGS.
 			cost := decimal.Zero
+			var lineComps []ServiceComponentParsed
 			if p.IsService {
 				serviceProducts[p.ID] = true
+				for _, comp := range it.Components {
+					if comp.ProductID <= 0 {
+						continue
+					}
+					cq, err := money.Parse(comp.Quantity)
+					if err != nil || !cq.IsPositive() {
+						return apperr.Validation(fmt.Sprintf("invalid consumable quantity for %s", p.Name))
+					}
+					ok, err := stkRepo.DecrementGuarded(ctx, comp.ProductID, cq)
+					if err != nil {
+						return apperr.Internal("failed to update stock", err)
+					}
+					if !ok {
+						return apperr.Conflict("insufficient stock for a consumable used by " + p.Name)
+					}
+					ccost, err := stkRepo.DepleteFEFO(ctx, comp.ProductID, cq)
+					if err != nil {
+						return apperr.Internal("failed to deplete batches", err)
+					}
+					// DepleteFEFO returns the weighted cost *per consumed unit*; the
+					// line's COGS is the total consumed (per-unit × qty) of every
+					// component, divided by the line quantity so cost_price stays a
+					// per-unit figure like every other sale line.
+					cost = cost.Add(ccost.Mul(cq))
+					lineComps = append(lineComps, ServiceComponentParsed{ProductID: comp.ProductID, Qty: cq})
+				}
+				if qty.IsPositive() {
+					cost = cost.Div(qty).Round(2)
+				}
 			}
 			if !p.IsService {
 				// Atomic guard: prevents overselling under concurrency.
@@ -245,6 +300,10 @@ func (s *Service) Create(ctx context.Context, in CreateInput, cashierID int64) (
 				}
 			}
 
+			var desc *string
+			if s := strings.TrimSpace(it.Description); s != "" {
+				desc = &s
+			}
 			lines = append(lines, SaleItem{
 				ProductID:     p.ID,
 				Quantity:      qty,
@@ -254,7 +313,11 @@ func (s *Service) Create(ctx context.Context, in CreateInput, cashierID int64) (
 				DiscountType:  discType,
 				DiscountValue: discValue,
 				Subtotal:      lineNet,
+				Description:   desc,
 			})
+			if len(lineComps) > 0 {
+				componentMoves[len(lines)-1] = lineComps
+			}
 		}
 
 		// Resolve the bill discount against the pre-tax net (after item discounts).
@@ -328,7 +391,22 @@ func (s *Service) Create(ctx context.Context, in CreateInput, cashierID int64) (
 				return apperr.Internal("failed to save sale item", err)
 			}
 			if serviceProducts[lines[i].ProductID] {
-				continue // service line: no inventory, no ledger movement
+				// Service line: no inventory of its own, but record a movement for
+				// each consumable it drew down (e.g. paper for a document job).
+				refType := "sale"
+				for _, comp := range componentMoves[i] {
+					if err := stkRepo.InsertMovement(ctx, stock.MovementInput{
+						ProductID:     comp.ProductID,
+						Type:          stock.MoveSale,
+						Quantity:      comp.Qty.Neg(),
+						ReferenceID:   &saleID,
+						ReferenceType: &refType,
+						UserID:        cashierID,
+					}); err != nil {
+						return apperr.Internal("failed to record stock movement", err)
+					}
+				}
+				continue
 			}
 			neg := lines[i].Quantity.Neg()
 			refType := "sale"

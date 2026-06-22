@@ -110,7 +110,11 @@ templ Receipt(d ReceiptData) {
 				<table class="r-items">
 					<tbody>
 						for _, it := range d.Detail.Items {
-							<tr class="r-item-name"><td colspan="3">{ it.ProductName }</td></tr>
+							if it.Description != nil && *it.Description != "" {
+								<tr class="r-item-name"><td colspan="3">{ *it.Description }</td></tr>
+							} else {
+								<tr class="r-item-name"><td colspan="3">{ it.ProductName }</td></tr>
+							}
 							<tr class="r-item-line">
 								<td>{ money.Display(it.Quantity) } { it.UnitAbbr } × { money.Display(it.UnitPrice) }</td>
 								<td></td>

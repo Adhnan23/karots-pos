@@ -23,7 +23,7 @@ templ POS(d POSData) {
 			x-data={ "pos('" + d.Symbol + "', '" + d.DefaultSaleType + "', " + jsBool(d.PromptAfterSale) + ")" }
 			x-init="init()"
 			x-on:keydown.window="onKey($event)"
-			x-on:pos-add-service.window="addServiceLine($event.detail.id, $event.detail.name, $event.detail.price, $event.detail.deviceId)"
+			x-on:pos-add-service.window="addServiceLine($event.detail)"
 		>
 			<!-- Register closed overlay: count the opening float by denomination -->
 			<div x-show="!session" x-cloak class="absolute inset-0 bg-slate-100/95 z-30 flex items-center justify-center p-4 overflow-auto">

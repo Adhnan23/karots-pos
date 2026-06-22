@@ -135,7 +135,7 @@ templ SaleReturnForm(d sales.Detail) {
 					for _, it := range d.Items {
 						if it.ReturnableQty().IsPositive() {
 							<tr class="border-b last:border-0">
-								<td class="py-1">{ it.ProductName }</td>
+								<td class="py-1">{ ternary(it.Description != nil && *it.Description != "", strOrEmpty(it.Description), it.ProductName) }</td>
 								<td class="py-1 text-right">{ money.Display(it.Quantity) } { it.UnitAbbr }</td>
 								<td class="py-1 text-right">{ money.Display(it.ReturnableQty()) }</td>
 								<td class="py-1 text-right">
