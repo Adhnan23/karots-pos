@@ -166,23 +166,39 @@ templ serviceCard(symbol string, vm ServiceVM, prods []products.Product) {
 					<form
 						hx-post={ "/admin/documents/services/" + strconv.FormatInt(vm.Service.ID, 10) + "/consumable" }
 						hx-swap="none"
-						hx-on::after-request="if(event.detail.successful) this.reset()"
 						class="grid grid-cols-2 gap-3 items-end"
 					>
-						<div>
-							<label class="block text-xs font-medium text-slate-500 mb-1">Size</label>
-							<input type="text" name="size" placeholder="any" class="w-full border rounded-lg px-3 py-2 text-sm"/>
+						<div class="col-span-2 relative" x-data="docConsumablePicker()">
+							<label class="block text-xs font-medium text-slate-500 mb-1">Product (paper / film)</label>
+							<input type="hidden" name="product_id" x-bind:value="productId"/>
+							<input
+								type="text"
+								x-model="name"
+								x-on:input.debounce.250ms="search()"
+								x-on:focus="if(results.length) open=true"
+								x-on:click.away="open=false"
+								placeholder="Search by name… e.g. A4 paper"
+								autocomplete="off"
+								class="w-full border rounded-lg px-3 py-2 text-sm"
+							/>
+							<ul x-show="open && results.length" x-cloak class="absolute z-10 mt-1 w-full bg-white border rounded-lg shadow-lg max-h-48 overflow-auto">
+								<template x-for="r in results" x-bind:key="r.id">
+									<li>
+										<button type="button" x-on:click="choose(r)" class="w-full text-left px-3 py-2 text-sm hover:bg-slate-100" x-text="r.name"></button>
+									</li>
+								</template>
+							</ul>
 						</div>
 						<div>
 							<label class="block text-xs font-medium text-slate-500 mb-1">Sheets / unit</label>
 							<input type="number" name="qty_per_unit" step="0.01" min="0" value="1" class="w-full border rounded-lg px-3 py-2 text-sm text-right" title="Sheets (or film) consumed per impression"/>
 						</div>
-						<div class="col-span-2">
-							<label class="block text-xs font-medium text-slate-500 mb-1">Product</label>
-							<select name="product_id" required class="w-full border rounded-lg px-3 py-2 text-sm">
-								<option value="">Pick a stock product…</option>
-								for _, pr := range prods {
-									<option value={ strconv.FormatInt(pr.ID, 10) }>{ pr.Name }</option>
+						<div>
+							<label class="block text-xs font-medium text-slate-500 mb-1">Size <span class="font-normal text-slate-400">(opt.)</span></label>
+							<select name="size" class="w-full border rounded-lg px-3 py-2 text-sm" title="Pick a size only if it uses different paper; otherwise leave on All sizes.">
+								<option value="">All sizes</option>
+								for _, sz := range distinctSizes(vm.Prices) {
+									<option value={ sz }>{ sz }</option>
 								}
 							</select>
 						</div>
@@ -313,6 +329,22 @@ templ docKpi(label, value, color string) {
 		<div class="text-sm text-slate-500">{ label }</div>
 		<div class={ "text-2xl font-bold mt-1 text-" + color + "-600" }>{ value }</div>
 	</div>
+}
+
+// distinctSizes returns the unique, non-empty sizes defined in a service's price
+// matrix, in first-seen order. The consumable form offers exactly these (plus
+// "all sizes") so a mapping's size always matches a real price row — no typos.
+func distinctSizes(prices []Price) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, p := range prices {
+		if p.Size == nil || *p.Size == "" || seen[*p.Size] {
+			continue
+		}
+		seen[*p.Size] = true
+		out = append(out, *p.Size)
+	}
+	return out
 }
 
 // sizeLabel renders a nullable size ("any" when unset / flat-priced).

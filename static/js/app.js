@@ -1018,6 +1018,38 @@ function poProductChoose(line, r) {
   line._open = false;
 }
 
+// docConsumablePicker backs the live search-box for the documents consumable
+// form: type to find a paper/film stock product (service products are excluded
+// server-side) and pick it to fill the hidden product_id the form submits.
+function docConsumablePicker() {
+  return {
+    productId: "",
+    name: "",
+    open: false,
+    results: [],
+    async search() {
+      const q = (this.name || "").trim();
+      if (!q) {
+        this.results = [];
+        this.open = false;
+        return;
+      }
+      try {
+        const json = await apiFetch("GET", "/api/products?limit=20&search=" + encodeURIComponent(q));
+        this.results = json.data || [];
+        this.open = true;
+      } catch (_) {
+        this.results = [];
+      }
+    },
+    choose(r) {
+      this.productId = String(r.id);
+      this.name = r.name;
+      this.open = false;
+    },
+  };
+}
+
 // reportProductPicker backs the search-box product selector on the per-product
 // report. Choosing a result fills the hidden `product` field and submits the
 // range form so the chart reloads for that product (keeping the date range/group).
