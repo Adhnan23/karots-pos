@@ -1,0 +1,8 @@
+{
+  "key": "documents",
+  "name": "Communication Store",
+  "import": "karots-pos/plugins/documents",
+  "version": "1.0.0",
+  "description": "Photocopy / print / laminate / bind counter: metered jobs priced by size, colour and side with quantity tiers (consuming paper/film from stock), plus custom labour jobs with a typed price and per-worker payout.",
+  "env_sample": "env.sample"
+}

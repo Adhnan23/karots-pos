@@ -172,6 +172,25 @@ reload *and* the wallet payment system:
   bonus/loss (carrier commission is unpredictable, so it surfaces at close).
 - **Admin** — carrier & device management and a reconciliation/ledger report.
 
+### Bundled plugin: Communication Store (photocopy / print / laminate / bind)
+
+`plugins/documents` runs the communication-store counter as a tabbed quick-action
+at the till (a `🖨 Photocopy` tab beside `📶 Reload`):
+
+- **Metered jobs** — pick a service, size, colour and side; the price is resolved
+  server-side from a per-service matrix with **quantity-tier** breaks, and the
+  job **consumes paper/film from normal stock** via the core consume-on-sale seam
+  (double-side = 1 sheet / 2 impressions). The receipt shows the full line
+  ("A4 colour 2-side ×20") and the sale line freezes the consumed FEFO cost as COGS.
+- **Custom labour jobs** (photo edit / CV / poster) — cashier types the price and,
+  optionally, a worker's "mini salary"; labour accrues to a per-worker balance and
+  a **Pay worker** action books a core expense and settles the jobs.
+- **Paper & film are ordinary products** — bought/refilled through purchasing,
+  sellable directly, and mapped as a service's consumables (a search picker; the
+  size is chosen from the service's own price-matrix sizes to avoid mismatches).
+- **Admin** — service / pricing / consumable management, a revenue–consumables–
+  labour report, and the worker-payouts page. Own `goose_db_version_documents`.
+
 ## Two surfaces
 
 | Surface | Path | Who | Does |
