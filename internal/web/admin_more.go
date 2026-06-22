@@ -266,15 +266,10 @@ func (a *adminUI) PurchaseEntry(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	prods, _, err := a.s.products.List(ctx, products.ListQuery{Limit: 500})
-	if err != nil {
-		return err
-	}
 	return response.RenderPage(c, adminpages.PurchaseEntryPage(adminpages.PurchaseEntryData{
 		UserName:   middleware.CurrentUserName(c),
 		Symbol:     a.symbol(ctx),
 		Suppliers:  sups,
-		Products:   prods,
 		ConfigJSON: "null",
 	}))
 }

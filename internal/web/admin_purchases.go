@@ -7,7 +7,6 @@ import (
 
 	"karots-pos/internal/apperr"
 	"karots-pos/internal/features/audit"
-	"karots-pos/internal/features/products"
 	"karots-pos/internal/features/purchases"
 	"karots-pos/internal/middleware"
 	"karots-pos/internal/response"
@@ -69,15 +68,10 @@ func (a *adminUI) PurchaseDraftEditForm(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	prods, _, err := a.s.products.List(ctx, products.ListQuery{Limit: 500})
-	if err != nil {
-		return err
-	}
 	return response.RenderPage(c, adminpages.PurchaseEntryPage(adminpages.PurchaseEntryData{
 		UserName:   middleware.CurrentUserName(c),
 		Symbol:     a.symbol(ctx),
 		Suppliers:  sups,
-		Products:   prods,
 		EditID:     id,
 		ConfigJSON: entryConfigJSON(*d),
 	}))
@@ -119,11 +113,18 @@ func (a *adminUI) PurchaseReceiveForm(c echo.Context) error {
 	if d.Purchase.Status != "draft" {
 		return c.Redirect(303, "/admin/purchases/"+strconv.FormatInt(id, 10))
 	}
+	// Current product cost/sell drives the receive screen's margin guard.
+	cur := make(map[int64][2]string, len(d.Items))
+	for _, it := range d.Items {
+		if p, err := a.s.products.Get(ctx, it.ProductID); err == nil {
+			cur[it.ProductID] = [2]string{p.CostPrice.String(), p.SellingPrice.String()}
+		}
+	}
 	return response.RenderPage(c, adminpages.PurchaseReceivePage(adminpages.PurchaseReceiveData{
 		UserName:   middleware.CurrentUserName(c),
 		Symbol:     a.symbol(ctx),
 		Detail:     *d,
-		ConfigJSON: receiveConfigJSON(*d),
+		ConfigJSON: receiveConfigJSON(*d, cur),
 	}))
 }
 
@@ -217,6 +218,7 @@ func parseIDList(s string) []int64 {
 func entryConfigJSON(d purchases.Detail) string {
 	type line struct {
 		ProductID    int64  `json:"product_id"`
+		Name         string `json:"name"`
 		Quantity     string `json:"quantity"`
 		CostPrice    string `json:"cost_price"`
 		SellingPrice string `json:"selling_price"`
@@ -230,6 +232,7 @@ func entryConfigJSON(d purchases.Detail) string {
 		}
 		lines = append(lines, line{
 			ProductID:    it.ProductID,
+			Name:         it.ProductName,
 			Quantity:     it.Quantity.String(),
 			CostPrice:    it.CostPrice.String(),
 			SellingPrice: it.SellingPrice.String(),
@@ -250,8 +253,9 @@ func entryConfigJSON(d purchases.Detail) string {
 }
 
 // receiveConfigJSON serialises a draft's lines for the receive screen (ordered +
-// editable received qty defaulting to ordered).
-func receiveConfigJSON(d purchases.Detail) string {
+// editable received qty defaulting to ordered). cur holds each product's current
+// {cost, sell} so the screen can flag a squeezed margin and suggest a new price.
+func receiveConfigJSON(d purchases.Detail, cur map[int64][2]string) string {
 	type line struct {
 		ProductID    int64  `json:"product_id"`
 		ProductName  string `json:"product_name"`
@@ -260,6 +264,8 @@ func receiveConfigJSON(d purchases.Detail) string {
 		CostPrice    string `json:"cost_price"`
 		SellingPrice string `json:"selling_price"`
 		ExpiryDate   string `json:"expiry_date"`
+		CurCost      string `json:"cur_cost"`
+		CurSell      string `json:"cur_sell"`
 	}
 	lines := make([]line, 0, len(d.Items))
 	for _, it := range d.Items {
@@ -271,6 +277,10 @@ func receiveConfigJSON(d purchases.Detail) string {
 		if it.ExpiryDate != nil {
 			exp = it.ExpiryDate.Format("2006-01-02")
 		}
+		curCost, curSell := "0", "0"
+		if v, ok := cur[it.ProductID]; ok {
+			curCost, curSell = v[0], v[1]
+		}
 		lines = append(lines, line{
 			ProductID:    it.ProductID,
 			ProductName:  it.ProductName,
@@ -279,6 +289,8 @@ func receiveConfigJSON(d purchases.Detail) string {
 			CostPrice:    it.CostPrice.String(),
 			SellingPrice: it.SellingPrice.String(),
 			ExpiryDate:   exp,
+			CurCost:      curCost,
+			CurSell:      curSell,
 		})
 	}
 	b, _ := json.Marshal(map[string]any{

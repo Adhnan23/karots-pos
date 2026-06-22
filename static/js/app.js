@@ -950,6 +950,35 @@ function pos(symbol, defaultType, promptAfterSale) {
 // effects until the order is received. `config` is null for a new order, or
 // {editId, supplierId, notes, lines} to edit an existing draft. Line math here is
 // a preview only — the server recomputes totals authoritatively.
+// poProductSearch / poProductChoose back the live product search picker shared by
+// the purchase-order entry form and the receive screen. They mutate a line object
+// in place: set its search results, or fill product_id/name + cost/sell on pick.
+async function poProductSearch(line) {
+  const q = (line.product_name || "").trim();
+  if (!q) {
+    line._results = [];
+    line._open = false;
+    return;
+  }
+  try {
+    const json = await apiFetch("GET", "/api/products?limit=20&search=" + encodeURIComponent(q));
+    line._results = json.data || [];
+    line._open = true;
+  } catch (_) {
+    line._results = [];
+  }
+}
+function poProductChoose(line, r) {
+  line.product_id = r.id;
+  line.product_name = r.name;
+  line.cost_price = Number(r.cost_price) || 0;
+  line.selling_price = Number(r.selling_price) || 0;
+  line.cur_cost = Number(r.cost_price) || 0;
+  line.cur_sell = Number(r.selling_price) || 0;
+  line._results = [];
+  line._open = false;
+}
+
 function grn(symbol, config) {
   config = config || {};
   return {
@@ -960,14 +989,24 @@ function grn(symbol, config) {
     lines: [],
     busy: false,
 
+    pick(l) {
+      poProductSearch(l);
+    },
+    choose(l, r) {
+      poProductChoose(l, r);
+    },
+
     init() {
       if (Array.isArray(config.lines) && config.lines.length > 0) {
         this.lines = config.lines.map((l) => ({
           product_id: Number(l.product_id) || 0,
+          product_name: l.name || "",
           quantity: Number(l.quantity) || 0,
           cost_price: Number(l.cost_price) || 0,
           selling_price: Number(l.selling_price) || 0,
           expiry_date: l.expiry_date || "",
+          _open: false,
+          _results: [],
         }));
       } else {
         this.addLine();
@@ -978,7 +1017,7 @@ function grn(symbol, config) {
       return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     },
     addLine() {
-      this.lines.push({ product_id: 0, quantity: 0, cost_price: 0, selling_price: 0, expiry_date: "" });
+      this.lines.push({ product_id: 0, product_name: "", quantity: 0, cost_price: 0, selling_price: 0, expiry_date: "", _open: false, _results: [] });
     },
     removeLine(i) {
       this.lines.splice(i, 1);
@@ -1067,7 +1106,30 @@ function grnReceive(symbol, config) {
       cost_price: Number(l.cost_price) || 0,
       selling_price: Number(l.selling_price) || 0,
       expiry_date: l.expiry_date || "",
+      cur_cost: Number(l.cur_cost) || 0,
+      cur_sell: Number(l.cur_sell) || 0,
+      _new: false,
+      _open: false,
+      _results: [],
     })),
+
+    pick(l) {
+      poProductSearch(l);
+    },
+    choose(l, r) {
+      poProductChoose(l, r);
+    },
+    // addNewLine lets you receive a forgotten/extra item that wasn't on the draft.
+    addNewLine() {
+      this.lines.push({
+        product_id: 0, product_name: "", ordered: "", quantity: 1,
+        cost_price: 0, selling_price: 0, expiry_date: "",
+        cur_cost: 0, cur_sell: 0, _new: true, _open: false, _results: [],
+      });
+    },
+    removeLine(i) {
+      this.lines.splice(i, 1);
+    },
 
     money(v) {
       const n = Number(v) || 0;
@@ -1085,6 +1147,24 @@ function grnReceive(symbol, config) {
     hasVariance() {
       return this.lines.some((l) => Number(l.quantity) !== Number(l.ordered));
     },
+    // suggestSell proposes a selling price that keeps the product's previous
+    // markup against the new received cost (falls back to a 20% markup).
+    suggestSell(l) {
+      const newCost = Number(l.cost_price) || 0;
+      const curCost = Number(l.cur_cost) || 0;
+      const curSell = Number(l.cur_sell) || 0;
+      const base = curCost > 0 && curSell > 0 ? newCost * (curSell / curCost) : newCost * 1.2;
+      return Math.round(base * 100) / 100;
+    },
+    // marginWarn flags a line where the received cost would sell at/below cost or
+    // squeeze the margin below the previous markup.
+    marginWarn(l) {
+      const newCost = Number(l.cost_price) || 0;
+      const sell = Number(l.selling_price) || 0;
+      if (newCost <= 0) return false;
+      if (sell > 0 && newCost >= sell) return true;
+      return this.suggestSell(l) > sell + 0.005;
+    },
     async submit() {
       if (this.busy) return;
       const items = this.lines
@@ -1092,7 +1172,7 @@ function grnReceive(symbol, config) {
         .map((l) => ({
           product_id: Number(l.product_id),
           quantity: String(l.quantity),
-          ordered_qty: String(l.ordered || 0),
+          ordered_qty: l._new ? "" : String(l.ordered || 0),
           cost_price: String(l.cost_price || 0),
           selling_price: String(l.selling_price || 0),
           expiry_date: l.expiry_date || "",

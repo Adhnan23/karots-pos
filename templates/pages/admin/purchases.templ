@@ -3,7 +3,6 @@ package adminpages
 import (
 	"strconv"
 
-	"karots-pos/internal/features/products"
 	"karots-pos/internal/features/purchases"
 	"karots-pos/internal/features/suppliers"
 	"karots-pos/internal/money"
@@ -189,7 +188,6 @@ type PurchaseEntryData struct {
 	UserName   string
 	Symbol     string
 	Suppliers  []suppliers.Supplier
-	Products   []products.Product
 	EditID     int64
 	ConfigJSON string
 }
@@ -204,7 +202,7 @@ templ PurchaseEntryPage(d PurchaseEntryData) {
 			}
 			<a href="/admin/purchases" class="text-slate-500 hover:underline">← Back</a>
 		</div>
-		<div class="bg-white rounded-2xl shadow-sm p-6" x-data={ "grn('" + d.Symbol + "', " + d.ConfigJSON + ")" } x-init="init()" x-on:keydown.window="onKey($event)">
+		<div class="bg-white rounded-2xl shadow-sm p-6" x-data={ "grn('" + d.Symbol + "', " + d.ConfigJSON + ")" } x-on:keydown.window="onKey($event)">
 			<div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
 				<div>
 					<label class="block text-sm font-medium mb-1">Supplier</label>
@@ -228,13 +226,13 @@ templ PurchaseEntryPage(d PurchaseEntryData) {
 				<tbody>
 					<template x-for="(l, i) in lines" x-bind:key="i">
 						<tr class="border-b">
-							<td class="py-1 pr-2">
-								<select x-model.number="l.product_id" class="w-full border rounded px-2 py-1">
-									<option value="0">Select…</option>
-									for _, p := range d.Products {
-										<option value={ strconv.FormatInt(p.ID, 10) }>{ p.Name }</option>
-									}
-								</select>
+							<td class="py-1 pr-2 relative" x-on:click.away="l._open=false">
+								<input type="text" x-model="l.product_name" x-on:input="pick(l)" x-on:focus="pick(l)" placeholder="Search name or barcode…" class="w-full border rounded px-2 py-1"/>
+								<div x-show="l._open && l._results.length" class="absolute z-20 left-0 right-0 mt-1 bg-white border rounded-lg shadow max-h-56 overflow-auto" x-cloak>
+									<template x-for="r in l._results" x-bind:key="r.id">
+										<button type="button" x-on:click="choose(l, r)" class="block w-full text-left px-3 py-1.5 hover:bg-slate-100" x-text="r.name + (r.barcode ? '  ·  ' + r.barcode : '')"></button>
+									</template>
+								</div>
 							</td>
 							<td class="py-1 pr-2">
 								<div class="flex items-center rounded border">
@@ -311,8 +309,23 @@ templ PurchaseReceivePage(d PurchaseReceiveData) {
 				<tbody>
 					<template x-for="(l, i) in lines" x-bind:key="i">
 						<tr class="border-b">
-							<td class="py-1 pr-2 font-medium" x-text="l.product_name"></td>
-							<td class="py-1 pr-2 text-right text-slate-500" x-text="l.ordered"></td>
+							<td class="py-1 pr-2 font-medium relative">
+								<template x-if="!l._new"><span x-text="l.product_name"></span></template>
+								<template x-if="l._new">
+									<div class="flex items-center gap-1" x-on:click.away="l._open=false">
+										<div class="flex-1 relative">
+											<input type="text" x-model="l.product_name" x-on:input="pick(l)" x-on:focus="pick(l)" placeholder="Search name or barcode…" class="w-full border rounded px-2 py-1"/>
+											<div x-show="l._open && l._results.length" class="absolute z-20 left-0 right-0 mt-1 bg-white border rounded-lg shadow max-h-56 overflow-auto" x-cloak>
+												<template x-for="r in l._results" x-bind:key="r.id">
+													<button type="button" x-on:click="choose(l, r)" class="block w-full text-left px-3 py-1.5 hover:bg-slate-100" x-text="r.name + (r.barcode ? '  ·  ' + r.barcode : '')"></button>
+												</template>
+											</div>
+										</div>
+										<button type="button" class="text-red-500 px-1" x-on:click="removeLine(i)" aria-label="Remove line">✕</button>
+									</div>
+								</template>
+							</td>
+							<td class="py-1 pr-2 text-right text-slate-500" x-text="l._new ? '—' : l.ordered"></td>
 							<td class="py-1 pr-2">
 								<div class="flex items-center rounded border" x-bind:class="Number(l.quantity) !== Number(l.ordered) ? 'border-amber-400' : ''">
 									<button type="button" x-on:click="l.quantity = Math.max(0,(Number(l.quantity)||0)-1)" class="px-2 text-slate-500 hover:bg-slate-100">−</button>
@@ -321,13 +334,17 @@ templ PurchaseReceivePage(d PurchaseReceiveData) {
 								</div>
 							</td>
 							<td class="py-1 pr-2"><input type="number" step="0.01" min="0" x-model.number="l.cost_price" class="w-full border rounded px-2 py-1 text-right"/></td>
-							<td class="py-1 pr-2"><input type="number" step="0.01" min="0" x-model.number="l.selling_price" class="w-full border rounded px-2 py-1 text-right"/></td>
+							<td class="py-1 pr-2">
+								<input type="number" step="0.01" min="0" x-model.number="l.selling_price" x-bind:class="marginWarn(l) ? 'border-amber-400' : ''" class="w-full border rounded px-2 py-1 text-right"/>
+								<button type="button" x-show="marginWarn(l)" x-on:click="l.selling_price = suggestSell(l)" class="mt-0.5 text-xs text-amber-600 hover:underline" x-text="'⚠ set ' + sym + ' ' + money(suggestSell(l))"></button>
+							</td>
 							<td class="py-1 pr-2"><input type="date" x-model="l.expiry_date" class="w-full border rounded px-2 py-1"/></td>
 							<td class="py-1 text-right" x-text="sym + ' ' + money(lineSub(l))"></td>
 						</tr>
 					</template>
 				</tbody>
 			</table>
+			<button type="button" class="text-indigo-600 text-sm mb-3" x-on:click="addNewLine()">+ Add forgotten / extra item</button>
 			<p class="text-xs text-amber-600 mb-4" x-show="hasVariance()">Some received quantities differ from what was ordered — only the received quantity updates stock.</p>
 
 			<div class="flex items-center justify-end border-t pt-4">
