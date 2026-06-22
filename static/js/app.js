@@ -946,21 +946,32 @@ function pos(symbol, defaultType, promptAfterSale) {
   };
 }
 
-// grn: the Goods Received Note (purchase entry) screen. Mirrors pos(): line math
-// here is a preview only — the server recomputes the totals authoritatively.
-function grn(symbol) {
+// grn: the Purchase Order entry screen. Creates (or edits) a *draft* — no stock
+// effects until the order is received. `config` is null for a new order, or
+// {editId, supplierId, notes, lines} to edit an existing draft. Line math here is
+// a preview only — the server recomputes totals authoritatively.
+function grn(symbol, config) {
+  config = config || {};
   return {
     sym: symbol,
-    supplierId: "",
-    invoiceNo: "",
-    dueDate: "",
-    paid: 0,
-    notes: "",
+    editId: Number(config.editId) || 0,
+    supplierId: config.supplierId || "",
+    notes: config.notes || "",
     lines: [],
     busy: false,
 
     init() {
-      this.addLine();
+      if (Array.isArray(config.lines) && config.lines.length > 0) {
+        this.lines = config.lines.map((l) => ({
+          product_id: Number(l.product_id) || 0,
+          quantity: Number(l.quantity) || 0,
+          cost_price: Number(l.cost_price) || 0,
+          selling_price: Number(l.selling_price) || 0,
+          expiry_date: l.expiry_date || "",
+        }));
+      } else {
+        this.addLine();
+      }
     },
     money(v) {
       const n = Number(v) || 0;
@@ -973,7 +984,7 @@ function grn(symbol) {
       this.lines.splice(i, 1);
       if (this.lines.length === 0) this.addLine();
     },
-    // F4 add line · F10 receive. Touch steppers on the qty column.
+    // F4 add line · F10 save. Touch steppers on the qty column.
     onKey(e) {
       if (document.body.classList.contains("palette-open")) return;
       if (e.key === "F4") {
@@ -1015,19 +1026,153 @@ function grn(symbol) {
         toast("Add at least one line", "error");
         return;
       }
+      const url = this.editId > 0 ? "/admin/purchases/" + this.editId + "/edit" : "/admin/purchases";
       this.busy = true;
       try {
-        await apiFetch("POST", "/api/purchases", {
+        await apiFetch("POST", url, {
           supplier_id: Number(this.supplierId),
-          invoice_no: this.invoiceNo || null,
           discount: "0",
-          paid_amount: String(this.paid || 0),
-          due_date: this.dueDate || "",
+          paid_amount: "0",
           notes: this.notes || null,
           items: items,
         });
-        toast("Goods received", "success");
+        toast(this.editId > 0 ? "Purchase order updated" : "Purchase order saved", "success");
         window.location = "/admin/purchases";
+      } catch (_) {
+        /* toast already shown */
+      } finally {
+        this.busy = false;
+      }
+    },
+  };
+}
+
+// grnReceive: the receive screen for a draft. Shows ordered vs editable received
+// qty (overstock allowed); posts the actually-received lines + invoice/paid.
+function grnReceive(symbol, config) {
+  config = config || {};
+  return {
+    sym: symbol,
+    id: Number(config.id) || 0,
+    invoiceNo: "",
+    dueDate: "",
+    discount: 0,
+    paid: 0,
+    busy: false,
+    lines: (config.lines || []).map((l) => ({
+      product_id: Number(l.product_id) || 0,
+      product_name: l.product_name || "",
+      ordered: l.ordered || "0",
+      quantity: Number(l.quantity) || 0,
+      cost_price: Number(l.cost_price) || 0,
+      selling_price: Number(l.selling_price) || 0,
+      expiry_date: l.expiry_date || "",
+    })),
+
+    money(v) {
+      const n = Number(v) || 0;
+      return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    },
+    lineSub(l) {
+      return (Number(l.quantity) || 0) * (Number(l.cost_price) || 0);
+    },
+    subtotal() {
+      return this.lines.reduce((s, l) => s + this.lineSub(l), 0);
+    },
+    total() {
+      return Math.max(0, this.subtotal() - (Number(this.discount) || 0));
+    },
+    hasVariance() {
+      return this.lines.some((l) => Number(l.quantity) !== Number(l.ordered));
+    },
+    async submit() {
+      if (this.busy) return;
+      const items = this.lines
+        .filter((l) => Number(l.product_id) > 0 && Number(l.quantity) > 0)
+        .map((l) => ({
+          product_id: Number(l.product_id),
+          quantity: String(l.quantity),
+          ordered_qty: String(l.ordered || 0),
+          cost_price: String(l.cost_price || 0),
+          selling_price: String(l.selling_price || 0),
+          expiry_date: l.expiry_date || "",
+        }));
+      if (items.length === 0) {
+        toast("Receive at least one line", "error");
+        return;
+      }
+      this.busy = true;
+      try {
+        await apiFetch("POST", "/admin/purchases/" + this.id + "/receive", {
+          invoice_no: this.invoiceNo || null,
+          discount: String(this.discount || 0),
+          paid_amount: String(this.paid || 0),
+          due_date: this.dueDate || "",
+          items: items,
+        });
+        toast("Goods received", "success");
+        window.location = "/admin/purchases/" + this.id;
+      } catch (_) {
+        /* toast already shown */
+      } finally {
+        this.busy = false;
+      }
+    },
+  };
+}
+
+// poBuilder: the low-stock reorder picker. Tick items, set qty + supplier, then
+// create one draft Purchase Order per supplier and open the printable order(s).
+function poBuilder(rows) {
+  return {
+    busy: false,
+    lines: (rows || []).map((r) => ({
+      product_id: Number(r.product_id) || 0,
+      name: r.name || "",
+      on_hand: r.on_hand || "0",
+      unit: r.unit || "",
+      suggested: Number(r.suggested) || 0,
+      cost: r.cost || "0",
+      supplier_id: Number(r.supplier_id) || 0,
+      selected: false,
+    })),
+
+    toggleAll(on) {
+      this.lines.forEach((l) => (l.selected = !!on));
+    },
+    selected() {
+      return this.lines.filter((l) => l.selected && Number(l.suggested) > 0);
+    },
+    selectedCount() {
+      return this.selected().length;
+    },
+    async build() {
+      if (this.busy) return;
+      const picked = this.selected();
+      if (picked.length === 0) {
+        toast("Tick at least one item to order", "error");
+        return;
+      }
+      if (picked.some((l) => Number(l.supplier_id) <= 0)) {
+        toast("Choose a supplier for every ticked item", "error");
+        return;
+      }
+      const lines = picked.map((l) => ({
+        product_id: Number(l.product_id),
+        supplier_id: Number(l.supplier_id),
+        quantity: String(l.suggested),
+        cost_price: String(l.cost || 0),
+      }));
+      this.busy = true;
+      try {
+        const res = await apiFetch("POST", "/admin/purchases/draft", { lines });
+        const ids = (res && res.data && res.data.ids) || [];
+        toast(ids.length + " purchase order(s) created", "success");
+        if (ids.length > 0) {
+          window.location = "/admin/purchases/po/print?mode=combined&ids=" + ids.join(",");
+        } else {
+          window.location = "/admin/purchases";
+        }
       } catch (_) {
         /* toast already shown */
       } finally {

@@ -222,9 +222,17 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	ag.GET("/suppliers/export", admin.SupplierExportCSV)
 	ag.POST("/suppliers/import", admin.SupplierImport)
 
-	// Purchases (GRN)
+	// Purchases — drafts (Purchase Orders) → receive
 	ag.GET("/purchases", admin.Purchases)
 	ag.GET("/purchases/new", admin.PurchaseEntry)
+	ag.POST("/purchases", admin.PurchaseEntryCreate)
+	ag.POST("/purchases/draft", admin.PurchaseDraftCreate)
+	ag.GET("/purchases/po/print", admin.DraftPOPrint)
+	ag.GET("/purchases/:id/edit", admin.PurchaseDraftEditForm)
+	ag.POST("/purchases/:id/edit", admin.PurchaseDraftUpdate)
+	ag.GET("/purchases/:id/receive", admin.PurchaseReceiveForm)
+	ag.POST("/purchases/:id/receive", admin.PurchaseReceive)
+	ag.POST("/purchases/:id/delete", admin.PurchaseDraftDelete)
 	ag.GET("/purchases/:id", admin.PurchaseDetail)
 
 	// Purchase returns (debit notes)

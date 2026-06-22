@@ -199,5 +199,7 @@ html.dark body.bg-slate-100 { background-color: #0b1120 !important; color: #e2e8
   .no-print { display: none !important; }
   .report-body { background: #fff !important; }
   .report-sheet { max-width: none !important; margin: 0 !important; padding: 0 !important; box-shadow: none !important; border-radius: 0 !important; }
+  /* Purchase orders printed one-per-supplier: break to a new page after each. */
+  .po-break { break-after: page; page-break-after: always; }
   @page { margin: 12mm; }
 }

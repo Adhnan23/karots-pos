@@ -227,14 +227,19 @@ func (a *adminUI) SupplierPay(c echo.Context) error {
 
 func (a *adminUI) Purchases(c echo.Context) error {
 	ctx := c.Request().Context()
-	rows, err := a.s.purchases.List(ctx)
+	drafts, err := a.s.purchases.ListDrafts(ctx)
+	if err != nil {
+		return err
+	}
+	received, err := a.s.purchases.ListReceived(ctx)
 	if err != nil {
 		return err
 	}
 	return response.RenderPage(c, adminpages.PurchasesPage(adminpages.PurchasesData{
 		UserName: middleware.CurrentUserName(c),
 		Symbol:   a.symbol(ctx),
-		Rows:     rows,
+		Drafts:   drafts,
+		Received: received,
 	}))
 }
 
@@ -266,10 +271,11 @@ func (a *adminUI) PurchaseEntry(c echo.Context) error {
 		return err
 	}
 	return response.RenderPage(c, adminpages.PurchaseEntryPage(adminpages.PurchaseEntryData{
-		UserName:  middleware.CurrentUserName(c),
-		Symbol:    a.symbol(ctx),
-		Suppliers: sups,
-		Products:  prods,
+		UserName:   middleware.CurrentUserName(c),
+		Symbol:     a.symbol(ctx),
+		Suppliers:  sups,
+		Products:   prods,
+		ConfigJSON: "null",
 	}))
 }
 
@@ -959,10 +965,15 @@ func (a *adminUI) LowStockReport(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	sups, err := a.s.suppliers.List(ctx, "")
+	if err != nil {
+		return err
+	}
 	return response.RenderPage(c, adminpages.LowStockPage(adminpages.LowStockData{
-		UserName: middleware.CurrentUserName(c),
-		Symbol:   a.symbol(ctx),
-		Rows:     rows,
+		UserName:  middleware.CurrentUserName(c),
+		Symbol:    a.symbol(ctx),
+		Rows:      rows,
+		Suppliers: sups,
 	}))
 }
 

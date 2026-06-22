@@ -34,15 +34,16 @@ type Purchase struct {
 func (p Purchase) Balance() decimal.Decimal { return p.Total.Sub(p.PaidAmount) }
 
 type PurchaseItem struct {
-	ID           int64           `db:"id"            json:"id"`
-	PurchaseID   int64           `db:"purchase_id"   json:"purchase_id"`
-	ProductID    int64           `db:"product_id"    json:"product_id"`
-	Quantity     decimal.Decimal `db:"quantity"      json:"quantity"`
-	CostPrice    decimal.Decimal `db:"cost_price"    json:"cost_price"`
-	SellingPrice decimal.Decimal `db:"selling_price" json:"selling_price"`
-	ExpiryDate   *time.Time      `db:"expiry_date"   json:"expiry_date,omitempty"`
-	Subtotal     decimal.Decimal `db:"subtotal"      json:"subtotal"`
-	ProductName  string          `db:"product_name"  json:"product_name"`
+	ID           int64            `db:"id"            json:"id"`
+	PurchaseID   int64            `db:"purchase_id"   json:"purchase_id"`
+	ProductID    int64            `db:"product_id"    json:"product_id"`
+	Quantity     decimal.Decimal  `db:"quantity"      json:"quantity"`
+	OrderedQty   *decimal.Decimal `db:"ordered_qty"   json:"ordered_qty,omitempty"`
+	CostPrice    decimal.Decimal  `db:"cost_price"    json:"cost_price"`
+	SellingPrice decimal.Decimal  `db:"selling_price" json:"selling_price"`
+	ExpiryDate   *time.Time       `db:"expiry_date"   json:"expiry_date,omitempty"`
+	Subtotal     decimal.Decimal  `db:"subtotal"      json:"subtotal"`
+	ProductName  string           `db:"product_name"  json:"product_name"`
 }
 
 type Detail struct {
@@ -87,9 +88,9 @@ func (r *Repository) InsertItem(ctx context.Context, purchaseID int64, it Purcha
 func (r *Repository) InsertItemReturningID(ctx context.Context, purchaseID int64, it PurchaseItem) (int64, error) {
 	var id int64
 	err := r.q.GetContext(ctx, &id, `
-		INSERT INTO purchase_items (purchase_id, product_id, quantity, cost_price, selling_price, expiry_date, subtotal)
-		VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
-		purchaseID, it.ProductID, it.Quantity, it.CostPrice, it.SellingPrice, it.ExpiryDate, it.Subtotal)
+		INSERT INTO purchase_items (purchase_id, product_id, quantity, ordered_qty, cost_price, selling_price, expiry_date, subtotal)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+		purchaseID, it.ProductID, it.Quantity, it.OrderedQty, it.CostPrice, it.SellingPrice, it.ExpiryDate, it.Subtotal)
 	return id, err
 }
 
@@ -177,4 +178,55 @@ func (r *Repository) List(ctx context.Context, limit int) ([]Purchase, error) {
 		LEFT JOIN users u ON u.id = pu.received_by
 		ORDER BY pu.created_at DESC LIMIT $1`, limit)
 	return rows, err
+}
+
+// ListByStatus lists draft purchases (Purchase Orders, draft=true) or received
+// history (draft=false), newest first.
+func (r *Repository) ListByStatus(ctx context.Context, draft bool, limit int) ([]Purchase, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	cond := "pu.status <> 'draft'"
+	if draft {
+		cond = "pu.status = 'draft'"
+	}
+	var rows []Purchase
+	err := r.q.SelectContext(ctx, &rows, `
+		SELECT pu.*, s.name AS supplier_name, u.name AS received_by_name
+		FROM purchases pu
+		JOIN suppliers s ON s.id = pu.supplier_id
+		LEFT JOIN users u ON u.id = pu.received_by
+		WHERE `+cond+`
+		ORDER BY pu.created_at DESC LIMIT $1`, limit)
+	return rows, err
+}
+
+// UpdateHeader rewrites a purchase's header fields. Used when receiving a draft
+// (sets invoice/paid/due and flips status) and when editing a draft's totals.
+func (r *Repository) UpdateHeader(ctx context.Context, id int64, h purchaseRow) error {
+	_, err := r.q.ExecContext(ctx, `
+		UPDATE purchases
+		SET invoice_no = $2, status = $3, subtotal = $4, discount = $5,
+		    total = $6, paid_amount = $7, due_date = $8, received_by = $9, notes = $10
+		WHERE id = $1`,
+		id, h.InvoiceNo, h.Status, h.Subtotal, h.Discount, h.Total, h.Paid, h.DueDate, h.ReceivedBy, h.Notes)
+	return err
+}
+
+// DeleteItems clears a purchase's lines (so a draft can be re-saved/received with
+// an edited set). Caller must run inside a transaction.
+func (r *Repository) DeleteItems(ctx context.Context, purchaseID int64) error {
+	_, err := r.q.ExecContext(ctx, `DELETE FROM purchase_items WHERE purchase_id = $1`, purchaseID)
+	return err
+}
+
+// DeleteDraft removes a draft purchase (only while still a draft — received
+// purchases are immutable history). Returns false if nothing was deleted.
+func (r *Repository) DeleteDraft(ctx context.Context, id int64) (bool, error) {
+	res, err := r.q.ExecContext(ctx, `DELETE FROM purchases WHERE id = $1 AND status = 'draft'`, id)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
 }
