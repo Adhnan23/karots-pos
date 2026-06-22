@@ -7,6 +7,14 @@
 document.addEventListener("DOMContentLoaded", function () {
   document.body.addEventListener("htmx:afterSwap", function (e) {
     if (e.target && e.target.id === "modal-container") {
+      // Alpine's MutationObserver can miss an HTMX-swapped fragment (e.g. when an
+      // unrelated Alpine effect throws mid-flush), leaving the modal's Cancel / ✕
+      // x-on:click handlers unbound so only Esc closes it. Initialise the swapped
+      // subtree explicitly; guarded so we don't double-init if the observer did.
+      const root = e.target.firstElementChild;
+      if (window.Alpine && root && !root._x_dataStack) {
+        window.Alpine.initTree(e.target);
+      }
       const el = e.target.querySelector(
         "input:not([type=hidden]):not([type=checkbox]):not([type=radio]), select, textarea",
       );

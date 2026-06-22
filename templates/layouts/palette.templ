@@ -53,8 +53,21 @@ type paletteEntry struct {
 }
 
 // paletteJSON marshals palette destinations to a JS array literal for x-data.
+// It drops duplicate hrefs first: the palette x-for is keyed on href, and a
+// plugin section reuses its hub entry's href both as the section link and as a
+// sub-link — duplicate keys crash Alpine's keyed reconciliation, which in turn
+// aborts the flush that initialises HTMX-swapped modals.
 func paletteJSON(entries []paletteEntry) string {
-	b, err := json.Marshal(entries)
+	seen := make(map[string]bool, len(entries))
+	uniq := make([]paletteEntry, 0, len(entries))
+	for _, e := range entries {
+		if seen[e.Href] {
+			continue
+		}
+		seen[e.Href] = true
+		uniq = append(uniq, e)
+	}
+	b, err := json.Marshal(uniq)
 	if err != nil {
 		return "[]"
 	}
