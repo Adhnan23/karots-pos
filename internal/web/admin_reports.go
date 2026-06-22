@@ -189,23 +189,18 @@ func (a *adminUI) ProductSalesReport(c echo.Context) error {
 	if group == "" {
 		group = "month"
 	}
-	prods, _, err := a.s.products.List(ctx, products.ListQuery{Limit: 1000})
-	if err != nil {
-		return err
-	}
 	var pid int64
 	if v := c.QueryParam("product"); v != "" {
 		pid, _ = strconv.ParseInt(v, 10, 64)
 	}
-	if pid == 0 && len(prods) > 0 {
-		pid = prods[0].ID
-	}
 	d := adminpages.ProductSalesData{
 		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx),
-		From: fromStr, To: toStr, Preset: preset, Group: group,
-		Products: prods, ProductID: pid,
+		From: fromStr, To: toStr, Preset: preset, Group: group, ProductID: pid,
 	}
 	if pid > 0 {
+		if p, err := a.s.products.Get(ctx, pid); err == nil && p != nil {
+			d.ProductName = p.Name
+		}
 		rows, err := a.s.reports.ProductSalesByPeriod(ctx, pid, from, to, group)
 		if err != nil {
 			return err
@@ -219,11 +214,6 @@ func (a *adminUI) ProductSalesReport(c echo.Context) error {
 		for _, r := range rows {
 			d.TotalQty = d.TotalQty.Add(r.Qty)
 			d.TotalRevenue = d.TotalRevenue.Add(r.Revenue)
-		}
-		for _, p := range prods {
-			if p.ID == pid {
-				d.ProductName = p.Name
-			}
 		}
 	}
 	return response.RenderPage(c, adminpages.ProductSalesReport(d))

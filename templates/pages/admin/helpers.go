@@ -11,6 +11,13 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+// jsArg JSON-encodes a string for safe embedding as a JS literal in an x-data
+// attribute (handles quotes/specials in e.g. product names).
+func jsArg(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
+}
+
 // ReorderInfo is the demand-derived hint for one low-stock product: a suggested
 // order qty (from trailing-average demand × lead time) and units sold in the same
 // period last year. Empty Suggested means "no sales history — use the fallback".

@@ -371,6 +371,16 @@ func bonusText(symbol string, v *decimal.Decimal) string {
 	return money.Format(symbol, *v)
 }
 
+// sessionBonus sums the per-carrier bonus/loss across a session (for the
+// collapsed session summary line on the report).
+func sessionBonus(b SessionRecon) decimal.Decimal {
+	sum := decimal.Zero
+	for _, cr := range b.Rows {
+		sum = sum.Add(cr.BonusLoss)
+	}
+	return sum
+}
+
 // usedFor renders a device's purpose tags for the admin device table.
 func usedFor(d Device) string {
 	if !d.TracksFloat {

@@ -587,16 +587,25 @@ templ typeOption(value, label, current string) {
 // reportSession shows one cash session's per-carrier reconciliation (carriers
 // with no activity are hidden).
 templ reportSession(symbol string, b SessionRecon) {
-	<div class="border rounded-xl p-4">
-		<div class="flex items-center justify-between mb-3">
+	<details class="border rounded-xl group" open?={ b.Session.ClosedAt == nil }>
+		<summary class="flex items-center justify-between p-4 cursor-pointer select-none list-none">
 			<div class="font-medium">
+				<span class="text-slate-400 mr-1 group-open:rotate-90 inline-block transition-transform">▸</span>
 				Session #{ strconv.FormatInt(b.Session.ID, 10) }
 				<span class="text-slate-400 font-normal">· { b.Session.UserName } · { b.Session.OpenedAt.Format("02 Jan, 15:04") }</span>
 			</div>
-			if b.Session.ClosedAt == nil {
-				<span class="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">open</span>
-			}
-		</div>
+			<div class="flex items-center gap-3 text-sm">
+				if !anyActivity(b.Rows) {
+					<span class="text-slate-400">no activity</span>
+				} else {
+					<span class="text-slate-500">Bonus/Loss <span class="tabular-nums font-medium">{ money.Format(symbol, sessionBonus(b)) }</span></span>
+				}
+				if b.Session.ClosedAt == nil {
+					<span class="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">open</span>
+				}
+			</div>
+		</summary>
+		<div class="px-4 pb-4">
 		if !anyActivity(b.Rows) {
 			<p class="text-sm text-slate-400">No recharge activity.</p>
 		} else {
@@ -645,5 +654,6 @@ templ reportSession(symbol string, b SessionRecon) {
 				</tbody>
 			</table>
 		}
-	</div>
+		</div>
+	</details>
 }

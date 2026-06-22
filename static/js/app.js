@@ -979,6 +979,39 @@ function poProductChoose(line, r) {
   line._open = false;
 }
 
+// reportProductPicker backs the search-box product selector on the per-product
+// report. Choosing a result fills the hidden `product` field and submits the
+// range form so the chart reloads for that product (keeping the date range/group).
+function reportProductPicker(initialId, initialName) {
+  return {
+    productId: initialId || "",
+    name: initialName || "",
+    open: false,
+    results: [],
+    async search() {
+      const q = (this.name || "").trim();
+      if (!q) {
+        this.results = [];
+        this.open = false;
+        return;
+      }
+      try {
+        const json = await apiFetch("GET", "/api/products?limit=20&search=" + encodeURIComponent(q));
+        this.results = json.data || [];
+        this.open = true;
+      } catch (_) {
+        this.results = [];
+      }
+    },
+    choose(r) {
+      this.productId = String(r.id);
+      this.name = r.name;
+      this.open = false;
+      this.$nextTick(() => this.$root.closest("form").submit());
+    },
+  };
+}
+
 function grn(symbol, config) {
   config = config || {};
   return {
