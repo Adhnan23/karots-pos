@@ -84,6 +84,24 @@ func (a *adminUI) ProductExportCSV(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	// Build a category id → full "Parent > Child" path so the export round-trips
+	// through import (which treats the category column as a path); writing only the
+	// leaf name would re-home nested products to a top-level category on re-upload.
+	catPath := map[int64]string{}
+	if nodes, terr := a.s.categories.Tree(ctx); terr == nil {
+		nameByID := make(map[int64]string, len(nodes))
+		for _, n := range nodes {
+			nameByID[n.ID] = n.Name
+		}
+		for _, n := range nodes {
+			parts := make([]string, 0, len(n.Path)+1)
+			for _, anc := range n.Path {
+				parts = append(parts, nameByID[anc])
+			}
+			parts = append(parts, n.Name)
+			catPath[n.ID] = strings.Join(parts, " > ")
+		}
+	}
 	out := make([][]string, 0, len(rows))
 	for _, p := range rows {
 		supplier := ""
@@ -98,8 +116,12 @@ func (a *adminUI) ProductExportCSV(c echo.Context) error {
 		if p.NameSi != nil {
 			nameSi = *p.NameSi
 		}
+		category := catPath[p.CategoryID]
+		if category == "" {
+			category = p.CategoryName
+		}
 		out = append(out, []string{
-			p.Name, nameSi, barcode, p.CategoryName, p.UnitAbbr,
+			p.Name, nameSi, barcode, category, p.UnitAbbr,
 			csvMoney(p.CostPrice), csvMoney(p.SellingPrice), csvMoney(p.WholesalePrice), csvMoney(p.TaxRate),
 			strconv.Itoa(p.ReorderLevel), p.StockQty.String(), supplier,
 			strconv.FormatBool(p.TrackSerial), strconv.Itoa(p.WarrantyMonths),
