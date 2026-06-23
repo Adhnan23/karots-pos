@@ -14,16 +14,16 @@
 // Flags:
 //
 //	-plugins  comma-separated plugin keys, or "all" (omit for interactive)
-//	-os       target GOOS: linux | windows | darwin   (default: host OS)
-//	-arch     target GOARCH                            (default: amd64)
+//	-os       target GOOS: linux | windows | darwin | freebsd  (default: host OS)
+//	-arch     target GOARCH: amd64 | arm64                      (default: amd64)
 //	-name     output binary base name                 (default: karots-pos)
 //	-out      output directory                         (default: dist)
 //	-yes      assume yes / non-interactive
 package main
 
 import (
-	"bufio"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -32,6 +32,9 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+
+	"github.com/charmbracelet/huh"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // manifest mirrors plugins/<key>/plugin.json.
@@ -58,8 +61,8 @@ func main() {
 func run() error {
 	var (
 		pluginsFlag = flag.String("plugins", "", `comma-separated plugin keys, or "all" (omit for interactive)`)
-		osFlag      = flag.String("os", runtime.GOOS, "target GOOS: linux | windows | darwin")
-		archFlag    = flag.String("arch", "amd64", "target GOARCH")
+		osFlag      = flag.String("os", runtime.GOOS, "target GOOS: linux | windows | darwin | freebsd")
+		archFlag    = flag.String("arch", "amd64", "target GOARCH: amd64 | arm64")
 		nameFlag    = flag.String("name", "karots-pos", "output binary base name")
 		outFlag     = flag.String("out", "dist", "output directory")
 		yes         = flag.Bool("yes", false, "assume yes / non-interactive")
@@ -83,12 +86,16 @@ func run() error {
 		return err
 	}
 
-	target, err := chooseOS(*osFlag, *yes)
+	target, arch, err := chooseTarget(*osFlag, *archFlag, *yes)
 	if err != nil {
 		return err
 	}
 
-	fmt.Printf("\nBuilding %q for %s/%s with: %s\n", *nameFlag, target, *archFlag, pluginNames(selected))
+	headStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("63"))
+	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("213"))
+	fmt.Printf("\n%s\n  binary  %s\n  target  %s/%s\n  plugins %s\n\n",
+		headStyle.Render("Building per-shop POS"),
+		keyStyle.Render(*nameFlag), target, arch, keyStyle.Render(pluginNames(selected)))
 
 	// Rewrite enabled_plugins.go, always restoring it afterwards.
 	original, err := os.ReadFile(enabledPluginsPath)
@@ -124,7 +131,7 @@ func run() error {
 	}
 	outBin := filepath.Join(*outFlag, bin)
 	build := exec.Command("go", "build", "-ldflags=-s -w", "-o", outBin, "./cmd/server")
-	build.Env = append(os.Environ(), "GOOS="+target, "GOARCH="+*archFlag, "CGO_ENABLED=0")
+	build.Env = append(os.Environ(), "GOOS="+target, "GOARCH="+arch, "CGO_ENABLED=0")
 	build.Stdout, build.Stderr = os.Stdout, os.Stderr
 	fmt.Printf("→ go build %s\n", outBin)
 	if err := build.Run(); err != nil {
@@ -179,7 +186,7 @@ func selectPlugins(all []manifest, flagVal string, yes bool) ([]manifest, error)
 			return all, nil
 		}
 		var sel []manifest
-		for _, k := range strings.Split(flagVal, ",") {
+		for k := range strings.SplitSeq(flagVal, ",") {
 			k = strings.TrimSpace(k)
 			if k == "" {
 				continue
@@ -197,47 +204,112 @@ func selectPlugins(all []manifest, flagVal string, yes bool) ([]manifest, error)
 		return nil, nil // core-only
 	}
 
-	// Interactive: ask per plugin.
-	fmt.Println("Select plugins to compile in (y/N):")
-	in := bufio.NewReader(os.Stdin)
-	var sel []manifest
+	// Interactive: a single checkbox multi-select. Each option shows the plugin
+	// name (bold) above a dimmed one-line description, so the list reads as a
+	// scannable menu rather than a wall of same-coloured y/N prompts.
+	nameStyle := lipgloss.NewStyle().Bold(true)
+	descStyle := lipgloss.NewStyle().Faint(true)
+	opts := make([]huh.Option[string], 0, len(all))
 	for _, m := range all {
-		fmt.Printf("  %s — %s [y/N]: ", m.Name, m.Description)
-		line, _ := in.ReadString('\n')
-		if ans := strings.ToLower(strings.TrimSpace(line)); ans == "y" || ans == "yes" {
-			sel = append(sel, m)
+		label := nameStyle.Render(m.Name) + "\n  " + descStyle.Render(oneLine(m.Description))
+		opts = append(opts, huh.NewOption(label, m.Key))
+	}
+
+	var chosen []string
+	form := huh.NewForm(huh.NewGroup(
+		huh.NewMultiSelect[string]().
+			Title("Plugins").
+			Description("Space to toggle · ↑/↓ to move · Enter to confirm. Leave all unchecked for a core-only build.").
+			Options(opts...).
+			Value(&chosen),
+	)).WithTheme(huh.ThemeCharm())
+	if err := form.Run(); err != nil {
+		if errors.Is(err, huh.ErrUserAborted) {
+			return nil, fmt.Errorf("cancelled")
 		}
+		return nil, err
+	}
+
+	var sel []manifest
+	for _, k := range chosen {
+		sel = append(sel, byKey[k])
 	}
 	return sel, nil
 }
 
-// chooseOS validates the -os flag or, when interactive, prompts (defaulting to
-// the flag value, which itself defaults to the host OS).
-func chooseOS(flagVal string, yes bool) (string, error) {
-	valid := map[string]bool{"linux": true, "windows": true, "darwin": true}
-	def := strings.ToLower(strings.TrimSpace(flagVal))
-	if def == "" {
-		def = runtime.GOOS
+// oneLine collapses a manifest description to a single, length-capped line so the
+// plugin menu stays tidy even for plugins with a paragraph-long description.
+func oneLine(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if i := strings.IndexAny(s, ".;"); i > 0 && i < 90 {
+		s = s[:i]
 	}
-	if !valid[def] {
-		return "", fmt.Errorf("unsupported -os %q (linux | windows | darwin)", flagVal)
+	const max = 88
+	if len(s) > max {
+		s = strings.TrimSpace(s[:max]) + "…"
 	}
-	// Non-interactive: take the flag (or host) value as-is. An explicit -os was
-	// honoured; the host default is also accepted without prompting.
-	if yes || flagWasSet("os") {
-		return def, nil
+	return s
+}
+
+// chooseTarget resolves the build target GOOS/GOARCH. It validates the -os/-arch
+// flags, and for any not explicitly set it prompts with a select (OS and
+// architecture as two separate lists). Defaults: host OS, amd64.
+func chooseTarget(osFlag, archFlag string, yes bool) (string, string, error) {
+	validOS := map[string]bool{"linux": true, "windows": true, "darwin": true, "freebsd": true}
+	validArch := map[string]bool{"amd64": true, "arm64": true}
+
+	goos := strings.ToLower(strings.TrimSpace(osFlag))
+	if goos == "" {
+		goos = runtime.GOOS
 	}
-	in := bufio.NewReader(os.Stdin)
-	fmt.Printf("Target OS [linux/windows/darwin] (default %s): ", def)
-	line, _ := in.ReadString('\n')
-	ans := strings.ToLower(strings.TrimSpace(line))
-	if ans == "" {
-		return def, nil
+	if !validOS[goos] {
+		return "", "", fmt.Errorf("unsupported -os %q (linux | windows | darwin | freebsd)", osFlag)
 	}
-	if !valid[ans] {
-		return "", fmt.Errorf("unsupported OS %q", ans)
+	goarch := strings.ToLower(strings.TrimSpace(archFlag))
+	if goarch == "" {
+		goarch = "amd64"
 	}
-	return ans, nil
+	if !validArch[goarch] {
+		return "", "", fmt.Errorf("unsupported -arch %q (amd64 | arm64)", archFlag)
+	}
+
+	if yes {
+		return goos, goarch, nil
+	}
+
+	// Prompt only for the parts not pinned by an explicit flag.
+	var fields []huh.Field
+	if !flagWasSet("os") {
+		fields = append(fields, huh.NewSelect[string]().
+			Title("Operating system").
+			Description("Where will this shop's binary run?").
+			Options(
+				huh.NewOption("Linux", "linux"),
+				huh.NewOption("Windows", "windows"),
+				huh.NewOption("macOS", "darwin"),
+				huh.NewOption("FreeBSD", "freebsd"),
+			).
+			Value(&goos))
+	}
+	if !flagWasSet("arch") {
+		fields = append(fields, huh.NewSelect[string]().
+			Title("Architecture").
+			Description("amd64 = Intel/AMD x86-64 · arm64 = ARM (Apple Silicon, Raspberry Pi, ARM servers)").
+			Options(
+				huh.NewOption("x86-64  (amd64)", "amd64"),
+				huh.NewOption("ARM 64-bit  (arm64)", "arm64"),
+			).
+			Value(&goarch))
+	}
+	if len(fields) > 0 {
+		if err := huh.NewForm(huh.NewGroup(fields...)).WithTheme(huh.ThemeCharm()).Run(); err != nil {
+			if errors.Is(err, huh.ErrUserAborted) {
+				return "", "", fmt.Errorf("cancelled")
+			}
+			return "", "", err
+		}
+	}
+	return goos, goarch, nil
 }
 
 // flagWasSet reports whether the named flag was explicitly passed.
