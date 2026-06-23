@@ -124,13 +124,19 @@ templ LowStockPage(d LowStockData) {
 								<td class="py-2 px-3 text-right"><span x-text="l.on_hand"></span> <span class="text-slate-400" x-text="l.unit"></span></td>
 								<td class="py-2 px-3 text-right text-slate-500" x-text="l.sold_last_year"></td>
 								<td class="py-2 px-3"><input type="number" step="0.001" min="0" x-model.number="l.suggested" class="w-full border rounded px-2 py-1 text-right"/></td>
-								<td class="py-2 px-3">
-									<select x-model.number="l.supplier_id" class="w-full border rounded px-2 py-1">
-										<option value="0">Select supplier…</option>
-										for _, s := range d.Suppliers {
-											<option value={ strconv.FormatInt(s.ID, 10) }>{ s.Name }</option>
-										}
-									</select>
+								<td class="py-2 px-3 relative" x-on:click.away="l._supOpen=false" x-on:keydown.escape="l._supOpen=false">
+									<button type="button" x-on:click="l._supOpen=!l._supOpen" class="w-full flex items-center justify-between gap-1 border rounded px-2 py-1 text-left">
+										<span class="truncate" x-text="l.supplier_name || 'Select supplier…'" x-bind:class="l.supplier_name ? '' : 'text-slate-400'"></span>
+										<span class="text-slate-400 shrink-0">▾</span>
+									</button>
+									<div x-show="l._supOpen" x-cloak class="absolute z-20 left-0 right-0 mt-1 bg-white border rounded-lg shadow-lg">
+										<input x-model="l._supQuery" x-on:input.debounce.200ms="searchLineSuppliers(l)" type="search" placeholder="Search supplier…" class="w-full border-b px-2 py-1.5 text-sm"/>
+										<ul class="max-h-48 overflow-auto">
+											<template x-for="s in l._supResults" x-bind:key="s.id">
+												<li><button type="button" x-on:click="pickLineSupplier(l, s)" class="w-full text-left px-3 py-1.5 text-sm hover:bg-slate-100" x-text="s.name"></button></li>
+											</template>
+										</ul>
+									</div>
 								</td>
 							</tr>
 						</template>

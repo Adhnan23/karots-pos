@@ -39,6 +39,7 @@ func lowStockConfigJSON(rows []products.Product, demand map[int64]ReorderInfo) s
 		SoldLastYear string `json:"sold_last_year"`
 		Cost         string `json:"cost"`
 		SupplierID   int64  `json:"supplier_id"`
+		SupplierName string `json:"supplier_name"`
 		Selected     bool   `json:"selected"`
 	}
 	out := make([]line, 0, len(rows))
@@ -57,12 +58,16 @@ func lowStockConfigJSON(rows []products.Product, demand map[int64]ReorderInfo) s
 			soldLY = "0"
 		}
 		var sup int64
+		supName := ""
 		if p.PreferredSupplierID != nil {
 			sup = *p.PreferredSupplierID
 		}
+		if p.PreferredSupplierName != nil {
+			supName = *p.PreferredSupplierName
+		}
 		out = append(out, line{
 			ProductID: p.ID, Name: p.Name, OnHand: p.StockQty.String(), Unit: p.UnitAbbr,
-			Suggested: suggested, SoldLastYear: soldLY, Cost: p.CostPrice.String(), SupplierID: sup,
+			Suggested: suggested, SoldLastYear: soldLY, Cost: p.CostPrice.String(), SupplierID: sup, SupplierName: supName,
 		})
 	}
 	b, _ := json.Marshal(out)

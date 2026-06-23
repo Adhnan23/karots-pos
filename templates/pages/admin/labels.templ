@@ -4,7 +4,7 @@ import (
 	"strconv"
 
 	"karots-pos/internal/features/products"
-	"karots-pos/internal/money"
+	adminfragments "karots-pos/templates/fragments/admin"
 	"karots-pos/templates/layouts"
 )
 
@@ -25,19 +25,9 @@ templ LabelsPage(d LabelsData) {
 				<h2 class="text-lg font-semibold mb-1">From a product</h2>
 				<p class="text-sm text-slate-500 mb-4">Pick a product, preview it, then print. The sheet opens in a new tab.</p>
 				<form method="get" action="/admin/labels/print" target="_blank" class="space-y-4">
-					<div>
+					<div x-on:picked="onProductPick($event.detail.item)">
 						<label class="block text-sm font-medium mb-1">Product</label>
-						<select name="product_id" required class="w-full border rounded-lg px-3 py-2" x-on:change="onProduct($event)">
-							<option value="">Select…</option>
-							for _, p := range d.Products {
-								<option
-									value={ strconv.FormatInt(p.ID, 10) }
-									data-name={ p.Name }
-									data-code={ barcodeValue(p) }
-									data-price={ money.Format(d.Symbol, p.SellingPrice) }
-								>{ p.Name } — { money.Format(d.Symbol, p.SellingPrice) }</option>
-							}
-						</select>
+						@adminfragments.ProductPicker("product_id", 0, "", "Search product…")
 					</div>
 					<div class="grid grid-cols-2 gap-4">
 						<div>

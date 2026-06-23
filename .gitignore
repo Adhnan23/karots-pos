@@ -8,3 +8,6 @@
 
 # Per-shop bootstrap build output
 dist/
+
+# Playwright MCP scratch output
+.playwright-mcp/

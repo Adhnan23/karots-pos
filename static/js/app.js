@@ -1468,8 +1468,26 @@ function poBuilder(rows) {
       suggested: Number(r.suggested) || 0,
       cost: r.cost || "0",
       supplier_id: Number(r.supplier_id) || 0,
+      supplier_name: r.supplier_name || "", // searchable per-line supplier chooser
+      _supOpen: false,
+      _supQuery: "",
+      _supResults: [],
       selected: false,
     })),
+    async searchLineSuppliers(l) {
+      const q = l._supQuery.trim();
+      if (!q) { l._supResults = []; return; }
+      try {
+        const json = await apiFetch("GET", "/api/suppliers?search=" + encodeURIComponent(q) + "&limit=20", undefined, { silent: true });
+        l._supResults = json.data || [];
+      } catch (_) { l._supResults = []; }
+    },
+    pickLineSupplier(l, s) {
+      l.supplier_id = s ? Number(s.id) : 0;
+      l.supplier_name = s ? s.name : "";
+      l._supOpen = false;
+      l._supQuery = "";
+    },
 
     toggleAll(on) {
       this.lines.forEach((l) => (l.selected = !!on));
@@ -1688,6 +1706,27 @@ function labels(sym) {
       this.pName = (o && o.dataset.name) || "";
       this.pCode = (o && o.dataset.code) || "";
       this.pPrice = (o && o.dataset.price) || "";
+      this.$nextTick(() => this.draw("preview-product", this.pCode, "CODE128"));
+    },
+    // onProductPick is the searchable ProductPicker's equivalent of onProduct:
+    // it takes the chosen product object (from the "picked" event) and rebuilds
+    // the live preview. barcode falls back to SKU<id> (mirrors barcodeValue).
+    onProductPick(item) {
+      if (!item) {
+        this.pName = "";
+        this.pCode = "";
+        this.pPrice = "";
+        return;
+      }
+      this.pName = item.name || "";
+      this.pCode = item.barcode || "SKU" + item.id;
+      this.pPrice =
+        this.sym +
+        " " +
+        (Number(item.selling_price) || 0).toLocaleString(undefined, {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        });
       this.$nextTick(() => this.draw("preview-product", this.pCode, "CODE128"));
     },
     renderCustom() {
