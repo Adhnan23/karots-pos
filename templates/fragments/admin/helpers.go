@@ -127,6 +127,7 @@ func jsIntArray(ids []int64) string {
 // Form field selectors for valOf, which prefills the product form for edits.
 const (
 	fName = iota
+	fNameLocal
 	fBarcode
 	fCost
 	fSelling
@@ -146,6 +147,11 @@ func valOf(p *products.Product, field int) string {
 	switch field {
 	case fName:
 		return p.Name
+	case fNameLocal:
+		if p.NameLocal != nil {
+			return *p.NameLocal
+		}
+		return ""
 	case fBarcode:
 		if p.Barcode != nil {
 			return *p.Barcode

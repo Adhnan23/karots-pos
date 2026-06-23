@@ -316,7 +316,7 @@ func toWriteRow(in CreateInput) (writeRow, error) {
 	}
 	return writeRow{
 		Name:       strings.TrimSpace(in.Name),
-		NameSi:     nullStr(deref(in.NameSi)),
+		NameLocal:  nullStr(deref(in.NameLocal)),
 		Barcode:    nullStr(deref(in.Barcode)),
 		CategoryID: in.CategoryID,
 		UnitID:     in.UnitID,
@@ -350,7 +350,7 @@ func nilIfZero(p *int64) *int64 {
 // service doesn't reach across features. OpeningQty seeds stock at OpeningCost.
 type ImportRow struct {
 	Name              string
-	NameSi            string
+	NameLocal         string
 	Barcode           string
 	CategoryID        int64
 	UnitID            int64
@@ -384,7 +384,7 @@ func (s *Service) ImportOne(ctx context.Context, in ImportRow) (ImportResult, er
 	}
 	w := writeRow{
 		Name:              name,
-		NameSi:            nullStr(strings.TrimSpace(in.NameSi)),
+		NameLocal:         nullStr(strings.TrimSpace(in.NameLocal)),
 		Barcode:           nullStr(strings.TrimSpace(in.Barcode)),
 		CategoryID:        in.CategoryID,
 		UnitID:            in.UnitID,

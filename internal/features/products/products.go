@@ -16,7 +16,7 @@ import (
 type Product struct {
 	ID             int64           `db:"id"              json:"id"`
 	Name           string          `db:"name"            json:"name"`
-	NameSi         *string         `db:"name_si"         json:"name_si,omitempty"`
+	NameLocal      *string         `db:"name_local"      json:"name_local,omitempty"`
 	Barcode        *string         `db:"barcode"         json:"barcode,omitempty"`
 	CategoryID     int64           `db:"category_id"     json:"category_id"`
 	UnitID         int64           `db:"unit_id"         json:"unit_id"`
@@ -51,7 +51,7 @@ func (p Product) IsLowStock() bool {
 
 type CreateInput struct {
 	Name           string  `json:"name"            form:"name"            validate:"required,min=1,max=150"`
-	NameSi         *string `json:"name_si"         form:"name_si"`
+	NameLocal      *string `json:"name_local"      form:"name_local"`
 	Barcode        *string `json:"barcode"         form:"barcode"         validate:"omitempty,max=50"`
 	CategoryID     int64   `json:"category_id"     form:"category_id"     validate:"required,gt=0"`
 	UnitID         int64   `json:"unit_id"         form:"unit_id"         validate:"required,gt=0"`
@@ -196,7 +196,7 @@ func (r *Repository) BarcodeExists(ctx context.Context, code string) (bool, erro
 
 type writeRow struct {
 	Name                          string
-	NameSi, Barcode               *string
+	NameLocal, Barcode            *string
 	CategoryID, UnitID            int64
 	Cost, Selling, Wholesale, Tax decimal.Decimal
 	Reorder                       int
@@ -213,13 +213,13 @@ func (r *Repository) Insert(ctx context.Context, w writeRow) (int64, error) {
 	var id int64
 	err := r.db.GetContext(ctx, &id, `
 		INSERT INTO products
-			(name, name_si, barcode, category_id, unit_id,
+			(name, name_local, barcode, category_id, unit_id,
 			 cost_price, selling_price, wholesale_price, tax_rate, reorder_level,
 			 track_serial, warranty_months, needs_review, created_by, preferred_supplier_id,
 			 is_service, is_pinned)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
 		RETURNING id`,
-		w.Name, w.NameSi, w.Barcode, w.CategoryID, w.UnitID,
+		w.Name, w.NameLocal, w.Barcode, w.CategoryID, w.UnitID,
 		w.Cost, w.Selling, w.Wholesale, w.Tax, w.Reorder,
 		w.TrackSerial, w.WarrantyMonths, w.NeedsReview, w.CreatedBy, w.PreferredSupplier,
 		w.IsService, w.IsPinned)
@@ -229,11 +229,11 @@ func (r *Repository) Insert(ctx context.Context, w writeRow) (int64, error) {
 func (r *Repository) Update(ctx context.Context, id int64, w writeRow) error {
 	res, err := r.db.ExecContext(ctx, `
 		UPDATE products SET
-			name=$1, name_si=$2, barcode=$3, category_id=$4, unit_id=$5,
+			name=$1, name_local=$2, barcode=$3, category_id=$4, unit_id=$5,
 			cost_price=$6, selling_price=$7, wholesale_price=$8, tax_rate=$9, reorder_level=$10,
 			track_serial=$11, warranty_months=$12, preferred_supplier_id=$13, is_pinned=$14
 		WHERE id=$15 AND is_active = true`,
-		w.Name, w.NameSi, w.Barcode, w.CategoryID, w.UnitID,
+		w.Name, w.NameLocal, w.Barcode, w.CategoryID, w.UnitID,
 		w.Cost, w.Selling, w.Wholesale, w.Tax, w.Reorder,
 		w.TrackSerial, w.WarrantyMonths, w.PreferredSupplier, w.IsPinned, id)
 	if err != nil {

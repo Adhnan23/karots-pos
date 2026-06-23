@@ -155,7 +155,7 @@ func seed(db *sqlx.DB) error {
 		}
 		if it.nameSi != "" {
 			ns := it.nameSi
-			in.NameSi = &ns
+			in.NameLocal = &ns
 		}
 		created, err := prodSvc.Create(ctx, in)
 		if err != nil {

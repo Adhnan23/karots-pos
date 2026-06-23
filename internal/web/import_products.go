@@ -23,7 +23,7 @@ import (
 // importColumns lists the CSV header for the product import template and export,
 // in order. The parser also accepts a few synonyms (see importSynonyms).
 var importColumns = []string{
-	"name", "name_si", "barcode", "category", "unit",
+	"name", "name_local", "barcode", "category", "unit",
 	"cost_price", "selling_price", "wholesale_price", "tax_rate",
 	"reorder_level", "opening_qty", "supplier", "track_serial", "warranty_months",
 }
@@ -31,7 +31,8 @@ var importColumns = []string{
 // importSynonyms maps alternative header labels to a canonical column name.
 var importSynonyms = map[string]string{
 	"product": "name", "item": "name",
-	"sinhala": "name_si", "name (si)": "name_si",
+	"sinhala": "name_local", "tamil": "name_local", "local": "name_local",
+	"local name": "name_local", "name (local)": "name_local", "name_si": "name_local",
 	"code": "barcode", "sku": "barcode",
 	"category path": "category", "categories": "category",
 	"uom": "unit",
@@ -112,16 +113,16 @@ func (a *adminUI) ProductExportCSV(c echo.Context) error {
 		if p.Barcode != nil {
 			barcode = *p.Barcode
 		}
-		nameSi := ""
-		if p.NameSi != nil {
-			nameSi = *p.NameSi
+		nameLocal := ""
+		if p.NameLocal != nil {
+			nameLocal = *p.NameLocal
 		}
 		category := catPath[p.CategoryID]
 		if category == "" {
 			category = p.CategoryName
 		}
 		out = append(out, []string{
-			p.Name, nameSi, barcode, category, p.UnitAbbr,
+			p.Name, nameLocal, barcode, category, p.UnitAbbr,
 			csvMoney(p.CostPrice), csvMoney(p.SellingPrice), csvMoney(p.WholesalePrice), csvMoney(p.TaxRate),
 			strconv.Itoa(p.ReorderLevel), p.StockQty.String(), supplier,
 			strconv.FormatBool(p.TrackSerial), strconv.Itoa(p.WarrantyMonths),
@@ -240,7 +241,7 @@ func (a *adminUI) ProductImport(c echo.Context) error {
 
 		row := products.ImportRow{
 			Name:              get("name"),
-			NameSi:            get("name_si"),
+			NameLocal:         get("name_local"),
 			Barcode:           get("barcode"),
 			CategoryID:        catID,
 			UnitID:            unitID,

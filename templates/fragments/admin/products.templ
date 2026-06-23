@@ -129,6 +129,10 @@ templ ProductForm(p *products.Product, cats []categories.TreeNode, us []units.Un
 					<label class="block text-sm font-medium mb-1">Name</label>
 					<input name="name" required value={ valOf(p, fName) } class="w-full border rounded-lg px-3 py-2"/>
 				</div>
+				<div>
+					<label class="block text-sm font-medium mb-1">Local name <span class="text-slate-400 font-normal">(optional — Sinhala / Tamil)</span></label>
+					<input name="name_local" value={ valOf(p, fNameLocal) } placeholder="e.g. තේ කොළ / தேயிலை" class="w-full border rounded-lg px-3 py-2"/>
+				</div>
 				<div class="grid grid-cols-2 gap-4">
 					<div>
 						<label class="block text-sm font-medium mb-1">Category</label>
