@@ -6,6 +6,7 @@ import (
 	"karots-pos/internal/features/products"
 	"karots-pos/internal/features/stock"
 	"karots-pos/internal/money"
+	adminfragments "karots-pos/templates/fragments/admin"
 	"karots-pos/templates/layouts"
 )
 
@@ -47,25 +48,13 @@ templ StockPage(d StockData) {
 					<thead class="text-left text-slate-500 border-b">
 						<tr><th class="py-2">Product</th><th class="py-2 text-right">On hand</th><th class="py-2 text-center">Status</th><th class="py-2"></th></tr>
 					</thead>
-					<tbody>
-						for _, p := range d.Products {
-							<tr class="border-b last:border-0">
-								<td class="py-2">{ p.Name }</td>
-								<td class="py-2 text-right">{ money.Display(p.StockQty) } { p.UnitAbbr }</td>
-								<td class="py-2 text-center">
-									if p.IsLowStock() {
-										<span class="px-2 py-0.5 rounded-full text-xs bg-amber-100 text-amber-700">low</span>
-									} else {
-										<span class="px-2 py-0.5 rounded-full text-xs bg-emerald-100 text-emerald-700">ok</span>
-									}
-								</td>
-								<td class="py-2 text-right">
-									<button class="text-indigo-600 hover:underline text-xs"
-										hx-get={ "/admin/stock/batches/" + strconv.FormatInt(p.ID, 10) }
-										hx-target="#modal-container" hx-swap="innerHTML">Batches</button>
-								</td>
-							</tr>
-						}
+					<tbody id="stock-levels-tbody"
+						hx-get="/admin/stock/levels"
+						hx-trigger="reload-stock from:body"
+						hx-target="#stock-levels-tbody"
+						hx-swap="innerHTML"
+					>
+						@StockLevelRows(d.Products)
 					</tbody>
 				</table>
 			</div>
@@ -107,6 +96,48 @@ templ StockPage(d StockData) {
 	}
 }
 
+// movFilterID parses the stock-movement product filter id ("" → 0).
+func movFilterID(s string) int64 {
+	id, _ := strconv.ParseInt(s, 10, 64)
+	return id
+}
+
+// movFilterName resolves the filtered product's name for seeding the picker box.
+func movFilterName(prods []products.Product, s string) string {
+	id, _ := strconv.ParseInt(s, 10, 64)
+	for _, p := range prods {
+		if p.ID == id {
+			return p.Name
+		}
+	}
+	return ""
+}
+
+templ StockLevelRows(prods []products.Product) {
+	if len(prods) == 0 {
+		<tr><td colspan="4" class="py-6 text-center text-slate-500">No products yet.</td></tr>
+	} else {
+		for _, p := range prods {
+			<tr class="border-b last:border-0">
+				<td class="py-2">{ p.Name }</td>
+				<td class="py-2 text-right">{ money.Display(p.StockQty) } { p.UnitAbbr }</td>
+				<td class="py-2 text-center">
+					if p.IsLowStock() {
+						<span class="px-2 py-0.5 rounded-full text-xs bg-amber-100 text-amber-700">low</span>
+					} else {
+						<span class="px-2 py-0.5 rounded-full text-xs bg-emerald-100 text-emerald-700">ok</span>
+					}
+				</td>
+				<td class="py-2 text-right">
+					<button class="text-indigo-600 hover:underline text-xs"
+						hx-get={ "/admin/stock/batches/" + strconv.FormatInt(p.ID, 10) }
+						hx-target="#modal-container" hx-swap="innerHTML">Batches</button>
+				</td>
+			</tr>
+		}
+	}
+}
+
 templ MovementRows(rows []stock.Movement) {
 	if len(rows) == 0 {
 		<tr><td colspan="4" class="py-6 text-center text-slate-500">No movements yet.</td></tr>
@@ -139,14 +170,9 @@ templ StockMovementsPage(d StockMovementsData) {
 		</div>
 		<div class="bg-white rounded-2xl shadow-sm p-6">
 			<form class="flex flex-wrap items-end gap-3 mb-4" method="get" action="/admin/stock/movements">
-				<div>
+				<div class="w-56">
 					<label class="block text-xs text-slate-500 mb-1">Product</label>
-					<select name="product_id" class="border rounded-lg px-2 py-1.5 text-sm">
-						@movProductOption("", "All products", d.ProductID)
-						for _, p := range d.Products {
-							@movProductOption(strconv.FormatInt(p.ID, 10), p.Name, d.ProductID)
-						}
-					</select>
+					@adminfragments.ProductPicker("product_id", movFilterID(d.ProductID), movFilterName(d.Products, d.ProductID), "All products")
 				</div>
 				<div>
 					<label class="block text-xs text-slate-500 mb-1">Type</label>
@@ -257,11 +283,7 @@ templ DamageForm(prods []products.Product) {
 		<form class="p-6 space-y-4" hx-post="/admin/stock/damage" hx-swap="none">
 			<div>
 				<label class="block text-sm font-medium mb-1">Product</label>
-				<select name="product_id" required class="w-full border rounded-lg px-3 py-2">
-					for _, p := range prods {
-						<option value={ strconv.FormatInt(p.ID, 10) }>{ p.Name } (on hand { money.Display(p.StockQty) } { p.UnitAbbr })</option>
-					}
-				</select>
+				@adminfragments.ProductPicker("product_id", 0, "", "Search product…")
 			</div>
 			<div>
 				<label class="block text-sm font-medium mb-1">Quantity to write off</label>
@@ -286,11 +308,7 @@ templ StockForm(prods []products.Product) {
 			<form class="p-6 space-y-4" hx-post="/admin/stock/adjust" hx-swap="none">
 				<div>
 					<label class="block text-sm font-medium mb-1">Product</label>
-					<select name="product_id" required class="w-full border rounded-lg px-3 py-2">
-						for _, p := range prods {
-							<option value={ strconv.FormatInt(p.ID, 10) }>{ p.Name } (on hand { money.Display(p.StockQty) } { p.UnitAbbr })</option>
-						}
-					</select>
+					@adminfragments.ProductPicker("product_id", 0, "", "Search product…")
 				</div>
 				<div>
 					<label class="block text-sm font-medium mb-1">New Quantity (absolute)</label>

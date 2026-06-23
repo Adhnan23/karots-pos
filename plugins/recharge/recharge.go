@@ -34,6 +34,7 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 	reg.Admin().GET("/recharge", a.Hub)
 	reg.Admin().GET("/recharge/carriers", a.Carriers)
 	reg.Admin().GET("/recharge/table", a.CarriersTable)
+	reg.Admin().GET("/recharge/device-form", a.DeviceForm)
 	reg.Admin().POST("/recharge", a.CarrierCreate)
 	reg.Admin().POST("/recharge/:id/delete", a.CarrierDelete)
 	reg.Admin().POST("/recharge/devices", a.DeviceCreate)

@@ -339,6 +339,17 @@ func (a *adminUI) StockTable(c echo.Context) error {
 	return response.RenderFragment(c, adminpages.MovementRows(moves))
 }
 
+// StockLevels re-renders just the on-hand rows so the Stock Levels table can
+// refresh in place after an adjustment/damage (reload-stock trigger), instead of
+// going stale until a full page reload.
+func (a *adminUI) StockLevels(c echo.Context) error {
+	prods, _, err := a.s.products.List(c.Request().Context(), products.ListQuery{Limit: 100})
+	if err != nil {
+		return err
+	}
+	return response.RenderFragment(c, adminpages.StockLevelRows(prods))
+}
+
 // StockMovements is the full stock-movement history: every in/out with who did
 // it and why, filterable by product and type. Unlike the stock-overview page
 // (capped at 50, no filter), this is the audit trail.

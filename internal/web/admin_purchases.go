@@ -289,6 +289,7 @@ func entryConfigJSON(d purchases.Detail) string {
 	b, _ := json.Marshal(map[string]any{
 		"editId":       d.Purchase.ID,
 		"supplierId":   strconv.FormatInt(d.Purchase.SupplierID, 10),
+		"supplierName": d.Purchase.SupplierName,
 		"expectedDate": expected,
 		"notes":        notes,
 		"lines":        lines,

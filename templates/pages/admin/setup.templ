@@ -40,7 +40,9 @@ templ SetupPage(d SetupData) {
 			<h1 class="text-2xl font-bold">{ d.Section.Icon + " " + d.Section.Label }</h1>
 			<p class="text-sm text-slate-500">Finish setting up your shop, then manage everything from here.</p>
 		</div>
-		@SetupChecklist(d.Steps, false)
+		if DoneCount(d.Steps) < len(d.Steps) {
+			@SetupChecklist(d.Steps, false)
+		}
 		<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
 			for _, l := range d.Section.Links {
 				@reportCard(l.Href, l.Label, l.Desc)

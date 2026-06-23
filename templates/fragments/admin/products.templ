@@ -136,21 +136,12 @@ templ ProductForm(p *products.Product, cats []categories.TreeNode, us []units.Un
 					</div>
 					<div>
 						<label class="block text-sm font-medium mb-1">Unit</label>
-						<select name="unit_id" required class="w-full border rounded-lg px-3 py-2">
-							for _, u := range us {
-								<option value={ strconv.FormatInt(u.ID, 10) } selected?={ p != nil && p.UnitID == u.ID }>{ u.Name } ({ u.Abbreviation })</option>
-							}
-						</select>
+						@OptionPicker("unit_id", unitOptions(us), unitSelectedID(p, us), "Select unit…")
 					</div>
 				</div>
 				<div>
 					<label class="block text-sm font-medium mb-1">Preferred Supplier <span class="text-slate-400 font-normal">(optional)</span></label>
-					<select name="preferred_supplier_id" class="w-full border rounded-lg px-3 py-2">
-						<option value="">— none —</option>
-						for _, sp := range sups {
-							<option value={ strconv.FormatInt(sp.ID, 10) } selected?={ p != nil && p.PreferredSupplierID != nil && *p.PreferredSupplierID == sp.ID }>{ sp.Name }</option>
-						}
-					</select>
+					@SupplierPicker("preferred_supplier_id", prefSupplierID(p), prefSupplierName(p, sups), "Search supplier…", true)
 				</div>
 				<div>
 					<label class="block text-sm font-medium mb-1">Barcode</label>

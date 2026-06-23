@@ -10,6 +10,8 @@ templ Base(title string) {
 			<meta charset="UTF-8"/>
 			<meta name="viewport" content="width=device-width, initial-scale=1"/>
 			<title>{ title } — POS</title>
+			<!-- Inline SVG favicon (a receipt) so browsers don't 404 on /favicon.ico. -->
+			<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext y='14' font-size='14'%3E%F0%9F%A7%BE%3C/text%3E%3C/svg%3E"/>
 			<!-- Apply the saved (or system) theme before paint to avoid a flash. -->
 			@templ.Raw(`<script>try{var t=localStorage.getItem('theme');if(t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme: dark)').matches)){document.documentElement.classList.add('dark');}}catch(e){}</script>`)
 			<script src="/static/vendor/htmx.min.js"></script>

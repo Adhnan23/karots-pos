@@ -98,7 +98,18 @@ func (a *adminUI) CarrierCreate(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	return response.RenderFragment(c, CarrierRows(cs), response.Toast(name+" added", "success"))
+	return response.RenderFragment(c, CarrierRows(cs), response.ToastAnd(name+" added", "success", "carriers-changed"))
+}
+
+// DeviceForm re-renders the carrier-dependent "Add a device" form, so it refreshes
+// (carrier dropdown / "add a carrier first" state) when carriers change without a
+// full page reload.
+func (a *adminUI) DeviceForm(c echo.Context) error {
+	cs, err := a.p.store.Carriers(c.Request().Context())
+	if err != nil {
+		return err
+	}
+	return response.RenderFragment(c, DeviceAddForm(cs))
 }
 
 // SessionRecon pairs a cash session with its per-carrier recharge reconciliation.
@@ -501,5 +512,5 @@ func (a *adminUI) CarrierDelete(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	return response.RenderFragment(c, CarrierRows(cs))
+	return response.RenderFragment(c, CarrierRows(cs), response.Trigger(map[string]any{"carriers-changed": true}))
 }

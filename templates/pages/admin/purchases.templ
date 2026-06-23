@@ -212,12 +212,21 @@ templ PurchaseEntryPage(d PurchaseEntryData) {
 			<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
 				<div>
 					<label class="block text-sm font-medium mb-1">Supplier</label>
-					<select x-model="supplierId" class="w-full border rounded-lg px-3 py-2">
-						<option value="">Select…</option>
-						for _, s := range d.Suppliers {
-							<option value={ strconv.FormatInt(s.ID, 10) }>{ s.Name }</option>
-						}
-					</select>
+					<div class="relative" x-on:keydown.escape="supOpen=false">
+						<button type="button" x-on:click="supOpen=!supOpen; if(supOpen)$nextTick(()=>$refs.supQ.focus())" class="w-full flex items-center justify-between gap-1 border rounded-lg px-3 py-2 text-left">
+							<span class="truncate" x-text="supplierName || 'Select supplier…'" x-bind:class="supplierName ? '' : 'text-slate-400'"></span>
+							<span class="text-slate-400 shrink-0">▾</span>
+						</button>
+						<div x-show="supOpen" x-cloak x-on:click.away="supOpen=false" class="absolute z-20 mt-1 w-full bg-white border rounded-lg shadow-lg">
+							<input x-ref="supQ" x-model="supQuery" x-on:input.debounce.200ms="searchSuppliers()" type="search" placeholder="Search supplier…" class="w-full border-b px-3 py-2 text-sm"/>
+							<ul class="max-h-56 overflow-auto">
+								<template x-for="s in supResults" x-bind:key="s.id">
+									<li><button type="button" x-on:click="pickSupplier(s)" class="w-full text-left px-3 py-2 text-sm hover:bg-slate-100" x-text="s.name"></button></li>
+								</template>
+								<li x-show="supQuery && supResults.length===0"><span class="block px-3 py-2 text-sm text-slate-400">No matches</span></li>
+							</ul>
+						</div>
+					</div>
 				</div>
 				<div>
 					<label class="block text-sm font-medium mb-1">Expected delivery</label>

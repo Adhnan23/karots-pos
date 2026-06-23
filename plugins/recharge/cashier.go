@@ -278,9 +278,16 @@ func (h *cashierUI) Tx(c echo.Context) error {
 // picker + checkout overdraw map). Requires an open drawer — the balance is
 // relative to the current session.
 func (h *cashierUI) Devices(c echo.Context) error {
-	sess, err := h.requireSession(c)
+	// Balances are session-scoped, but the POS reload panel fetches this on page
+	// load — possibly before the drawer is open. Return an empty list (not a 409)
+	// in that case so the panel shows nothing quietly; it re-fetches on the
+	// register-opened event. The reload action itself still requires a session.
+	sess, err := h.p.core.CashRegister.Current(c.Request().Context(), middleware.CurrentUserID(c))
 	if err != nil {
 		return err
+	}
+	if sess == nil {
+		return c.JSON(http.StatusOK, map[string]any{"data": []any{}})
 	}
 	carrierID, _ := strconv.ParseInt(c.QueryParam("carrier_id"), 10, 64) // 0 = all
 	purpose := c.QueryParam("for")                                       // "recharge" | "money" | "" (all)

@@ -6,20 +6,25 @@
 // ModalHost). Harmless on touch.
 document.addEventListener("DOMContentLoaded", function () {
   document.body.addEventListener("htmx:afterSwap", function (e) {
-    if (e.target && e.target.id === "modal-container") {
-      // Alpine's MutationObserver can miss an HTMX-swapped fragment (e.g. when an
-      // unrelated Alpine effect throws mid-flush), leaving the modal's Cancel / ✕
-      // x-on:click handlers unbound so only Esc closes it. Initialise the swapped
-      // subtree explicitly; guarded so we don't double-init if the observer did.
-      const root = e.target.firstElementChild;
-      if (window.Alpine && root && !root._x_dataStack) {
-        window.Alpine.initTree(e.target);
+    if (!e.target || e.target.id !== "modal-container") return;
+    // Alpine's MutationObserver normally initialises an HTMX-swapped fragment,
+    // but can miss it (e.g. an unrelated effect threw mid-flush), leaving the
+    // modal's Cancel / ✕ handlers unbound so only Esc closes it. Wait one frame
+    // so the observer has run, then init only the x-data elements it left
+    // uninitialised — PER ELEMENT and guarded, because initialising an already-
+    // initialised subtree re-runs every x-for and duplicates option lists
+    // (e.g. the category picker showed each category twice).
+    requestAnimationFrame(function () {
+      if (window.Alpine) {
+        e.target.querySelectorAll("[x-data]").forEach(function (el) {
+          if (!el._x_dataStack) window.Alpine.initTree(el);
+        });
       }
       const el = e.target.querySelector(
         "input:not([type=hidden]):not([type=checkbox]):not([type=radio]), select, textarea",
       );
       if (el) el.focus();
-    }
+    });
   });
 
   // Loading bar for every HTMX request.
@@ -214,6 +219,8 @@ function pos(symbol, defaultType, promptAfterSale) {
     scan: "",
     saleType: defaultType || "retail",
     customerId: "",
+    custSearch: "", // searchable customer chooser (filters the loaded list)
+    custOpen: false,
     discount: 0,
     discountType: "fixed", // bill-level discount: "fixed" (Rs) or "percent" (%)
     // Split tender: one or more payment lines (cash / card / online / wallet).
@@ -357,6 +364,26 @@ function pos(symbol, defaultType, promptAfterSale) {
         this.customers = [];
       }
     },
+    // Customer chooser (searchable, replaces the <select>): the visible label of
+    // the selected customer, the search-filtered list, and the pick action.
+    customerLabel() {
+      const c = this.customers.find((x) => String(x.id) === String(this.customerId));
+      return c ? c.name : "";
+    },
+    filteredCustomers() {
+      const q = this.custSearch.trim().toLowerCase();
+      const list = q
+        ? this.customers.filter(
+            (c) => c.name.toLowerCase().includes(q) || (c.phone || "").includes(q),
+          )
+        : this.customers;
+      return list.slice(0, 50);
+    },
+    pickCustomer(c) {
+      this.customerId = c ? String(c.id) : "";
+      this.custOpen = false;
+      this.custSearch = "";
+    },
     async loadUnits() {
       try {
         const json = await apiFetch("GET", "/api/units");
@@ -420,6 +447,9 @@ function pos(symbol, defaultType, promptAfterSale) {
       this.session = json.data;
       this.openCounts = {};
       await this.loadSummary();
+      // Let plugin quick-action panels (e.g. Reload) that need an open drawer
+      // load their session-scoped data now, in case they initialised first.
+      window.dispatchEvent(new CustomEvent("register-opened"));
       toast("Register opened", "success");
     },
     startClose() {
@@ -1050,6 +1080,94 @@ function docConsumablePicker() {
   };
 }
 
+// entityPicker is the generic searchable single-select used to replace plain
+// <select> dropdowns that can grow large (products, suppliers, customers, …).
+// cfg: { id, name, url, minLen, param }. The search endpoint must accept a
+// ?<param>= query (default "search") and return { data: [{id, name, ...}] }.
+// The picker only tracks id/name; the template's x-for renders whatever result
+// fields it wants (e.g. on-hand for products). Used via the ProductPicker /
+// EntityPicker templ components.
+function entityPicker(cfg) {
+  cfg = cfg || {};
+  return {
+    id: cfg.id ? String(cfg.id) : "",
+    name: cfg.name || "",
+    open: false,
+    results: [],
+    url: cfg.url || "/api/products",
+    param: cfg.param || "search",
+    minLen: cfg.minLen || 1,
+    async search() {
+      const q = (this.name || "").trim();
+      if (q.length < this.minLen) {
+        this.results = [];
+        this.open = false;
+        return;
+      }
+      try {
+        const sep = this.url.indexOf("?") === -1 ? "?" : "&";
+        const json = await apiFetch(
+          "GET",
+          this.url + sep + this.param + "=" + encodeURIComponent(q) + "&limit=20",
+        );
+        this.results = json.data || [];
+        this.open = true;
+      } catch (_) {
+        this.results = [];
+      }
+    },
+    choose(r) {
+      this.id = String(r.id);
+      this.name = r.name;
+      this.open = false;
+      // Let a parent Alpine component sync its own state (e.g. an x-model the
+      // picker replaced). field disambiguates multiple pickers in one form.
+      this.$dispatch("picked", { field: this.field, id: this.id, name: this.name, item: r });
+    },
+    clear() {
+      this.id = "";
+      this.name = "";
+      this.results = [];
+      this.open = false;
+      this.$dispatch("picked", { field: this.field, id: "", name: "", item: null });
+    },
+    field: cfg.field || "",
+  };
+}
+
+// optionPicker is the client-side searchable single-select for small/medium
+// fixed lists passed from the server (units, a category tree, …) — no API call.
+// cfg: { id, options:[{id,label}], placeholder }. Submits the chosen id via a
+// hidden input bound to `id`. Backed by the OptionPicker templ component.
+function optionPicker(cfg) {
+  cfg = cfg || {};
+  return {
+    open: false,
+    query: "",
+    id: cfg.id ? String(cfg.id) : "",
+    options: cfg.options || [],
+    placeholder: cfg.placeholder || "Select…",
+    filtered() {
+      const q = this.query.trim().toLowerCase();
+      if (!q) return this.options;
+      return this.options.filter((o) => o.label.toLowerCase().includes(q));
+    },
+    label() {
+      const o = this.options.find((o) => String(o.id) === String(this.id));
+      return o ? o.label : "";
+    },
+    toggle() {
+      this.open = !this.open;
+      if (this.open) this.$nextTick(() => this.$refs.q && this.$refs.q.focus());
+    },
+    pick(o) {
+      this.id = o ? String(o.id) : "";
+      this.open = false;
+      this.query = "";
+    },
+  };
+}
+
 // reportProductPicker backs the search-box product selector on the per-product
 // report. Choosing a result fills the hidden `product` field and submits the
 // range form so the chart reloads for that product (keeping the date range/group).
@@ -1089,6 +1207,10 @@ function grn(symbol, config) {
     sym: symbol,
     editId: Number(config.editId) || 0,
     supplierId: config.supplierId || "",
+    supplierName: config.supplierName || "", // searchable supplier chooser
+    supOpen: false,
+    supQuery: "",
+    supResults: [],
     expectedDate: config.expectedDate || "",
     notes: config.notes || "",
     lines: [],
@@ -1102,7 +1224,22 @@ function grn(symbol, config) {
       // Default the supplier to the product's preferred supplier (if none chosen yet).
       if (!this.supplierId && r.preferred_supplier_id) {
         this.supplierId = String(r.preferred_supplier_id);
+        this.supplierName = r.preferred_supplier_name || "";
       }
+    },
+    async searchSuppliers() {
+      const q = this.supQuery.trim();
+      if (!q) { this.supResults = []; return; }
+      try {
+        const json = await apiFetch("GET", "/api/suppliers?search=" + encodeURIComponent(q) + "&limit=20", undefined, { silent: true });
+        this.supResults = json.data || [];
+      } catch (_) { this.supResults = []; }
+    },
+    pickSupplier(s) {
+      this.supplierId = s ? String(s.id) : "";
+      this.supplierName = s ? s.name : "";
+      this.supOpen = false;
+      this.supQuery = "";
     },
 
     init() {
@@ -1384,6 +1521,10 @@ function pret(symbol) {
   return {
     sym: symbol,
     supplierId: "",
+    supplierName: "", // searchable supplier chooser
+    supOpen: false,
+    supQuery: "",
+    supResults: [],
     reference: "",
     reason: "",
     lines: [],
@@ -1395,8 +1536,29 @@ function pret(symbol) {
       const n = Number(v) || 0;
       return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     },
+    async searchSuppliers() {
+      const q = this.supQuery.trim();
+      if (!q) { this.supResults = []; return; }
+      try {
+        const json = await apiFetch("GET", "/api/suppliers?search=" + encodeURIComponent(q) + "&limit=20", undefined, { silent: true });
+        this.supResults = json.data || [];
+      } catch (_) { this.supResults = []; }
+    },
+    pickSupplier(s) {
+      this.supplierId = s ? String(s.id) : "";
+      this.supplierName = s ? s.name : "";
+      this.supOpen = false;
+      this.supQuery = "";
+    },
+    // Per-line product search (shared pickers).
+    pick(l) {
+      poProductSearch(l);
+    },
+    choose(l, r) {
+      poProductChoose(l, r);
+    },
     addLine() {
-      this.lines.push({ product_id: 0, quantity: 0, cost_price: 0 });
+      this.lines.push({ product_id: 0, product_name: "", quantity: 0, cost_price: 0, _open: false, _results: [] });
     },
     removeLine(i) {
       this.lines.splice(i, 1);

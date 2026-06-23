@@ -7,6 +7,8 @@ import (
 
 	"karots-pos/internal/features/categories"
 	"karots-pos/internal/features/products"
+	"karots-pos/internal/features/suppliers"
+	"karots-pos/internal/features/units"
 )
 
 // categoryPickerData builds the x-data init string for the categoryPicker Alpine
@@ -66,6 +68,50 @@ func productCatID(p *products.Product) string {
 		return ""
 	}
 	return strconv.FormatInt(p.CategoryID, 10)
+}
+
+// prefSupplierID is the product's preferred-supplier id (0 when none/new), for
+// seeding the SupplierPicker on the product form.
+func prefSupplierID(p *products.Product) int64 {
+	if p == nil || p.PreferredSupplierID == nil {
+		return 0
+	}
+	return *p.PreferredSupplierID
+}
+
+// prefSupplierName resolves the product's preferred-supplier display name from
+// the supplied supplier list, for seeding the SupplierPicker's visible box.
+func prefSupplierName(p *products.Product, sups []suppliers.Supplier) string {
+	if p == nil || p.PreferredSupplierID == nil {
+		return ""
+	}
+	for _, sp := range sups {
+		if sp.ID == *p.PreferredSupplierID {
+			return sp.Name
+		}
+	}
+	return ""
+}
+
+// unitOptions adapts the unit list to OptionPicker choices ("Name (abbr)").
+func unitOptions(us []units.Unit) []PickerOption {
+	out := make([]PickerOption, 0, len(us))
+	for _, u := range us {
+		out = append(out, PickerOption{ID: u.ID, Label: u.Name + " (" + u.Abbreviation + ")"})
+	}
+	return out
+}
+
+// unitSelectedID is the product's unit when editing, else the first unit so a
+// new product defaults to a valid unit (matching the old <select>'s behaviour).
+func unitSelectedID(p *products.Product, us []units.Unit) int64 {
+	if p != nil {
+		return p.UnitID
+	}
+	if len(us) > 0 {
+		return us[0].ID
+	}
+	return 0
 }
 
 // jsIntArray renders a slice of IDs as a JS array literal, e.g. [3,7], for use

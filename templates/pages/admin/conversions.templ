@@ -5,6 +5,7 @@ import (
 
 	"karots-pos/internal/features/conversions"
 	"karots-pos/internal/features/products"
+	adminfragments "karots-pos/templates/fragments/admin"
 	"karots-pos/templates/layouts"
 )
 
@@ -59,21 +60,11 @@ templ ConversionForm(prods []products.Product) {
 		<form class="p-6 space-y-4" hx-post="/admin/conversions" hx-swap="none">
 			<div>
 				<label class="block text-sm font-medium mb-1">From product (the whole)</label>
-				<select name="from_product_id" required class="w-full border rounded-lg px-3 py-2">
-					<option value="">Select…</option>
-					for _, p := range prods {
-						<option value={ strconv.FormatInt(p.ID, 10) }>{ p.Name } ({ p.UnitAbbr })</option>
-					}
-				</select>
+				@adminfragments.ProductPicker("from_product_id", 0, "", "Search product…")
 			</div>
 			<div>
 				<label class="block text-sm font-medium mb-1">To product (the pieces)</label>
-				<select name="to_product_id" required class="w-full border rounded-lg px-3 py-2">
-					<option value="">Select…</option>
-					for _, p := range prods {
-						<option value={ strconv.FormatInt(p.ID, 10) }>{ p.Name } ({ p.UnitAbbr })</option>
-					}
-				</select>
+				@adminfragments.ProductPicker("to_product_id", 0, "", "Search product…")
 			</div>
 			<div>
 				<label class="block text-sm font-medium mb-1">Ratio (1 from-unit yields N to-units)</label>

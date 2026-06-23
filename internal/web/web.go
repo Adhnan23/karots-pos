@@ -167,6 +167,7 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	ag.GET("/stock", admin.Stock)
 	ag.GET("/stock/movements", admin.StockMovements)
 	ag.GET("/stock/table", admin.StockTable)
+	ag.GET("/stock/levels", admin.StockLevels)
 	ag.GET("/stock/form", admin.StockForm)
 	ag.POST("/stock/adjust", admin.StockAdjust)
 	ag.GET("/stock/take", admin.StockTake)

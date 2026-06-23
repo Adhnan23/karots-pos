@@ -5,6 +5,7 @@ import (
 
 	"karots-pos/internal/features/suppliers"
 	"karots-pos/internal/money"
+	adminfragments "karots-pos/templates/fragments/admin"
 
 	"github.com/shopspring/decimal"
 )
@@ -46,12 +47,7 @@ templ RecoveryForm(d RecoveryFormData) {
 		<div x-show="outcome === 'paid'" class="space-y-2">
 			<div>
 				<label class="block text-sm font-medium mb-1">Supplier</label>
-				<select name="supplier_id" class="w-full border rounded-lg px-3 py-2">
-					<option value="">— select supplier —</option>
-					for _, s := range d.Suppliers {
-						<option value={ strconv.FormatInt(s.ID, 10) }>{ s.Name }</option>
-					}
-				</select>
+				@adminfragments.SupplierPicker("supplier_id", 0, "", "Search supplier…", false)
 			</div>
 			<div>
 				<label class="block text-sm font-medium mb-1">Amount paid / credited</label>

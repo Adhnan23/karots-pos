@@ -4,6 +4,7 @@ import (
 	"strconv"
 
 	"karots-pos/internal/features/categories"
+	adminfragments "karots-pos/templates/fragments/admin"
 	"karots-pos/templates/layouts"
 )
 
@@ -83,14 +84,7 @@ templ CategoryForm(all []categories.Category, cur *categories.Category) {
 			</div>
 			<div>
 				<label class="block text-sm font-medium mb-1">Parent (optional)</label>
-				<select name="parent_id" class="w-full border rounded-lg px-3 py-2">
-					<option value="">— none (top level) —</option>
-					for _, c := range all {
-						if cur == nil || c.ID != cur.ID {
-							@catOption(c, cur)
-						}
-					}
-				</select>
+				@adminfragments.OptionPicker("parent_id", catParentOptions(all, cur), catParentSelected(cur), "— none (top level) —")
 			</div>
 			@modalButtons()
 		</form>
@@ -110,6 +104,27 @@ func catName(c *categories.Category) string {
 		return ""
 	}
 	return c.Name
+}
+
+// catParentOptions lists categories that may be the parent (all except the one
+// being edited, to prevent self-parenting), for the parent OptionPicker.
+func catParentOptions(all []categories.Category, cur *categories.Category) []adminfragments.PickerOption {
+	out := make([]adminfragments.PickerOption, 0, len(all))
+	for _, c := range all {
+		if cur != nil && c.ID == cur.ID {
+			continue
+		}
+		out = append(out, adminfragments.PickerOption{ID: c.ID, Label: c.Name})
+	}
+	return out
+}
+
+// catParentSelected is the current category's parent id (0 when top-level/new).
+func catParentSelected(cur *categories.Category) int64 {
+	if cur == nil || cur.ParentID == nil {
+		return 0
+	}
+	return *cur.ParentID
 }
 
 // jsIntArray renders ancestor IDs as a JS array literal (e.g. [3,7]) for the

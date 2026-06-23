@@ -1,0 +1,179 @@
+package adminfragments
+
+import (
+	"encoding/json"
+	"strconv"
+)
+
+// This file holds searchable single-select pickers that replace plain <select>
+// dropdowns which become unusable past ~10 options (products, suppliers,
+// customers). They submit the chosen id via a hidden input under fieldName and
+// live-search the matching /api endpoint. All are backed by entityPicker() in
+// static/js/app.js. Kept in adminfragments so admin pages, cashier pages and
+// plugins can all reuse them without an import cycle.
+
+// ProductPicker searches /api/products and shows each match's on-hand quantity.
+templ ProductPicker(fieldName string, initialID int64, initialName, placeholder string) {
+	<div
+		class="relative"
+		x-data={ "entityPicker({url:'/api/products', field:" + pickerStr(fieldName) + ", id:'" + pickerID(initialID) + "', name:" + pickerStr(initialName) + "})" }
+	>
+		<input type="hidden" name={ fieldName } x-bind:value="id"/>
+		<input
+			type="text"
+			x-model="name"
+			x-on:input.debounce.200ms="search()"
+			x-on:focus="if(results.length) open=true"
+			x-on:click.away="open=false"
+			placeholder={ placeholder }
+			autocomplete="off"
+			class="w-full border rounded-lg px-3 py-2"
+		/>
+		<ul x-show="open && results.length" x-cloak class="absolute z-20 mt-1 w-full bg-white border rounded-lg shadow-lg max-h-56 overflow-auto">
+			<template x-for="r in results" x-bind:key="r.id">
+				<li>
+					<button type="button" x-on:click="choose(r)" class="w-full flex items-center justify-between gap-2 text-left px-3 py-2 text-sm hover:bg-slate-100">
+						<span x-text="r.name"></span>
+						<span class="text-xs text-slate-400" x-text="'on hand ' + (Number(r.stock_qty)||0) + ' ' + (r.unit_abbr||'')"></span>
+					</button>
+				</li>
+			</template>
+		</ul>
+	</div>
+}
+
+// SupplierPicker searches /api/suppliers. Pass includeNone to allow an explicit
+// clear (e.g. a product's optional preferred supplier).
+templ SupplierPicker(fieldName string, initialID int64, initialName, placeholder string, includeNone bool) {
+	<div
+		class="relative"
+		x-data={ "entityPicker({url:'/api/suppliers', field:" + pickerStr(fieldName) + ", id:'" + pickerID(initialID) + "', name:" + pickerStr(initialName) + "})" }
+	>
+		<input type="hidden" name={ fieldName } x-bind:value="id"/>
+		<div class="flex items-center gap-2">
+			<input
+				type="text"
+				x-model="name"
+				x-on:input.debounce.200ms="search()"
+				x-on:focus="if(results.length) open=true"
+				x-on:click.away="open=false"
+				placeholder={ placeholder }
+				autocomplete="off"
+				class="w-full border rounded-lg px-3 py-2"
+			/>
+			if includeNone {
+				<button type="button" x-show="id" x-cloak x-on:click="clear()" class="text-slate-400 hover:text-slate-600 text-sm px-2" title="Clear">✕</button>
+			}
+		</div>
+		<ul x-show="open && results.length" x-cloak class="absolute z-20 mt-1 w-full bg-white border rounded-lg shadow-lg max-h-56 overflow-auto">
+			<template x-for="r in results" x-bind:key="r.id">
+				<li>
+					<button type="button" x-on:click="choose(r)" class="w-full text-left px-3 py-2 text-sm hover:bg-slate-100" x-text="r.name"></button>
+				</li>
+			</template>
+		</ul>
+	</div>
+}
+
+// CustomerPicker searches /api/customers and shows each match's phone.
+templ CustomerPicker(fieldName string, initialID int64, initialName, placeholder string) {
+	<div
+		class="relative"
+		x-data={ "entityPicker({url:'/api/customers', field:" + pickerStr(fieldName) + ", id:'" + pickerID(initialID) + "', name:" + pickerStr(initialName) + "})" }
+	>
+		<input type="hidden" name={ fieldName } x-bind:value="id"/>
+		<input
+			type="text"
+			x-model="name"
+			x-on:input.debounce.200ms="search()"
+			x-on:focus="if(results.length) open=true"
+			x-on:click.away="open=false"
+			placeholder={ placeholder }
+			autocomplete="off"
+			class="w-full border rounded-lg px-3 py-2"
+		/>
+		<ul x-show="open && results.length" x-cloak class="absolute z-20 mt-1 w-full bg-white border rounded-lg shadow-lg max-h-56 overflow-auto">
+			<template x-for="r in results" x-bind:key="r.id">
+				<li>
+					<button type="button" x-on:click="choose(r)" class="w-full flex items-center justify-between gap-2 text-left px-3 py-2 text-sm hover:bg-slate-100">
+						<span x-text="r.name"></span>
+						<span class="text-xs text-slate-400" x-text="r.phone||''"></span>
+					</button>
+				</li>
+			</template>
+		</ul>
+	</div>
+}
+
+// PickerOption is one choice for the client-side OptionPicker.
+type PickerOption struct {
+	ID    int64
+	Label string
+}
+
+// OptionPicker is a client-side searchable single-select for small/medium fixed
+// lists the server already has (units, etc.) — no API call. Submits the chosen
+// id via a hidden input under fieldName. Backed by optionPicker() in app.js.
+templ OptionPicker(fieldName string, options []PickerOption, selectedID int64, placeholder string) {
+	<div
+		class="relative"
+		x-data={ "optionPicker({id:'" + pickerID(selectedID) + "', placeholder:" + pickerStr(placeholder) + ", options:" + optionsJSON(options) + "})" }
+		x-on:keydown.escape.stop="open=false"
+	>
+		<input type="hidden" name={ fieldName } x-bind:value="id"/>
+		<button type="button" x-on:click="toggle()" class="w-full flex items-center justify-between border rounded-lg px-3 py-2 text-left">
+			<span x-text="label() || placeholder" x-bind:class="label() ? '' : 'text-slate-400'"></span>
+			<span class="text-slate-400">▾</span>
+		</button>
+		<div x-show="open" x-cloak x-on:click.away="open=false" class="absolute z-20 mt-1 w-full bg-white border rounded-lg shadow-lg">
+			<input x-ref="q" x-model="query" type="search" placeholder="Search…" class="w-full border-b px-3 py-2 text-sm"/>
+			<ul class="max-h-56 overflow-auto">
+				<template x-for="o in filtered()" x-bind:key="o.id">
+					<li>
+						<button type="button" x-on:click="pick(o)" class="w-full text-left px-3 py-2 text-sm hover:bg-slate-100" x-text="o.label"></button>
+					</li>
+				</template>
+			</ul>
+		</div>
+	</div>
+}
+
+// optionsJSON marshals OptionPicker choices to the {id,label} JSON the Alpine
+// component reads.
+func optionsJSON(options []PickerOption) string {
+	type jo struct {
+		ID    int64  `json:"id"`
+		Label string `json:"label"`
+	}
+	out := make([]jo, 0, len(options))
+	for _, o := range options {
+		out = append(out, jo{ID: o.ID, Label: o.Label})
+	}
+	b, err := json.Marshal(out)
+	if err != nil {
+		return "[]"
+	}
+	return string(b)
+}
+
+// pickerID renders a positive id as a string, or "" for 0 (the new/empty case).
+func pickerID(id int64) string {
+	if id <= 0 {
+		return ""
+	}
+	return strconv.FormatInt(id, 10)
+}
+
+// pickerStr quotes a Go string as a JS string literal for inline x-data init.
+func pickerStr(s string) string {
+	b := make([]rune, 0, len(s)+2)
+	b = append(b, '\'')
+	for _, r := range s {
+		if r == '\'' || r == '\\' {
+			b = append(b, '\\')
+		}
+		b = append(b, r)
+	}
+	b = append(b, '\'')
+	return string(b)
+}
