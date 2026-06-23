@@ -49,7 +49,11 @@ func (a *adminUI) Carriers(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	return response.RenderPage(c, CarriersPage(middleware.CurrentUserName(c), cs, ds, cards))
+	tills, err := a.p.core.CashRegister.OpenSessions(ctx)
+	if err != nil {
+		return err
+	}
+	return response.RenderPage(c, CarriersPage(middleware.CurrentUserName(c), cs, ds, cards, tills))
 }
 
 // CarriersTable is the HTMX row fragment.
@@ -528,6 +532,16 @@ func (a *adminUI) CarrierDelete(c echo.Context) error {
 	return response.RenderFragment(c, CarrierRows(cs), response.Trigger(map[string]any{"carriers-changed": true}))
 }
 
+// cardAdjustData is the Alpine x-data for the bank-card adjust form: the action /
+// source toggles plus the till preselected to the first open till.
+func cardAdjustData(tills []cashregister.SessionRow) string {
+	till := ""
+	if len(tills) > 0 {
+		till = strconv.FormatInt(tills[0].UserID, 10)
+	}
+	return "{ type:'deposit', source:'external', till:'" + till + "' }"
+}
+
 // cardRowsFragment re-renders the bank-card table (the HTMX swap target after a
 // card create/delete/adjust).
 func (a *adminUI) cardRowsFragment(c echo.Context, triggers ...string) error {
@@ -572,10 +586,13 @@ func (a *adminUI) CardDelete(c echo.Context) error {
 	return a.cardRowsFragment(c)
 }
 
-// CardAdjust is the admin's balance-only deposit/withdrawal on a bank card: it
-// changes the tracked balance WITHOUT touching the cash drawer or booking an
-// expense. (The admin manages the real bank balance; if they need the cash they
-// take it from the cashier as a normal till withdrawal.)
+// CardAdjust is the admin's deposit/withdrawal on a bank card's tracked balance.
+// By default it is a balance-only adjustment that does NOT touch any cash drawer
+// or book an expense (money moving between the shop's drawer and bank account is
+// an internal transfer, not a cost). A deposit can optionally be sourced "from a
+// till": then it also records that open till's matching cash withdrawal — the
+// cashier-side half of moving drawer cash into the bank — so the drawer stays
+// reconciled in one action.
 func (a *adminUI) CardAdjust(c echo.Context) error {
 	ctx := c.Request().Context()
 	uid := middleware.CurrentUserID(c)
@@ -583,7 +600,8 @@ func (a *adminUI) CardAdjust(c echo.Context) error {
 	if err != nil || cardID == 0 {
 		return apperr.Validation("choose a bank card")
 	}
-	if a.p.store.BankCardName(ctx, cardID) == "" {
+	card := a.p.store.BankCardName(ctx, cardID)
+	if card == "" {
 		return apperr.Validation("unknown bank card")
 	}
 	typ := c.FormValue("type")
@@ -594,6 +612,8 @@ func (a *adminUI) CardAdjust(c echo.Context) error {
 	if err != nil || !amt.IsPositive() {
 		return apperr.Validation("enter a valid amount")
 	}
+	note := strings.TrimSpace(c.FormValue("note"))
+
 	// deposit: balance +.   withdrawal: balance − (guard against overdraw).
 	balanceDelta := amt
 	if typ == "withdrawal" {
@@ -606,9 +626,26 @@ func (a *adminUI) CardAdjust(c echo.Context) error {
 		}
 		balanceDelta = amt.Neg()
 	}
+
+	// Optional: a deposit whose cash came from an open till also books that till's
+	// withdrawal (done first, so a drawer-overdraw aborts before the balance moves).
+	if typ == "deposit" && c.FormValue("source") == "till" {
+		tillUID, err := strconv.ParseInt(c.FormValue("till_user_id"), 10, 64)
+		if err != nil || tillUID == 0 {
+			return apperr.Validation("choose which till the cash came from")
+		}
+		reason := card + " bank deposit"
+		if note != "" {
+			reason += " — " + note
+		}
+		if _, err := a.p.core.CashRegister.Withdraw(ctx, tillUID, cashregister.MovementInput{Amount: amt.String(), Reason: reason}); err != nil {
+			return err
+		}
+	}
+
 	if _, err := a.p.store.RecordCardTx(ctx, CardTxInput{
 		CardID: cardID, Type: typ, Amount: amt, BalanceDelta: balanceDelta,
-		Note: strings.TrimSpace(c.FormValue("note")), CreatedBy: uid,
+		Note: note, CreatedBy: uid,
 	}); err != nil {
 		return err
 	}
