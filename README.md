@@ -157,20 +157,28 @@ it exactly like the core binary (`-migrate` / `-init`, then serve). Flags:
 ### Bundled plugin: Mobile Recharge (carrier mobile-money agent)
 
 `plugins/recharge` turns the till into a carrier agent (Dialog **eZ Cash**,
-Mobitel **mCash**, …). One shared **float per device** drives both airtime
-reload *and* the wallet payment system:
+Mobitel **mCash**, …). A per-device **reload balance** (the device's working
+float — labelled "reload balance" in the UI) drives both airtime reload *and* the
+wallet payment system, while **bank cards** are a separate, balance-tracked money
+source for bill payments and cash hand-outs:
 
 - **Reload** at the POS (a hidden non-stocked service line — on the receipt,
   counts as a sale, not returnable, no stock movement).
-- **Money transactions** on a dedicated cashier screen: cash-in/deposit,
-  cash-out/withdrawal, bill payment and supplier float top-up — each posts the
-  matching cash-drawer movement (top-ups also book an expense) and prints a slip.
+- **Device money transactions** on a dedicated cashier screen: cash-in/deposit,
+  cash-out/withdrawal and supplier reload top-up — each posts the matching
+  cash-drawer movement (top-ups also book an expense) and prints a slip.
+- **Bank cards** — a carrier-independent card/account with its own running
+  balance. Cashiers **pay a bill** (balance ↓, cash in) or **get money** (balance
+  ↑, cash out), with an optional service charge added to the drawer; an overdraw
+  on bill-pay is hard-blocked. Admins **deposit / withdraw** to match the real
+  bank balance — a balance-only adjustment that never touches the cash drawer.
 - **Wallet tender** — a customer can pay a normal product sale by wallet
-  transfer; it credits the carrier float and stays out of the cash drawer.
+  transfer; it credits the device reload balance and stays out of the cash drawer.
 - **Per-device reconciliation** — cashier enters each device's counted opening &
-  closing float; the system computes the per-carrier expected balance and the
+  closing balance; the system computes the per-carrier expected balance and the
   bonus/loss (carrier commission is unpredictable, so it surfaces at close).
-- **Admin** — carrier & device management and a reconciliation/ledger report.
+- **Admin** — carrier, device & bank-card management and a reconciliation/ledger
+  report (with live bank-card balances).
 
 ### Bundled plugin: Communication Store (photocopy / print / laminate / bind)
 

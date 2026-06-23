@@ -45,7 +45,11 @@ func (a *adminUI) Carriers(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	return response.RenderPage(c, CarriersPage(middleware.CurrentUserName(c), cs, ds))
+	cards, err := a.p.store.ListBankCards(ctx, false)
+	if err != nil {
+		return err
+	}
+	return response.RenderPage(c, CarriersPage(middleware.CurrentUserName(c), cs, ds, cards))
 }
 
 // CarriersTable is the HTMX row fragment.
@@ -181,6 +185,14 @@ func (a *adminUI) Report(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	cards, err := a.p.store.ListBankCards(ctx, false)
+	if err != nil {
+		return err
+	}
+	cardLed, err := a.p.store.CardLedger(ctx, 50)
+	if err != nil {
+		return err
+	}
 	symbol := a.symbol(ctx)
 	vm := ReportVM{
 		UserName:      middleware.CurrentUserName(c),
@@ -189,6 +201,8 @@ func (a *adminUI) Report(c echo.Context) error {
 		From:          fromStr,
 		To:            toStr,
 		Balances:      balances,
+		Cards:         cards,
+		CardLedger:    cardLed,
 		Blocks:        blocks,
 		ServiceEarned: sumServiceCharge(led),
 		FloatOnHand:   sumBalances(balances),
@@ -463,15 +477,14 @@ func (a *adminUI) DeviceCreate(c echo.Context) error {
 	if label == "" {
 		return apperr.Validation("device label is required")
 	}
-	// A bank card is a money source with no float to track: it is always
-	// money-only (never airtime) and skips reconciliation/refill.
-	bankCard := c.FormValue("bank_card") != ""
-	forRecharge := c.FormValue("for_recharge") != "" && !bankCard
-	forMoney := c.FormValue("for_money") != "" || bankCard
+	// Devices always hold a tracked reload balance. (Bank cards are a separate
+	// entity now — see CardCreate.)
+	forRecharge := c.FormValue("for_recharge") != ""
+	forMoney := c.FormValue("for_money") != ""
 	if !forRecharge && !forMoney {
 		return apperr.Validation("choose at least one use (recharge and/or money transfer)")
 	}
-	if _, err := a.p.store.CreateDevice(ctx, carrierID, label, strings.TrimSpace(c.FormValue("number")), forRecharge, forMoney, !bankCard); err != nil {
+	if _, err := a.p.store.CreateDevice(ctx, carrierID, label, strings.TrimSpace(c.FormValue("number")), forRecharge, forMoney, true); err != nil {
 		return err
 	}
 	ds, err := a.p.store.Devices(ctx)
@@ -513,4 +526,91 @@ func (a *adminUI) CarrierDelete(c echo.Context) error {
 		return err
 	}
 	return response.RenderFragment(c, CarrierRows(cs), response.Trigger(map[string]any{"carriers-changed": true}))
+}
+
+// cardRowsFragment re-renders the bank-card table (the HTMX swap target after a
+// card create/delete/adjust).
+func (a *adminUI) cardRowsFragment(c echo.Context, triggers ...string) error {
+	cards, err := a.p.store.ListBankCards(c.Request().Context(), false)
+	if err != nil {
+		return err
+	}
+	return response.RenderFragment(c, CardRows(a.symbol(c.Request().Context()), cards), triggers...)
+}
+
+// CardCreate adds a bank card (a carrier-independent money source with a tracked
+// balance, used for bill-pay / get-money at the till).
+func (a *adminUI) CardCreate(c echo.Context) error {
+	ctx := c.Request().Context()
+	name := strings.TrimSpace(c.FormValue("name"))
+	if name == "" {
+		return apperr.Validation("bank card name is required")
+	}
+	exists, err := a.p.store.BankCardExists(ctx, name)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return apperr.Conflict("a bank card with that name already exists")
+	}
+	if _, err := a.p.store.CreateBankCard(ctx, name); err != nil {
+		return err
+	}
+	return a.cardRowsFragment(c, response.Toast(name+" added", "success"))
+}
+
+// CardDelete retires a bank card (its history is preserved).
+func (a *adminUI) CardDelete(c echo.Context) error {
+	ctx := c.Request().Context()
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	if err := a.p.store.DeactivateBankCard(ctx, id); err != nil {
+		return err
+	}
+	return a.cardRowsFragment(c)
+}
+
+// CardAdjust is the admin's balance-only deposit/withdrawal on a bank card: it
+// changes the tracked balance WITHOUT touching the cash drawer or booking an
+// expense. (The admin manages the real bank balance; if they need the cash they
+// take it from the cashier as a normal till withdrawal.)
+func (a *adminUI) CardAdjust(c echo.Context) error {
+	ctx := c.Request().Context()
+	uid := middleware.CurrentUserID(c)
+	cardID, err := strconv.ParseInt(c.FormValue("card_id"), 10, 64)
+	if err != nil || cardID == 0 {
+		return apperr.Validation("choose a bank card")
+	}
+	if a.p.store.BankCardName(ctx, cardID) == "" {
+		return apperr.Validation("unknown bank card")
+	}
+	typ := c.FormValue("type")
+	if typ != "deposit" && typ != "withdrawal" {
+		return apperr.BadRequest("invalid adjustment type")
+	}
+	amt, err := money.Parse(c.FormValue("amount"))
+	if err != nil || !amt.IsPositive() {
+		return apperr.Validation("enter a valid amount")
+	}
+	// deposit: balance +.   withdrawal: balance − (guard against overdraw).
+	balanceDelta := amt
+	if typ == "withdrawal" {
+		over, err := a.p.store.cardWouldOverdraw(ctx, cardID, amt)
+		if err != nil {
+			return err
+		}
+		if over {
+			return apperr.Conflict("not enough balance on this card")
+		}
+		balanceDelta = amt.Neg()
+	}
+	if _, err := a.p.store.RecordCardTx(ctx, CardTxInput{
+		CardID: cardID, Type: typ, Amount: amt, BalanceDelta: balanceDelta,
+		Note: strings.TrimSpace(c.FormValue("note")), CreatedBy: uid,
+	}); err != nil {
+		return err
+	}
+	return a.cardRowsFragment(c, response.Toast("Balance updated", "success"))
 }

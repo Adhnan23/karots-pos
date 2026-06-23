@@ -100,7 +100,12 @@ func buildSlip(cfg *settings.Settings, d slipData) []byte {
 	bold(false)
 	rule()
 	left()
-	line("Carrier : " + d.Carrier)
+	// Bill-pay / get-money are bank-card operations; everything else names a carrier.
+	if d.Kind == "billpay" || d.Kind == "getmoney" {
+		line("Card    : " + d.Carrier)
+	} else {
+		line("Carrier : " + d.Carrier)
+	}
 	if strings.TrimSpace(d.Device) != "" {
 		line("Device  : " + d.Device)
 	}
@@ -132,8 +137,10 @@ func txLabel(t string) string {
 		return "withdrawal"
 	case "billpay":
 		return "bill payment"
+	case "getmoney":
+		return "money out (card)"
 	case "topup":
-		return "float top-up"
+		return "reload top-up"
 	case "wallet_in":
 		return "wallet payment"
 	case "reload":

@@ -510,3 +510,131 @@ func nullStr(s string) *string {
 	}
 	return &s
 }
+
+// ============================ Bank cards ============================
+// A bank card is a carrier-independent money source (the shop's own card/account)
+// with a real running balance = Σ balance_delta. Unlike device floats, it is not
+// reconciled per session — the balance persists across shifts.
+
+// BankCard is a shop bank card/account with its live balance.
+type BankCard struct {
+	ID       int64           `db:"id"        json:"id"`
+	Name     string          `db:"name"      json:"name"`
+	Balance  decimal.Decimal `db:"balance"   json:"balance"`
+	IsActive bool            `db:"is_active" json:"is_active"`
+}
+
+// ListBankCards returns bank cards with their live balance. activeOnly limits to
+// active cards (the cashier/admin pickers); false includes retired ones (history).
+func (s *Store) ListBankCards(ctx context.Context, activeOnly bool) ([]BankCard, error) {
+	var rows []BankCard
+	err := s.db.SelectContext(ctx, &rows, `
+		SELECT b.id, b.name, b.is_active, COALESCE(t.bal,0) AS balance
+		FROM recharge_bank_cards b
+		LEFT JOIN LATERAL (
+		  SELECT SUM(balance_delta) AS bal FROM recharge_card_tx WHERE card_id=b.id) t ON true
+		WHERE ($1 = false OR b.is_active = true)
+		ORDER BY b.name`, activeOnly)
+	return rows, err
+}
+
+// CardBalance returns one card's live balance.
+func (s *Store) CardBalance(ctx context.Context, cardID int64) (decimal.Decimal, error) {
+	var v decimal.Decimal
+	err := s.db.GetContext(ctx, &v,
+		`SELECT COALESCE(SUM(balance_delta),0) FROM recharge_card_tx WHERE card_id=$1`, cardID)
+	return v, err
+}
+
+// CreateBankCard inserts a bank card.
+func (s *Store) CreateBankCard(ctx context.Context, name string) (int64, error) {
+	var id int64
+	err := s.db.GetContext(ctx, &id,
+		`INSERT INTO recharge_bank_cards (name) VALUES ($1) RETURNING id`, name)
+	return id, err
+}
+
+// BankCardExists reports whether an active card already uses this name.
+func (s *Store) BankCardExists(ctx context.Context, name string) (bool, error) {
+	var ok bool
+	err := s.db.GetContext(ctx, &ok,
+		`SELECT EXISTS (SELECT 1 FROM recharge_bank_cards WHERE lower(name)=lower($1) AND is_active=true)`, name)
+	return ok, err
+}
+
+// DeactivateBankCard retires a card (its history is preserved).
+func (s *Store) DeactivateBankCard(ctx context.Context, id int64) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE recharge_bank_cards SET is_active=false WHERE id=$1`, id)
+	return err
+}
+
+// BankCardName returns a card's display name ("" when unknown).
+func (s *Store) BankCardName(ctx context.Context, id int64) string {
+	var n string
+	_ = s.db.GetContext(ctx, &n, `SELECT name FROM recharge_bank_cards WHERE id=$1`, id)
+	return n
+}
+
+// cardWouldOverdraw reports whether decreasing a card's balance by amt would push
+// it below zero (the hard-block on bill-pay and admin withdrawal).
+func (s *Store) cardWouldOverdraw(ctx context.Context, cardID int64, amt decimal.Decimal) (bool, error) {
+	bal, err := s.CardBalance(ctx, cardID)
+	if err != nil {
+		return false, err
+	}
+	return amt.GreaterThan(bal), nil
+}
+
+// CardTxInput is one bank-card movement to record. The matching cash-drawer
+// movement (PayIn/Withdraw) is handled by the caller; deltas are precomputed.
+type CardTxInput struct {
+	CardID        int64
+	SessionID     *int64 // core cash session (nil for admin balance adjustments)
+	Type          string // billpay | getmoney | deposit | withdrawal
+	Amount        decimal.Decimal
+	BalanceDelta  decimal.Decimal
+	CashDelta     decimal.Decimal
+	ServiceCharge decimal.Decimal
+	Reference     string
+	Note          string
+	CreatedBy     int64
+}
+
+// RecordCardTx inserts a bank-card ledger row.
+func (s *Store) RecordCardTx(ctx context.Context, in CardTxInput) (int64, error) {
+	var id int64
+	err := s.db.GetContext(ctx, &id, `
+		INSERT INTO recharge_card_tx
+		  (card_id, session_id, type, amount, balance_delta, cash_delta,
+		   service_charge, reference, note, created_by)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+		in.CardID, in.SessionID, in.Type, in.Amount, in.BalanceDelta, in.CashDelta,
+		in.ServiceCharge, nullStr(in.Reference), nullStr(in.Note), in.CreatedBy)
+	return id, err
+}
+
+// CardTxRow is one bank-card ledger entry for the admin report.
+type CardTxRow struct {
+	ID            int64           `db:"id"`
+	CreatedAt     time.Time       `db:"created_at"`
+	Card          string          `db:"card"`
+	Type          string          `db:"type"`
+	Amount        decimal.Decimal `db:"amount"`
+	ServiceCharge decimal.Decimal `db:"service_charge"`
+	CashDelta     decimal.Decimal `db:"cash_delta"`
+	BalanceDelta  decimal.Decimal `db:"balance_delta"`
+	Reference     *string         `db:"reference"`
+}
+
+// CardLedger lists recent bank-card movements, newest first.
+func (s *Store) CardLedger(ctx context.Context, limit int) ([]CardTxRow, error) {
+	var rows []CardTxRow
+	err := s.db.SelectContext(ctx, &rows, `
+		SELECT t.id, t.created_at, b.name AS card, t.type, t.amount, t.service_charge,
+		       t.cash_delta, t.balance_delta, t.reference
+		FROM recharge_card_tx t
+		JOIN recharge_bank_cards b ON b.id = t.card_id
+		ORDER BY t.created_at DESC
+		LIMIT $1`, limit)
+	return rows, err
+}

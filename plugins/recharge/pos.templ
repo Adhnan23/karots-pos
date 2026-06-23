@@ -58,8 +58,8 @@ templ ReloadPanel() {
 					<input type="number" min="0" step="0.01" x-model="amount" x-on:keydown.enter.prevent="add()" placeholder="0.00" class="w-28 border rounded-lg px-3 py-2.5 text-right"/>
 					<button type="button" x-on:click="add()" x-bind:disabled="!(Number(amount)>0 && did && !over())" class="px-4 py-2.5 rounded-lg bg-emerald-600 text-white font-semibold disabled:opacity-40">Add to cart</button>
 				</div>
-				<p x-show="dev()" class="text-xs text-slate-500 mt-1">Float balance: <span class="font-semibold tabular-nums" x-text="bal().toFixed(2)"></span></p>
-				<p x-show="over()" class="text-xs text-rose-500 mt-1">Amount exceeds this device's float balance.</p>
+				<p x-show="dev()" class="text-xs text-slate-500 mt-1">Reload balance: <span class="font-semibold tabular-nums" x-text="bal().toFixed(2)"></span></p>
+				<p x-show="over()" class="text-xs text-rose-500 mt-1">Amount exceeds this device's reload balance.</p>
 			</div>
 		</div>
 	</div>

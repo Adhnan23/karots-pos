@@ -39,6 +39,7 @@ type ReconData struct {
 	Rows          []CarrierRecon
 	Carriers      []Carrier
 	Devices       []Device
+	Cards         []BankCard
 }
 
 func (h *cashierUI) showChangePin(c echo.Context) bool {
@@ -75,6 +76,9 @@ func (h *cashierUI) reconData(c echo.Context) (ReconData, error) {
 		return d, err
 	}
 	if d.Devices, err = h.p.store.Devices(ctx); err != nil {
+		return d, err
+	}
+	if d.Cards, err = h.p.store.ListBankCards(ctx, true); err != nil {
 		return d, err
 	}
 	return d, nil
@@ -163,7 +167,9 @@ func (h *cashierUI) Tx(c echo.Context) error {
 
 	typ := c.FormValue("type")
 	kind, ok := txKinds[typ]
-	if !ok || typ == "wallet_in" || typ == "reload" { // wallet_in/reload only via the sale path
+	// Float devices handle deposit / withdrawal / topup only. wallet_in & reload flow
+	// through the sale path; billpay is now a bank-card operation (see CardTx).
+	if !ok || typ == "wallet_in" || typ == "reload" || typ == "billpay" {
 		return apperr.BadRequest("invalid transaction type")
 	}
 	deviceID, err := strconv.ParseInt(c.FormValue("device_id"), 10, 64)
@@ -296,6 +302,109 @@ func (h *cashierUI) Devices(c echo.Context) error {
 		return err
 	}
 	return c.JSON(http.StatusOK, map[string]any{"data": rows})
+}
+
+// Cards lists active bank cards with their live balance for the cashier's
+// bill-pay / get-money picker.
+func (h *cashierUI) Cards(c echo.Context) error {
+	rows, err := h.p.store.ListBankCards(c.Request().Context(), true)
+	if err != nil {
+		return err
+	}
+	return c.JSON(http.StatusOK, map[string]any{"data": rows})
+}
+
+// CardTx records a bank-card money movement done by the cashier: a bill payment
+// (card balance −, cash in) or a get-money (card balance +, cash out). A service
+// charge, when set, is always extra cash into the drawer. It mirrors the drawer,
+// guards a bill payment against the card balance, writes the card ledger and
+// prints a slip. Deposits/withdrawals on the balance are admin-only (see admin).
+func (h *cashierUI) CardTx(c echo.Context) error {
+	ctx := c.Request().Context()
+	uid := middleware.CurrentUserID(c)
+	sess, err := h.requireSession(c)
+	if err != nil {
+		return err
+	}
+
+	typ := c.FormValue("type")
+	if typ != "billpay" && typ != "getmoney" {
+		return apperr.BadRequest("invalid transaction type")
+	}
+	cardID, err := strconv.ParseInt(c.FormValue("card_id"), 10, 64)
+	if err != nil || cardID == 0 {
+		return apperr.Validation("choose a bank card")
+	}
+	card := h.p.store.BankCardName(ctx, cardID)
+	if card == "" {
+		return apperr.Validation("unknown bank card")
+	}
+	amt, err := money.Parse(c.FormValue("amount"))
+	if err != nil || !amt.IsPositive() {
+		return apperr.Validation("amount must be positive")
+	}
+	svc := decimal.Zero
+	if v := strings.TrimSpace(c.FormValue("service_charge")); v != "" {
+		svc, err = money.Parse(v)
+		if err != nil || svc.IsNegative() {
+			return apperr.Validation("service charge must be zero or more")
+		}
+	}
+	ref := strings.TrimSpace(c.FormValue("reference"))
+	note := strings.TrimSpace(c.FormValue("note"))
+
+	// Bill payment draws down the card balance — hard-block an overdraw.
+	if typ == "billpay" {
+		over, err := h.p.store.cardWouldOverdraw(ctx, cardID, amt)
+		if err != nil {
+			return err
+		}
+		if over {
+			return apperr.Conflict("not enough balance on this card")
+		}
+	}
+
+	// billpay: balance −, cash +.   getmoney: balance +, cash −.
+	balanceDelta, cashDelta := amt.Neg(), amt
+	if typ == "getmoney" {
+		balanceDelta, cashDelta = amt, amt.Neg()
+	}
+
+	reason := card + " " + txLabel(typ)
+	if ref != "" {
+		reason += " #" + ref
+	}
+
+	// 1) Mirror the cash drawer (Withdraw guards get-money against the drawer balance).
+	if cashDelta.IsPositive() {
+		if _, err := h.p.core.CashRegister.PayIn(ctx, uid, cashregister.MovementInput{Amount: cashDelta.String(), Reason: reason}); err != nil {
+			return err
+		}
+	} else {
+		if _, err := h.p.core.CashRegister.Withdraw(ctx, uid, cashregister.MovementInput{Amount: cashDelta.Neg().String(), Reason: reason}); err != nil {
+			return err
+		}
+	}
+	// 1b) Service charge is extra cash into the drawer (shop earnings).
+	if svc.IsPositive() {
+		if _, err := h.p.core.CashRegister.PayIn(ctx, uid, cashregister.MovementInput{Amount: svc.String(), Reason: reason + " service charge"}); err != nil {
+			return err
+		}
+	}
+
+	// 2) Ledger.
+	if _, err := h.p.store.RecordCardTx(ctx, CardTxInput{
+		CardID: cardID, SessionID: &sess.ID, Type: typ, Amount: amt,
+		BalanceDelta: balanceDelta, CashDelta: cashDelta, ServiceCharge: svc,
+		Reference: ref, Note: note, CreatedBy: uid,
+	}); err != nil {
+		return err
+	}
+
+	// 3) Slip.
+	h.p.printSlip(ctx, typ, card, amt, svc, ref)
+
+	return h.reconFragment(c, response.Toast(card+" "+txLabel(typ)+" recorded", "success"))
 }
 
 // Reload records the float decrease for an airtime sale, attributed to a specific

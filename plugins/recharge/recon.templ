@@ -22,13 +22,16 @@ templ ReconBody(d ReconData) {
 	<div id="recon-body" class="space-y-6">
 		if d.Session == nil {
 			<div class="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-5">
-				Open your cash drawer first — float reconciliation is tied to the open cash session.
+				Open your cash drawer first — reload-balance reconciliation is tied to the open cash session.
 			</div>
 		} else {
 			<div class="text-sm text-slate-500">
 				Cash session #{ strconv.FormatInt(d.Session.ID, 10) } · opened { d.Session.OpenedAt.Format("Mon 02 Jan, 15:04") }
 			</div>
 			@txForm(d)
+			if len(d.Cards) > 0 {
+				@cardTxForm(d)
+			}
 			if len(d.Rows) == 0 {
 				<div class="bg-white rounded-2xl shadow-sm p-6 text-slate-400 text-center">
 					No carriers set up. Add carriers and devices in Admin → Reload & Bills.
@@ -47,14 +50,14 @@ templ ReconBody(d ReconData) {
 						hx-target="#recon-body"
 						hx-swap="outerHTML"
 						class="px-4 py-2.5 rounded-lg border border-indigo-300 text-indigo-700 font-medium hover:bg-indigo-50"
-					>Save opening floats</button>
+					>Save opening balances</button>
 					<button
 						type="button"
 						hx-post="/cashier/recharge/close"
 						hx-include="#recon-floats"
 						hx-target="#recon-body"
 						hx-swap="outerHTML"
-						hx-confirm="Save the counted closing floats? This finalises each device for this session."
+						hx-confirm="Save the counted closing balances? This finalises each device for this session."
 						class="px-4 py-2.5 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700"
 					>Save closing & show bonus/loss</button>
 				</div>
@@ -63,14 +66,15 @@ templ ReconBody(d ReconData) {
 	</div>
 }
 
-// txForm is the money-transaction recorder (deposit / withdrawal / bill-pay / topup).
-// The device picker is dynamic (loads the chosen carrier's devices with live
-// balances) and mandatory; deposit/bill-pay are blocked client-side when the
-// amount exceeds the device's float (the server re-checks authoritatively).
+// txForm is the device money-transaction recorder (deposit / withdrawal / reload
+// top-up). The device picker is dynamic (loads the chosen carrier's devices with
+// live balances) and mandatory; a deposit is blocked client-side when the amount
+// exceeds the device's reload balance (the server re-checks authoritatively).
+// Bill payments and handing out cash are bank-card operations — see cardTxForm.
 templ txForm(d ReconData) {
 	<div
 		class="bg-white rounded-2xl shadow-sm p-6"
-		x-data="{ type:'deposit', cid:'', did:'', amount:'', svc:'', devices:[], async loadDevices(){ this.devices=[]; this.did=''; if(!this.cid){ return } try{ const r=await fetch('/cashier/recharge/devices?for=money&carrier_id='+encodeURIComponent(this.cid)); const j=await r.json(); this.devices=j.data||[]; if(this.devices.length){ this.did=String(this.devices[0].id) } }catch(e){} }, dev(){ return this.devices.find(x=>String(x.id)===String(this.did)) }, tracked(){ const x=this.dev(); return x ? x.tracks_float!==false : true }, bal(){ const x=this.dev(); return x?Number(x.balance):0 }, decreases(){ return this.type==='deposit'||this.type==='billpay' }, over(){ return this.tracked() && this.decreases() && Number(this.amount)>this.bal() } }"
+		x-data="{ type:'deposit', cid:'', did:'', amount:'', svc:'', devices:[], async loadDevices(){ this.devices=[]; this.did=''; if(!this.cid){ return } try{ const r=await fetch('/cashier/recharge/devices?for=money&carrier_id='+encodeURIComponent(this.cid)); const j=await r.json(); this.devices=j.data||[]; if(this.devices.length){ this.did=String(this.devices[0].id) } }catch(e){} }, dev(){ return this.devices.find(x=>String(x.id)===String(this.did)) }, bal(){ const x=this.dev(); return x?Number(x.balance):0 }, decreases(){ return this.type==='deposit' }, over(){ return this.decreases() && Number(this.amount)>this.bal() } }"
 		x-init="cid=$el.querySelector('[data-first-carrier]')?.value || ''; loadDevices()"
 	>
 		<h2 class="text-lg font-semibold mb-4">Record a transaction</h2>
@@ -84,11 +88,10 @@ templ txForm(d ReconData) {
 			<div class="col-span-full">
 				<label class="block text-sm font-medium text-slate-600 mb-1">Type</label>
 				<input type="hidden" name="type" x-model="type"/>
-				<div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+				<div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
 					@typeCard("deposit", "Deposit", "cash-in → wallet")
 					@typeCard("withdrawal", "Withdrawal", "give cash out")
-					@typeCard("billpay", "Bill payment", "pay a bill")
-					@typeCard("topup", "Float top-up", "buy from supplier")
+					@typeCard("topup", "Reload top-up", "buy from supplier")
 				</div>
 			</div>
 			<div class="col-span-full">
@@ -120,17 +123,16 @@ templ txForm(d ReconData) {
 							class="px-3 py-2.5 rounded-lg text-left"
 						>
 							<div class="font-medium text-sm" x-text="dv.label"></div>
-							<div class="text-xs text-slate-400" x-text="dv.tracks_float===false ? 'Bank card' : ('Bal: '+Number(dv.balance).toFixed(2))"></div>
+							<div class="text-xs text-slate-400" x-text="'Bal: '+Number(dv.balance).toFixed(2)"></div>
 						</button>
 					</template>
 				</div>
 				<p x-show="cid && devices.length===0" class="text-xs text-rose-500 mt-1">No devices for this carrier.</p>
-				<p x-show="dev() && !tracked()" class="text-xs text-indigo-500 mt-1">Bank card — no float limit.</p>
 			</div>
 			<div>
 				<label class="block text-sm font-medium text-slate-600 mb-1">Amount</label>
 				<input type="number" name="amount" min="0" step="0.01" x-model="amount" required placeholder="0.00" class="w-full border rounded-lg px-3 py-2.5 text-right"/>
-				<p x-show="over()" class="text-xs text-rose-500 mt-1">Amount exceeds this device's float balance.</p>
+				<p x-show="over()" class="text-xs text-rose-500 mt-1">Amount exceeds this device's reload balance.</p>
 			</div>
 			<div>
 				<label class="block text-sm font-medium text-slate-600 mb-1">Service charge (optional)</label>
@@ -145,7 +147,74 @@ templ txForm(d ReconData) {
 				<button type="submit" x-bind:disabled="!did || over()" class="w-full py-2.5 rounded-lg bg-emerald-600 text-white font-semibold hover:bg-emerald-700 disabled:opacity-40">Record & print</button>
 			</div>
 		</form>
-		<p class="text-xs text-slate-400 mt-3">Cash-in/out posts to your cash drawer automatically; top-ups also book a shop expense. A slip prints for deposit, withdrawal and bill payment.</p>
+		<p class="text-xs text-slate-400 mt-3">Cash-in/out posts to your cash drawer automatically; reload top-ups also book a shop expense. A slip prints for deposit and withdrawal.</p>
+	</div>
+}
+
+// cardTxForm is the bank-card money recorder: pay a bill (card balance ↓, cash in)
+// or get money (card balance ↑, cash out). A bill payment is blocked client-side
+// when the amount exceeds the card balance (the server re-checks authoritatively).
+// Deposits/withdrawals on the balance are admin-only.
+templ cardTxForm(d ReconData) {
+	<div
+		class="bg-white rounded-2xl shadow-sm p-6"
+		x-data="{ type:'billpay', cardId:'', amount:'', svc:'', cards:[], async load(){ try{ const r=await fetch('/cashier/recharge/cards'); const j=await r.json(); this.cards=j.data||[]; if(this.cards.length){ this.cardId=String(this.cards[0].id) } }catch(e){} }, card(){ return this.cards.find(x=>String(x.id)===String(this.cardId)) }, bal(){ const x=this.card(); return x?Number(x.balance):0 }, over(){ return this.type==='billpay' && Number(this.amount)>this.bal() } }"
+		x-init="load()"
+	>
+		<h2 class="text-lg font-semibold mb-1">Bank card — bill payment &amp; cash</h2>
+		<p class="text-xs text-slate-400 mb-4">Pay a bill from a card (balance goes down, cash comes in) or hand out cash (balance goes up, cash goes out). Service charge is extra cash into the drawer.</p>
+		<form
+			hx-post="/cashier/recharge/card-tx"
+			hx-target="#recon-body"
+			hx-swap="outerHTML"
+			hx-on::after-request="if(event.detail.successful) this.reset()"
+			class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3"
+		>
+			<div class="col-span-full">
+				<label class="block text-sm font-medium text-slate-600 mb-1">Type</label>
+				<input type="hidden" name="type" x-model="type"/>
+				<div class="grid grid-cols-2 gap-2">
+					<button type="button" x-on:click="type='billpay'" x-bind:class="type==='billpay' ? 'ring-2 ring-emerald-500 bg-emerald-50' : 'border border-slate-200'" class="px-3 py-2.5 rounded-lg text-left">
+						<div class="font-medium text-sm">Pay bill</div>
+						<div class="text-xs text-slate-400">balance ↓ · cash in</div>
+					</button>
+					<button type="button" x-on:click="type='getmoney'" x-bind:class="type==='getmoney' ? 'ring-2 ring-emerald-500 bg-emerald-50' : 'border border-slate-200'" class="px-3 py-2.5 rounded-lg text-left">
+						<div class="font-medium text-sm">Get money</div>
+						<div class="text-xs text-slate-400">balance ↑ · cash out</div>
+					</button>
+				</div>
+			</div>
+			<div class="col-span-full">
+				<label class="block text-sm font-medium text-slate-600 mb-1">Bank card</label>
+				<input type="hidden" name="card_id" x-model="cardId"/>
+				<div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+					<template x-for="bc in cards" x-bind:key="bc.id">
+						<button type="button" x-on:click="cardId=String(bc.id)" x-bind:class="String(cardId)===String(bc.id) ? 'ring-2 ring-indigo-500 bg-indigo-50' : 'border border-slate-200'" class="px-3 py-2.5 rounded-lg text-left">
+							<div class="font-medium text-sm" x-text="bc.name"></div>
+							<div class="text-xs text-slate-400" x-text="'Bal: '+Number(bc.balance).toFixed(2)"></div>
+						</button>
+					</template>
+				</div>
+				<p x-show="cards.length===0" class="text-xs text-rose-500 mt-1">No bank cards. Add one in Admin → Reload &amp; Bills.</p>
+			</div>
+			<div>
+				<label class="block text-sm font-medium text-slate-600 mb-1">Amount</label>
+				<input type="number" name="amount" min="0" step="0.01" x-model="amount" required placeholder="0.00" class="w-full border rounded-lg px-3 py-2.5 text-right"/>
+				<p x-show="over()" class="text-xs text-rose-500 mt-1">Amount exceeds this card's balance.</p>
+			</div>
+			<div>
+				<label class="block text-sm font-medium text-slate-600 mb-1">Service charge (optional)</label>
+				<input type="number" name="service_charge" min="0" step="0.01" x-model="svc" placeholder="0.00" class="w-full border rounded-lg px-3 py-2.5 text-right"/>
+				<p x-show="Number(svc)>0" class="text-xs text-slate-500 mt-1">Customer pays <span class="font-semibold tabular-nums" x-text="(Number(amount||0)+Number(svc||0)).toFixed(2)"></span> total (charge added to drawer).</p>
+			</div>
+			<div>
+				<label class="block text-sm font-medium text-slate-600 mb-1">Reference (optional)</label>
+				<input type="text" name="reference" placeholder="bill / txn no." class="w-full border rounded-lg px-3 py-2.5"/>
+			</div>
+			<div class="flex items-end">
+				<button type="submit" x-bind:disabled="!cardId || over()" class="w-full py-2.5 rounded-lg bg-emerald-600 text-white font-semibold hover:bg-emerald-700 disabled:opacity-40">Record &amp; print</button>
+			</div>
+		</form>
 	</div>
 }
 
@@ -203,8 +272,8 @@ templ carrierBlock(symbol string, cr CarrierRecon) {
 			</table>
 			<dl class="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-1 text-sm mt-4">
 				@stat("Opening", money.Format(symbol, cr.Opening))
-				@stat("Float in", money.Format(symbol, cr.FloatIn))
-				@stat("Float out", money.Format(symbol, cr.FloatOut))
+				@stat("Reload in", money.Format(symbol, cr.FloatIn))
+				@stat("Reload out", money.Format(symbol, cr.FloatOut))
 				@stat("Expected close", money.Format(symbol, cr.Expected))
 				if cr.AllClosed {
 					@stat("Counted close", money.Format(symbol, cr.Closing))
