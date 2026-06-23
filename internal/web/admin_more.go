@@ -976,9 +976,10 @@ func (a *adminUI) LowStockReport(c echo.Context) error {
 
 // reorderDemand computes a demand-based reorder hint per low-stock product:
 // suggested qty = ceil(avg daily sales over the last 90 days × 14-day lead −
-// on-hand) when there's sales history, plus units sold in the same 90-day window
-// a year ago (seasonality). Products with no recent sales get an empty Suggested
-// so the page falls back to the simple 2× reorder-level rule.
+// on-hand) when there's sales history, plus units sold over the last week and
+// month (recent velocity) and the same 90-day window a year ago (seasonality).
+// Products with no recent sales get an empty Suggested so the page falls back to
+// the simple 2× reorder-level rule.
 func (a *adminUI) reorderDemand(ctx context.Context, rows []products.Product) map[int64]adminpages.ReorderInfo {
 	const trailingDays, leadDays = 90, 14
 	ids := make([]int64, 0, len(rows))
@@ -990,11 +991,19 @@ func (a *adminUI) reorderDemand(ctx context.Context, rows []products.Product) ma
 	if err != nil {
 		return nil
 	}
+	soldWeek, _ := a.s.reports.ProductQtySold(ctx, ids, now.AddDate(0, 0, -7), now)
+	soldMonth, _ := a.s.reports.ProductQtySold(ctx, ids, now.AddDate(0, 0, -30), now)
 	lyTo := now.AddDate(-1, 0, 0)
 	soldLY, _ := a.s.reports.ProductQtySold(ctx, ids, lyTo.AddDate(0, 0, -trailingDays), lyTo)
 	out := make(map[int64]adminpages.ReorderInfo, len(rows))
 	for _, p := range rows {
 		var info adminpages.ReorderInfo
+		if v, ok := soldWeek[p.ID]; ok {
+			info.SoldLastWeek = money.Display(v)
+		}
+		if v, ok := soldMonth[p.ID]; ok {
+			info.SoldLastMonth = money.Display(v)
+		}
 		if v, ok := soldLY[p.ID]; ok {
 			info.SoldLastYear = money.Display(v)
 		}

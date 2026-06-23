@@ -2,14 +2,52 @@ package adminpages
 
 import (
 	"encoding/json"
+	"sort"
 	"strconv"
 	"time"
 
 	"karots-pos/internal/features/products"
 	"karots-pos/internal/features/suppliers"
+	"karots-pos/templates/layouts"
 
 	"github.com/shopspring/decimal"
 )
+
+// reportHubCard is one card on the Reports hub (built-in or plugin-contributed).
+type reportHubCard struct {
+	Href, Title, Desc string
+}
+
+// reportHubCards returns every Reports-hub card — the built-in reports plus any
+// plugin-contributed ones — sorted alphabetically by title so the grid is easy
+// to scan.
+func reportHubCards() []reportHubCard {
+	cards := []reportHubCard{
+		{"/admin/reports/sales", "Sales", "Receipts and totals over a date range"},
+		{"/admin/reports/finance", "Finance / P&L", "Revenue, COGS, profit, dues for a period"},
+		{"/admin/reports/tax", "Tax Summary", "VAT/tax collected over a period"},
+		{"/admin/reports/returns", "Returns / Refunds", "Returned lines and refund value"},
+		{"/admin/reports/profit-by-category", "Profit by Category", "Net revenue & profit per category"},
+		{"/admin/reports/sales-trend", "Daily Sales Trend", "Day-by-day net revenue & profit"},
+		{"/admin/reports/product-sales", "Product Sales", "One product's units over time vs last year"},
+		{"/admin/reports/warranty", "Warranty & Recovery", "Replacement cost vs supplier recovery"},
+		{"/admin/reports/cash-register", "Cash Register", "Drawer sessions with over/short"},
+		{"/admin/reports/purchases", "Purchases", "GRNs received in a period"},
+		{"/admin/reports/suppliers", "Suppliers", "Outstanding payables snapshot"},
+		{"/admin/reports/customer-dues", "Customer Dues", "Receivables — who owes you money"},
+		{"/admin/reports/supplier-dues", "Supplier Dues", "Payables — who you owe money"},
+		{"/admin/reports/inventory", "Inventory Valuation", "Stock on hand at cost & retail"},
+		{"/admin/reports/batches", "Batches / Expiry", "Live batches and expiry dates"},
+		{"/admin/reports/low-stock", "Low Stock", "Items at or below reorder level"},
+		{"/admin/reports/expiring", "Expiring Stock", "Batches expiring soon"},
+		{"/admin/damage", "Damage Report", "Damaged/written-off stock & recovery"},
+	}
+	for _, rc := range layouts.PluginReportCards() {
+		cards = append(cards, reportHubCard{rc.Href, rc.Label, rc.Desc})
+	}
+	sort.SliceStable(cards, func(i, j int) bool { return cards[i].Title < cards[j].Title })
+	return cards
+}
 
 // jsArg JSON-encodes a string for safe embedding as a JS literal in an x-data
 // attribute (handles quotes/specials in e.g. product names).
@@ -22,8 +60,10 @@ func jsArg(s string) string {
 // order qty (from trailing-average demand × lead time) and units sold in the same
 // period last year. Empty Suggested means "no sales history — use the fallback".
 type ReorderInfo struct {
-	Suggested    string
-	SoldLastYear string
+	Suggested     string
+	SoldLastWeek  string
+	SoldLastMonth string
+	SoldLastYear  string
 }
 
 // lowStockConfigJSON serialises the low-stock rows for the reorder PO builder's
@@ -31,16 +71,18 @@ type ReorderInfo struct {
 // (ReorderInfo.Suggested), otherwise falls back to ≈ 2× reorder level − on-hand.
 func lowStockConfigJSON(rows []products.Product, demand map[int64]ReorderInfo) string {
 	type line struct {
-		ProductID    int64  `json:"product_id"`
-		Name         string `json:"name"`
-		OnHand       string `json:"on_hand"`
-		Unit         string `json:"unit"`
-		Suggested    string `json:"suggested"`
-		SoldLastYear string `json:"sold_last_year"`
-		Cost         string `json:"cost"`
-		SupplierID   int64  `json:"supplier_id"`
-		SupplierName string `json:"supplier_name"`
-		Selected     bool   `json:"selected"`
+		ProductID     int64  `json:"product_id"`
+		Name          string `json:"name"`
+		OnHand        string `json:"on_hand"`
+		Unit          string `json:"unit"`
+		Suggested     string `json:"suggested"`
+		SoldLastWeek  string `json:"sold_last_week"`
+		SoldLastMonth string `json:"sold_last_month"`
+		SoldLastYear  string `json:"sold_last_year"`
+		Cost          string `json:"cost"`
+		SupplierID    int64  `json:"supplier_id"`
+		SupplierName  string `json:"supplier_name"`
+		Selected      bool   `json:"selected"`
 	}
 	out := make([]line, 0, len(rows))
 	for _, p := range rows {
@@ -52,6 +94,14 @@ func lowStockConfigJSON(rows []products.Product, demand map[int64]ReorderInfo) s
 				need = decimal.Zero
 			}
 			suggested = need.String()
+		}
+		soldWk := info.SoldLastWeek
+		if soldWk == "" {
+			soldWk = "0"
+		}
+		soldMo := info.SoldLastMonth
+		if soldMo == "" {
+			soldMo = "0"
 		}
 		soldLY := info.SoldLastYear
 		if soldLY == "" {
@@ -67,7 +117,8 @@ func lowStockConfigJSON(rows []products.Product, demand map[int64]ReorderInfo) s
 		}
 		out = append(out, line{
 			ProductID: p.ID, Name: p.Name, OnHand: p.StockQty.String(), Unit: p.UnitAbbr,
-			Suggested: suggested, SoldLastYear: soldLY, Cost: p.CostPrice.String(), SupplierID: sup, SupplierName: supName,
+			Suggested: suggested, SoldLastWeek: soldWk, SoldLastMonth: soldMo, SoldLastYear: soldLY,
+			Cost: p.CostPrice.String(), SupplierID: sup, SupplierName: supName,
 		})
 	}
 	b, _ := json.Marshal(out)

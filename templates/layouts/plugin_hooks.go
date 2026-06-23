@@ -1,6 +1,10 @@
 package layouts
 
-import "karots-pos/internal/plugin"
+import (
+	"sort"
+
+	"karots-pos/internal/plugin"
+)
 
 // This file weaves plugin-contributed UI (registered via the plugin Registry's
 // Add* hooks) into the core admin/cashier shells. It is the only place the
@@ -15,6 +19,7 @@ import "karots-pos/internal/plugin"
 func withPluginSections(core []AdminSection) []AdminSection {
 	entries := plugin.AdminNav()
 	if len(entries) == 0 {
+		sortSectionLinks(core)
 		return core
 	}
 	idx := map[string]int{}
@@ -46,7 +51,21 @@ func withPluginSections(core []AdminSection) []AdminSection {
 	for _, k := range newOrder {
 		core = append(core, *newSecs[k])
 	}
+	sortSectionLinks(core)
 	return core
+}
+
+// sortSectionLinks alphabetises the cards within each section (by visible label)
+// so every hub page and the command palette list links in a predictable order,
+// including any plugin-contributed links merged above. Section order itself is
+// left as declared (it follows the sell→inventory→…→setup workflow).
+func sortSectionLinks(secs []AdminSection) {
+	for i := range secs {
+		links := secs[i].Links
+		sort.SliceStable(links, func(a, b int) bool {
+			return links[a].Label < links[b].Label
+		})
+	}
 }
 
 // pluginPalette adapts plugin palette entries to the layout's paletteEntry type.

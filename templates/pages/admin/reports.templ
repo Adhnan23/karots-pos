@@ -104,13 +104,15 @@ templ LowStockPage(d LowStockData) {
 			if len(d.Rows) == 0 {
 				<p class="py-6 text-center text-slate-500">All products are above their reorder level. 🎉</p>
 			} else {
-				<p class="text-sm text-slate-500 mb-4">Tick the items to reorder, set the quantity and supplier, then build the purchase order(s). The suggested quantity is demand-based (last 90 days of sales projected over a 2-week lead time); “Sold last yr” shows the same 90-day window a year ago for seasonality.</p>
+				<p class="text-sm text-slate-500 mb-4">Tick the items to reorder, set the quantity and supplier, then build the purchase order(s). The suggested quantity is demand-based (last 90 days of sales projected over a 2-week lead time). “Sold last wk/mo” show recent velocity (7 / 30 days) and “Sold last yr” shows the same 90-day window a year ago for seasonality.</p>
 				<table class="w-full text-sm">
 					<thead class="text-left text-slate-500 border-b">
 						<tr>
 							<th class="py-2 px-3 w-8"><input type="checkbox" x-on:change="toggleAll($event.target.checked)" aria-label="Select all"/></th>
 							<th class="py-2 px-3">Product</th>
 							<th class="py-2 px-3 text-right">On hand</th>
+							<th class="py-2 px-3 text-right">Sold last wk</th>
+							<th class="py-2 px-3 text-right">Sold last mo</th>
 							<th class="py-2 px-3 text-right">Sold last yr</th>
 							<th class="py-2 px-3 w-28 text-right">Order qty</th>
 							<th class="py-2 px-3 w-56">Supplier</th>
@@ -122,6 +124,8 @@ templ LowStockPage(d LowStockData) {
 								<td class="py-2 px-3"><input type="checkbox" x-model="l.selected"/></td>
 								<td class="py-2 px-3 font-medium" x-text="l.name"></td>
 								<td class="py-2 px-3 text-right"><span x-text="l.on_hand"></span> <span class="text-slate-400" x-text="l.unit"></span></td>
+								<td class="py-2 px-3 text-right text-slate-500" x-text="l.sold_last_week"></td>
+								<td class="py-2 px-3 text-right text-slate-500" x-text="l.sold_last_month"></td>
 								<td class="py-2 px-3 text-right text-slate-500" x-text="l.sold_last_year"></td>
 								<td class="py-2 px-3"><input type="number" step="0.001" min="0" x-model.number="l.suggested" class="w-full border rounded px-2 py-1 text-right"/></td>
 								<td class="py-2 px-3 relative" x-on:click.away="l._supOpen=false" x-on:keydown.escape="l._supOpen=false">
