@@ -33,15 +33,6 @@ func (h *cashierUI) PriceRows(c echo.Context) error {
 	return response.OK(c, rows)
 }
 
-// Workers lists active staff for the labour-payout picker on custom jobs.
-func (h *cashierUI) Workers(c echo.Context) error {
-	rows, err := h.p.store.Workers(c.Request().Context())
-	if err != nil {
-		return err
-	}
-	return response.OK(c, rows)
-}
-
 // Quote resolves the tiered unit price, line total, descriptive label and the
 // consumables a metered job will draw down.
 func (h *cashierUI) Quote(c echo.Context) error {
@@ -105,8 +96,6 @@ type RecordInput struct {
 		UnitPrice      string `json:"unit_price"`
 		LineTotal      string `json:"line_total"`
 		ConsumableCost string `json:"consumable_cost"`
-		LabourWorkerID *int64 `json:"labour_worker_id"`
-		LabourAmount   string `json:"labour_amount"`
 	} `json:"jobs"`
 }
 
@@ -123,10 +112,6 @@ func (h *cashierUI) Record(c echo.Context) error {
 	}
 	sid := in.SaleID
 	for _, j := range in.Jobs {
-		worker := j.LabourWorkerID
-		if worker != nil && *worker <= 0 {
-			worker = nil
-		}
 		if err := h.p.store.InsertJob(ctx, Job{
 			SaleID:         &sid,
 			ServiceID:      j.ServiceID,
@@ -135,8 +120,6 @@ func (h *cashierUI) Record(c echo.Context) error {
 			UnitPrice:      dec(j.UnitPrice),
 			LineTotal:      dec(j.LineTotal),
 			ConsumableCost: dec(j.ConsumableCost),
-			LabourWorkerID: worker,
-			LabourAmount:   dec(j.LabourAmount),
 		}); err != nil {
 			return err
 		}

@@ -10,6 +10,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/shopspring/decimal"
@@ -195,13 +196,15 @@ func (s *Store) ConsumablesFor(ctx context.Context, serviceID int64, size string
 
 // ---- jobs ----
 
+// InsertJob records a completed job's analytics row. Labour is left at zero here:
+// the cashier only sets the price, and the admin settles labour per job later.
 func (s *Store) InsertJob(ctx context.Context, j Job) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO doc_job (sale_id, service_id, description, qty, unit_price, line_total,
-		                     consumable_cost, labour_worker_id, labour_amount)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+		                     consumable_cost)
+		VALUES ($1,$2,$3,$4,$5,$6,$7)`,
 		j.SaleID, j.ServiceID, j.Description, j.Qty, j.UnitPrice, j.LineTotal,
-		j.ConsumableCost, j.LabourWorkerID, j.LabourAmount)
+		j.ConsumableCost)
 	return err
 }
 
@@ -213,84 +216,125 @@ func (s *Store) ConsumableCost(ctx context.Context, productID int64) decimal.Dec
 	return c
 }
 
-// ---- workers & payouts ----
+// ---- labour payments (per individual custom job) ----
 
-type Worker struct {
-	ID   int64  `db:"id"   json:"id"`
-	Name string `db:"name" json:"name"`
+// UnpaidJob is one custom-service job awaiting a labour decision in the admin
+// panel: its receipt details + the price the cashier charged for it.
+type UnpaidJob struct {
+	ID          int64           `db:"id"           json:"id"`
+	SaleID      *int64          `db:"sale_id"      json:"sale_id"`
+	ServiceName string          `db:"service_name" json:"service_name"`
+	Description string          `db:"description"  json:"description"`
+	LineTotal   decimal.Decimal `db:"line_total"   json:"line_total"`
+	CreatedAt   time.Time       `db:"created_at"   json:"created_at"`
 }
 
-func (s *Store) Workers(ctx context.Context) ([]Worker, error) {
-	var rows []Worker
-	err := s.db.SelectContext(ctx, &rows, `SELECT id, name FROM users WHERE is_active = true ORDER BY name`)
-	return rows, err
-}
-
-// WorkerBalance is a worker's unpaid labour total + paid-to-date.
-type WorkerBalance struct {
-	WorkerID int64           `db:"worker_id" json:"worker_id"`
-	Name     string          `db:"name"      json:"name"`
-	Unpaid   decimal.Decimal `db:"unpaid"    json:"unpaid"`
-	Jobs     int             `db:"jobs"      json:"jobs"`
-}
-
-func (s *Store) WorkerBalances(ctx context.Context) ([]WorkerBalance, error) {
-	var rows []WorkerBalance
+// UnpaidJobs lists custom-service jobs that have not yet been settled (paid or
+// dismissed). Metered work (photocopy/print) carries no labour, so it is excluded.
+func (s *Store) UnpaidJobs(ctx context.Context) ([]UnpaidJob, error) {
+	var rows []UnpaidJob
 	err := s.db.SelectContext(ctx, &rows, `
-		SELECT u.id AS worker_id, u.name,
-		       COALESCE(SUM(j.labour_amount),0) AS unpaid, COUNT(j.id) AS jobs
-		FROM doc_job j JOIN users u ON u.id = j.labour_worker_id
-		WHERE j.labour_payout_id IS NULL AND j.labour_amount > 0
-		GROUP BY u.id, u.name ORDER BY u.name`)
+		SELECT j.id, j.sale_id, COALESCE(sv.name,'(deleted)') AS service_name,
+		       j.description, j.line_total, j.created_at
+		FROM doc_job j JOIN doc_service sv ON sv.id = j.service_id
+		WHERE j.labour_payout_id IS NULL AND sv.kind = 'custom'
+		ORDER BY j.created_at DESC`)
 	return rows, err
 }
 
-// UnpaidTotal is a single worker's outstanding labour.
-func (s *Store) UnpaidTotal(ctx context.Context, workerID int64) (decimal.Decimal, error) {
-	var t decimal.Decimal
-	err := s.db.GetContext(ctx, &t, `
-		SELECT COALESCE(SUM(labour_amount),0) FROM doc_job
-		WHERE labour_worker_id=$1 AND labour_payout_id IS NULL AND labour_amount>0`, workerID)
-	return t, err
+// UnpaidJob fetches a single still-unsettled custom job by id (nil when not found
+// or already settled) — used to validate before booking money.
+func (s *Store) UnpaidJob(ctx context.Context, id int64) (*UnpaidJob, error) {
+	var j UnpaidJob
+	err := s.db.GetContext(ctx, &j, `
+		SELECT j.id, j.sale_id, COALESCE(sv.name,'(deleted)') AS service_name,
+		       j.description, j.line_total, j.created_at
+		FROM doc_job j JOIN doc_service sv ON sv.id = j.service_id
+		WHERE j.id=$1 AND j.labour_payout_id IS NULL AND sv.kind = 'custom'`, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &j, nil
 }
 
-// WorkerName returns a worker's display name ("" if unknown).
-func (s *Store) WorkerName(ctx context.Context, id int64) string {
-	var n string
-	_ = s.db.GetContext(ctx, &n, `SELECT name FROM users WHERE id=$1`, id)
-	return n
+// SettleInput records a labour decision for one job. A pay books amount>0 with a
+// "Labour" expense (and, when Source=="till", that till's drawer withdrawal); a
+// dismiss is amount 0 / source "none" with no expense. Either way the job leaves
+// the unpaid worklist.
+type SettleInput struct {
+	JobID     int64
+	Amount    decimal.Decimal
+	Note      string
+	Source    string // external | till | none
+	TillUID   *int64
+	ExpenseID int64
 }
 
-// SettleWorker books a payout: it sums the worker's unpaid labour, records a
-// payout row (with the core expense id), and stamps the covered jobs. Returns the
-// settled amount (zero when nothing was due).
-func (s *Store) SettleWorker(ctx context.Context, workerID, expenseID int64) (decimal.Decimal, int64, error) {
-	var settled decimal.Decimal
-	var payoutID int64
-	err := WithTx(ctx, s.db, func(tx *sqlx.Tx) error {
-		if err := tx.GetContext(ctx, &settled, `
-			SELECT COALESCE(SUM(labour_amount),0) FROM doc_job
-			WHERE labour_worker_id=$1 AND labour_payout_id IS NULL AND labour_amount>0`, workerID); err != nil {
-			return err
-		}
-		if !settled.IsPositive() {
-			return nil
-		}
+// SettleJob writes the payout row and stamps the job in one transaction.
+func (s *Store) SettleJob(ctx context.Context, in SettleInput) error {
+	return WithTx(ctx, s.db, func(tx *sqlx.Tx) error {
 		var exp any
-		if expenseID > 0 {
-			exp = expenseID
+		if in.ExpenseID > 0 {
+			exp = in.ExpenseID
 		}
+		var till any
+		if in.TillUID != nil {
+			till = *in.TillUID
+		}
+		var payoutID int64
 		if err := tx.GetContext(ctx, &payoutID, `
-			INSERT INTO doc_payout (worker_id, amount, expense_id) VALUES ($1,$2,$3) RETURNING id`,
-			workerID, settled, exp); err != nil {
+			INSERT INTO doc_payout (job_id, amount, note, source, till_user_id, expense_id)
+			VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+			in.JobID, in.Amount, in.Note, in.Source, till, exp); err != nil {
 			return err
 		}
-		_, err := tx.ExecContext(ctx, `
-			UPDATE doc_job SET labour_payout_id=$2
-			WHERE labour_worker_id=$1 AND labour_payout_id IS NULL AND labour_amount>0`, workerID, payoutID)
-		return err
+		res, err := tx.ExecContext(ctx, `
+			UPDATE doc_job SET labour_amount=$2, labour_payout_id=$3
+			WHERE id=$1 AND labour_payout_id IS NULL`, in.JobID, in.Amount, payoutID)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return errors.New("job already settled")
+		}
+		return nil
 	})
-	return settled, payoutID, err
+}
+
+// LabourPayment is one settled labour decision for the history log: what was paid
+// (or dismissed), on which job, how, and when.
+type LabourPayment struct {
+	ID          int64           `db:"id"           json:"id"`
+	PaidAt      time.Time       `db:"paid_at"      json:"paid_at"`
+	ServiceName string          `db:"service_name" json:"service_name"`
+	Description string          `db:"description"  json:"description"`
+	Amount      decimal.Decimal `db:"amount"       json:"amount"`
+	Note        string          `db:"note"         json:"note"`
+	Source      string          `db:"source"       json:"source"` // till | external | none
+	TillName    *string         `db:"till_name"    json:"till_name"`
+}
+
+// LabourHistory lists the most recent per-job labour settlements (paid and
+// dismissed), newest first.
+func (s *Store) LabourHistory(ctx context.Context, limit int) ([]LabourPayment, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	var rows []LabourPayment
+	err := s.db.SelectContext(ctx, &rows, `
+		SELECT p.id, p.paid_at, COALESCE(sv.name,'(deleted)') AS service_name,
+		       COALESCE(j.description,'') AS description, p.amount, p.note, p.source,
+		       u.name AS till_name
+		FROM doc_payout p
+		LEFT JOIN doc_job j ON j.id = p.job_id
+		LEFT JOIN doc_service sv ON sv.id = j.service_id
+		LEFT JOIN users u ON u.id = p.till_user_id
+		WHERE p.job_id IS NOT NULL
+		ORDER BY p.paid_at DESC LIMIT $1`, limit)
+	return rows, err
 }
 
 // ---- report aggregates ----

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"karots-pos/internal/apperr"
+	"karots-pos/internal/features/cashregister"
 	"karots-pos/internal/features/expenses"
 	"karots-pos/internal/features/products"
 	"karots-pos/internal/features/reports"
@@ -196,47 +197,106 @@ func (a *adminUI) Report(c echo.Context) error {
 	return response.RenderPage(c, ReportPage(d))
 }
 
-// PayoutsData lists per-worker outstanding labour.
-type PayoutsData struct {
+// LabourData lists custom jobs awaiting a labour decision + the open tills a
+// payout's cash can be taken from.
+type LabourData struct {
 	UserName string
 	Symbol   string
-	Rows     []WorkerBalance
+	Rows     []UnpaidJob
+	Tills    []cashregister.SessionRow
+	History  []LabourPayment
 }
 
-func (a *adminUI) Payouts(c echo.Context) error {
-	rows, err := a.p.store.WorkerBalances(c.Request().Context())
+func (a *adminUI) Labour(c echo.Context) error {
+	ctx := c.Request().Context()
+	rows, err := a.p.store.UnpaidJobs(ctx)
 	if err != nil {
 		return err
 	}
-	return response.RenderPage(c, PayoutsPage(PayoutsData{
-		UserName: middleware.CurrentUserName(c), Symbol: a.symbol(c.Request().Context()), Rows: rows,
+	tills, err := a.p.core.CashRegister.OpenSessions(ctx)
+	if err != nil {
+		return err
+	}
+	hist, err := a.p.store.LabourHistory(ctx, 100)
+	if err != nil {
+		return err
+	}
+	return response.RenderPage(c, LabourPage(LabourData{
+		UserName: middleware.CurrentUserName(c), Symbol: a.symbol(ctx),
+		Rows: rows, Tills: tills, History: hist,
 	}))
 }
 
-func (a *adminUI) PayWorker(c echo.Context) error {
+// PayJob settles one custom job's labour: it books a "Labour" expense and, when
+// the cash comes "from a till", also records that drawer's withdrawal (done first
+// so a drawer-overdraw aborts before the expense is booked). The job is then
+// stamped paid and leaves the worklist.
+func (a *adminUI) PayJob(c echo.Context) error {
 	ctx := c.Request().Context()
-	workerID, _ := strconv.ParseInt(c.Param("worker"), 10, 64)
-	total, err := a.p.store.UnpaidTotal(ctx, workerID)
+	jobID, _ := strconv.ParseInt(c.Param("job"), 10, 64)
+	job, err := a.p.store.UnpaidJob(ctx, jobID)
 	if err != nil {
 		return err
 	}
-	if !total.IsPositive() {
-		return apperr.Validation("nothing to pay this worker")
+	if job == nil {
+		return apperr.Validation("this job is already settled")
 	}
-	name := a.p.store.WorkerName(ctx, workerID)
-	desc := "Documents labour — " + name
+	amt, err := decimal.NewFromString(strings.TrimSpace(c.FormValue("amount")))
+	if err != nil || !amt.IsPositive() {
+		return apperr.Validation("enter a valid amount")
+	}
+	note := strings.TrimSpace(c.FormValue("note"))
+
+	in := SettleInput{JobID: jobID, Amount: amt, Note: note, Source: "external"}
+
+	if c.FormValue("source") == "till" {
+		tillUID, err := strconv.ParseInt(c.FormValue("till_user_id"), 10, 64)
+		if err != nil || tillUID == 0 {
+			return apperr.Validation("choose which till the cash came from")
+		}
+		reason := "Labour — " + job.ServiceName
+		if note != "" {
+			reason += " (" + note + ")"
+		}
+		if _, err := a.p.core.CashRegister.Withdraw(ctx, tillUID, cashregister.MovementInput{Amount: amt.String(), Reason: reason}); err != nil {
+			return err
+		}
+		in.Source = "till"
+		in.TillUID = &tillUID
+	}
+
+	desc := "Documents labour — " + job.ServiceName
 	exp, err := a.p.core.Expenses.Create(ctx, expenses.CreateInput{
-		Category: "Labour", Amount: total.StringFixed(2), Description: &desc,
+		Category: "Labour", Amount: amt.StringFixed(2), Description: &desc,
 		ExpenseDate: time.Now().Format("2006-01-02"),
 	}, middleware.CurrentUserID(c))
-	var expID int64
 	if err == nil && exp != nil {
-		expID = exp.ID
+		in.ExpenseID = exp.ID
 	}
-	if _, _, err := a.p.store.SettleWorker(ctx, workerID, expID); err != nil {
+	if err := a.p.store.SettleJob(ctx, in); err != nil {
 		return err
 	}
-	c.Response().Header().Set("HX-Trigger", response.Toast("Paid "+name, "success"))
+	c.Response().Header().Set("HX-Trigger", response.Toast("Labour paid", "success"))
+	c.Response().Header().Set("HX-Refresh", "true")
+	return c.NoContent(200)
+}
+
+// DismissJob clears a custom job from the worklist without paying labour (no
+// expense, no drawer movement) — for jobs that needed no payout.
+func (a *adminUI) DismissJob(c echo.Context) error {
+	ctx := c.Request().Context()
+	jobID, _ := strconv.ParseInt(c.Param("job"), 10, 64)
+	job, err := a.p.store.UnpaidJob(ctx, jobID)
+	if err != nil {
+		return err
+	}
+	if job == nil {
+		return apperr.Validation("this job is already settled")
+	}
+	if err := a.p.store.SettleJob(ctx, SettleInput{JobID: jobID, Amount: decimal.Zero, Source: "none"}); err != nil {
+		return err
+	}
+	c.Response().Header().Set("HX-Trigger", response.Toast("Dismissed", "success"))
 	c.Response().Header().Set("HX-Refresh", "true")
 	return c.NoContent(200)
 }

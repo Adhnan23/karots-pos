@@ -3,6 +3,7 @@ package documents
 import "karots-pos/templates/layouts"
 import "karots-pos/internal/money"
 import "karots-pos/internal/features/products"
+import "karots-pos/internal/features/cashregister"
 import "strconv"
 
 // HubPage is the Communication Store management screen: services (with their
@@ -209,7 +210,7 @@ templ serviceCard(symbol string, vm ServiceVM, prods []products.Product) {
 				</div>
 			</div>
 		} else {
-			<p class="text-sm text-slate-400">Custom labour job — the cashier types the price and (optionally) a worker's mini-salary at the till.</p>
+			<p class="text-sm text-slate-400">Custom labour job — the cashier types <strong>only the price</strong> at the till. Settle any labour for it under <a href="/admin/documents/labour" class="text-indigo-600 hover:underline">Labour payments</a>.</p>
 		}
 	</div>
 }
@@ -270,38 +271,51 @@ templ ReportPage(d ReportData) {
 	}
 }
 
-// PayoutsPage lists workers with outstanding labour and a settle button.
-templ PayoutsPage(d PayoutsData) {
-	@layouts.Admin("Communication Store — Worker payouts", d.UserName, "documents-payouts") {
-		<h1 class="text-2xl font-bold mb-6">🖨 Worker payouts</h1>
-		<div class="bg-white rounded-2xl shadow-sm p-6">
-			<p class="text-sm text-slate-500 mb-4">Unpaid labour ("mini salary") accrued from custom jobs. Paying a worker books a core expense and marks their jobs settled.</p>
+// LabourPage lists each unsettled custom job. The admin types the labour amount
+// to pay for that one job (or dismisses it), choosing whether the cash comes from
+// an open till (which also records that drawer's withdrawal) or external funds.
+templ LabourPage(d LabourData) {
+	@layouts.Admin("Communication Store — Labour payments", d.UserName, "documents-labour") {
+		<h1 class="text-2xl font-bold mb-2">🖨 Labour payments</h1>
+		<p class="text-sm text-slate-500 mb-6">Custom jobs from the till, each waiting on a labour decision. Pay an amount per job (books a <strong>Labour</strong> expense) — from a till also records that drawer's cash withdrawal — or dismiss jobs that need no payout.</p>
+		if len(d.Rows) == 0 {
+			<div class="bg-white rounded-2xl shadow-sm p-6 text-sm text-slate-400">Nothing waiting — all custom jobs are settled.</div>
+		}
+		<div class="space-y-4">
+			for _, r := range d.Rows {
+				@labourJobCard(d.Symbol, r, d.Tills)
+			}
+		</div>
+		<div class="bg-white rounded-2xl shadow-sm p-6 mt-8">
+			<h2 class="text-lg font-semibold mb-4">History</h2>
 			<table class="w-full text-sm">
 				<thead class="text-left text-slate-500 border-b">
 					<tr>
-						<th class="py-2 pr-4">Worker</th>
-						<th class="py-2 pr-4 text-right">Jobs</th>
-						<th class="py-2 pr-4 text-right">Outstanding</th>
-						<th class="py-2 text-right">Action</th>
+						<th class="py-2 pr-4">When</th>
+						<th class="py-2 pr-4">Service</th>
+						<th class="py-2 pr-4">Job</th>
+						<th class="py-2 pr-4">Paid from</th>
+						<th class="py-2 pr-4">Note</th>
+						<th class="py-2 text-right">Amount</th>
 					</tr>
 				</thead>
 				<tbody>
-					if len(d.Rows) == 0 {
-						<tr><td colspan="4" class="py-3 text-slate-400">Nothing outstanding.</td></tr>
+					if len(d.History) == 0 {
+						<tr><td colspan="6" class="py-3 text-slate-400">No labour settlements yet.</td></tr>
 					}
-					for _, r := range d.Rows {
+					for _, h := range d.History {
 						<tr class="border-b last:border-0">
-							<td class="py-2 pr-4">{ r.Name }</td>
-							<td class="py-2 pr-4 text-right tabular-nums">{ strconv.Itoa(r.Jobs) }</td>
-							<td class="py-2 pr-4 text-right tabular-nums font-medium">{ money.Format(d.Symbol, r.Unpaid) }</td>
-							<td class="py-2 text-right">
-								<button
-									type="button"
-									hx-post={ "/admin/documents/payouts/" + strconv.FormatInt(r.WorkerID, 10) + "/pay" }
-									hx-confirm={ "Pay " + r.Name + " " + money.Format(d.Symbol, r.Unpaid) + "?" }
-									hx-swap="none"
-									class="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700"
-								>Pay worker</button>
+							<td class="py-2 pr-4 whitespace-nowrap">{ h.PaidAt.Format("2006-01-02 15:04") }</td>
+							<td class="py-2 pr-4">{ h.ServiceName }</td>
+							<td class="py-2 pr-4 text-slate-500">{ h.Description }</td>
+							<td class="py-2 pr-4">{ labourSourceLabel(h) }</td>
+							<td class="py-2 pr-4 text-slate-500">{ h.Note }</td>
+							<td class="py-2 text-right tabular-nums font-medium">
+								if h.Source == "none" {
+									<span class="text-slate-400">dismissed</span>
+								} else {
+									{ money.Format(d.Symbol, h.Amount) }
+								}
 							</td>
 						</tr>
 					}
@@ -309,6 +323,115 @@ templ PayoutsPage(d PayoutsData) {
 			</table>
 		</div>
 	}
+}
+
+// labourSourceLabel renders where a payout's cash came from for the history log.
+func labourSourceLabel(h LabourPayment) string {
+	switch h.Source {
+	case "till":
+		if h.TillName != nil && *h.TillName != "" {
+			return "Till — " + *h.TillName
+		}
+		return "Till"
+	case "none":
+		return "—"
+	default:
+		return "External"
+	}
+}
+
+// labourJobCard is one unsettled job + its per-job pay/dismiss controls.
+templ labourJobCard(symbol string, j UnpaidJob, tills []cashregister.SessionRow) {
+	<div class="bg-white rounded-2xl shadow-sm p-5">
+		<div class="flex flex-wrap items-start justify-between gap-3 mb-3">
+			<div>
+				<div class="font-semibold text-slate-800">{ j.ServiceName }</div>
+				<div class="text-xs text-slate-400">
+					{ j.Description }
+					if j.SaleID != nil {
+						· sale #{ strconv.FormatInt(*j.SaleID, 10) }
+					}
+					· { j.CreatedAt.Format("2006-01-02 15:04") }
+				</div>
+			</div>
+			<div class="text-right">
+				<div class="text-xs text-slate-400">Charged</div>
+				<div class="font-semibold tabular-nums">{ money.Format(symbol, j.LineTotal) }</div>
+			</div>
+		</div>
+		<form
+			x-data={ labourRowData(tills) }
+			hx-post={ "/admin/documents/labour/" + strconv.FormatInt(j.ID, 10) + "/pay" }
+			hx-swap="none"
+			class="space-y-3"
+		>
+			<input type="hidden" name="source" x-model="source"/>
+			<input type="hidden" name="till_user_id" x-model="till"/>
+			<div class="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
+				<div>
+					<label class="block text-xs font-medium text-slate-500 mb-1">Labour to pay</label>
+					<input type="number" name="amount" min="0" step="0.01" required placeholder="0.00" class="w-full border rounded-lg px-3 py-2.5 text-right"/>
+				</div>
+				<div>
+					<label class="block text-xs font-medium text-slate-500 mb-1">Note (optional)</label>
+					<input type="text" name="note" placeholder="e.g. designer's cut" class="w-full border rounded-lg px-3 py-2.5"/>
+				</div>
+			</div>
+			<div>
+				<span class="block text-xs font-medium text-slate-500 mb-1">Pay from</span>
+				<div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+					<button type="button" x-on:click="source='external'" x-bind:class="source==='external' ? 'ring-2 ring-indigo-500 bg-indigo-50' : 'border border-slate-200'" class="px-3 py-2.5 rounded-lg text-sm text-left">
+						<div class="font-medium">External</div>
+						<div class="text-xs text-slate-400">expense only — no drawer</div>
+					</button>
+					<button type="button" x-on:click="source='till'" x-bind:class="source==='till' ? 'ring-2 ring-indigo-500 bg-indigo-50' : 'border border-slate-200'" class="px-3 py-2.5 rounded-lg text-sm text-left">
+						<div class="font-medium">From a till</div>
+						<div class="text-xs text-slate-400">also records its cash withdrawal</div>
+					</button>
+				</div>
+				<div x-show="source==='till'" x-cloak class="mt-3">
+					<span class="block text-xs font-medium text-slate-500 mb-1">Which till?</span>
+					if len(tills) == 0 {
+						<p class="text-xs text-rose-500">No open tills right now — a cashier must have a drawer open to take cash from.</p>
+					} else {
+						<div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+							for _, t := range tills {
+								<button
+									type="button"
+									x-on:click={ "till='" + strconv.FormatInt(t.UserID, 10) + "'" }
+									x-bind:class={ "till==='" + strconv.FormatInt(t.UserID, 10) + "' ? 'ring-2 ring-indigo-500 bg-indigo-50' : 'border border-slate-200'" }
+									class="px-3 py-2.5 rounded-lg text-sm text-left"
+								>
+									<div class="font-medium">{ t.UserName } · #{ strconv.FormatInt(t.ID, 10) }</div>
+									<div class="text-xs text-slate-400">opened { t.OpenedAt.Format("15:04") }</div>
+								</button>
+							}
+						</div>
+					}
+				</div>
+			</div>
+			<div class="flex items-center justify-end gap-2 border-t pt-3">
+				<button
+					type="button"
+					hx-post={ "/admin/documents/labour/" + strconv.FormatInt(j.ID, 10) + "/dismiss" }
+					hx-confirm="Dismiss this job without paying labour?"
+					hx-swap="none"
+					class="px-3 py-2 rounded-lg text-sm text-slate-500 hover:text-rose-600"
+				>No labour</button>
+				<button type="submit" class="px-4 py-2.5 rounded-lg bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700">Pay labour</button>
+			</div>
+		</form>
+	</div>
+}
+
+// labourRowData is the Alpine x-data for a job's pay form: source toggle with the
+// till preselected to the first open till.
+func labourRowData(tills []cashregister.SessionRow) string {
+	till := ""
+	if len(tills) > 0 {
+		till = strconv.FormatInt(tills[0].UserID, 10)
+	}
+	return "{ source:'external', till:'" + till + "' }"
 }
 
 // --- small shared templ helpers ---

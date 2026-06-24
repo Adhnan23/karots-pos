@@ -34,13 +34,13 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 	reg.Admin().POST("/documents/services/:id/consumable", a.ConsumableAdd)
 	reg.Admin().POST("/documents/consumable/:id/delete", a.ConsumableDelete)
 	reg.Admin().GET("/documents/report", a.Report)
-	reg.Admin().GET("/documents/payouts", a.Payouts)
-	reg.Admin().POST("/documents/payouts/:worker/pay", a.PayWorker)
+	reg.Admin().GET("/documents/labour", a.Labour)
+	reg.Admin().POST("/documents/labour/:job/pay", a.PayJob)
+	reg.Admin().POST("/documents/labour/:job/dismiss", a.DismissJob)
 
 	ch := &cashierUI{p: p}
 	reg.Cashier().GET("/documents/services", ch.Services)
 	reg.Cashier().GET("/documents/prices", ch.PriceRows)
-	reg.Cashier().GET("/documents/workers", ch.Workers)
 	reg.Cashier().GET("/documents/quote", ch.Quote)
 	reg.Cashier().POST("/documents/record", ch.Record)
 
@@ -48,7 +48,7 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 	reg.AddReportCard(plugin.ReportCard{
 		Href:  "/admin/documents/report",
 		Label: "🖨 Documents",
-		Desc:  "Print/copy revenue, paper used & worker payouts",
+		Desc:  "Print/copy revenue, paper used & labour",
 	})
 	reg.AddAdminNav(plugin.AdminNavEntry{
 		SectionLabel: "Communication Store", Icon: "🖨",
@@ -62,7 +62,7 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 	})
 	reg.AddAdminNav(plugin.AdminNavEntry{
 		SectionLabel: "Communication Store", Icon: "🖨",
-		Href: "/admin/documents/payouts", Label: "Worker payouts", Key: "documents-payouts",
-		Desc: "Settle worker mini-salaries",
+		Href: "/admin/documents/labour", Label: "Labour payments", Key: "documents-labour",
+		Desc: "Pay labour on custom jobs",
 	})
 }
