@@ -31,8 +31,9 @@ is unaccounted for.
 - A core **locker** entity (safe, bank, owner-pocket, "owner's brother", a 2nd bank, …) — freely
   user-creatable, each with its own balance + ledger.
 - A single core **`cashflow.Move`** helper that writes both sides of any cash event atomically.
-- Wire a reusable **location picker** into every cash touchpoint (till open/close, mid-session
-  withdraw/pay-in, expenses, supplier payments, customer credit collection).
+- Wire a reusable **location picker** into **every** cash touchpoint with no exceptions: till
+  open/close, mid-session withdraw/pay-in, expenses, supplier payments, customer credit collection,
+  **customer refunds, purchase returns**, locker transfers, capital, bank charge/interest.
 - **Bank charges & interest** adjustments on lockers.
 - A **combined cash-flow view** (routes: customer → safe → supplier) and a **net-position** summary
   (cash + stock − payables + receivables).
@@ -91,7 +92,7 @@ locker_ledger          -- balance of a locker = SUM(balance_delta)
   counterparty  TEXT NOT NULL  -- 'till' | 'locker' | 'external'
   counter_till_session BIGINT  -- the other endpoint when it's a till (cash_register.id)
   counter_locker_id    BIGINT  -- the other endpoint when it's another locker
-  ref_kind      TEXT           -- 'expense'|'supplier_payment'|'customer_payment'|'cash_movement'|'locker_ledger'|null
+  ref_kind      TEXT           -- 'expense'|'supplier_payment'|'customer_payment'|'refund'|'purchase_return'|'cash_movement'|'locker_ledger'|null
   ref_id        BIGINT         -- soft link to the row that caused this side
   note          TEXT NOT NULL DEFAULT ''
   created_by    BIGINT
@@ -151,15 +152,19 @@ structured endpoint. Used everywhere money moves:
 | **Expense pay** (admin) | expense row only | **source** = till or locker (external = the expense itself) |
 | **Supplier pay** (admin) | payment row only | **source** = till or locker |
 | **Customer credit collect** | balance + ledger only | **destination** = till or locker |
+| **Customer refund** (goods returned, money out) | drawer only (cashier) | **source** = till or locker; external = the customer |
+| **Purchase return** (goods to supplier) | reduces payable / drawer | cash refund → **destination** location; or payable-only (no cash side) |
 | **Locker↔locker transfer** | n/a | both endpoints picked |
 | **Capital injection** | n/a | external → locker (`open_balance`) |
 | **Bank charge / interest** | n/a | locker ↔ external (§7) |
 
 Every one routes through `cashflow.Move`, so the domain row (expense / supplier-payment /
-customer-payment) and the cash side are written together in one tx and cross-link via `ref`.
-
-**Out of scope to re-wire now but on the checklist to verify:** refunds and purchase returns already
-touch the drawer — confirm they keep working and, where sensible, gain the location dimension.
+customer-payment / refund / purchase-return) and the cash side are written together in one tx and
+cross-link via `ref`. **No flow is exempt** — every path that moves cash names a location from day one;
+partial coverage is explicitly rejected (it would leave untracked drawer drift). For a purchase return
+settled against the supplier payable rather than in cash, there is simply no cash side (payable
+adjustment only) — but a cash refund from the supplier is an intake to a chosen location like any
+other.
 
 ## 7. Bank charges, interest & opening balances
 
@@ -238,15 +243,20 @@ Suggested order (each its own slice, E2E-verified):
 3. Location picker component; wire **expense pay** source (till/locker) E2E.
 4. Wire **supplier pay** source E2E.
 5. Wire **customer credit collect** destination E2E.
-6. Wire **till open** (source) and **till close** (destination) + mid-session withdraw/pay-in
+6. Wire **customer refund** (source) and **purchase return** (cash destination / payable-only) E2E.
+7. Wire **till open** (source) and **till close** (destination) + mid-session withdraw/pay-in
    counterparty E2E.
-7. Bank charge (+ expense) / interest / manual adjust E2E.
-8. Combined cash-flow view + routes viz; reports integration (interest as other-income) E2E.
-9. Net-position summary E2E.
+8. Bank charge (+ expense) / interest / manual adjust E2E.
+9. Combined cash-flow view + routes viz; reports integration (interest as other-income) E2E.
+10. Net-position summary E2E.
+
+Every slice is shipped only when its money operation reconciles end-to-end (location balances + the
+domain ledger agree). No flow is left on the old untracked path.
 
 ## 13. Open questions / future
 
 - Fold recharge bank-cards into core lockers (separate spec).
 - A proper "other income" ledger if interest/other income should be first-class on the P&L beyond the
   read-through.
-- Whether refunds / purchase returns should require a location (currently keep as-is, verify).
+
+(Refunds and purchase returns are **in scope** — wired in slice 6, not deferred.)
