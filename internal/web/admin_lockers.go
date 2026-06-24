@@ -2,9 +2,11 @@ package web
 
 import (
 	"strconv"
+	"strings"
 
 	"karots-pos/internal/apperr"
 	"karots-pos/internal/features/audit"
+	"karots-pos/internal/features/cashflow"
 	"karots-pos/internal/features/lockers"
 	"karots-pos/internal/features/reports"
 	"karots-pos/internal/middleware"
@@ -98,6 +100,48 @@ func (a *adminUI) LockerArchive(c echo.Context) error {
 		return err
 	}
 	c.Response().Header().Set("HX-Trigger", response.Toast("Locker archived", "success"))
+	c.Response().Header().Set("HX-Refresh", "true")
+	return c.NoContent(200)
+}
+
+// LockerTransferForm renders the locker→locker transfer modal, populated with
+// the active lockers (and their live balances) to pick between.
+func (a *adminUI) LockerTransferForm(c echo.Context) error {
+	ctx := c.Request().Context()
+	rows, err := a.s.lockers.List(ctx, true)
+	if err != nil {
+		return err
+	}
+	return response.RenderFragment(c, adminpages.LockerTransferForm(adminpages.LockerTransferData{
+		Symbol:  a.symbol(ctx),
+		Lockers: rows,
+	}))
+}
+
+// LockerTransfer moves cash between two lockers atomically via cashflow.Move.
+func (a *adminUI) LockerTransfer(c echo.Context) error {
+	ctx := c.Request().Context()
+	fromID, _ := strconv.ParseInt(c.FormValue("from_id"), 10, 64)
+	toID, _ := strconv.ParseInt(c.FormValue("to_id"), 10, 64)
+	if fromID == 0 || toID == 0 {
+		return apperr.Validation("pick both a source and a destination locker")
+	}
+	amt, err := decimal.NewFromString(strings.TrimSpace(c.FormValue("amount")))
+	if err != nil || !amt.IsPositive() {
+		return apperr.Validation("enter a valid amount")
+	}
+	note := strings.TrimSpace(c.FormValue("note"))
+	if err := a.s.cashflow.Move(ctx, cashflow.MoveInput{
+		From:    cashflow.Locker(fromID),
+		To:      cashflow.Locker(toID),
+		Amount:  amt,
+		Reason:  note,
+		ActorID: middleware.CurrentUserID(c),
+	}); err != nil {
+		return err
+	}
+	a.s.logAudit(c, audit.ActionUpdate, "locker", strconv.FormatInt(fromID, 10), "transferred cash between lockers")
+	c.Response().Header().Set("HX-Trigger", response.ToastAnd("Transfer recorded", "success", "close-modal"))
 	c.Response().Header().Set("HX-Refresh", "true")
 	return c.NoContent(200)
 }

@@ -120,6 +120,18 @@ func (r *Repository) Get(ctx context.Context, id int64) (*Locker, error) {
 	return &l, nil
 }
 
+// GetForUpdate loads a locker with its live balance and locks the locker row,
+// for use inside a transaction that debits it (cashflow.Move). The lock
+// serialises concurrent debits so two can't both pass the overdraw guard.
+func (r *Repository) GetForUpdate(ctx context.Context, id int64) (*Locker, error) {
+	// Lock the row first, then read the balance (a subquery in a locked SELECT
+	// can't carry FOR UPDATE through the aggregate).
+	if _, err := r.q.ExecContext(ctx, `SELECT 1 FROM lockers WHERE id = $1 FOR UPDATE`, id); err != nil {
+		return nil, err
+	}
+	return r.Get(ctx, id)
+}
+
 // Create inserts a locker row (no opening balance — the service writes that as a
 // ledger entry in the same transaction).
 func (r *Repository) Create(ctx context.Context, name, kind string, allowNeg bool) (*Locker, error) {

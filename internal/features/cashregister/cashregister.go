@@ -124,6 +124,19 @@ func (r *Repository) FindOpen(ctx context.Context, userID int64) (*Session, erro
 	return &s, nil
 }
 
+// FindOpenForUpdate is FindOpen with a row lock, for use inside a transaction
+// that moves cash to/from this drawer (cashflow.Move). The lock serialises
+// concurrent withdrawals so two can't both pass the overdraw guard.
+func (r *Repository) FindOpenForUpdate(ctx context.Context, userID int64) (*Session, error) {
+	var s Session
+	err := r.q.GetContext(ctx, &s,
+		`SELECT * FROM cash_register WHERE user_id = $1 AND closed_at IS NULL FOR UPDATE`, userID)
+	if err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
+
 // LastClosed returns the cashier's most recently closed session (for the
 // "continue with last amount" option when reopening).
 func (r *Repository) LastClosed(ctx context.Context, userID int64) (*Session, error) {

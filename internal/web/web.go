@@ -16,6 +16,7 @@ import (
 	"karots-pos/internal/features/conversions"
 	"karots-pos/internal/features/customers"
 	"karots-pos/internal/features/denominations"
+	"karots-pos/internal/features/cashflow"
 	"karots-pos/internal/features/expenses"
 	"karots-pos/internal/features/lockers"
 	"karots-pos/internal/features/products"
@@ -55,6 +56,7 @@ type Server struct {
 	conversions *conversions.Service
 	expenses   *expenses.Service
 	lockers    *lockers.Service
+	cashflow   *cashflow.Service
 	reports    *reports.Service
 	denominations *denominations.Service
 	cashRegister  *cashregister.Service
@@ -90,6 +92,7 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 		recovery:      recovery.NewService(db),
 	}
 	s.cashRegister = cashregister.NewService(db, sales.NewService(db)).WithAudit(s.audit)
+	s.cashflow = cashflow.NewService(db, s.sales)
 	a := &authUI{svc: authSvc, cookie: CookieConfig{Secure: cfg.CookieSecure, MaxAge: cfg.JWTAccessTTL}}
 	admin := &adminUI{s: s, db: db}
 	cashier := &cashierUI{s: s}
@@ -261,6 +264,8 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	ag.PUT("/lockers/:id", admin.LockerUpdate)
 	ag.POST("/lockers/:id/archive", admin.LockerArchive)
 	ag.GET("/lockers/:id/ledger", admin.LockerLedger)
+	ag.GET("/lockers/transfer/form", admin.LockerTransferForm)
+	ag.POST("/lockers/transfer", admin.LockerTransfer)
 
 	// Warranty (admin shell) + losses & supplier recovery
 	ag.GET("/warranty", admin.Warranty)

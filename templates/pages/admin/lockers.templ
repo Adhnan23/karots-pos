@@ -24,8 +24,14 @@ templ LockersPage(d LockersData) {
 				<h1 class="text-2xl font-bold">Cash Lockers</h1>
 				<p class="text-sm text-slate-500">Money held outside the cashier drawers — a safe, a bank account, the owner's pocket.</p>
 			</div>
-			<button class="px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium"
-				hx-get="/admin/lockers/form" hx-target="#modal-container" hx-swap="innerHTML">+ New Locker</button>
+			<div class="flex gap-2">
+				if len(d.Rows) >= 2 {
+					<button class="px-4 py-2 rounded-lg bg-white border font-medium text-slate-700"
+						hx-get="/admin/lockers/transfer/form" hx-target="#modal-container" hx-swap="innerHTML">⇄ Transfer</button>
+				}
+				<button class="px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium"
+					hx-get="/admin/lockers/form" hx-target="#modal-container" hx-swap="innerHTML">+ New Locker</button>
+			</div>
 		</div>
 
 		<div class="bg-white rounded-2xl shadow-sm p-4 mb-4 flex items-center justify-between">
@@ -123,6 +129,48 @@ templ LockerForm(l *lockers.Locker) {
 					Active
 				</label>
 			}
+			@modalButtons()
+		</form>
+	}
+}
+
+type LockerTransferData struct {
+	Symbol  string
+	Lockers []lockers.Locker
+}
+
+templ LockerTransferForm(d LockerTransferData) {
+	@modalShell("Transfer between lockers") {
+		<form class="p-6 space-y-4" hx-post="/admin/lockers/transfer" hx-swap="none">
+			<div class="grid grid-cols-2 gap-4">
+				<div>
+					<label class="block text-sm font-medium mb-1">From</label>
+					<select name="from_id" required class="w-full border rounded-lg px-3 py-2">
+						<option value="">— pick —</option>
+						for _, l := range d.Lockers {
+							<option value={ strconv.FormatInt(l.ID, 10) }>{ l.Name } ({ money.Format(d.Symbol, l.Balance) })</option>
+						}
+					</select>
+				</div>
+				<div>
+					<label class="block text-sm font-medium mb-1">To</label>
+					<select name="to_id" required class="w-full border rounded-lg px-3 py-2">
+						<option value="">— pick —</option>
+						for _, l := range d.Lockers {
+							<option value={ strconv.FormatInt(l.ID, 10) }>{ l.Name } ({ money.Format(d.Symbol, l.Balance) })</option>
+						}
+					</select>
+				</div>
+			</div>
+			<div>
+				<label class="block text-sm font-medium mb-1">Amount</label>
+				<input name="amount" type="number" step="0.01" min="0" required class="w-full border rounded-lg px-3 py-2"/>
+			</div>
+			<div>
+				<label class="block text-sm font-medium mb-1">Note (optional)</label>
+				<input name="note" placeholder="e.g. banked the day's takings" class="w-full border rounded-lg px-3 py-2"/>
+			</div>
+			<p class="text-xs text-slate-500">Source can't go below zero unless it allows a negative balance.</p>
 			@modalButtons()
 		</form>
 	}
