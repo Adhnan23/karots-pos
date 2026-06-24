@@ -25,10 +25,15 @@ name and details.
 4. **Tracked list** under Money: searchable (number / party / kind) + date-range
    presets, with view + reprint — mirroring the sale receipts list.
 5. **Shop name + details** (address, phone) on every receipt, from Settings.
-6. **Recharge stays as-is for now** (it already prints + reprints its own slips);
+6. **Reuse + rename the existing print-prompt setting.** It already means *off →
+   skip the prompt and auto-print; on → show a Print button*. Since it now covers
+   payments too, rename it from `prompt_after_sale` / `PromptAfterSale` to
+   `ask_to_print` / `AskToPrint` (label "Ask before printing (sales &
+   payments)"). No new setting — one flag governs all receipts.
+7. **Recharge stays as-is for now** (it already prints + reprints its own slips);
    fold recharge transactions into this unified registry in a later slice when
    recharge routes through `cashflow.Move`.
-7. **Adjacent fix:** the sale receipts list already searches by receipt number;
+8. **Adjacent fix:** the sale receipts list already searches by receipt number;
    broaden it to also match **customer name / phone**.
 
 ## Data model
@@ -77,10 +82,10 @@ caller can open/print it). Labels are derived **in-tx**:
 - Till endpoint → `"Till — " + cashier name` (join `users` via the session).
 - External endpoint → `Party` if given, else `"External"`.
 
-After the tx commits, Move **best-effort prints the thermal slip** (swallows any
-printer error, exactly like recharge `printSlip`). This needs `settings.Service`
-+ `internal/printing` injected into `cashflow.NewService(db, sales, settings)`.
-Receipt creation never fails a move because the printer is offline.
+`cashflow.Move` itself does **no printing** and takes no settings dependency — it
+only creates the receipt row and returns it. The print *policy* lives in the web
+layer (below), so core stays pure and there is one place that knows the
+`AskToPrint` rule.
 
 One move = **one** receipt (a two-leg locker↔locker transfer still produces a
 single receipt).
@@ -109,8 +114,7 @@ domain):
   print-friendly page (shop header from Settings) with a **Print** button
   (browser dialog, for A4/no-thermal) and a **Reprint slip** button
   (`POST /admin/money-receipts/:id/print` → re-sends the thermal slip,
-  best-effort, returns a toast). The page does **not** auto-print (the thermal
-  slip already fired at creation); it's for viewing + reprint.
+  best-effort, returns a toast). Used for viewing + reprint at any time.
 
 ## Tracking UI
 
@@ -121,11 +125,40 @@ domain):
 - Nav entry `{"/admin/money-receipts", "Cash Receipts", "money-receipts", …}` in
   the Money section.
 
-## Post-move UX
+## Settings rename
 
-On a successful move the handler responds with `HX-Redirect` to
-`/admin/money-receipts/:id` so the user immediately sees/keeps the receipt (Back
-link returns to the originating page). The thermal slip has already printed.
+Migration `0039_rename_prompt_after_sale.sql`:
+
+```sql
+-- +goose Up
+ALTER TABLE settings RENAME COLUMN prompt_after_sale TO ask_to_print;
+-- +goose Down
+ALTER TABLE settings RENAME COLUMN ask_to_print TO prompt_after_sale;
+```
+
+Rename across the code: `Settings.PromptAfterSale` → `AskToPrint`, `UpdateInput`
+form tag `prompt_after_sale` → `ask_to_print`, the settings checkbox label →
+"Ask before printing (sales & payments)", and the cashier JS `promptAfterSale`
+param/`pos.templ` wiring → `askToPrint` (behaviour unchanged for sales).
+
+## Post-move UX — honors `AskToPrint`
+
+A single shared web helper applies the print policy after every money move, so
+all current and future money-move handlers behave identically:
+
+```
+afterMoneyMove(c, receipt):
+  if settings.AskToPrint:             # "ask to print"
+      HX-Redirect → /admin/money-receipts/:id   # the page with a Print button
+  else:                               # "skip & print"
+      best-effort thermal print of the slip
+      toast "Receipt CR-… · <toast>"  + HX-Refresh / redirect back
+```
+
+This mirrors the sale checkout exactly (`askToPrint` → show the Print prompt;
+else auto-print and move on). The thermal slip is therefore printed **once**,
+only on the skip-and-print path; on the ask path nothing prints until the user
+clicks Print (browser) or Reprint slip (thermal) on the receipt page.
 
 ## Adjacent: sale receipts search
 
@@ -149,4 +182,8 @@ cashier `/cashier/receipts` search so `q` also matches customer name/phone
   `CR-` number, correct from/to labels and amount; the HTML receipt shows shop
   name + details; Reprint re-sends the slip; the list search finds it by number
   and by party; date presets filter it. psql confirms the row + sequence advance.
+- E2E both print modes: with `AskToPrint` ON a transfer lands on the receipt
+  page (Print button, nothing auto-printed); with it OFF the slip prints
+  best-effort and the user stays on the lockers page with a toast. Sale checkout
+  still respects the (renamed) flag.
 - Sale receipts list search now also matches a customer name.
