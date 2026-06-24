@@ -1,0 +1,239 @@
+package adminpages
+
+import (
+	"strconv"
+
+	"karots-pos/internal/features/lockers"
+	"karots-pos/internal/money"
+	"karots-pos/templates/layouts"
+
+	"github.com/shopspring/decimal"
+)
+
+type LockersData struct {
+	UserName string
+	Symbol   string
+	Rows     []lockers.Locker
+	Total    decimal.Decimal
+}
+
+templ LockersPage(d LockersData) {
+	@layouts.Admin("Cash Lockers", d.UserName, "lockers") {
+		<div class="flex items-center justify-between mb-6">
+			<div>
+				<h1 class="text-2xl font-bold">Cash Lockers</h1>
+				<p class="text-sm text-slate-500">Money held outside the cashier drawers — a safe, a bank account, the owner's pocket.</p>
+			</div>
+			<button class="px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium"
+				hx-get="/admin/lockers/form" hx-target="#modal-container" hx-swap="innerHTML">+ New Locker</button>
+		</div>
+
+		<div class="bg-white rounded-2xl shadow-sm p-4 mb-4 flex items-center justify-between">
+			<div class="text-sm text-slate-500">Total across active lockers</div>
+			<div class="text-2xl font-bold">{ money.Format(d.Symbol, d.Total) }</div>
+		</div>
+
+		<div class="bg-white rounded-2xl shadow-sm p-6">
+			<table class="w-full text-sm">
+				<thead class="text-left text-slate-500 border-b">
+					<tr>
+						<th class="py-2 px-3">Locker</th>
+						<th class="py-2 px-3">Kind</th>
+						<th class="py-2 px-3">Overdraft</th>
+						<th class="py-2 px-3 text-right">Balance</th>
+						<th class="py-2 px-3"></th>
+					</tr>
+				</thead>
+				<tbody>
+					if len(d.Rows) == 0 {
+						<tr><td colspan="5" class="py-6 text-center text-slate-500">No lockers yet. Create one to start tracking off-drawer cash.</td></tr>
+					} else {
+						for _, l := range d.Rows {
+							<tr class={ "border-b last:border-0", templ.KV("opacity-50", !l.IsActive) }>
+								<td class="py-2 px-3 font-medium">
+									{ l.Name }
+									if !l.IsActive {
+										<span class="ml-2 text-xs px-2 py-0.5 rounded-full bg-slate-200 text-slate-600">archived</span>
+									}
+								</td>
+								<td class="py-2 px-3">{ lockerKindLabel(l.Kind) }</td>
+								<td class="py-2 px-3">
+									if l.AllowNegative {
+										<span class="text-amber-600">allowed</span>
+									} else {
+										<span class="text-slate-400">no</span>
+									}
+								</td>
+								<td class={ "py-2 px-3 text-right font-semibold", templ.KV("text-rose-600", l.Balance.IsNegative()) }>
+									{ money.Format(d.Symbol, l.Balance) }
+								</td>
+								<td class="py-2 px-3 text-right whitespace-nowrap">
+									<a class="text-slate-600 hover:underline" href={ templ.SafeURL("/admin/lockers/" + strconv.FormatInt(l.ID, 10) + "/ledger") }>Ledger</a>
+									<button class="text-indigo-600 hover:underline ml-3" hx-get={ "/admin/lockers/form/" + strconv.FormatInt(l.ID, 10) } hx-target="#modal-container" hx-swap="innerHTML">Edit</button>
+									if l.IsActive {
+										<button class="text-red-600 hover:underline ml-3" hx-post={ "/admin/lockers/" + strconv.FormatInt(l.ID, 10) + "/archive" } hx-swap="none" hx-confirm="Archive this locker? Its balance and history are kept.">Archive</button>
+									}
+								</td>
+							</tr>
+						}
+					}
+				</tbody>
+			</table>
+		</div>
+	}
+}
+
+templ LockerForm(l *lockers.Locker) {
+	@modalShell(ternary(l == nil, "New Locker", "Edit Locker")) {
+		<form class="p-6 space-y-4"
+			if l == nil {
+				hx-post="/admin/lockers"
+			} else {
+				hx-put={ "/admin/lockers/" + strconv.FormatInt(l.ID, 10) }
+			}
+			hx-swap="none">
+			<div>
+				<label class="block text-sm font-medium mb-1">Name</label>
+				<input name="name" required value={ lockerVal(l, "name") } placeholder="e.g. Shop safe, BOC account, Owner's pocket" class="w-full border rounded-lg px-3 py-2"/>
+			</div>
+			<div class="grid grid-cols-2 gap-4">
+				<div>
+					<label class="block text-sm font-medium mb-1">Kind</label>
+					<select name="kind" class="w-full border rounded-lg px-3 py-2">
+						@lockerKindOption("other", l)
+						@lockerKindOption("safe", l)
+						@lockerKindOption("bank", l)
+						@lockerKindOption("pocket", l)
+					</select>
+				</div>
+				if l == nil {
+					<div>
+						<label class="block text-sm font-medium mb-1">Opening balance</label>
+						<input name="opening_balance" type="number" step="0.01" value="0" class="w-full border rounded-lg px-3 py-2"/>
+					</div>
+				}
+			</div>
+			<label class="flex items-center gap-2 text-sm">
+				<input type="checkbox" name="allow_negative" value="on" checked?={ l != nil && l.AllowNegative } class="rounded"/>
+				Allow negative balance (e.g. owner's pocket — he may put in more than he takes)
+			</label>
+			if l != nil {
+				<label class="flex items-center gap-2 text-sm">
+					<input type="checkbox" name="is_active" value="on" checked?={ l.IsActive } class="rounded"/>
+					Active
+				</label>
+			}
+			@modalButtons()
+		</form>
+	}
+}
+
+type LockerLedgerData struct {
+	Symbol     string
+	UserName   string
+	Locker     lockers.Locker
+	Entries    []lockers.LedgerEntry
+	Preset     string
+	From       string
+	To         string
+	NetInRange decimal.Decimal
+}
+
+templ LockerLedgerPage(d LockerLedgerData) {
+	@layouts.Admin(d.Locker.Name+" — ledger", d.UserName, "lockers") {
+		<div class="flex items-center justify-between mb-6">
+			<div>
+				<a href="/admin/lockers" class="text-sm text-indigo-600 hover:underline">← Cash Lockers</a>
+				<h1 class="text-2xl font-bold">{ d.Locker.Name }</h1>
+				<p class="text-sm text-slate-500">
+					{ lockerKindLabel(d.Locker.Kind) } · current balance
+					<span class={ "font-semibold", templ.KV("text-rose-600", d.Locker.Balance.IsNegative()) }>{ money.Format(d.Symbol, d.Locker.Balance) }</span>
+				</p>
+			</div>
+			<div class="text-right">
+				<div class="text-xs text-slate-500">Net change in range</div>
+				<div class={ "text-xl font-bold", templ.KV("text-rose-600", d.NetInRange.IsNegative()), templ.KV("text-emerald-600", d.NetInRange.IsPositive()) }>{ money.Format(d.Symbol, d.NetInRange) }</div>
+			</div>
+		</div>
+
+		@rptRangeForm("/admin/lockers/"+strconv.FormatInt(d.Locker.ID, 10)+"/ledger", d.Preset, d.From, d.To) {
+		}
+		@rptPeriodLine(d.From, d.To)
+
+		<div class="bg-white rounded-2xl shadow-sm p-6">
+			<table class="w-full text-sm">
+				<thead class="text-left text-slate-500 border-b">
+					<tr>
+						<th class="py-2 px-2">When</th>
+						<th class="py-2 px-2">Type</th>
+						<th class="py-2 px-2">Note</th>
+						<th class="py-2 px-2 text-right">Change</th>
+					</tr>
+				</thead>
+				<tbody>
+					if len(d.Entries) == 0 {
+						<tr><td colspan="4" class="py-6 text-center text-slate-500">No movements in this range.</td></tr>
+					} else {
+						for _, e := range d.Entries {
+							<tr class="border-b last:border-0">
+								<td class="py-2 px-2 text-slate-500 whitespace-nowrap">{ e.CreatedAt.Format("2006-01-02 15:04") }</td>
+								<td class="py-2 px-2">{ lockerLedgerKindLabel(e.Kind) }</td>
+								<td class="py-2 px-2">{ e.Note }</td>
+								<td class={ "py-2 px-2 text-right font-medium", templ.KV("text-rose-600", e.BalanceDelta.IsNegative()), templ.KV("text-emerald-600", e.BalanceDelta.IsPositive()) }>
+									{ money.Format(d.Symbol, e.BalanceDelta) }
+								</td>
+							</tr>
+						}
+					}
+				</tbody>
+			</table>
+		</div>
+	}
+}
+
+templ lockerKindOption(kind string, l *lockers.Locker) {
+	<option value={ kind } selected?={ (l == nil && kind == "other") || (l != nil && l.Kind == kind) }>{ lockerKindLabel(kind) }</option>
+}
+
+func lockerVal(l *lockers.Locker, field string) string {
+	if l == nil {
+		return ""
+	}
+	switch field {
+	case "name":
+		return l.Name
+	}
+	return ""
+}
+
+func lockerKindLabel(k string) string {
+	switch k {
+	case "safe":
+		return "Safe"
+	case "bank":
+		return "Bank account"
+	case "pocket":
+		return "Pocket"
+	}
+	return "Other"
+}
+
+func lockerLedgerKindLabel(k string) string {
+	switch k {
+	case "open_balance":
+		return "Opening balance"
+	case "transfer":
+		return "Transfer"
+	case "payment":
+		return "Payment"
+	case "intake":
+		return "Intake"
+	case "bank_charge":
+		return "Bank charge"
+	case "interest":
+		return "Interest"
+	case "adjust":
+		return "Adjustment"
+	}
+	return k
+}

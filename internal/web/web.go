@@ -17,6 +17,7 @@ import (
 	"karots-pos/internal/features/customers"
 	"karots-pos/internal/features/denominations"
 	"karots-pos/internal/features/expenses"
+	"karots-pos/internal/features/lockers"
 	"karots-pos/internal/features/products"
 	"karots-pos/internal/features/purchasereturns"
 	"karots-pos/internal/features/purchases"
@@ -53,6 +54,7 @@ type Server struct {
 	purchaseReturns *purchasereturns.Service
 	conversions *conversions.Service
 	expenses   *expenses.Service
+	lockers    *lockers.Service
 	reports    *reports.Service
 	denominations *denominations.Service
 	cashRegister  *cashregister.Service
@@ -80,6 +82,7 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 		purchaseReturns: purchasereturns.NewService(db),
 		conversions: conversions.NewService(db),
 		expenses:   expenses.NewService(db),
+		lockers:    lockers.NewService(db),
 		reports:    reports.NewService(db),
 		denominations: denominations.NewService(db),
 		audit:         audit.NewService(db),
@@ -249,6 +252,15 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	ag.POST("/expenses", admin.ExpenseCreate)
 	ag.PUT("/expenses/:id", admin.ExpenseUpdate)
 	ag.DELETE("/expenses/:id", admin.ExpenseDelete)
+
+	// Cash lockers (safe / bank / pocket money locations)
+	ag.GET("/lockers", admin.Lockers)
+	ag.GET("/lockers/form", admin.LockerForm)
+	ag.GET("/lockers/form/:id", admin.LockerEditForm)
+	ag.POST("/lockers", admin.LockerCreate)
+	ag.PUT("/lockers/:id", admin.LockerUpdate)
+	ag.POST("/lockers/:id/archive", admin.LockerArchive)
+	ag.GET("/lockers/:id/ledger", admin.LockerLedger)
 
 	// Warranty (admin shell) + losses & supplier recovery
 	ag.GET("/warranty", admin.Warranty)
