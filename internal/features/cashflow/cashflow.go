@@ -73,6 +73,13 @@ type MoveInput struct {
 	// to let Move classify it (transfer / payment / intake). Used by the bank
 	// charge / interest / adjust flows that need an explicit kind.
 	LockerKind string
+	// ReceiptKind is the semantic label stored on the money receipt (transfer,
+	// supplier_payment, customer_payment, expense, refund, ...). Empty lets Move
+	// classify it like the locker leg (transfer / payment / intake).
+	ReceiptKind string
+	// Party is the outside counterparty name (customer / supplier) shown on the
+	// receipt and used for search; also used as the External endpoint's label.
+	Party string
 	// ActorID is the user performing the move (recorded as created_by on locker
 	// ledger rows). For a till leg the drawer's own cashier id is used.
 	ActorID int64
@@ -92,19 +99,24 @@ func NewService(db *sqlx.DB, salesSvc *sales.Service) *Service {
 
 // Move transfers Amount from in.From to in.To atomically. It guards the source
 // against overdraw (a till, or a locker with allow_negative=false, cannot go
-// below zero — 409 Conflict) and writes whichever sides are tracked.
-func (s *Service) Move(ctx context.Context, in MoveInput) error {
+// below zero — 409 Conflict), writes whichever sides are tracked, and records
+// exactly one money receipt (returned so the caller can view / print it). The
+// ledger legs and the receipt commit together or not at all. Move does no
+// printing and takes no settings dependency — the print policy lives in the web
+// layer.
+func (s *Service) Move(ctx context.Context, in MoveInput) (*Receipt, error) {
 	if !in.Amount.IsPositive() {
-		return apperr.Validation("amount must be greater than zero")
+		return nil, apperr.Validation("amount must be greater than zero")
 	}
 	if !in.From.tracked() && !in.To.tracked() {
-		return apperr.Validation("a move needs at least one tracked location")
+		return nil, apperr.Validation("a move needs at least one tracked location")
 	}
 	if in.From.Kind == in.To.Kind && in.From.ID == in.To.ID && in.From.tracked() {
-		return apperr.Validation("source and destination must be different")
+		return nil, apperr.Validation("source and destination must be different")
 	}
 
-	return appdb.WithTx(ctx, s.db, func(tx *sqlx.Tx) error {
+	var receipt *Receipt
+	err := appdb.WithTx(ctx, s.db, func(tx *sqlx.Tx) error {
 		crepo := cashregister.NewRepository(tx)
 		lrepo := lockers.NewRepository(tx)
 
@@ -132,8 +144,95 @@ func (s *Service) Move(ctx context.Context, in MoveInput) error {
 		if err := s.writeLeg(ctx, crepo, lrepo, in, true, fromSess, toSess); err != nil {
 			return err
 		}
-		return s.writeLeg(ctx, crepo, lrepo, in, false, fromSess, toSess)
+		if err := s.writeLeg(ctx, crepo, lrepo, in, false, fromSess, toSess); err != nil {
+			return err
+		}
+
+		rec, err := s.writeReceipt(ctx, tx, lrepo, in, fromSess, toSess)
+		if err != nil {
+			return err
+		}
+		receipt = rec
+		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
+	return receipt, nil
+}
+
+// writeReceipt records the single money receipt for a move, deriving the from/to
+// labels in-tx from the resolved endpoints.
+func (s *Service) writeReceipt(ctx context.Context, q appdb.Queryer, lrepo *lockers.Repository, in MoveInput, fromSess, toSess *cashregister.Session) (*Receipt, error) {
+	rrepo := NewReceiptRepository(q)
+	fromLabel := label(ctx, q, lrepo, in.From, fromSess, in.Party)
+	toLabel := label(ctx, q, lrepo, in.To, toSess, in.Party)
+
+	kind := in.ReceiptKind
+	if kind == "" {
+		kind = receiptKind(in)
+	}
+	ri := ReceiptInput{
+		Kind:      kind,
+		FromLabel: fromLabel,
+		ToLabel:   toLabel,
+		Party:     in.Party,
+		Amount:    in.Amount,
+		Note:      in.Reason,
+	}
+	if in.Ref != nil {
+		ri.RefKind = &in.Ref.Kind
+		ri.RefID = &in.Ref.ID
+	}
+	if in.ActorID > 0 {
+		by := in.ActorID
+		ri.CreatedBy = &by
+	}
+	rec, err := rrepo.Insert(ctx, ri)
+	if err != nil {
+		return nil, apperr.Internal("failed to record money receipt", err)
+	}
+	return rec, nil
+}
+
+// label renders one endpoint for a receipt: a locker's name, "Till — <cashier>",
+// or the party name (else "External") for the trading counterparty. It reads over
+// the same queryer (tx) as the move so the label reflects the committed state.
+func label(ctx context.Context, q appdb.Queryer, lrepo *lockers.Repository, loc Location, sess *cashregister.Session, party string) string {
+	switch loc.Kind {
+	case KindLocker:
+		if l, err := lrepo.Get(ctx, loc.ID); err == nil {
+			return l.Name
+		}
+		return "Locker"
+	case KindTill:
+		name := ""
+		if sess != nil {
+			_ = q.GetContext(ctx, &name, `SELECT name FROM users WHERE id = $1`, sess.UserID)
+		}
+		if name == "" {
+			return "Till"
+		}
+		return "Till — " + name
+	default: // External
+		if party != "" {
+			return party
+		}
+		return "External"
+	}
+}
+
+// receiptKind classifies a move's receipt kind when the caller doesn't override
+// it: own-pile↔own-pile is a transfer; money out to a counterparty is a payment;
+// money in from a counterparty is an intake.
+func receiptKind(in MoveInput) string {
+	if in.From.tracked() && in.To.tracked() {
+		return "transfer"
+	}
+	if in.From.tracked() {
+		return "payment"
+	}
+	return "intake"
 }
 
 // guardSource blocks a move that would overdraw the source.

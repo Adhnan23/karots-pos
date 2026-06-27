@@ -91,11 +91,11 @@ func (h *cashierUI) ZReport(c echo.Context) error {
 
 func (h *cashierUI) POS(c echo.Context) error {
 	ctx := c.Request().Context()
-	symbol, defaultType, promptAfterSale := "Rs.", "retail", true
+	symbol, defaultType, askToPrint := "Rs.", "retail", true
 	if cfg, err := h.s.settings.Get(ctx); err == nil {
 		symbol = cfg.CurrencySymbol
 		defaultType = cfg.DefaultSaleType
-		promptAfterSale = cfg.PromptAfterSale
+		askToPrint = cfg.AskToPrint
 	}
 	return response.RenderPage(c, cashierpages.POS(cashierpages.POSData{
 		CashierName:     middleware.CurrentUserName(c),
@@ -103,7 +103,7 @@ func (h *cashierUI) POS(c echo.Context) error {
 		ShowChangePin:   h.showChangePin(c),
 		Symbol:          symbol,
 		DefaultSaleType: defaultType,
-		PromptAfterSale: promptAfterSale,
+		AskToPrint:      askToPrint,
 	}))
 }
 
@@ -237,7 +237,7 @@ func (h *cashierUI) PrintReceipt(c echo.Context) error {
 func (h *cashierUI) Receipts(c echo.Context) error {
 	ctx := c.Request().Context()
 	q := c.QueryParam("q")
-	rows, err := h.s.sales.List(ctx, sales.ListFilter{Receipt: q, Limit: 50})
+	rows, err := h.s.sales.List(ctx, sales.ListFilter{Query: q, Limit: 50})
 	if err != nil {
 		return err
 	}

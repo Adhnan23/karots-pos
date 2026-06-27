@@ -14,40 +14,40 @@ import (
 )
 
 type Sale struct {
-	ID          int64           `db:"id"           json:"id"`
-	ReceiptNo   string          `db:"receipt_no"   json:"receipt_no"`
-	CustomerID  *int64          `db:"customer_id"  json:"customer_id,omitempty"`
-	SaleType    string          `db:"sale_type"    json:"sale_type"`
+	ID            int64           `db:"id"           json:"id"`
+	ReceiptNo     string          `db:"receipt_no"   json:"receipt_no"`
+	CustomerID    *int64          `db:"customer_id"  json:"customer_id,omitempty"`
+	SaleType      string          `db:"sale_type"    json:"sale_type"`
 	Subtotal      decimal.Decimal `db:"subtotal"       json:"subtotal"`
 	Discount      decimal.Decimal `db:"discount"       json:"discount"`
 	DiscountType  string          `db:"discount_type"  json:"discount_type"`  // bill discount: fixed|percent
 	DiscountValue decimal.Decimal `db:"discount_value" json:"discount_value"` // entered value
 	Tax           decimal.Decimal `db:"tax"          json:"tax"`
-	Total       decimal.Decimal `db:"total"        json:"total"`
-	PaidAmount  decimal.Decimal `db:"paid_amount"  json:"paid_amount"`
-	ChangeGiven decimal.Decimal `db:"change_given" json:"change_given"`
-	Status      string          `db:"status"       json:"status"`
-	CashierID   int64           `db:"cashier_id"   json:"cashier_id"`
-	Notes       *string         `db:"notes"        json:"notes,omitempty"`
-	CreatedAt   time.Time       `db:"created_at"   json:"created_at"`
+	Total         decimal.Decimal `db:"total"        json:"total"`
+	PaidAmount    decimal.Decimal `db:"paid_amount"  json:"paid_amount"`
+	ChangeGiven   decimal.Decimal `db:"change_given" json:"change_given"`
+	Status        string          `db:"status"       json:"status"`
+	CashierID     int64           `db:"cashier_id"   json:"cashier_id"`
+	Notes         *string         `db:"notes"        json:"notes,omitempty"`
+	CreatedAt     time.Time       `db:"created_at"   json:"created_at"`
 	// joined
 	CashierName  string  `db:"cashier_name"  json:"cashier_name"`
 	CustomerName *string `db:"customer_name" json:"customer_name,omitempty"`
 }
 
 type SaleItem struct {
-	ID          int64           `db:"id"           json:"id"`
-	SaleID      int64           `db:"sale_id"      json:"sale_id"`
-	ProductID   int64           `db:"product_id"   json:"product_id"`
-	Quantity    decimal.Decimal `db:"quantity"     json:"quantity"`
-	UnitPrice   decimal.Decimal `db:"unit_price"   json:"unit_price"`
-	CostPrice   decimal.Decimal `db:"cost_price"   json:"cost_price"`
+	ID            int64           `db:"id"           json:"id"`
+	SaleID        int64           `db:"sale_id"      json:"sale_id"`
+	ProductID     int64           `db:"product_id"   json:"product_id"`
+	Quantity      decimal.Decimal `db:"quantity"     json:"quantity"`
+	UnitPrice     decimal.Decimal `db:"unit_price"   json:"unit_price"`
+	CostPrice     decimal.Decimal `db:"cost_price"   json:"cost_price"`
 	Discount      decimal.Decimal `db:"discount"       json:"discount"`
-	DiscountType  string          `db:"discount_type"  json:"discount_type"`  // fixed|percent
+	DiscountType  string          `db:"discount_type"  json:"discount_type"` // fixed|percent
 	DiscountValue decimal.Decimal `db:"discount_value" json:"discount_value"`
-	Subtotal    decimal.Decimal `db:"subtotal"     json:"subtotal"`
-	ReturnedQty decimal.Decimal `db:"returned_qty" json:"returned_qty"`
-	Description *string         `db:"description"  json:"description,omitempty"`
+	Subtotal      decimal.Decimal `db:"subtotal"     json:"subtotal"`
+	ReturnedQty   decimal.Decimal `db:"returned_qty" json:"returned_qty"`
+	Description   *string         `db:"description"  json:"description,omitempty"`
 	// joined
 	ProductName string `db:"product_name" json:"product_name"`
 	UnitAbbr    string `db:"unit_abbr"    json:"unit_abbr"`
@@ -283,6 +283,7 @@ type ListFilter struct {
 	CashierID *int64
 	Status    string
 	Receipt   string // receipt-number substring match (blank = any)
+	Query     string // matches receipt no / customer name / customer phone (blank = any)
 	Method    string // payment method on the sale (blank = any)
 	Limit     int
 	Offset    int
@@ -304,6 +305,10 @@ func (r *Repository) List(ctx context.Context, f ListFilter) ([]Sale, error) {
 	if f.Method != "" {
 		method = &f.Method
 	}
+	var query *string
+	if f.Query != "" {
+		query = &f.Query
+	}
 	var rows []Sale
 	err := r.q.SelectContext(ctx, &rows, `
 		SELECT s.*, u.name AS cashier_name, c.name AS customer_name
@@ -317,7 +322,11 @@ func (r *Repository) List(ctx context.Context, f ListFilter) ([]Sale, error) {
 		  AND ($5::text IS NULL OR s.receipt_no ILIKE '%' || $5 || '%')
 		  AND ($8::text IS NULL OR EXISTS (
 		      SELECT 1 FROM payments p WHERE p.sale_id = s.id AND p.method = $8::payment_method))
+		  AND ($9::text IS NULL OR
+		       s.receipt_no ILIKE '%' || $9 || '%' OR
+		       c.name       ILIKE '%' || $9 || '%' OR
+		       c.phone      ILIKE '%' || $9 || '%')
 		ORDER BY s.created_at DESC
-		LIMIT $6 OFFSET $7`, f.From, f.To, f.CashierID, status, receipt, f.Limit, f.Offset, method)
+		LIMIT $6 OFFSET $7`, f.From, f.To, f.CashierID, status, receipt, f.Limit, f.Offset, method, query)
 	return rows, err
 }

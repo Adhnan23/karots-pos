@@ -1,0 +1,186 @@
+package adminpages
+
+import (
+	"strconv"
+
+	"karots-pos/internal/datetime"
+	"karots-pos/internal/features/cashflow"
+	"karots-pos/internal/features/settings"
+	"karots-pos/internal/money"
+	"karots-pos/templates/layouts"
+)
+
+type MoneyReceiptsData struct {
+	UserName string
+	Symbol   string
+	Rows     []cashflow.Receipt
+	Query    string
+	Kind     string
+	Preset   string
+	From     string
+	To       string
+}
+
+templ MoneyReceiptsPage(d MoneyReceiptsData) {
+	@layouts.Admin("Cash Receipts", d.UserName, "money-receipts") {
+		<div class="flex items-center justify-between mb-6">
+			<div>
+				<h1 class="text-2xl font-bold">Cash Receipts</h1>
+				<p class="text-sm text-slate-500">Every money movement — transfers, payments, intakes — with a printable, searchable receipt.</p>
+			</div>
+		</div>
+
+		@rptRangeForm("/admin/money-receipts", d.Preset, d.From, d.To) {
+			<div>
+				<label class="block text-xs text-slate-500 mb-1">Search</label>
+				<input type="text" name="q" value={ d.Query } placeholder="Receipt no / party" class="border rounded-lg px-3 py-1.5"/>
+			</div>
+			<div>
+				<label class="block text-xs text-slate-500 mb-1">Kind</label>
+				<select name="kind" class="border rounded-lg px-3 py-1.5">
+					@mrKindOpt("", "All kinds", d.Kind)
+					@mrKindOpt("transfer", "Transfer", d.Kind)
+					@mrKindOpt("payment", "Payment", d.Kind)
+					@mrKindOpt("intake", "Intake", d.Kind)
+				</select>
+			</div>
+		}
+		@rptPeriodLine(d.From, d.To)
+
+		<div class="bg-white rounded-2xl shadow-sm p-6">
+			<table class="w-full text-sm">
+				<thead class="text-left text-slate-500 border-b">
+					<tr>
+						<th class="py-2 px-2">When</th>
+						<th class="py-2 px-2">Receipt</th>
+						<th class="py-2 px-2">Kind</th>
+						<th class="py-2 px-2">From → To</th>
+						<th class="py-2 px-2">Party</th>
+						<th class="py-2 px-2 text-right">Amount</th>
+						<th class="py-2 px-2">By</th>
+						<th class="py-2 px-2"></th>
+					</tr>
+				</thead>
+				<tbody>
+					if len(d.Rows) == 0 {
+						<tr><td colspan="8" class="py-6 text-center text-slate-500">No receipts in this range.</td></tr>
+					} else {
+						for _, r := range d.Rows {
+							<tr class="border-b last:border-0">
+								<td class="py-2 px-2 text-slate-500 whitespace-nowrap">{ datetime.DateTime(r.CreatedAt) }</td>
+								<td class="py-2 px-2 font-medium">{ r.ReceiptNo }</td>
+								<td class="py-2 px-2">{ mrKindLabel(r.Kind) }</td>
+								<td class="py-2 px-2 text-slate-600">{ r.FromLabel } → { r.ToLabel }</td>
+								<td class="py-2 px-2">{ r.Party }</td>
+								<td class="py-2 px-2 text-right font-semibold">{ money.Format(d.Symbol, r.Amount) }</td>
+								<td class="py-2 px-2 text-slate-500">
+									if r.CreatedByName != nil {
+										{ *r.CreatedByName }
+									}
+								</td>
+								<td class="py-2 px-2 text-right whitespace-nowrap">
+									<a class="text-indigo-600 hover:underline" href={ templ.SafeURL("/admin/money-receipts/" + strconv.FormatInt(r.ID, 10)) }>View</a>
+								</td>
+							</tr>
+						}
+					}
+				</tbody>
+			</table>
+		</div>
+	}
+}
+
+type MoneyReceiptData struct {
+	UserName string
+	Settings settings.Settings
+	Receipt  cashflow.Receipt
+}
+
+templ MoneyReceiptPage(d MoneyReceiptData) {
+	@layouts.Admin("Receipt "+d.Receipt.ReceiptNo, d.UserName, "money-receipts") {
+		<div class="no-print flex items-center justify-between mb-6">
+			<a href="/admin/money-receipts" class="text-sm text-indigo-600 hover:underline">← Cash Receipts</a>
+			<div class="flex gap-2">
+				<button onclick="window.print()" class="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium">🖨 Print</button>
+				<button
+					hx-post={ "/admin/money-receipts/" + strconv.FormatInt(d.Receipt.ID, 10) + "/print" }
+					hx-swap="none"
+					class="px-4 py-2 rounded-lg bg-white border text-slate-700 text-sm font-medium">Reprint slip</button>
+			</div>
+		</div>
+
+		<div class="bg-white rounded-2xl shadow-sm max-w-md mx-auto p-8 print:shadow-none">
+			<div class="text-center border-b pb-4 mb-4">
+				if d.Settings.LogoSrc() != "" {
+					<img class="h-12 mx-auto mb-2" src={ templ.SafeURL(d.Settings.LogoSrc()) } alt="logo"/>
+				}
+				<div class="text-lg font-bold">{ d.Settings.ShopName }</div>
+				if d.Settings.Address != nil && *d.Settings.Address != "" {
+					<div class="text-xs text-slate-500">{ *d.Settings.Address }</div>
+				}
+				if d.Settings.Phone != nil && *d.Settings.Phone != "" {
+					<div class="text-xs text-slate-500">Tel: { *d.Settings.Phone }</div>
+				}
+			</div>
+
+			<div class="text-center mb-4">
+				<div class="text-xs uppercase tracking-wide text-slate-400">{ mrKindLabel(d.Receipt.Kind) } receipt</div>
+				<div class="text-2xl font-bold">{ d.Receipt.ReceiptNo }</div>
+			</div>
+
+			<dl class="text-sm space-y-1.5">
+				<div class="flex justify-between"><dt class="text-slate-500">Date</dt><dd>{ datetime.DateTime(d.Receipt.CreatedAt) }</dd></div>
+				<div class="flex justify-between"><dt class="text-slate-500">From</dt><dd class="font-medium">{ d.Receipt.FromLabel }</dd></div>
+				<div class="flex justify-between"><dt class="text-slate-500">To</dt><dd class="font-medium">{ d.Receipt.ToLabel }</dd></div>
+				if d.Receipt.Party != "" {
+					<div class="flex justify-between"><dt class="text-slate-500">Party</dt><dd>{ d.Receipt.Party }</dd></div>
+				}
+				if d.Receipt.Note != "" {
+					<div class="flex justify-between"><dt class="text-slate-500">Note</dt><dd>{ d.Receipt.Note }</dd></div>
+				}
+				if d.Receipt.CreatedByName != nil {
+					<div class="flex justify-between"><dt class="text-slate-500">By</dt><dd>{ *d.Receipt.CreatedByName }</dd></div>
+				}
+			</dl>
+
+			<div class="flex justify-between items-baseline border-t mt-4 pt-4">
+				<span class="text-slate-500">Amount</span>
+				<span class="text-2xl font-bold">{ money.Format(d.Settings.CurrencySymbol, d.Receipt.Amount) }</span>
+			</div>
+
+			<div class="text-center text-xs text-slate-400 mt-6">Signature: ____________________</div>
+		</div>
+	}
+}
+
+templ mrKindOpt(val, label, active string) {
+	<option value={ val } selected?={ val == active }>{ label }</option>
+}
+
+func mrKindLabel(k string) string {
+	switch k {
+	case "transfer":
+		return "Transfer"
+	case "payment":
+		return "Payment"
+	case "intake":
+		return "Intake"
+	case "supplier_payment":
+		return "Supplier payment"
+	case "customer_payment":
+		return "Customer payment"
+	case "expense":
+		return "Expense"
+	case "refund":
+		return "Refund"
+	case "capital":
+		return "Capital"
+	case "bank_charge":
+		return "Bank charge"
+	case "interest":
+		return "Interest"
+	case "adjust":
+		return "Adjustment"
+	}
+	return k
+}

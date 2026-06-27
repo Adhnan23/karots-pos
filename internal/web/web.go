@@ -11,12 +11,12 @@ import (
 	"karots-pos/internal/config"
 	"karots-pos/internal/features/audit"
 	"karots-pos/internal/features/auth"
+	"karots-pos/internal/features/cashflow"
 	"karots-pos/internal/features/cashregister"
 	"karots-pos/internal/features/categories"
 	"karots-pos/internal/features/conversions"
 	"karots-pos/internal/features/customers"
 	"karots-pos/internal/features/denominations"
-	"karots-pos/internal/features/cashflow"
 	"karots-pos/internal/features/expenses"
 	"karots-pos/internal/features/lockers"
 	"karots-pos/internal/features/products"
@@ -40,59 +40,61 @@ import (
 
 // Server bundles the services the UI handlers call.
 type Server struct {
-	cfg        *config.Config
-	auth       *auth.Service
-	products   *products.Service
-	categories *categories.Service
-	units      *units.Service
-	settings   *settings.Service
-	sales      *sales.Service
-	customers  *customers.Service
-	stock      *stock.Service
-	suppliers  *suppliers.Service
-	supplierPay *supplierpay.Service
-	purchases  *purchases.Service
-	purchaseReturns *purchasereturns.Service
-	conversions *conversions.Service
-	expenses   *expenses.Service
-	lockers    *lockers.Service
-	cashflow   *cashflow.Service
-	reports    *reports.Service
-	denominations *denominations.Service
-	cashRegister  *cashregister.Service
-	audit         *audit.Service
-	warranty      *warranty.Service
-	recovery      *recovery.Service
+	cfg              *config.Config
+	auth             *auth.Service
+	products         *products.Service
+	categories       *categories.Service
+	units            *units.Service
+	settings         *settings.Service
+	sales            *sales.Service
+	customers        *customers.Service
+	stock            *stock.Service
+	suppliers        *suppliers.Service
+	supplierPay      *supplierpay.Service
+	purchases        *purchases.Service
+	purchaseReturns  *purchasereturns.Service
+	conversions      *conversions.Service
+	expenses         *expenses.Service
+	lockers          *lockers.Service
+	cashflow         *cashflow.Service
+	cashflowReceipts *cashflow.ReceiptService
+	reports          *reports.Service
+	denominations    *denominations.Service
+	cashRegister     *cashregister.Service
+	audit            *audit.Service
+	warranty         *warranty.Service
+	recovery         *recovery.Service
 }
 
 // RegisterUI builds UI services and mounts all server-rendered routes. authSvc
 // is shared with the API layer so login state is consistent.
 func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Service) {
 	s := &Server{
-		cfg:        cfg,
-		auth:       authSvc,
-		products:   products.NewService(db),
-		categories: categories.NewService(db),
-		units:      units.NewService(db),
-		settings:   settings.NewService(db),
-		sales:      sales.NewService(db),
-		customers:  customers.NewService(db),
-		stock:      stock.NewService(db),
-		suppliers:  suppliers.NewService(db),
-		supplierPay: supplierpay.NewService(db),
-		purchases:  purchases.NewService(db),
+		cfg:             cfg,
+		auth:            authSvc,
+		products:        products.NewService(db),
+		categories:      categories.NewService(db),
+		units:           units.NewService(db),
+		settings:        settings.NewService(db),
+		sales:           sales.NewService(db),
+		customers:       customers.NewService(db),
+		stock:           stock.NewService(db),
+		suppliers:       suppliers.NewService(db),
+		supplierPay:     supplierpay.NewService(db),
+		purchases:       purchases.NewService(db),
 		purchaseReturns: purchasereturns.NewService(db),
-		conversions: conversions.NewService(db),
-		expenses:   expenses.NewService(db),
-		lockers:    lockers.NewService(db),
-		reports:    reports.NewService(db),
-		denominations: denominations.NewService(db),
-		audit:         audit.NewService(db),
-		warranty:      warranty.NewService(db),
-		recovery:      recovery.NewService(db),
+		conversions:     conversions.NewService(db),
+		expenses:        expenses.NewService(db),
+		lockers:         lockers.NewService(db),
+		reports:         reports.NewService(db),
+		denominations:   denominations.NewService(db),
+		audit:           audit.NewService(db),
+		warranty:        warranty.NewService(db),
+		recovery:        recovery.NewService(db),
 	}
 	s.cashRegister = cashregister.NewService(db, sales.NewService(db)).WithAudit(s.audit)
 	s.cashflow = cashflow.NewService(db, s.sales)
+	s.cashflowReceipts = cashflow.NewReceiptService(db)
 	a := &authUI{svc: authSvc, cookie: CookieConfig{Secure: cfg.CookieSecure, MaxAge: cfg.JWTAccessTTL}}
 	admin := &adminUI{s: s, db: db}
 	cashier := &cashierUI{s: s}
@@ -266,6 +268,10 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	ag.GET("/lockers/:id/ledger", admin.LockerLedger)
 	ag.GET("/lockers/transfer/form", admin.LockerTransferForm)
 	ag.POST("/lockers/transfer", admin.LockerTransfer)
+	// Money receipts — one printable, searchable receipt per money move.
+	ag.GET("/money-receipts", admin.MoneyReceipts)
+	ag.GET("/money-receipts/:id", admin.MoneyReceipt)
+	ag.POST("/money-receipts/:id/print", admin.MoneyReceiptPrint)
 
 	// Warranty (admin shell) + losses & supplier recovery
 	ag.GET("/warranty", admin.Warranty)

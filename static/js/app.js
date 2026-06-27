@@ -206,12 +206,12 @@ async function printBill(id) {
 
 // pos: the cashier terminal. Cart math here is a live preview only — the server
 // recomputes every amount authoritatively when the sale is posted.
-function pos(symbol, defaultType, promptAfterSale) {
+function pos(symbol, defaultType, askToPrint) {
   return {
     sym: symbol,
     // When false, completing a sale auto-prints the receipt and resets straight
     // to a new sale instead of showing the Print / New Sale prompt.
-    promptAfterSale: promptAfterSale !== false,
+    askToPrint: askToPrint !== false,
     products: [],
     customers: [],
     cart: [],
@@ -986,7 +986,7 @@ function pos(symbol, defaultType, promptAfterSale) {
         await this.attributeReloads(json.data.sale.id);
         await this.recordDocJobs(json.data.sale.id);
         toast("Sale complete", "success");
-        if (this.promptAfterSale) {
+        if (this.askToPrint) {
           this.receipt = json.data; // show the Print / New Sale prompt
         } else {
           await printBill(json.data.sale.id); // auto-print (async, self-toasts)

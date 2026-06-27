@@ -131,19 +131,18 @@ func (a *adminUI) LockerTransfer(c echo.Context) error {
 		return apperr.Validation("enter a valid amount")
 	}
 	note := strings.TrimSpace(c.FormValue("note"))
-	if err := a.s.cashflow.Move(ctx, cashflow.MoveInput{
+	rec, err := a.s.cashflow.Move(ctx, cashflow.MoveInput{
 		From:    cashflow.Locker(fromID),
 		To:      cashflow.Locker(toID),
 		Amount:  amt,
 		Reason:  note,
 		ActorID: middleware.CurrentUserID(c),
-	}); err != nil {
+	})
+	if err != nil {
 		return err
 	}
 	a.s.logAudit(c, audit.ActionUpdate, "locker", strconv.FormatInt(fromID, 10), "transferred cash between lockers")
-	c.Response().Header().Set("HX-Trigger", response.ToastAnd("Transfer recorded", "success", "close-modal"))
-	c.Response().Header().Set("HX-Refresh", "true")
-	return c.NoContent(200)
+	return a.afterMoneyMove(c, rec)
 }
 
 // LockerLedger shows one locker's movements on a full page, filterable by date.

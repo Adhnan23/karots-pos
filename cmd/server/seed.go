@@ -63,25 +63,25 @@ func seed(db *sqlx.DB) error {
 	phone := "0112345678"
 	footer := "Thank you! Please come again."
 	if _, err := setSvc.Update(ctx, settings.UpdateInput{
-		ShopName:        "Karots Super Mart",
-		ShopNameSi:      &shopNameSi, // prints on the thermal receipt as a raster image
-		Address:         &address,
-		Phone:           &phone,
-		CurrencyCode:    cur.CurrencyCode,
-		CurrencySymbol:  cur.CurrencySymbol,
-		ReceiptFooter:   &footer,
-		ReceiptWidth:    cur.ReceiptWidth,
-		TaxRegistered:   cur.TaxRegistered,
-		LowStockAlerts:  cur.LowStockAlerts,
-		PromptAfterSale: cur.PromptAfterSale,
+		ShopName:              "Karots Super Mart",
+		ShopNameSi:            &shopNameSi, // prints on the thermal receipt as a raster image
+		Address:               &address,
+		Phone:                 &phone,
+		CurrencyCode:          cur.CurrencyCode,
+		CurrencySymbol:        cur.CurrencySymbol,
+		ReceiptFooter:         &footer,
+		ReceiptWidth:          cur.ReceiptWidth,
+		TaxRegistered:         cur.TaxRegistered,
+		LowStockAlerts:        cur.LowStockAlerts,
+		AskToPrint:            cur.AskToPrint,
 		ForcePinChange:        cur.ForcePinChange,
 		AllowCashierPinChange: cur.AllowCashierPinChange,
-		DefaultSaleType: cur.DefaultSaleType,
-		ReceiptPrinter:  cur.ReceiptPrinter,
-		LabelPrinter:    cur.LabelPrinter,
-		LabelWidthMM:    cur.LabelWidthMM,
-		LabelHeightMM:   cur.LabelHeightMM,
-		LabelGapMM:      cur.LabelGapMM,
+		DefaultSaleType:       cur.DefaultSaleType,
+		ReceiptPrinter:        cur.ReceiptPrinter,
+		LabelPrinter:          cur.LabelPrinter,
+		LabelWidthMM:          cur.LabelWidthMM,
+		LabelHeightMM:         cur.LabelHeightMM,
+		LabelGapMM:            cur.LabelGapMM,
 	}); err != nil {
 		return fmt.Errorf("seed settings: %w", err)
 	}
