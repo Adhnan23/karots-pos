@@ -75,6 +75,7 @@ templ LockersPage(d LockersData) {
 								</td>
 								<td class="py-2 px-3 text-right whitespace-nowrap">
 									<a class="text-slate-600 hover:underline" href={ templ.SafeURL("/admin/lockers/" + strconv.FormatInt(l.ID, 10) + "/ledger") }>Ledger</a>
+									<button class="text-amber-600 hover:underline ml-3" hx-get={ "/admin/lockers/" + strconv.FormatInt(l.ID, 10) + "/adjust/form" } hx-target="#modal-container" hx-swap="innerHTML">Adjust</button>
 									<button class="text-indigo-600 hover:underline ml-3" hx-get={ "/admin/lockers/form/" + strconv.FormatInt(l.ID, 10) } hx-target="#modal-container" hx-swap="innerHTML">Edit</button>
 									if l.IsActive {
 										<button class="text-red-600 hover:underline ml-3" hx-post={ "/admin/lockers/" + strconv.FormatInt(l.ID, 10) + "/archive" } hx-swap="none" hx-confirm="Archive this locker? Its balance and history are kept.">Archive</button>
@@ -129,6 +130,33 @@ templ LockerForm(l *lockers.Locker) {
 					Active
 				</label>
 			}
+			@modalButtons()
+		</form>
+	}
+}
+
+templ LockerAdjustForm(l lockers.Locker, symbol string) {
+	@modalShell("Adjust " + l.Name) {
+		<form class="p-6 space-y-4" hx-post={ "/admin/lockers/" + strconv.FormatInt(l.ID, 10) + "/adjust" } hx-swap="none">
+			<p class="text-sm text-slate-600">Current balance <span class={ "font-semibold", templ.KV("text-rose-600", l.Balance.IsNegative()) }>{ money.Format(symbol, l.Balance) }</span></p>
+			<div>
+				<label class="block text-sm font-medium mb-1">Type</label>
+				<select name="type" class="w-full border rounded-lg px-3 py-2">
+					<option value="bank_charge">Bank charge (money out, books an expense)</option>
+					<option value="interest">Interest earned (money in)</option>
+					<option value="adjust_up">Manual adjustment — increase</option>
+					<option value="adjust_down">Manual adjustment — decrease</option>
+				</select>
+			</div>
+			<div>
+				<label class="block text-sm font-medium mb-1">Amount</label>
+				<input name="amount" type="number" step="0.01" min="0" required class="w-full border rounded-lg px-3 py-2"/>
+			</div>
+			<div>
+				<label class="block text-sm font-medium mb-1">Note</label>
+				<input name="note" placeholder="e.g. monthly account fee, fixed-deposit interest, count correction" class="w-full border rounded-lg px-3 py-2"/>
+			</div>
+			<p class="text-xs text-slate-500">A receipt is recorded for every adjustment.</p>
 			@modalButtons()
 		</form>
 	}

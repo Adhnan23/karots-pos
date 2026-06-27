@@ -5,14 +5,17 @@ import (
 	"strings"
 
 	"karots-pos/internal/apperr"
+	appdb "karots-pos/internal/db"
 	"karots-pos/internal/features/audit"
 	"karots-pos/internal/features/cashflow"
+	"karots-pos/internal/features/expenses"
 	"karots-pos/internal/features/lockers"
 	"karots-pos/internal/features/reports"
 	"karots-pos/internal/middleware"
 	"karots-pos/internal/response"
 	adminpages "karots-pos/templates/pages/admin"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/labstack/echo/v4"
 	"github.com/shopspring/decimal"
 )
@@ -142,6 +145,81 @@ func (a *adminUI) LockerTransfer(c echo.Context) error {
 		return err
 	}
 	a.s.logAudit(c, audit.ActionUpdate, "locker", strconv.FormatInt(fromID, 10), "transferred cash between lockers")
+	return a.s.afterMoneyMove(c, rec)
+}
+
+// LockerAdjustForm renders the bank-charge / interest / manual-adjust modal.
+func (a *adminUI) LockerAdjustForm(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	ctx := c.Request().Context()
+	l, err := a.s.lockers.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	return response.RenderFragment(c, adminpages.LockerAdjustForm(*l, a.symbol(ctx)))
+}
+
+// LockerAdjust applies a bank charge, interest or manual adjustment to a locker
+// via cashflow.Move (so it produces a CR- receipt). A bank charge also books an
+// Expense (category "Bank charges") in the same transaction.
+func (a *adminUI) LockerAdjust(c echo.Context) error {
+	ctx := c.Request().Context()
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	amt, err := decimal.NewFromString(strings.TrimSpace(c.FormValue("amount")))
+	if err != nil || !amt.IsPositive() {
+		return apperr.Validation("enter a valid amount")
+	}
+	note := strings.TrimSpace(c.FormValue("note"))
+	userID := middleware.CurrentUserID(c)
+
+	// Map the chosen type to a money move: direction, ledger kind and receipt kind.
+	var in cashflow.MoveInput
+	bookExpense := false
+	switch c.FormValue("type") {
+	case "bank_charge":
+		in = cashflow.MoveInput{From: cashflow.Locker(id), To: cashflow.External(), LockerKind: "bank_charge", ReceiptKind: "bank_charge"}
+		bookExpense = true
+	case "interest":
+		in = cashflow.MoveInput{From: cashflow.External(), To: cashflow.Locker(id), LockerKind: "interest", ReceiptKind: "interest"}
+	case "adjust_up":
+		in = cashflow.MoveInput{From: cashflow.External(), To: cashflow.Locker(id), LockerKind: "adjust", ReceiptKind: "adjust"}
+	case "adjust_down":
+		in = cashflow.MoveInput{From: cashflow.Locker(id), To: cashflow.External(), LockerKind: "adjust", ReceiptKind: "adjust"}
+	default:
+		return apperr.Validation("pick an adjustment type")
+	}
+	in.Amount = amt
+	in.Reason = note
+	in.ActorID = userID
+
+	var rec *cashflow.Receipt
+	err = appdb.WithTx(ctx, a.db, func(tx *sqlx.Tx) error {
+		if bookExpense {
+			desc := note
+			e, err := a.s.expenses.CreateInTx(ctx, tx, expenses.CreateInput{
+				Category:    "Bank charges",
+				Amount:      amt.StringFixed(2),
+				Description: &desc,
+			}, userID)
+			if err != nil {
+				return err
+			}
+			in.Ref = &cashflow.Ref{Kind: "expense", ID: e.ID}
+		}
+		r, err := a.s.cashflow.MoveTx(ctx, tx, in)
+		rec = r
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	a.s.logAudit(c, audit.ActionUpdate, "locker", strconv.FormatInt(id, 10), "locker adjustment ("+c.FormValue("type")+")")
 	return a.s.afterMoneyMove(c, rec)
 }
 
