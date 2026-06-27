@@ -273,6 +273,7 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	ag.GET("/lockers/transfer/form", admin.LockerTransferForm)
 	ag.POST("/lockers/transfer", admin.LockerTransfer)
 	// Money receipts — one printable, searchable receipt per money move.
+	ag.GET("/cashflow", admin.Cashflow)
 	ag.GET("/money-receipts", admin.MoneyReceipts)
 	ag.GET("/money-receipts/:id", admin.MoneyReceipt)
 	ag.POST("/money-receipts/:id/print", admin.MoneyReceiptPrint)

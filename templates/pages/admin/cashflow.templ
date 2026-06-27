@@ -1,0 +1,181 @@
+package adminpages
+
+import (
+	"karots-pos/internal/features/cashflow"
+	"karots-pos/internal/money"
+	"karots-pos/templates/layouts"
+
+	"github.com/shopspring/decimal"
+)
+
+type CashLocationBal struct {
+	Name    string
+	Balance decimal.Decimal
+}
+
+type CashflowData struct {
+	UserName  string
+	Symbol    string
+	Lockers   []CashLocationBal
+	Tills     []CashLocationBal
+	TotalCash decimal.Decimal
+	Rows      []cashflow.LedgerRow
+	Preset    string
+	From      string
+	To        string
+	NetIn     decimal.Decimal
+	NetOut    decimal.Decimal
+	NetChange decimal.Decimal
+	// Net position (current snapshot).
+	StockValue  decimal.Decimal
+	Receivables decimal.Decimal
+	Payables    decimal.Decimal
+	NetPosition decimal.Decimal
+}
+
+templ CashflowPage(d CashflowData) {
+	@layouts.Admin("Cash Flow", d.UserName, "cashflow") {
+		<div class="mb-6">
+			<h1 class="text-2xl font-bold">Cash Flow</h1>
+			<p class="text-sm text-slate-500">Where the money is, and every move in and out — tills and lockers together.</p>
+		</div>
+
+		<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+			<div class="bg-white rounded-2xl shadow-sm p-5">
+				<div class="text-xs text-slate-500 uppercase tracking-wide mb-2">Lockers</div>
+				if len(d.Lockers) == 0 {
+					<div class="text-sm text-slate-400">No active lockers.</div>
+				} else {
+					for _, l := range d.Lockers {
+						<div class="flex justify-between py-1 text-sm">
+							<span>{ l.Name }</span>
+							<span class={ "font-medium", templ.KV("text-rose-600", l.Balance.IsNegative()) }>{ money.Format(d.Symbol, l.Balance) }</span>
+						</div>
+					}
+				}
+			</div>
+			<div class="bg-white rounded-2xl shadow-sm p-5">
+				<div class="text-xs text-slate-500 uppercase tracking-wide mb-2">Open tills</div>
+				if len(d.Tills) == 0 {
+					<div class="text-sm text-slate-400">No open tills.</div>
+				} else {
+					for _, t := range d.Tills {
+						<div class="flex justify-between py-1 text-sm">
+							<span>{ t.Name }</span>
+							<span class="font-medium">{ money.Format(d.Symbol, t.Balance) }</span>
+						</div>
+					}
+				}
+			</div>
+			<div class="bg-indigo-600 text-white rounded-2xl shadow-sm p-5 flex flex-col justify-center">
+				<div class="text-xs uppercase tracking-wide opacity-80">Total cash on hand</div>
+				<div class="text-3xl font-bold mt-1">{ money.Format(d.Symbol, d.TotalCash) }</div>
+			</div>
+		</div>
+
+		<div class="bg-white rounded-2xl shadow-sm p-5 mb-6">
+			<div class="text-xs text-slate-500 uppercase tracking-wide mb-3">Net position (now)</div>
+			<div class="grid grid-cols-2 md:grid-cols-5 gap-4 items-end">
+				<div>
+					<div class="text-xs text-slate-500">Cash on hand</div>
+					<div class="font-semibold">{ money.Format(d.Symbol, d.TotalCash) }</div>
+				</div>
+				<div>
+					<div class="text-xs text-slate-500">+ Stock at cost</div>
+					<div class="font-semibold">{ money.Format(d.Symbol, d.StockValue) }</div>
+				</div>
+				<div>
+					<div class="text-xs text-slate-500">+ Customer dues</div>
+					<div class="font-semibold">{ money.Format(d.Symbol, d.Receivables) }</div>
+				</div>
+				<div>
+					<div class="text-xs text-slate-500">− Supplier dues</div>
+					<div class="font-semibold text-rose-600">{ money.Format(d.Symbol, d.Payables) }</div>
+				</div>
+				<div class="border-l pl-4">
+					<div class="text-xs text-slate-500">Net worth (est.)</div>
+					<div class={ "text-2xl font-bold", templ.KV("text-rose-600", d.NetPosition.IsNegative()) }>{ money.Format(d.Symbol, d.NetPosition) }</div>
+				</div>
+			</div>
+		</div>
+
+		@rptRangeForm("/admin/cashflow", d.Preset, d.From, d.To) {
+		}
+		@rptPeriodLine(d.From, d.To)
+
+		<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+			<div class="bg-white rounded-2xl shadow-sm p-5">
+				<div class="text-xs text-slate-500">Cash in (range)</div>
+				<div class="text-xl font-bold text-emerald-600">{ money.Format(d.Symbol, d.NetIn) }</div>
+			</div>
+			<div class="bg-white rounded-2xl shadow-sm p-5">
+				<div class="text-xs text-slate-500">Cash out (range)</div>
+				<div class="text-xl font-bold text-rose-600">{ money.Format(d.Symbol, d.NetOut) }</div>
+			</div>
+			<div class="bg-white rounded-2xl shadow-sm p-5">
+				<div class="text-xs text-slate-500">Net change (range)</div>
+				<div class={ "text-xl font-bold", templ.KV("text-rose-600", d.NetChange.IsNegative()), templ.KV("text-emerald-600", d.NetChange.IsPositive()) }>{ money.Format(d.Symbol, d.NetChange) }</div>
+			</div>
+		</div>
+
+		<div class="bg-white rounded-2xl shadow-sm p-6">
+			<table class="w-full text-sm">
+				<thead class="text-left text-slate-500 border-b">
+					<tr>
+						<th class="py-2 px-2">When</th>
+						<th class="py-2 px-2">Location</th>
+						<th class="py-2 px-2">Type</th>
+						<th class="py-2 px-2">Note</th>
+						<th class="py-2 px-2 text-right">Change</th>
+					</tr>
+				</thead>
+				<tbody>
+					if len(d.Rows) == 0 {
+						<tr><td colspan="5" class="py-6 text-center text-slate-500">No cash movements in this range.</td></tr>
+					} else {
+						for _, r := range d.Rows {
+							<tr class="border-b last:border-0">
+								<td class="py-2 px-2 text-slate-500 whitespace-nowrap">{ r.CreatedAt.Format("2006-01-02 15:04") }</td>
+								<td class="py-2 px-2">{ r.Location }</td>
+								<td class="py-2 px-2">{ cashflowKindLabel(r.Kind) }</td>
+								<td class="py-2 px-2 text-slate-600">{ r.Note }</td>
+								<td class={ "py-2 px-2 text-right font-medium", templ.KV("text-rose-600", r.Delta.IsNegative()), templ.KV("text-emerald-600", r.Delta.IsPositive()) }>
+									{ money.Format(d.Symbol, r.Delta) }
+								</td>
+							</tr>
+						}
+					}
+				</tbody>
+			</table>
+		</div>
+	}
+}
+
+// cashflowKindLabel humanizes the merged locker-ledger / cash-movement kinds.
+func cashflowKindLabel(k string) string {
+	switch k {
+	case "open_balance":
+		return "Opening balance"
+	case "transfer":
+		return "Transfer"
+	case "payment":
+		return "Payment"
+	case "intake":
+		return "Intake"
+	case "bank_charge":
+		return "Bank charge"
+	case "interest":
+		return "Interest"
+	case "adjust":
+		return "Adjustment"
+	case "withdrawal":
+		return "Withdrawal"
+	case "pay_in":
+		return "Pay-in"
+	case "credit_payment":
+		return "Credit collected"
+	case "refund":
+		return "Refund"
+	}
+	return k
+}
