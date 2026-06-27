@@ -5,6 +5,7 @@ import (
 
 	"karots-pos/internal/features/customers"
 	"karots-pos/internal/money"
+	adminfragments "karots-pos/templates/fragments/admin"
 	"karots-pos/templates/layouts"
 )
 
@@ -129,10 +130,16 @@ templ CustomerEditForm(c customers.Customer) {
 	}
 }
 
-templ CustomerPaymentForm(c customers.Customer, symbol string) {
+type CustomerPayData struct {
+	Customer customers.Customer
+	Symbol   string
+	Dests    []adminfragments.LocationChoice // cash destinations (lockers + open tills)
+}
+
+templ CustomerPaymentForm(d CustomerPayData) {
 	@modalShell("Collect Payment") {
-		<form class="p-6 space-y-4" hx-post={ "/admin/customers/" + strconv.FormatInt(c.ID, 10) + "/payment" } hx-swap="none">
-			<p class="text-sm text-slate-600">{ c.Name } — outstanding <span class="font-semibold">{ money.Format(symbol, c.OutstandingBalance) }</span></p>
+		<form class="p-6 space-y-4" x-data="{ method: 'cash' }" hx-post={ "/admin/customers/" + strconv.FormatInt(d.Customer.ID, 10) + "/payment" } hx-swap="none">
+			<p class="text-sm text-slate-600">{ d.Customer.Name } — outstanding <span class="font-semibold">{ money.Format(d.Symbol, d.Customer.OutstandingBalance) }</span></p>
 			<div class="grid grid-cols-2 gap-4">
 				<div>
 					<label class="block text-sm font-medium mb-1">Payment Amount</label>
@@ -140,12 +147,21 @@ templ CustomerPaymentForm(c customers.Customer, symbol string) {
 				</div>
 				<div>
 					<label class="block text-sm font-medium mb-1">Method</label>
-					<select name="method" class="w-full border rounded-lg px-3 py-2">
+					<select name="method" x-model="method" class="w-full border rounded-lg px-3 py-2">
 						<option value="cash">Cash</option>
 						<option value="card">Card</option>
 						<option value="online">Online</option>
 					</select>
 				</div>
+			</div>
+			<div x-show="method === 'cash'" x-cloak>
+				<label class="block text-sm font-medium mb-1">Cash into</label>
+				if len(d.Dests) == 0 {
+					<p class="text-sm text-amber-600">No cash locker or open till to receive into. Create a cash locker first.</p>
+				} else {
+					@adminfragments.LocationPicker("dest", "— pick where cash goes —", d.Dests)
+					<p class="text-xs text-slate-500 mt-1">Cash enters this location and a receipt is recorded.</p>
+				}
 			</div>
 			<div>
 				<label class="block text-sm font-medium mb-1">Reference <span class="text-slate-400">(optional)</span></label>

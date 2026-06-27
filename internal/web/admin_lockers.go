@@ -142,7 +142,7 @@ func (a *adminUI) LockerTransfer(c echo.Context) error {
 		return err
 	}
 	a.s.logAudit(c, audit.ActionUpdate, "locker", strconv.FormatInt(fromID, 10), "transferred cash between lockers")
-	return a.afterMoneyMove(c, rec)
+	return a.s.afterMoneyMove(c, rec)
 }
 
 // LockerLedger shows one locker's movements on a full page, filterable by date.

@@ -41,6 +41,7 @@ import (
 // Server bundles the services the UI handlers call.
 type Server struct {
 	cfg              *config.Config
+	db               *sqlx.DB
 	auth             *auth.Service
 	products         *products.Service
 	categories       *categories.Service
@@ -71,6 +72,7 @@ type Server struct {
 func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Service) {
 	s := &Server{
 		cfg:             cfg,
+		db:              db,
 		auth:            authSvc,
 		products:        products.NewService(db),
 		categories:      categories.NewService(db),

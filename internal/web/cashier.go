@@ -10,9 +10,11 @@ import (
 
 	"karots-pos/internal/apperr"
 	"karots-pos/internal/datetime"
+	appdb "karots-pos/internal/db"
 	"karots-pos/internal/escpos"
 	"karots-pos/internal/features/audit"
 	"karots-pos/internal/features/auth"
+	"karots-pos/internal/features/cashflow"
 	"karots-pos/internal/features/customers"
 	"karots-pos/internal/features/products"
 	"karots-pos/internal/features/sales"
@@ -20,12 +22,12 @@ import (
 	"karots-pos/internal/features/stock"
 	"karots-pos/internal/features/warranty"
 	"karots-pos/internal/middleware"
-	"karots-pos/internal/money"
 	"karots-pos/internal/receiptimg"
 	"karots-pos/internal/response"
 	poststatic "karots-pos/static"
 	cashierpages "karots-pos/templates/pages/cashier"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/labstack/echo/v4"
 	"github.com/shopspring/decimal"
 )
@@ -245,9 +247,9 @@ func (h *cashierUI) Receipts(c echo.Context) error {
 		CashierName:   middleware.CurrentUserName(c),
 		Role:          middleware.CurrentRole(c),
 		ShowChangePin: h.showChangePin(c),
-		Symbol:      h.cashierSymbol(ctx),
-		Query:       q,
-		Sales:       rows,
+		Symbol:        h.cashierSymbol(ctx),
+		Query:         q,
+		Sales:         rows,
 	}))
 }
 
@@ -265,8 +267,8 @@ func (h *cashierUI) Labels(c echo.Context) error {
 		CashierName:   middleware.CurrentUserName(c),
 		Role:          middleware.CurrentRole(c),
 		ShowChangePin: h.showChangePin(c),
-		Symbol:      h.cashierSymbol(ctx),
-		Products:    prods,
+		Symbol:        h.cashierSymbol(ctx),
+		Products:      prods,
 	}))
 }
 
@@ -286,8 +288,8 @@ func (h *cashierUI) returnsData(c echo.Context) (cashierpages.ReturnsData, error
 		CashierName:   middleware.CurrentUserName(c),
 		Role:          middleware.CurrentRole(c),
 		ShowChangePin: h.showChangePin(c),
-		Symbol:      h.cashierSymbol(ctx),
-		Sales:       rows,
+		Symbol:        h.cashierSymbol(ctx),
+		Sales:         rows,
 	}, nil
 }
 
@@ -360,7 +362,7 @@ func (h *cashierUI) Damage(c echo.Context) error {
 		CashierName:   middleware.CurrentUserName(c),
 		Role:          middleware.CurrentRole(c),
 		ShowChangePin: h.showChangePin(c),
-		Products:    prods,
+		Products:      prods,
 	}))
 }
 
@@ -414,8 +416,8 @@ func (h *cashierUI) creditData(c echo.Context) (cashierpages.CreditData, error) 
 		CashierName:   middleware.CurrentUserName(c),
 		Role:          middleware.CurrentRole(c),
 		ShowChangePin: h.showChangePin(c),
-		Symbol:      h.cashierSymbol(ctx),
-		Customers:   owing,
+		Symbol:        h.cashierSymbol(ctx),
+		Customers:     owing,
 	}, nil
 }
 
@@ -459,20 +461,46 @@ func (h *cashierUI) CreditPay(c echo.Context) error {
 	if err := c.Validate(&in); err != nil {
 		return err
 	}
-	cust, err := h.s.customers.Get(c.Request().Context(), id)
+	ctx := c.Request().Context()
+	cust, err := h.s.customers.Get(ctx, id)
 	if err != nil {
 		return err
 	}
-	if err := h.s.customers.RecordPayment(c.Request().Context(), id, in, middleware.CurrentUserID(c)); err != nil {
+	userID := middleware.CurrentUserID(c)
+
+	// A cash repayment enters the cashier's own till and produces a receipt, booked
+	// atomically with the payment. Non-cash (card/online) just records the payment.
+	var rec *cashflow.Receipt
+	err = appdb.WithTx(ctx, h.s.db, func(tx *sqlx.Tx) error {
+		res, err := h.s.customers.RecordPaymentTx(ctx, tx, id, in, userID)
+		if err != nil {
+			return err
+		}
+		if res.Method == "cash" {
+			rec, err = h.s.cashflow.MoveTx(ctx, tx, cashflow.MoveInput{
+				From:        cashflow.External(),
+				To:          cashflow.Till(userID),
+				Amount:      res.Amount,
+				Reason:      "credit collected: " + cust.Name,
+				ReceiptKind: "customer_payment",
+				Party:       cust.Name,
+				Ref:         &cashflow.Ref{Kind: "customer_payment", ID: res.PaymentID},
+				ActorID:     userID,
+			})
+			return err
+		}
+		return nil
+	})
+	if err != nil {
 		return err
 	}
-	// Mirror the cash into the cashier's open drawer (no-op if none is open) so
-	// credit collected shows up in the register's expected cash and audit trail.
-	if amt, perr := money.Parse(in.Amount); perr == nil {
-		h.s.cashRegister.RecordCreditCash(c.Request().Context(), middleware.CurrentUserID(c), amt, "credit collected: "+cust.Name)
+	msg := "Payment recorded"
+	if rec != nil {
+		h.s.printMoneyReceipt(ctx, rec) // cashier flow: print the slip, stay on screen
+		msg = "Payment recorded · " + rec.ReceiptNo
 	}
 	h.s.logAudit(c, audit.ActionPayment, "customer", strconv.FormatInt(id, 10), "credit collected "+in.Amount+" from "+cust.Name)
-	return htmxDone(c, "Payment recorded", "reload-ccredit")
+	return htmxDone(c, msg, "reload-ccredit")
 }
 
 // ============================ Warranty ============================
@@ -511,11 +539,11 @@ func (h *cashierUI) warrantyData(c echo.Context) (cashierpages.WarrantyData, err
 		CashierName:   middleware.CurrentUserName(c),
 		Role:          middleware.CurrentRole(c),
 		ShowChangePin: h.showChangePin(c),
-		Symbol:      h.cashierSymbol(ctx),
-		Base:        "/cashier",
-		Status:      status,
-		Search:      search,
-		Units:       units,
+		Symbol:        h.cashierSymbol(ctx),
+		Base:          "/cashier",
+		Status:        status,
+		Search:        search,
+		Units:         units,
 	}, nil
 }
 

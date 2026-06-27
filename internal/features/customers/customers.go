@@ -160,17 +160,19 @@ func (r *Repository) AddBalance(ctx context.Context, id int64, delta decimal.Dec
 	return err
 }
 
-// InsertPayment logs a credit repayment. createdBy of 0 stores NULL.
-func (r *Repository) InsertPayment(ctx context.Context, customerID int64, amount decimal.Decimal, method string, reference, note *string, createdBy int64) error {
+// InsertPayment logs a credit repayment and returns its id. createdBy of 0
+// stores NULL.
+func (r *Repository) InsertPayment(ctx context.Context, customerID int64, amount decimal.Decimal, method string, reference, note *string, createdBy int64) (int64, error) {
 	var cb *int64
 	if createdBy > 0 {
 		cb = &createdBy
 	}
-	_, err := r.q.ExecContext(ctx,
+	var id int64
+	err := r.q.GetContext(ctx, &id,
 		`INSERT INTO customer_payments (customer_id, amount, method, reference, note, created_by)
-		 VALUES ($1,$2,$3,$4,$5,$6)`,
+		 VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
 		customerID, amount, method, reference, note, cb)
-	return err
+	return id, err
 }
 
 // ListAll includes inactive customers (for the admin list, so they can be
@@ -398,27 +400,46 @@ func (s *Service) Reactivate(ctx context.Context, id int64) error {
 // repayment (balance decrement + ledger row in one transaction). createdBy is
 // the acting user (0 = unknown/system).
 func (s *Service) RecordPayment(ctx context.Context, id int64, in PaymentInput, createdBy int64) error {
+	return db.WithTx(ctx, s.db, func(tx *sqlx.Tx) error {
+		_, err := s.RecordPaymentTx(ctx, tx, id, in, createdBy)
+		return err
+	})
+}
+
+// PaymentResult summarises a recorded credit repayment for the cash mirror.
+type PaymentResult struct {
+	PaymentID int64
+	Amount    decimal.Decimal
+	Method    string
+}
+
+// RecordPaymentTx records a credit repayment over an existing transaction, so the
+// caller can book the matching cash intake (cashflow.MoveTx) atomically. Returns
+// the payment id, parsed amount and normalized method.
+func (s *Service) RecordPaymentTx(ctx context.Context, tx *sqlx.Tx, id int64, in PaymentInput, createdBy int64) (*PaymentResult, error) {
 	amt, err := money.Parse(in.Amount)
 	if err != nil || !amt.IsPositive() {
-		return apperr.Validation("payment amount must be greater than zero")
-	}
-	if _, err := s.Get(ctx, id); err != nil {
-		return err
+		return nil, apperr.Validation("payment amount must be greater than zero")
 	}
 	method := strings.TrimSpace(in.Method)
 	if method == "" {
 		method = "cash"
 	}
-	return db.WithTx(ctx, s.db, func(tx *sqlx.Tx) error {
-		r := NewRepository(tx)
-		if err := r.AddBalance(ctx, id, amt.Neg()); err != nil {
-			return apperr.Internal("failed to record payment", err)
+	r := NewRepository(tx)
+	if _, err := r.FindByID(ctx, id); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, apperr.NotFound("customer")
 		}
-		if err := r.InsertPayment(ctx, id, amt, method, in.Reference, in.Note, createdBy); err != nil {
-			return apperr.Internal("failed to record payment", err)
-		}
-		return nil
-	})
+		return nil, apperr.Internal("failed to load customer", err)
+	}
+	if err := r.AddBalance(ctx, id, amt.Neg()); err != nil {
+		return nil, apperr.Internal("failed to record payment", err)
+	}
+	payID, err := r.InsertPayment(ctx, id, amt, method, in.Reference, in.Note, createdBy)
+	if err != nil {
+		return nil, apperr.Internal("failed to record payment", err)
+	}
+	return &PaymentResult{PaymentID: payID, Amount: amt, Method: method}, nil
 }
 
 // LedgerEntry is one line of a customer statement (a debit raises what the

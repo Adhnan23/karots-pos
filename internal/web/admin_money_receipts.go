@@ -2,6 +2,7 @@ package web
 
 import (
 	"bytes"
+	"context"
 	"strconv"
 	"strings"
 	"time"
@@ -115,13 +116,14 @@ func resolveReceiptRange(c echo.Context) (from, to *time.Time, fromStr, toStr st
 	return &f, &t, fStr, tStr, nil
 }
 
-// afterMoneyMove applies the shop's print policy after a money move, identically
-// for every money-move handler. With AskToPrint on, it redirects to the receipt
-// page (a Print button, nothing auto-printed); off, it best-effort prints the
-// thermal slip and stays put with a toast. Mirrors the sale checkout path.
-func (a *adminUI) afterMoneyMove(c echo.Context, rec *cashflow.Receipt) error {
+// afterMoneyMove applies the shop's print policy after an ADMIN money move,
+// identically for every admin money-move handler. With AskToPrint on, it
+// redirects to the receipt page (a Print button, nothing auto-printed); off, it
+// best-effort prints the thermal slip and stays put with a toast. Mirrors the
+// sale checkout path. (It lives on Server so admin handlers reach it via a.s.)
+func (s *Server) afterMoneyMove(c echo.Context, rec *cashflow.Receipt) error {
 	ctx := c.Request().Context()
-	cfg, err := a.s.settings.Get(ctx)
+	cfg, err := s.settings.Get(ctx)
 	if err != nil {
 		return err
 	}
@@ -139,6 +141,17 @@ func (a *adminUI) afterMoneyMove(c echo.Context, rec *cashflow.Receipt) error {
 	c.Response().Header().Set("HX-Trigger", response.ToastAnd("Receipt "+rec.ReceiptNo+" recorded", "success", "close-modal"))
 	c.Response().Header().Set("HX-Refresh", "true")
 	return c.NoContent(200)
+}
+
+// printMoneyReceipt best-effort prints a money receipt's thermal slip. Used by
+// cashier counter flows (credit collection, refunds) which can't redirect to the
+// admin-only receipt page — they print the slip and stay on the cashier screen.
+func (s *Server) printMoneyReceipt(ctx context.Context, rec *cashflow.Receipt) {
+	cfg, err := s.settings.Get(ctx)
+	if err != nil || cfg == nil || strings.TrimSpace(cfg.ReceiptPrinter) == "" {
+		return
+	}
+	_ = printing.Raw(ctx, cfg.ReceiptPrinter, buildReceiptSlip(cfg, *rec))
 }
 
 // buildReceiptSlip renders a money receipt as raw ESC/POS bytes for the thermal

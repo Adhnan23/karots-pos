@@ -260,7 +260,7 @@ func (a *adminUI) SupplierPay(c echo.Context) error {
 	a.s.logAudit(c, audit.ActionPayment, "supplier", strconv.FormatInt(id, 10),
 		"paid "+money.Display(res.Total)+" ("+res.Method+")")
 	if rec != nil {
-		return a.afterMoneyMove(c, rec)
+		return a.s.afterMoneyMove(c, rec)
 	}
 	return htmxDone(c, "Payment recorded", "reload-suppliers")
 }
@@ -507,7 +507,7 @@ func (a *adminUI) ExpenseCreate(c echo.Context) error {
 		return err
 	}
 	a.s.logAudit(c, audit.ActionCreate, "expense", strconv.FormatInt(expenseID, 10), "recorded expense paid from "+rec.FromLabel)
-	return a.afterMoneyMove(c, rec)
+	return a.s.afterMoneyMove(c, rec)
 }
 
 // ============================ Finance / Profit ============================
@@ -1248,11 +1248,20 @@ func (a *adminUI) CustomerPayForm(c echo.Context) error {
 	if err != nil {
 		return apperr.BadRequest("invalid id")
 	}
-	cust, err := a.s.customers.Get(c.Request().Context(), id)
+	ctx := c.Request().Context()
+	cust, err := a.s.customers.Get(ctx, id)
 	if err != nil {
 		return err
 	}
-	return response.RenderFragment(c, adminpages.CustomerPaymentForm(*cust, a.symbol(c.Request().Context())))
+	dests, err := a.cashLocationChoices(ctx)
+	if err != nil {
+		return err
+	}
+	return response.RenderFragment(c, adminpages.CustomerPaymentForm(adminpages.CustomerPayData{
+		Customer: *cust,
+		Symbol:   a.symbol(ctx),
+		Dests:    dests,
+	}))
 }
 
 func (a *adminUI) CustomerUpdate(c echo.Context) error {
@@ -1278,6 +1287,7 @@ func (a *adminUI) CustomerPay(c echo.Context) error {
 	if err != nil {
 		return apperr.BadRequest("invalid id")
 	}
+	ctx := c.Request().Context()
 	var in customers.PaymentInput
 	if err := c.Bind(&in); err != nil {
 		return apperr.BadRequest("invalid form")
@@ -1285,10 +1295,52 @@ func (a *adminUI) CustomerPay(c echo.Context) error {
 	if err := c.Validate(&in); err != nil {
 		return err
 	}
-	if err := a.s.customers.RecordPayment(c.Request().Context(), id, in, middleware.CurrentUserID(c)); err != nil {
+	cust, err := a.s.customers.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	userID := middleware.CurrentUserID(c)
+
+	method := strings.TrimSpace(in.Method)
+	if method == "" {
+		method = "cash"
+	}
+	var dest cashflow.Location
+	if method == "cash" {
+		dest, err = parseLocation(c.FormValue("dest"))
+		if err != nil {
+			return err
+		}
+	}
+
+	var rec *cashflow.Receipt
+	err = appdb.WithTx(ctx, a.db, func(tx *sqlx.Tx) error {
+		res, err := a.s.customers.RecordPaymentTx(ctx, tx, id, in, userID)
+		if err != nil {
+			return err
+		}
+		if res.Method == "cash" {
+			rec, err = a.s.cashflow.MoveTx(ctx, tx, cashflow.MoveInput{
+				From:        cashflow.External(),
+				To:          dest,
+				Amount:      res.Amount,
+				Reason:      "credit collected: " + cust.Name,
+				ReceiptKind: "customer_payment",
+				Party:       cust.Name,
+				Ref:         &cashflow.Ref{Kind: "customer_payment", ID: res.PaymentID},
+				ActorID:     userID,
+			})
+			return err
+		}
+		return nil
+	})
+	if err != nil {
 		return err
 	}
 	a.s.logAudit(c, audit.ActionPayment, "customer", strconv.FormatInt(id, 10), "credit payment "+in.Amount)
+	if rec != nil {
+		return a.s.afterMoneyMove(c, rec)
+	}
 	return htmxDone(c, "Payment recorded", "reload-customers")
 }
 
