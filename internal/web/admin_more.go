@@ -112,11 +112,16 @@ func (a *adminUI) SupplierPayForm(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	sources, err := a.cashLocationChoices(ctx)
+	if err != nil {
+		return err
+	}
 	return response.RenderFragment(c, adminpages.SupplierPaymentForm(adminpages.SupplierPayData{
 		Supplier: *s,
 		Invoices: invoices,
 		History:  history,
 		Symbol:   a.symbol(ctx),
+		Sources:  sources,
 	}))
 }
 
@@ -208,23 +213,68 @@ func (a *adminUI) SupplierPay(c echo.Context) error {
 		}
 	}
 
-	res, err := a.s.supplierPay.Pay(ctx, id, in, middleware.CurrentUserID(c))
+	userID := middleware.CurrentUserID(c)
+	name := ""
+	if sup, gerr := a.s.suppliers.Get(ctx, id); gerr == nil {
+		name = sup.Name
+	}
+
+	// A cash payment leaves a chosen cash location (locker or till) and produces a
+	// receipt — booked atomically with the payment. Non-cash (card/online) just
+	// records the payment with no drawer impact.
+	method, _ := normSupplierMethod(in.Method)
+	var src cashflow.Location
+	if method == "cash" {
+		src, err = parseLocation(c.FormValue("source"))
+		if err != nil {
+			return err
+		}
+	}
+
+	var res *supplierpay.Result
+	var rec *cashflow.Receipt
+	err = appdb.WithTx(ctx, a.db, func(tx *sqlx.Tx) error {
+		r, err := a.s.supplierPay.PayTx(ctx, tx, id, in, userID)
+		if err != nil {
+			return err
+		}
+		res = r
+		if r.Method == "cash" {
+			rec, err = a.s.cashflow.MoveTx(ctx, tx, cashflow.MoveInput{
+				From:        src,
+				To:          cashflow.External(),
+				Amount:      r.Total,
+				Reason:      "supplier payment: " + name,
+				ReceiptKind: "supplier_payment",
+				Party:       name,
+				Ref:         &cashflow.Ref{Kind: "supplier_payment", ID: r.PaymentID},
+				ActorID:     userID,
+			})
+			return err
+		}
+		return nil
+	})
 	if err != nil {
 		return err
 	}
-
-	// Cash paid to a supplier leaves the cashier's drawer (no-op without an open
-	// session), mirroring how collected customer credit enters it.
-	if res.Method == "cash" {
-		name := ""
-		if sup, gerr := a.s.suppliers.Get(ctx, id); gerr == nil {
-			name = sup.Name
-		}
-		a.s.cashRegister.RecordSupplierCash(ctx, middleware.CurrentUserID(c), res.Total, "supplier paid: "+name)
-	}
 	a.s.logAudit(c, audit.ActionPayment, "supplier", strconv.FormatInt(id, 10),
 		"paid "+money.Display(res.Total)+" ("+res.Method+")")
+	if rec != nil {
+		return a.afterMoneyMove(c, rec)
+	}
 	return htmxDone(c, "Payment recorded", "reload-suppliers")
+}
+
+// normSupplierMethod mirrors supplierpay.normMethod for the web layer's cash
+// branch decision (blank → cash).
+func normSupplierMethod(m string) (string, bool) {
+	switch m {
+	case "cash", "card", "online":
+		return m, true
+	case "":
+		return "cash", true
+	}
+	return "", false
 }
 
 // ============================ Purchases (GRN) ============================

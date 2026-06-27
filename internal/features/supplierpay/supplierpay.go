@@ -141,11 +141,29 @@ func strOrNil(s string) *string {
 // allocation rows are written, and the supplier's aggregate balance drops by the
 // full amount. Returns the recorded total (for the cash-drawer mirror).
 func (s *Service) Pay(ctx context.Context, supplierID int64, in PayInput, userID int64) (*Result, error) {
+	var res Result
+	err := appdb.WithTx(ctx, s.db, func(tx *sqlx.Tx) error {
+		r, err := s.PayTx(ctx, tx, supplierID, in, userID)
+		if err != nil {
+			return err
+		}
+		res = *r
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+// PayTx records the supplier payment over an existing transaction, so the caller
+// can book the matching cash move (cashflow.MoveTx) atomically in the same tx.
+// It re-validates the method/total so it is safe to call directly.
+func (s *Service) PayTx(ctx context.Context, tx *sqlx.Tx, supplierID int64, in PayInput, userID int64) (*Result, error) {
 	method, ok := normMethod(in.Method)
 	if !ok {
 		return nil, apperr.Validation("payment method must be cash, card or online")
 	}
-
 	total := in.Unallocated
 	for _, a := range in.Allocations {
 		if a.Amount.IsNegative() {
@@ -157,64 +175,56 @@ func (s *Service) Pay(ctx context.Context, supplierID int64, in PayInput, userID
 		return nil, apperr.Validation("payment amount must be greater than zero")
 	}
 
-	var res Result
-	err := appdb.WithTx(ctx, s.db, func(tx *sqlx.Tx) error {
-		supRepo := suppliers.NewRepository(tx)
-		puRepo := purchases.NewRepository(tx)
-		payRepo := NewRepository(tx)
+	supRepo := suppliers.NewRepository(tx)
+	puRepo := purchases.NewRepository(tx)
+	payRepo := NewRepository(tx)
 
-		sup, err := supRepo.FindByID(ctx, supplierID)
+	sup, err := supRepo.FindByID(ctx, supplierID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, apperr.NotFound("supplier")
+		}
+		return nil, apperr.Internal("failed to load supplier", err)
+	}
+
+	paymentID, err := payRepo.InsertPayment(ctx, supplierID, total, method,
+		strOrNil(in.Reference), strOrNil(in.Note), userID)
+	if err != nil {
+		return nil, apperr.Internal("failed to record payment", err)
+	}
+
+	for _, a := range in.Allocations {
+		if !a.Amount.IsPositive() {
+			continue
+		}
+		pu, err := puRepo.FindByID(ctx, a.PurchaseID)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				return apperr.NotFound("supplier")
+				return nil, apperr.Validation("invoice not found")
 			}
-			return apperr.Internal("failed to load supplier", err)
+			return nil, apperr.Internal("failed to load invoice", err)
 		}
-
-		paymentID, err := payRepo.InsertPayment(ctx, supplierID, total, method,
-			strOrNil(in.Reference), strOrNil(in.Note), userID)
+		if pu.SupplierID != supplierID {
+			return nil, apperr.Validation("invoice does not belong to this supplier")
+		}
+		advanced, err := puRepo.ApplyPayment(ctx, a.PurchaseID, a.Amount)
 		if err != nil {
-			return apperr.Internal("failed to record payment", err)
+			return nil, apperr.Internal("failed to apply payment to invoice", err)
 		}
-
-		for _, a := range in.Allocations {
-			if !a.Amount.IsPositive() {
-				continue
-			}
-			pu, err := puRepo.FindByID(ctx, a.PurchaseID)
-			if err != nil {
-				if errors.Is(err, sql.ErrNoRows) {
-					return apperr.Validation("invoice not found")
-				}
-				return apperr.Internal("failed to load invoice", err)
-			}
-			if pu.SupplierID != supplierID {
-				return apperr.Validation("invoice does not belong to this supplier")
-			}
-			advanced, err := puRepo.ApplyPayment(ctx, a.PurchaseID, a.Amount)
-			if err != nil {
-				return apperr.Internal("failed to apply payment to invoice", err)
-			}
-			if !advanced {
-				return apperr.Conflict("payment exceeds the balance on invoice " + invoiceLabel(pu))
-			}
-			if err := payRepo.InsertAllocation(ctx, paymentID, a.PurchaseID, a.Amount); err != nil {
-				return apperr.Internal("failed to record allocation", err)
-			}
+		if !advanced {
+			return nil, apperr.Conflict("payment exceeds the balance on invoice " + invoiceLabel(pu))
 		}
-
-		// Drop the supplier's aggregate payable by the full amount paid.
-		if err := supRepo.AddBalance(ctx, sup.ID, total.Neg()); err != nil {
-			return apperr.Internal("failed to update supplier balance", err)
+		if err := payRepo.InsertAllocation(ctx, paymentID, a.PurchaseID, a.Amount); err != nil {
+			return nil, apperr.Internal("failed to record allocation", err)
 		}
-
-		res = Result{PaymentID: paymentID, Total: total, Method: method}
-		return nil
-	})
-	if err != nil {
-		return nil, err
 	}
-	return &res, nil
+
+	// Drop the supplier's aggregate payable by the full amount paid.
+	if err := supRepo.AddBalance(ctx, sup.ID, total.Neg()); err != nil {
+		return nil, apperr.Internal("failed to update supplier balance", err)
+	}
+
+	return &Result{PaymentID: paymentID, Total: total, Method: method}, nil
 }
 
 func invoiceLabel(p *purchases.Purchase) string {

@@ -8,6 +8,7 @@ import (
 	"karots-pos/internal/features/supplierpay"
 	"karots-pos/internal/features/suppliers"
 	"karots-pos/internal/money"
+	adminfragments "karots-pos/templates/fragments/admin"
 	"karots-pos/templates/layouts"
 )
 
@@ -139,11 +140,12 @@ type SupplierPayData struct {
 	Invoices []purchases.Purchase  // open (unpaid/partial) invoices, oldest first
 	History  []supplierpay.Payment // recorded payments, newest first
 	Symbol   string
+	Sources  []adminfragments.LocationChoice // cash sources (lockers + open tills)
 }
 
 templ SupplierPaymentForm(d SupplierPayData) {
 	@modalShell("Pay Supplier") {
-		<form class="p-6 space-y-4" hx-post={ "/admin/suppliers/" + strconv.FormatInt(d.Supplier.ID, 10) + "/payment" } hx-swap="none">
+		<form class="p-6 space-y-4" x-data="{ method: 'cash' }" hx-post={ "/admin/suppliers/" + strconv.FormatInt(d.Supplier.ID, 10) + "/payment" } hx-swap="none">
 			<p class="text-sm text-slate-600">{ d.Supplier.Name } — currently owed <span class="font-semibold">{ money.Format(d.Symbol, d.Supplier.OutstandingBalance) }</span></p>
 			if len(d.Invoices) > 0 {
 				<div>
@@ -189,7 +191,7 @@ templ SupplierPaymentForm(d SupplierPayData) {
 			<div class="grid grid-cols-2 gap-4">
 				<div>
 					<label class="block text-sm font-medium mb-1">Method</label>
-					<select name="method" class="w-full border rounded-lg px-3 py-2">
+					<select name="method" x-model="method" class="w-full border rounded-lg px-3 py-2">
 						<option value="cash">Cash</option>
 						<option value="card">Card</option>
 						<option value="online">Online</option>
@@ -199,6 +201,15 @@ templ SupplierPaymentForm(d SupplierPayData) {
 					<label class="block text-sm font-medium mb-1">Reference</label>
 					<input name="reference" class="w-full border rounded-lg px-3 py-2" placeholder="cheque / txn no"/>
 				</div>
+			</div>
+			<div x-show="method === 'cash'" x-cloak>
+				<label class="block text-sm font-medium mb-1">Pay cash from</label>
+				if len(d.Sources) == 0 {
+					<p class="text-sm text-amber-600">No cash locker or open till to pay from. Create a cash locker first.</p>
+				} else {
+					@adminfragments.LocationPicker("source", "— pick cash source —", d.Sources)
+					<p class="text-xs text-slate-500 mt-1">Cash leaves this location and a receipt is recorded.</p>
+				}
 			</div>
 			<div>
 				<label class="block text-sm font-medium mb-1">Note</label>

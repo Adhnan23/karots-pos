@@ -171,7 +171,10 @@ type LocationChoice struct {
 // chosen "kind:id" value is parsed server-side into a cashflow.Location. Reused
 // by every cash touchpoint (expense pay, supplier pay, refunds, ...).
 templ LocationPicker(fieldName, placeholder string, choices []LocationChoice) {
-	<select name={ fieldName } required class="w-full border rounded-lg px-3 py-2">
+	// No HTML "required": the picker may sit inside an x-show block (e.g. only
+	// shown for cash payments); a hidden required field would block the form.
+	// The server validates via parseLocation when a source is actually needed.
+	<select name={ fieldName } class="w-full border rounded-lg px-3 py-2">
 		<option value="">{ placeholder }</option>
 		for _, g := range locationGroups(choices) {
 			<optgroup label={ g }>
