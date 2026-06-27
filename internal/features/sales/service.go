@@ -366,20 +366,20 @@ func (s *Service) Create(ctx context.Context, in CreateInput, cashierID int64) (
 		}
 
 		saleID, err := saleRepo.InsertSale(ctx, saleRow{
-			ReceiptNo:   receiptNo,
-			CustomerID:  in.CustomerID,
-			SaleType:    in.SaleType,
+			ReceiptNo:     receiptNo,
+			CustomerID:    in.CustomerID,
+			SaleType:      in.SaleType,
 			Subtotal:      subtotal,
 			Discount:      discount,
 			DiscountType:  billDiscType,
 			DiscountValue: billDiscValue,
 			Tax:           taxTotal,
 			Total:         total,
-			PaidAmount:  paid,
-			ChangeGiven: change,
-			Status:      status,
-			CashierID:   cashierID,
-			Notes:       in.Notes,
+			PaidAmount:    paid,
+			ChangeGiven:   change,
+			Status:        status,
+			CashierID:     cashierID,
+			Notes:         in.Notes,
 		})
 		if err != nil {
 			return apperr.Internal("failed to save sale", err)
@@ -603,6 +603,27 @@ func (s *Service) PartialReturn(ctx context.Context, saleID int64, in PartialRet
 	var detail *Detail
 	cashRefund := decimal.Zero
 	err := appdb.WithTx(ctx, s.db, func(tx *sqlx.Tx) error {
+		d, refund, _, err := s.PartialReturnTx(ctx, tx, saleID, in, userID)
+		if err != nil {
+			return err
+		}
+		detail, cashRefund = d, refund
+		return nil
+	})
+	if err != nil {
+		return nil, decimal.Zero, err
+	}
+	return detail, cashRefund, nil
+}
+
+// PartialReturnTx performs a partial return over an existing transaction, so a
+// caller can book the cash refund (cashflow.MoveTx) atomically in the same tx.
+// Returns the refreshed sale detail, the cash-refund amount and the return id.
+func (s *Service) PartialReturnTx(ctx context.Context, tx *sqlx.Tx, saleID int64, in PartialReturnInput, userID int64) (*Detail, decimal.Decimal, int64, error) {
+	cashRefund := decimal.Zero
+	var detail *Detail
+	var returnID int64
+	err := func() error {
 		saleRepo := NewRepository(tx)
 		stkRepo := stock.NewRepository(tx)
 		custRepo := customers.NewRepository(tx)
@@ -620,7 +641,7 @@ func (s *Service) PartialReturn(ctx context.Context, saleID int64, in PartialRet
 
 		ref := "sale"
 		totalRefundValue := decimal.Zero
-		returnID, err := saleRepo.InsertSaleReturn(ctx, saleID, userID, decimal.Zero, decimal.Zero, in.Reason)
+		returnID, err = saleRepo.InsertSaleReturn(ctx, saleID, userID, decimal.Zero, decimal.Zero, in.Reason)
 		if err != nil {
 			return apperr.Internal("failed to open return", err)
 		}
@@ -710,11 +731,11 @@ func (s *Service) PartialReturn(ctx context.Context, saleID int64, in PartialRet
 		}
 		detail = d
 		return nil
-	})
+	}()
 	if err != nil {
-		return nil, decimal.Zero, err
+		return nil, decimal.Zero, 0, err
 	}
-	return detail, cashRefund, nil
+	return detail, cashRefund, returnID, nil
 }
 
 func (s *Service) loadDetail(ctx context.Context, repo *Repository, id int64) (*Detail, error) {

@@ -337,16 +337,46 @@ func (h *cashierUI) ReturnSubmit(c echo.Context) error {
 	if err := c.Validate(&in); err != nil {
 		return err
 	}
-	detail, cashRefund, err := h.s.sales.PartialReturn(c.Request().Context(), id, in, middleware.CurrentUserID(c))
+	ctx := c.Request().Context()
+	userID := middleware.CurrentUserID(c)
+
+	// The return and any cash refund commit together: the refund leaves the
+	// cashier's till and produces a CR- refund receipt in the same transaction.
+	var detail *sales.Detail
+	err = appdb.WithTx(ctx, h.s.db, func(tx *sqlx.Tx) error {
+		d, cashRefund, returnID, err := h.s.sales.PartialReturnTx(ctx, tx, id, in, userID)
+		if err != nil {
+			return err
+		}
+		detail = d
+		if cashRefund.IsPositive() {
+			party := ""
+			if d.Sale.CustomerName != nil {
+				party = *d.Sale.CustomerName
+			}
+			if _, err := h.s.cashflow.MoveTx(ctx, tx, cashflow.MoveInput{
+				From:        cashflow.Till(userID),
+				To:          cashflow.External(),
+				Amount:      cashRefund,
+				Reason:      "cash refund: " + d.Sale.ReceiptNo,
+				ReceiptKind: "refund",
+				Party:       party,
+				Ref:         &cashflow.Ref{Kind: "sale_return", ID: returnID},
+				ActorID:     userID,
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 	if err != nil {
 		return err
 	}
 	h.s.logAudit(c, audit.ActionReturn, "sale", strconv.FormatInt(id, 10), "partial return")
-	// A cash refund leaves the cashier's drawer; record it so the close
-	// reconciliation stays accurate (no-op when no session is open).
-	h.s.cashRegister.RecordRefundCash(c.Request().Context(), middleware.CurrentUserID(c), cashRefund, "cash refund: "+detail.Sale.ReceiptNo)
-	// Hand the customer a refund slip. Non-fatal: a printer problem must never
-	// fail the return itself (the goods are already restocked / credit adjusted).
+	// Hand the customer the goods-return slip. Non-fatal: a printer problem must
+	// never fail the return (the goods are already restocked / credit adjusted).
+	// The CR- refund receipt is tracked in the registry (not auto-printed here —
+	// the return slip already serves the customer).
 	h.printRefundSlip(c, id)
 	return response.OK(c, detail)
 }
