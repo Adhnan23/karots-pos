@@ -156,6 +156,48 @@ func optionsJSON(options []PickerOption) string {
 	return string(b)
 }
 
+// LocationChoice is one cash location (a till or a locker) for the cash-flow
+// source/destination picker. Value encodes the endpoint as "locker:<id>" or
+// "till:<userID>"; Group is the optgroup heading ("Lockers", "Tills").
+type LocationChoice struct {
+	Value string
+	Label string
+	Group string
+}
+
+// LocationPicker is a grouped <select> for choosing a cash location (a till or a
+// locker) as the source/destination of a money move. The list is small (a few
+// lockers + open tills), so a plain grouped select is the right control; the
+// chosen "kind:id" value is parsed server-side into a cashflow.Location. Reused
+// by every cash touchpoint (expense pay, supplier pay, refunds, ...).
+templ LocationPicker(fieldName, placeholder string, choices []LocationChoice) {
+	<select name={ fieldName } required class="w-full border rounded-lg px-3 py-2">
+		<option value="">{ placeholder }</option>
+		for _, g := range locationGroups(choices) {
+			<optgroup label={ g }>
+				for _, ch := range choices {
+					if ch.Group == g {
+						<option value={ ch.Value }>{ ch.Label }</option>
+					}
+				}
+			</optgroup>
+		}
+	</select>
+}
+
+// locationGroups returns the distinct optgroup headings in first-seen order.
+func locationGroups(choices []LocationChoice) []string {
+	var groups []string
+	seen := map[string]bool{}
+	for _, ch := range choices {
+		if !seen[ch.Group] {
+			seen[ch.Group] = true
+			groups = append(groups, ch.Group)
+		}
+	}
+	return groups
+}
+
 // pickerID renders a positive id as a string, or "" for 0 (the new/empty case).
 func pickerID(id int64) string {
 	if id <= 0 {

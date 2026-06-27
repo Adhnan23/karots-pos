@@ -5,6 +5,7 @@ import (
 
 	"karots-pos/internal/features/expenses"
 	"karots-pos/internal/money"
+	adminfragments "karots-pos/templates/fragments/admin"
 	"karots-pos/templates/layouts"
 
 	"github.com/shopspring/decimal"
@@ -79,19 +80,24 @@ templ ExpensesPage(d ExpensesData) {
 	}
 }
 
-templ ExpenseForm(e *expenses.Expense) {
-	@modalShell(ternary(e == nil, "New Expense", "Edit Expense")) {
+type ExpenseFormData struct {
+	Expense *expenses.Expense
+	Sources []adminfragments.LocationChoice
+}
+
+templ ExpenseForm(d ExpenseFormData) {
+	@modalShell(ternary(d.Expense == nil, "New Expense", "Edit Expense")) {
 		<form class="p-6 space-y-4"
-			if e == nil {
+			if d.Expense == nil {
 				hx-post="/admin/expenses"
 			} else {
-				hx-put={ "/admin/expenses/" + strconv.FormatInt(e.ID, 10) }
+				hx-put={ "/admin/expenses/" + strconv.FormatInt(d.Expense.ID, 10) }
 			}
 			hx-swap="none">
 			<div class="grid grid-cols-2 gap-4">
 				<div>
 					<label class="block text-sm font-medium mb-1">Category</label>
-					<input name="category" required list="expense-cats" value={ expVal(e, "category") } class="w-full border rounded-lg px-3 py-2"/>
+					<input name="category" required list="expense-cats" value={ expVal(d.Expense, "category") } class="w-full border rounded-lg px-3 py-2"/>
 					<datalist id="expense-cats">
 						<option value="Rent"></option>
 						<option value="Electricity"></option>
@@ -103,16 +109,27 @@ templ ExpenseForm(e *expenses.Expense) {
 				</div>
 				<div>
 					<label class="block text-sm font-medium mb-1">Amount</label>
-					<input name="amount" type="number" step="0.01" min="0" required value={ expVal(e, "amount") } class="w-full border rounded-lg px-3 py-2"/>
+					<input name="amount" type="number" step="0.01" min="0" required value={ expVal(d.Expense, "amount") } class="w-full border rounded-lg px-3 py-2"/>
 				</div>
 			</div>
+			if d.Expense == nil {
+				<div>
+					<label class="block text-sm font-medium mb-1">Paid from</label>
+					if len(d.Sources) == 0 {
+						<p class="text-sm text-amber-600">No cash locker or open till to pay from. Create a cash locker first.</p>
+					} else {
+						@adminfragments.LocationPicker("source", "— pick cash source —", d.Sources)
+						<p class="text-xs text-slate-500 mt-1">Cash leaves this location and a receipt is recorded.</p>
+					}
+				</div>
+			}
 			<div>
 				<label class="block text-sm font-medium mb-1">Date</label>
-				<input name="expense_date" type="date" value={ expVal(e, "date") } class="w-full border rounded-lg px-3 py-2"/>
+				<input name="expense_date" type="date" value={ expVal(d.Expense, "date") } class="w-full border rounded-lg px-3 py-2"/>
 			</div>
 			<div>
 				<label class="block text-sm font-medium mb-1">Description</label>
-				<input name="description" value={ expVal(e, "description") } class="w-full border rounded-lg px-3 py-2"/>
+				<input name="description" value={ expVal(d.Expense, "description") } class="w-full border rounded-lg px-3 py-2"/>
 			</div>
 			@modalButtons()
 		</form>

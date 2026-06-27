@@ -126,23 +126,45 @@ func (s *Service) List(ctx context.Context, f Filter) ([]Expense, error) {
 	return rows, nil
 }
 
-func (s *Service) Create(ctx context.Context, in CreateInput, userID int64) (*Expense, error) {
-	amt, err := money.Parse(in.Amount)
-	if err != nil || !amt.IsPositive() {
-		return nil, apperr.Validation("amount must be greater than zero")
+// parseCreate validates and normalizes a create form into its stored fields.
+func parseCreate(in CreateInput, userID int64) (category string, amt decimal.Decimal, desc *string, paidBy *int64, date time.Time, err error) {
+	amt, perr := money.Parse(in.Amount)
+	if perr != nil || !amt.IsPositive() {
+		return "", amt, nil, nil, date, apperr.Validation("amount must be greater than zero")
 	}
-	date := time.Now()
+	date = time.Now()
 	if strings.TrimSpace(in.ExpenseDate) != "" {
-		date, err = time.Parse("2006-01-02", in.ExpenseDate)
-		if err != nil {
-			return nil, apperr.Validation("date must be YYYY-MM-DD")
+		date, perr = time.Parse("2006-01-02", in.ExpenseDate)
+		if perr != nil {
+			return "", amt, nil, nil, date, apperr.Validation("date must be YYYY-MM-DD")
 		}
 	}
-	var paidBy *int64
 	if userID > 0 {
 		paidBy = &userID
 	}
-	e, err := s.repo.Create(ctx, strings.TrimSpace(in.Category), amt, in.Description, paidBy, date)
+	return strings.TrimSpace(in.Category), amt, in.Description, paidBy, date, nil
+}
+
+func (s *Service) Create(ctx context.Context, in CreateInput, userID int64) (*Expense, error) {
+	category, amt, desc, paidBy, date, err := parseCreate(in, userID)
+	if err != nil {
+		return nil, err
+	}
+	e, err := s.repo.Create(ctx, category, amt, desc, paidBy, date)
+	if err != nil {
+		return nil, apperr.Internal("failed to record expense", err)
+	}
+	return e, nil
+}
+
+// CreateInTx records an expense over an existing transaction, so the caller can
+// book the matching cash move (cashflow.MoveTx) atomically in the same tx.
+func (s *Service) CreateInTx(ctx context.Context, q db.Queryer, in CreateInput, userID int64) (*Expense, error) {
+	category, amt, desc, paidBy, date, err := parseCreate(in, userID)
+	if err != nil {
+		return nil, err
+	}
+	e, err := NewRepository(q).Create(ctx, category, amt, desc, paidBy, date)
 	if err != nil {
 		return nil, apperr.Internal("failed to record expense", err)
 	}

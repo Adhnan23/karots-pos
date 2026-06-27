@@ -7,8 +7,10 @@ import (
 	"time"
 
 	"karots-pos/internal/apperr"
+	appdb "karots-pos/internal/db"
 	"karots-pos/internal/features/audit"
 	"karots-pos/internal/features/auth"
+	"karots-pos/internal/features/cashflow"
 	"karots-pos/internal/features/categories"
 	"karots-pos/internal/features/conversions"
 	"karots-pos/internal/features/customers"
@@ -27,6 +29,7 @@ import (
 	"karots-pos/internal/tspl"
 	adminpages "karots-pos/templates/pages/admin"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/labstack/echo/v4"
 	"github.com/shopspring/decimal"
 )
@@ -356,7 +359,11 @@ func (a *adminUI) Expenses(c echo.Context) error {
 }
 
 func (a *adminUI) ExpenseForm(c echo.Context) error {
-	return response.RenderFragment(c, adminpages.ExpenseForm(nil))
+	sources, err := a.cashLocationChoices(c.Request().Context())
+	if err != nil {
+		return err
+	}
+	return response.RenderFragment(c, adminpages.ExpenseForm(adminpages.ExpenseFormData{Sources: sources}))
 }
 
 func (a *adminUI) ExpenseEditForm(c echo.Context) error {
@@ -368,7 +375,7 @@ func (a *adminUI) ExpenseEditForm(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	return response.RenderFragment(c, adminpages.ExpenseForm(e))
+	return response.RenderFragment(c, adminpages.ExpenseForm(adminpages.ExpenseFormData{Expense: e}))
 }
 
 func (a *adminUI) ExpenseUpdate(c echo.Context) error {
@@ -406,6 +413,7 @@ func (a *adminUI) ExpenseDelete(c echo.Context) error {
 }
 
 func (a *adminUI) ExpenseCreate(c echo.Context) error {
+	ctx := c.Request().Context()
 	var in expenses.CreateInput
 	if err := c.Bind(&in); err != nil {
 		return apperr.BadRequest("invalid form")
@@ -413,12 +421,43 @@ func (a *adminUI) ExpenseCreate(c echo.Context) error {
 	if err := c.Validate(&in); err != nil {
 		return err
 	}
-	if _, err := a.s.expenses.Create(c.Request().Context(), in, middleware.CurrentUserID(c)); err != nil {
+	src, err := parseLocation(c.FormValue("source"))
+	if err != nil {
 		return err
 	}
-	c.Response().Header().Set("HX-Trigger", response.ToastAnd("Expense recorded", "success", "close-modal"))
-	c.Response().Header().Set("HX-Refresh", "true")
-	return c.NoContent(200)
+	userID := middleware.CurrentUserID(c)
+
+	// Insert the expense and pay it from the chosen cash location in ONE tx, so
+	// the expense, the source debit and the receipt always commit together.
+	reason := strings.TrimSpace(in.Category)
+	if in.Description != nil && strings.TrimSpace(*in.Description) != "" {
+		reason += " — " + strings.TrimSpace(*in.Description)
+	}
+	var rec *cashflow.Receipt
+	var expenseID int64
+	err = appdb.WithTx(ctx, a.db, func(tx *sqlx.Tx) error {
+		e, err := a.s.expenses.CreateInTx(ctx, tx, in, userID)
+		if err != nil {
+			return err
+		}
+		expenseID = e.ID
+		r, err := a.s.cashflow.MoveTx(ctx, tx, cashflow.MoveInput{
+			From:        src,
+			To:          cashflow.External(),
+			Amount:      e.Amount,
+			Reason:      reason,
+			ReceiptKind: "expense",
+			Ref:         &cashflow.Ref{Kind: "expense", ID: e.ID},
+			ActorID:     userID,
+		})
+		rec = r
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	a.s.logAudit(c, audit.ActionCreate, "expense", strconv.FormatInt(expenseID, 10), "recorded expense paid from "+rec.FromLabel)
+	return a.afterMoneyMove(c, rec)
 }
 
 // ============================ Finance / Profit ============================

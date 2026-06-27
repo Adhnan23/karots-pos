@@ -105,6 +105,23 @@ func NewService(db *sqlx.DB, salesSvc *sales.Service) *Service {
 // printing and takes no settings dependency — the print policy lives in the web
 // layer.
 func (s *Service) Move(ctx context.Context, in MoveInput) (*Receipt, error) {
+	var receipt *Receipt
+	err := appdb.WithTx(ctx, s.db, func(tx *sqlx.Tx) error {
+		rec, err := s.MoveTx(ctx, tx, in)
+		receipt = rec
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return receipt, nil
+}
+
+// MoveTx performs the move over an existing transaction, so a caller can book a
+// money move atomically together with the domain row that caused it (e.g. insert
+// an expense and pay it from a locker in one tx). Validation, the overdraw guard,
+// both ledger legs and the single receipt all run on tx. Same contract as Move.
+func (s *Service) MoveTx(ctx context.Context, tx *sqlx.Tx, in MoveInput) (*Receipt, error) {
 	if !in.Amount.IsPositive() {
 		return nil, apperr.Validation("amount must be greater than zero")
 	}
@@ -115,50 +132,37 @@ func (s *Service) Move(ctx context.Context, in MoveInput) (*Receipt, error) {
 		return nil, apperr.Validation("source and destination must be different")
 	}
 
-	var receipt *Receipt
-	err := appdb.WithTx(ctx, s.db, func(tx *sqlx.Tx) error {
-		crepo := cashregister.NewRepository(tx)
-		lrepo := lockers.NewRepository(tx)
+	crepo := cashregister.NewRepository(tx)
+	lrepo := lockers.NewRepository(tx)
 
-		// Resolve any till sessions up front (locked) — needed both for the
-		// overdraw guard and to reference the session from the locker leg.
-		var fromSess, toSess *cashregister.Session
-		if in.From.Kind == KindTill {
-			sess, err := crepo.FindOpenForUpdate(ctx, in.From.ID)
-			if err != nil {
-				return tillSessionErr(err)
-			}
-			fromSess = sess
-		}
-		if in.To.Kind == KindTill {
-			sess, err := crepo.FindOpenForUpdate(ctx, in.To.ID)
-			if err != nil {
-				return tillSessionErr(err)
-			}
-			toSess = sess
-		}
-
-		if err := s.guardSource(ctx, crepo, lrepo, in, fromSess); err != nil {
-			return err
-		}
-		if err := s.writeLeg(ctx, crepo, lrepo, in, true, fromSess, toSess); err != nil {
-			return err
-		}
-		if err := s.writeLeg(ctx, crepo, lrepo, in, false, fromSess, toSess); err != nil {
-			return err
-		}
-
-		rec, err := s.writeReceipt(ctx, tx, lrepo, in, fromSess, toSess)
+	// Resolve any till sessions up front (locked) — needed both for the
+	// overdraw guard and to reference the session from the locker leg.
+	var fromSess, toSess *cashregister.Session
+	if in.From.Kind == KindTill {
+		sess, err := crepo.FindOpenForUpdate(ctx, in.From.ID)
 		if err != nil {
-			return err
+			return nil, tillSessionErr(err)
 		}
-		receipt = rec
-		return nil
-	})
-	if err != nil {
+		fromSess = sess
+	}
+	if in.To.Kind == KindTill {
+		sess, err := crepo.FindOpenForUpdate(ctx, in.To.ID)
+		if err != nil {
+			return nil, tillSessionErr(err)
+		}
+		toSess = sess
+	}
+
+	if err := s.guardSource(ctx, crepo, lrepo, in, fromSess); err != nil {
 		return nil, err
 	}
-	return receipt, nil
+	if err := s.writeLeg(ctx, crepo, lrepo, in, true, fromSess, toSess); err != nil {
+		return nil, err
+	}
+	if err := s.writeLeg(ctx, crepo, lrepo, in, false, fromSess, toSess); err != nil {
+		return nil, err
+	}
+	return s.writeReceipt(ctx, tx, lrepo, in, fromSess, toSess)
 }
 
 // writeReceipt records the single money receipt for a move, deriving the from/to
