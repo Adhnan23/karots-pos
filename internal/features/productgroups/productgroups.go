@@ -23,16 +23,23 @@ type Group struct {
 	ItemCount   int     `db:"item_count"  json:"item_count"`
 }
 
-// GroupProduct is a product linked into a group, with the per-link emoji and
-// enough fields to render a till card without a second lookup.
+// GroupProduct is a product linked into a group, with the per-link emoji and the
+// same fields a till product card + addToCart need (so the card behaves exactly
+// like a search result). JSON tags mirror products.Product.
 type GroupProduct struct {
-	ProductID    int64           `db:"product_id"    json:"id"`
-	Name         string          `db:"name"          json:"name"`
-	SellingPrice decimal.Decimal `db:"selling_price" json:"selling_price"`
-	UnitAbbr     string          `db:"unit_abbr"     json:"unit_abbr"`
-	Barcode      *string         `db:"barcode"       json:"barcode"`
-	Emoji        *string         `db:"emoji"         json:"emoji"`
-	SortOrder    int             `db:"sort_order"    json:"sort_order"`
+	ProductID        int64           `db:"product_id"         json:"id"`
+	Name             string          `db:"name"               json:"name"`
+	Barcode          *string         `db:"barcode"            json:"barcode,omitempty"`
+	SellingPrice     decimal.Decimal `db:"selling_price"      json:"selling_price"`
+	WholesalePrice   decimal.Decimal `db:"wholesale_price"    json:"wholesale_price"`
+	TaxRate          decimal.Decimal `db:"tax_rate"           json:"tax_rate"`
+	TrackSerial      bool            `db:"track_serial"       json:"track_serial"`
+	WarrantyMonths   int             `db:"warranty_months"    json:"warranty_months"`
+	UnitAbbr         string          `db:"unit_abbr"          json:"unit_abbr"`
+	UnitAllowDecimal bool            `db:"unit_allow_decimal" json:"unit_allow_decimal"`
+	StockQty         decimal.Decimal `db:"stock_qty"          json:"stock_qty"`
+	Emoji            *string         `db:"emoji"              json:"emoji"`
+	SortOrder        int             `db:"sort_order"         json:"sort_order"`
 }
 
 type CreateInput struct {
@@ -89,11 +96,15 @@ func (r *Repository) Get(ctx context.Context, id int64) (*Group, error) {
 func (r *Repository) Products(ctx context.Context, groupID int64) ([]GroupProduct, error) {
 	var rows []GroupProduct
 	err := r.db.SelectContext(ctx, &rows, `
-		SELECT p.id AS product_id, p.name, p.selling_price, u.abbreviation AS unit_abbr,
-		       p.barcode, i.emoji, i.sort_order
+		SELECT p.id AS product_id, p.name, p.barcode, p.selling_price, p.wholesale_price,
+		       p.tax_rate, p.track_serial, p.warranty_months,
+		       u.abbreviation AS unit_abbr, u.allow_decimal AS unit_allow_decimal,
+		       COALESCE(s.quantity, 0) AS stock_qty,
+		       i.emoji, i.sort_order
 		FROM product_group_items i
-		JOIN products p ON p.id = i.product_id
-		JOIN units u    ON u.id = p.unit_id
+		JOIN products p   ON p.id = i.product_id
+		JOIN units u      ON u.id = p.unit_id
+		LEFT JOIN stock s ON s.product_id = p.id
 		WHERE i.group_id = $1 AND p.is_active
 		ORDER BY i.sort_order, p.name, p.id`, groupID)
 	return rows, err

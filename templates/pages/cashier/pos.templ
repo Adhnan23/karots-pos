@@ -103,7 +103,23 @@ templ POS(d POSData) {
 							@a.Component
 						}
 					</div>
-					<div class="flex-1 overflow-auto min-h-0">
+					<div class="flex-1 overflow-auto min-h-0 p-1">
+							<div x-show="inGroups && groupStack.length" class="mb-3 flex items-center gap-2">
+								<button type="button" x-on:click="backGroup()" class="px-3 py-1.5 rounded-lg border text-sm hover:bg-slate-50">← Back</button>
+								<span class="text-sm text-slate-500" x-text="groupStack.map(g => (g.emoji ? g.emoji + ' ' : '') + g.name).join(' / ')"></span>
+							</div>
+							<div x-show="inGroups && groupChildren.length" class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3 mb-3">
+								<template x-for="g in groupChildren" x-bind:key="'g'+g.id">
+									<button type="button" x-on:click="openGroup(g.id)" class="text-left p-3 rounded-xl bg-white shadow-sm hover:ring-2 hover:ring-indigo-400">
+										<div class="text-2xl leading-none" x-text="g.emoji || '📁'"></div>
+										<div class="font-medium text-sm mt-1" x-text="g.name"></div>
+										<div class="text-xs text-slate-400 mt-0.5"><span x-text="g.item_count"></span> items</div>
+									</button>
+								</template>
+							</div>
+							<template x-if="inGroups && !groupChildren.length && !products.length">
+								<div class="text-center text-slate-400 py-10">Nothing here yet.</div>
+							</template>
 						<div class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3">
 							<template x-for="p in products" x-bind:key="p.id">
 								<button
@@ -111,7 +127,7 @@ templ POS(d POSData) {
 									class="text-left p-3 rounded-xl bg-white shadow-sm hover:ring-2 hover:ring-indigo-400 disabled:opacity-40"
 									x-bind:disabled="Number(p.stock_qty) <= 0"
 								>
-									<div class="font-medium text-sm leading-tight" x-text="p.name"></div>
+									<div class="font-medium text-sm leading-tight"><span x-show="p.emoji" x-text="p.emoji" class="mr-1"></span><span x-text="p.name"></span></div>
 									<div class="text-indigo-600 font-semibold mt-1" x-text="sym + ' ' + money(p.selling_price)"></div>
 									<div class="text-xs text-slate-400 mt-0.5">
 										<span x-text="'Stock: ' + money3(p.stock_qty)"></span>
@@ -119,7 +135,7 @@ templ POS(d POSData) {
 									</div>
 								</button>
 							</template>
-							<template x-if="products.length === 0">
+							<template x-if="!inGroups && products.length === 0">
 								<div class="col-span-full text-center text-slate-400 py-10">No products found.</div>
 							</template>
 						</div>

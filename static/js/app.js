@@ -213,6 +213,11 @@ function pos(symbol, defaultType, askToPrint) {
     // to a new sale instead of showing the Print / New Sale prompt.
     askToPrint: askToPrint !== false,
     products: [],
+    // Cashier menu: top-level + drill-down group cards (replaces the old default
+    // grid). groupStack is the breadcrumb of {id,name,emoji} from root to here.
+    groupChildren: [],
+    groupStack: [],
+    inGroups: true,
     customers: [],
     cart: [],
     search: "",
@@ -362,18 +367,44 @@ function pos(symbol, defaultType, askToPrint) {
     },
 
     async loadProducts() {
-      // Empty search shows the default grid (pinned first, then best sellers);
-      // typing switches to a live name/barcode search.
-      if (!this.search || !this.search.trim()) {
-        return this.loadDefaultGrid();
+      // Typing overrides the group menu: show flat name/barcode search results.
+      if (this.search && this.search.trim()) {
+        this.inGroups = false;
+        const q = encodeURIComponent(this.search);
+        const json = await apiFetch("GET", `/api/products?limit=100&search=${q}`);
+        this.products = json.data || [];
+        this.groupChildren = [];
+        return;
       }
-      const q = encodeURIComponent(this.search);
-      const json = await apiFetch("GET", `/api/products?limit=100&search=${q}`);
-      this.products = json.data || [];
+      // No search: show the group level we're on (or the top level).
+      this.inGroups = true;
+      const top = this.groupStack[this.groupStack.length - 1];
+      if (!top) return this.loadGroupsTop();
+      return this.openGroup(top.id, true);
     },
-    async loadDefaultGrid() {
-      const json = await apiFetch("GET", "/api/products/default");
-      this.products = json.data || [];
+    async loadGroupsTop() {
+      this.groupStack = [];
+      const json = await apiFetch("GET", "/api/groups");
+      this.groupChildren = (json.data && json.data.groups) || [];
+      this.products = [];
+    },
+    async openGroup(id, reload) {
+      const json = await apiFetch("GET", `/api/groups/${id}`);
+      const d = json.data || {};
+      this.inGroups = true;
+      if (!reload) {
+        this.groupStack = (d.breadcrumb || []).map((g) => ({
+          id: g.id, name: g.name, emoji: g.emoji,
+        }));
+      }
+      this.groupChildren = d.children || [];
+      this.products = d.products || [];
+    },
+    backGroup() {
+      this.groupStack.pop();
+      const top = this.groupStack[this.groupStack.length - 1];
+      if (top) return this.openGroup(top.id, true);
+      return this.loadGroupsTop();
     },
     async loadCustomers() {
       try {
