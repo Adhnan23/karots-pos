@@ -1313,14 +1313,15 @@ func (a *adminUI) CustomerPay(c echo.Context) error {
 		}
 	}
 
-	var rec *cashflow.Receipt
+	var res *customers.PaymentResult
 	err = appdb.WithTx(ctx, a.db, func(tx *sqlx.Tx) error {
-		res, err := a.s.customers.RecordPaymentTx(ctx, tx, id, in, userID)
-		if err != nil {
-			return err
+		var txErr error
+		res, txErr = a.s.customers.RecordPaymentTx(ctx, tx, id, in, userID)
+		if txErr != nil {
+			return txErr
 		}
 		if res.Method == "cash" {
-			rec, err = a.s.cashflow.MoveTx(ctx, tx, cashflow.MoveInput{
+			_, txErr = a.s.cashflow.MoveTx(ctx, tx, cashflow.MoveInput{
 				From:        cashflow.External(),
 				To:          dest,
 				Amount:      res.Amount,
@@ -1330,18 +1331,23 @@ func (a *adminUI) CustomerPay(c echo.Context) error {
 				Ref:         &cashflow.Ref{Kind: "customer_payment", ID: res.PaymentID},
 				ActorID:     userID,
 			})
-			return err
+			return txErr
 		}
 		return nil
 	})
 	if err != nil {
 		return err
 	}
-	a.s.logAudit(c, audit.ActionPayment, "customer", strconv.FormatInt(id, 10), "credit payment "+in.Amount)
-	if rec != nil {
-		return a.s.afterMoneyMove(c, rec)
+	cfg, _ := a.s.settings.Get(ctx)
+	if cfg != nil {
+		pay := customers.CustomerPayment{
+			Amount: res.Amount, Method: res.Method, CreatedAt: time.Now(),
+			ReceiptNo: &res.ReceiptNo, BalanceBefore: &res.BalanceBefore, BalanceAfter: &res.BalanceAfter,
+		}
+		_ = printing.Raw(ctx, cfg.ReceiptPrinter, a.s.buildDebtSlip(ctx, cfg, pay, cust, middleware.CurrentUserName(c)))
 	}
-	return htmxDone(c, "Payment recorded", "reload-customers")
+	a.s.logAudit(c, audit.ActionPayment, "customer", strconv.FormatInt(id, 10), "credit payment "+in.Amount)
+	return htmxDone(c, "Payment recorded · "+res.ReceiptNo, "reload-customers")
 }
 
 // CustomerStatement renders a printable credit ledger for one customer.

@@ -9,6 +9,7 @@ import (
 	"karots-pos/internal/datetime"
 	"karots-pos/internal/escpos"
 	"karots-pos/internal/features/cashflow"
+	"karots-pos/internal/features/customers"
 	"karots-pos/internal/features/settings"
 	"karots-pos/internal/features/warranty"
 	"karots-pos/internal/middleware"
@@ -18,6 +19,19 @@ import (
 
 	"github.com/labstack/echo/v4"
 )
+
+// txMethodLabel converts a raw payment method string to a display label.
+func txMethodLabel(method string) string {
+	labels := map[string]string{
+		"cash":   "Cash",
+		"card":   "Card",
+		"online": "Online",
+	}
+	if l, ok := labels[method]; ok {
+		return l
+	}
+	return method
+}
 
 // ReceiptsCash renders the Cash tab fragment: shop-wide CR- money receipts with
 // search, kind filter, and the shared date-range presets.
@@ -162,4 +176,28 @@ func (s *Server) buildWarrantySlip(ctx context.Context, cfg *settings.Settings, 
 		slip.CustomerName = *u.CustomerName
 	}
 	return escpos.WarrantyDocument(slip, *cfg, s.receiptImgOptions(ctx, cfg))
+}
+
+// buildDebtSlip renders a credit-payment slip for printing/reprint (UI-agnostic).
+func (s *Server) buildDebtSlip(ctx context.Context, cfg *settings.Settings, p customers.CustomerPayment, cust *customers.Customer, cashierName string) []byte {
+	slip := escpos.DebtSlip{
+		Date:          datetime.DateTime(p.CreatedAt),
+		Method:        txMethodLabel(p.Method),
+		Amount:        p.Amount,
+		BalanceBefore: p.BalanceBefore,
+		BalanceAfter:  p.BalanceAfter,
+		CashierName:   cashierName,
+	}
+	if p.ReceiptNo != nil {
+		slip.ReceiptNo = *p.ReceiptNo
+	}
+	if cust != nil {
+		slip.CustomerName = cust.Name
+		if cust.Phone != nil {
+			slip.CustomerPhone = *cust.Phone
+		}
+		cl := cust.CreditLimit
+		slip.CreditLimit = &cl
+	}
+	return escpos.DebtDocument(slip, *cfg, s.receiptImgOptions(ctx, cfg))
 }

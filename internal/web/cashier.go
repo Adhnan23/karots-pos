@@ -551,14 +551,15 @@ func (h *cashierUI) CreditPay(c echo.Context) error {
 
 	// A cash repayment enters the cashier's own till and produces a receipt, booked
 	// atomically with the payment. Non-cash (card/online) just records the payment.
-	var rec *cashflow.Receipt
+	var res *customers.PaymentResult
 	err = appdb.WithTx(ctx, h.s.db, func(tx *sqlx.Tx) error {
-		res, err := h.s.customers.RecordPaymentTx(ctx, tx, id, in, userID)
-		if err != nil {
-			return err
+		var txErr error
+		res, txErr = h.s.customers.RecordPaymentTx(ctx, tx, id, in, userID)
+		if txErr != nil {
+			return txErr
 		}
 		if res.Method == "cash" {
-			rec, err = h.s.cashflow.MoveTx(ctx, tx, cashflow.MoveInput{
+			_, txErr = h.s.cashflow.MoveTx(ctx, tx, cashflow.MoveInput{
 				From:        cashflow.External(),
 				To:          cashflow.Till(userID),
 				Amount:      res.Amount,
@@ -568,18 +569,26 @@ func (h *cashierUI) CreditPay(c echo.Context) error {
 				Ref:         &cashflow.Ref{Kind: "customer_payment", ID: res.PaymentID},
 				ActorID:     userID,
 			})
-			return err
+			return txErr
 		}
 		return nil
 	})
 	if err != nil {
 		return err
 	}
-	msg := "Payment recorded"
-	if rec != nil {
-		h.s.printMoneyReceipt(ctx, rec) // cashier flow: print the slip, stay on screen
-		msg = "Payment recorded · " + rec.ReceiptNo
+	// Hand the customer a detailed credit-payment slip (all methods). The CR-
+	// money record is still created for cash inside the tx (tracking unchanged);
+	// it is just no longer the paper handed over.
+	pay := customers.CustomerPayment{
+		Amount: res.Amount, Method: res.Method, CreatedAt: time.Now(),
+		ReceiptNo: &res.ReceiptNo, BalanceBefore: &res.BalanceBefore, BalanceAfter: &res.BalanceAfter,
 	}
+	cfg, _ := h.s.settings.Get(ctx)
+	if cfg != nil {
+		slip := h.s.buildDebtSlip(ctx, cfg, pay, cust, middleware.CurrentUserName(c))
+		_ = escpos.Send(ctx, h.receiptQueue(c, cfg), slip)
+	}
+	msg := "Payment recorded · " + res.ReceiptNo
 	h.s.logAudit(c, audit.ActionPayment, "customer", strconv.FormatInt(id, 10), "credit collected "+in.Amount+" from "+cust.Name)
 	return htmxDone(c, msg, "reload-ccredit")
 }
