@@ -90,7 +90,7 @@ func adminPalette() []paletteEntry {
 templ Admin(title, userName, active string) {
 	@Base(title) {
 		<div class="min-h-full flex">
-			<aside class="w-60 shrink-0 bg-slate-900 text-slate-200 flex flex-col">
+			<aside class="w-60 shrink-0 bg-slate-900 text-slate-200 flex flex-col sticky top-0 h-screen self-start">
 				<div class="px-5 py-4 border-b border-slate-800">
 					<div class="text-lg font-bold text-white">POS Admin</div>
 					<div class="text-xs text-slate-400">{ userName }</div>
