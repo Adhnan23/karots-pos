@@ -136,3 +136,37 @@ func TestASCIIReplacesNonLatin(t *testing.T) {
 		t.Errorf("ascii() dropped Latin text: %q", got)
 	}
 }
+
+func TestDebtDocument(t *testing.T) {
+	d := decimal.RequireFromString
+	before, after, limit := d("5000.00"), d("3000.00"), d("10000.00")
+	out := DebtDocument(DebtSlip{
+		ReceiptNo: "DP-000123", Date: "2026-06-28 14:05",
+		CustomerName: "Nimal Perera", CustomerPhone: "0771239876",
+		Method: "Cash", CashierName: "Kamal", Amount: d("2000.00"),
+		BalanceBefore: &before, BalanceAfter: &after, CreditLimit: &limit,
+	}, cfg("80"), Options{})
+	s := string(out)
+	for _, want := range []string{"CREDIT PAYMENT", "DP-000123", "Nimal Perera", "0771239876", "2,000.00", "3,000.00"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("debt slip missing %q", want)
+		}
+	}
+	if out[0] != esc || out[1] != '@' {
+		t.Fatalf("expected ESC @ init")
+	}
+	if !strings.HasSuffix(s, string([]byte{gs, 'V', 1})) {
+		t.Fatalf("expected partial-cut at end")
+	}
+}
+
+func TestDebtDocumentOmitsNullBalances(t *testing.T) {
+	d := decimal.RequireFromString
+	out := DebtDocument(DebtSlip{
+		ReceiptNo: "DP-000099", Date: "2026-06-28 10:00",
+		CustomerName: "Old Row", Method: "Cash", Amount: d("500.00"),
+	}, cfg("80"), Options{})
+	if strings.Contains(string(out), "Remaining balance") {
+		t.Errorf("expected no balance block when balances are nil")
+	}
+}

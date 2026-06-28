@@ -385,6 +385,81 @@ func WarrantyDocument(s WarrantySlip, cfg settings.Settings, opts Options) []byt
 	return b.Bytes()
 }
 
+// DebtSlip is the data for a printed credit payment slip — the proof a
+// customer is handed after making a payment toward their outstanding balance.
+type DebtSlip struct {
+	ReceiptNo, Date, CustomerName, CustomerPhone, Method, CashierName string
+	Amount                                   decimal.Decimal
+	BalanceBefore, BalanceAfter, CreditLimit *decimal.Decimal
+}
+
+// DebtDocument builds the ESC/POS byte stream for a credit payment slip.
+// It mirrors the receipt header/footer and lists the payment details and
+// updated balance (if available).
+func DebtDocument(s DebtSlip, cfg settings.Settings, opts Options) []byte {
+	w := columns(cfg.ReceiptWidth)
+	sym := cfg.CurrencySymbol
+	if sym == "" {
+		sym = "Rs."
+	}
+	var b bytes.Buffer
+	b.Write([]byte{esc, '@'})
+	b.Write([]byte{esc, 't', 0})
+	// header
+	b.Write([]byte{esc, 'a', 1})
+	if len(opts.Logo) > 0 {
+		b.Write(opts.Logo)
+		line(&b, "")
+	}
+	b.Write([]byte{esc, 'E', 1})
+	b.Write([]byte{gs, '!', 0x11})
+	line(&b, ascii(cfg.ShopName))
+	b.Write([]byte{gs, '!', 0x00})
+	b.Write([]byte{esc, 'E', 0})
+	if len(opts.SubName) > 0 {
+		b.Write(opts.SubName)
+	}
+	line(&b, "")
+	b.Write([]byte{esc, 'E', 1})
+	line(&b, "*** CREDIT PAYMENT ***")
+	b.Write([]byte{esc, 'E', 0})
+	// meta
+	b.Write([]byte{esc, 'a', 0})
+	divider(&b, w)
+	line(&b, leftRight("Receipt:", s.ReceiptNo, w))
+	line(&b, leftRight("Date:", s.Date, w))
+	line(&b, leftRight("Customer:", ascii(s.CustomerName), w))
+	if s.CustomerPhone != "" {
+		line(&b, leftRight("Phone:", ascii(s.CustomerPhone), w))
+	}
+	divider(&b, w)
+	// amount
+	b.Write([]byte{esc, 'E', 1})
+	line(&b, leftRight("Amount paid", money.Format(sym, s.Amount), w))
+	b.Write([]byte{esc, 'E', 0})
+	line(&b, leftRight("Method:", s.Method, w))
+	// balances (omitted for backfilled rows)
+	if s.BalanceBefore != nil && s.BalanceAfter != nil {
+		divider(&b, w)
+		line(&b, leftRight("Previous balance", money.Format(sym, *s.BalanceBefore), w))
+		b.Write([]byte{esc, 'E', 1})
+		line(&b, leftRight("Remaining balance", money.Format(sym, *s.BalanceAfter), w))
+		b.Write([]byte{esc, 'E', 0})
+		if s.CreditLimit != nil {
+			line(&b, leftRight("Credit limit", money.Format(sym, *s.CreditLimit), w))
+		}
+	}
+	divider(&b, w)
+	b.Write([]byte{esc, 'a', 1})
+	if s.CashierName != "" {
+		line(&b, "Served by: "+ascii(s.CashierName))
+	}
+	line(&b, "Thank you - please retain.")
+	b.Write([]byte{esc, 'd', feedBeforeCut})
+	b.Write([]byte{gs, 'V', 1})
+	return b.Bytes()
+}
+
 // wrap breaks s into lines of at most w characters, preferring to break at
 // spaces. A single word longer than w is hard-split so it never overflows.
 func wrap(s string, w int) []string {
