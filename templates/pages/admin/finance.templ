@@ -92,6 +92,13 @@ templ FinanceProfit(d FinanceData) {
 			@statCard("Gross Profit", money.Format(d.Symbol, d.PL.GrossProfit), "emerald")
 			@statCard("Gross Margin", money.Display(d.PL.GrossMargin)+"%", profitColor(d.PL.GrossMargin.IsNegative()))
 		</div>
+		<div class="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
+			@statCard("Expenses", money.Format(d.Symbol, d.PL.Expenses), "rose")
+			@statCard("Stock Losses", money.Format(d.Symbol, d.PL.Losses), "rose")
+			@statCard("Recoveries", money.Format(d.Symbol, d.PL.Recoveries), "emerald")
+			@statCard("Other Income (interest)", money.Format(d.Symbol, d.PL.OtherIncome), "emerald")
+			@statCard("Net Profit", money.Format(d.Symbol, d.PL.NetProfit), profitColor(d.PL.NetProfit.IsNegative()))
+		</div>
 		<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
 			@shared.ChartCard("Profit by category") {
 				@shared.HBarChart(catBars(d.Cats, d.Symbol))

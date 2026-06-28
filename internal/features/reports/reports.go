@@ -19,26 +19,27 @@ import (
 
 // PL is a profit & loss summary for [From, To).
 type PL struct {
-	From         time.Time          `json:"from"`
-	To           time.Time          `json:"to"`
-	SalesCount   int                `json:"sales_count"`
-	GrossRevenue decimal.Decimal    `json:"gross_revenue"` // sale totals before returns (excl. void)
-	Returns      decimal.Decimal    `json:"returns"`       // value of returned lines, by sale date
-	Revenue      decimal.Decimal    `json:"revenue"`       // net revenue = gross - returns
-	Received     decimal.Decimal    `json:"received"`      // cash/card/online actually collected
-	COGS         decimal.Decimal    `json:"cogs"`          // cost of goods sold, net of returns
-	GrossProfit  decimal.Decimal    `json:"gross_profit"`  // revenue - COGS
-	GrossMargin  decimal.Decimal    `json:"gross_margin"`  // gross profit / revenue, percent
-	Expenses     decimal.Decimal    `json:"expenses"`      // operating expenses in range
-	Losses       decimal.Decimal    `json:"losses"`        // damage + warranty replacement cost
-	Recoveries   decimal.Decimal    `json:"recoveries"`    // value reclaimed from suppliers
-	NetProfit    decimal.Decimal    `json:"net_profit"`    // gross - expenses - losses + recoveries
-	Receivables  decimal.Decimal    `json:"receivables"`   // customer dues (current snapshot)
-	Payables     decimal.Decimal    `json:"payables"`      // supplier dues (current snapshot)
-	CashWithdrawn decimal.Decimal   `json:"cash_withdrawn"` // drawer withdrawals in range
-	RegisterDiff  decimal.Decimal   `json:"register_diff"`  // net over/short of sessions closed in range
-	TopProducts  []ProductRevenue   `json:"top_products"`
-	ByPayment    []MethodTotal      `json:"by_payment"`
+	From          time.Time        `json:"from"`
+	To            time.Time        `json:"to"`
+	SalesCount    int              `json:"sales_count"`
+	GrossRevenue  decimal.Decimal  `json:"gross_revenue"`  // sale totals before returns (excl. void)
+	Returns       decimal.Decimal  `json:"returns"`        // value of returned lines, by sale date
+	Revenue       decimal.Decimal  `json:"revenue"`        // net revenue = gross - returns
+	Received      decimal.Decimal  `json:"received"`       // cash/card/online actually collected
+	COGS          decimal.Decimal  `json:"cogs"`           // cost of goods sold, net of returns
+	GrossProfit   decimal.Decimal  `json:"gross_profit"`   // revenue - COGS
+	GrossMargin   decimal.Decimal  `json:"gross_margin"`   // gross profit / revenue, percent
+	Expenses      decimal.Decimal  `json:"expenses"`       // operating expenses in range
+	Losses        decimal.Decimal  `json:"losses"`         // damage + warranty replacement cost
+	Recoveries    decimal.Decimal  `json:"recoveries"`     // value reclaimed from suppliers
+	OtherIncome   decimal.Decimal  `json:"other_income"`   // bank interest credited to lockers in range
+	NetProfit     decimal.Decimal  `json:"net_profit"`     // gross - expenses - losses + recoveries + other income
+	Receivables   decimal.Decimal  `json:"receivables"`    // customer dues (current snapshot)
+	Payables      decimal.Decimal  `json:"payables"`       // supplier dues (current snapshot)
+	CashWithdrawn decimal.Decimal  `json:"cash_withdrawn"` // drawer withdrawals in range
+	RegisterDiff  decimal.Decimal  `json:"register_diff"`  // net over/short of sessions closed in range
+	TopProducts   []ProductRevenue `json:"top_products"`
+	ByPayment     []MethodTotal    `json:"by_payment"`
 }
 
 type ProductRevenue struct {
@@ -124,7 +125,15 @@ func (s *Service) Compute(ctx context.Context, from, to time.Time) (*PL, error) 
 		return nil, apperr.Internal("failed to compute recoveries", err)
 	}
 
-	pl.NetProfit = pl.GrossProfit.Sub(pl.Expenses).Sub(pl.Losses).Add(pl.Recoveries)
+	// Other income: bank interest credited to a locker in the period (recorded via
+	// the locker "Adjust → Interest" path as a locker_ledger row). Bank charges
+	// already hit the P&L through expenses; interest is the symmetric income side,
+	// read straight from the ledger (no separate income subsystem).
+	_ = s.db.GetContext(ctx, &pl.OtherIncome, `
+		SELECT COALESCE(SUM(balance_delta),0) FROM locker_ledger
+		WHERE kind = 'interest' AND created_at >= $1 AND created_at < $2`, from, to)
+
+	pl.NetProfit = pl.GrossProfit.Sub(pl.Expenses).Sub(pl.Losses).Add(pl.Recoveries).Add(pl.OtherIncome)
 
 	_ = s.db.GetContext(ctx, &pl.Receivables, `SELECT COALESCE(SUM(outstanding_balance),0) FROM customers`)
 	_ = s.db.GetContext(ctx, &pl.Payables, `SELECT COALESCE(SUM(outstanding_balance),0) FROM suppliers`)
