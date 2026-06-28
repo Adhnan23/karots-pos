@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -466,6 +467,84 @@ func (s *Service) RecordPaymentTx(ctx context.Context, tx *sqlx.Tx, id int64, in
 		PaymentID: payID, Amount: amt, Method: method,
 		ReceiptNo: receiptNo, BalanceBefore: before, BalanceAfter: after,
 	}, nil
+}
+
+// DebtReceipt is one credit-payment receipt as shown in the Credit receipts tab
+// and rendered on the printable debt slip: the payment joined to its customer
+// (name/phone/limit) and the cashier who took it.
+type DebtReceipt struct {
+	ID            int64            `db:"id"`
+	ReceiptNo     string           `db:"receipt_no"`
+	CreatedAt     time.Time        `db:"created_at"`
+	CustomerName  string           `db:"customer_name"`
+	CustomerPhone *string          `db:"customer_phone"`
+	Amount        decimal.Decimal  `db:"amount"`
+	Method        string           `db:"method"`
+	BalanceBefore *decimal.Decimal `db:"balance_before"`
+	BalanceAfter  *decimal.Decimal `db:"balance_after"`
+	CreditLimit   decimal.Decimal  `db:"credit_limit"`
+	CashierName   *string          `db:"cashier_name"`
+}
+
+// DebtFilter narrows the credit-payment list: Query matches the receipt number
+// or the customer name/phone; From/To bound the created_at range (To exclusive).
+type DebtFilter struct {
+	Query string
+	From  time.Time
+	To    time.Time
+	Limit int
+}
+
+const debtSelect = `
+	SELECT cp.id, cp.receipt_no, cp.created_at, c.name AS customer_name, c.phone AS customer_phone,
+	       cp.amount, cp.method, cp.balance_before, cp.balance_after, c.credit_limit,
+	       u.name AS cashier_name
+	FROM customer_payments cp
+	JOIN customers c ON c.id = cp.customer_id
+	LEFT JOIN users u ON u.id = cp.created_by`
+
+// ListPayments returns credit-payment receipts newest-first for the Credit tab.
+func (s *Service) ListPayments(ctx context.Context, f DebtFilter) ([]DebtReceipt, error) {
+	q := debtSelect + ` WHERE cp.receipt_no IS NOT NULL`
+	args := []any{}
+	n := 1
+	if t := strings.TrimSpace(f.Query); t != "" {
+		q += fmt.Sprintf(` AND (cp.receipt_no ILIKE $%d OR c.name ILIKE $%d OR c.phone ILIKE $%d)`, n, n, n)
+		args = append(args, "%"+t+"%")
+		n++
+	}
+	if !f.From.IsZero() {
+		q += fmt.Sprintf(` AND cp.created_at >= $%d`, n)
+		args = append(args, f.From)
+		n++
+	}
+	if !f.To.IsZero() {
+		q += fmt.Sprintf(` AND cp.created_at < $%d`, n)
+		args = append(args, f.To)
+		n++
+	}
+	q += ` ORDER BY cp.id DESC`
+	if f.Limit > 0 {
+		q += fmt.Sprintf(` LIMIT $%d`, n)
+		args = append(args, f.Limit)
+	}
+	var rows []DebtReceipt
+	if err := s.db.SelectContext(ctx, &rows, q, args...); err != nil {
+		return nil, apperr.Internal("failed to list credit payments", err)
+	}
+	return rows, nil
+}
+
+// GetPayment loads one credit-payment receipt for the View page / reprint.
+func (s *Service) GetPayment(ctx context.Context, id int64) (*DebtReceipt, error) {
+	var r DebtReceipt
+	if err := s.db.GetContext(ctx, &r, debtSelect+` WHERE cp.id = $1`, id); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, apperr.NotFound("payment")
+		}
+		return nil, apperr.Internal("failed to load credit payment", err)
+	}
+	return &r, nil
 }
 
 // LedgerEntry is one line of a customer statement (a debit raises what the
