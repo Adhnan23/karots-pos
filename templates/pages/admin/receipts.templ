@@ -1,0 +1,202 @@
+package adminpages
+
+import (
+	"strconv"
+
+	"karots-pos/internal/datetime"
+	"karots-pos/internal/features/cashflow"
+	"karots-pos/internal/features/sales"
+	"karots-pos/internal/features/warranty"
+	"karots-pos/internal/money"
+	"karots-pos/templates/layouts"
+	"karots-pos/templates/shared"
+)
+
+type RcSalesData struct {
+	Symbol string
+	Rows   []sales.Sale
+	Query  string
+	Preset string
+	From   string
+	To     string
+}
+
+type RcCashData struct {
+	Symbol string
+	Rows   []cashflow.Receipt
+	Query  string
+	Kind   string
+	Preset string
+	From   string
+	To     string
+}
+
+type RcWarrantyData struct {
+	Rows   []warranty.Claim
+	Query  string
+	Preset string
+	From   string
+	To     string
+}
+
+type ReceiptsHubData struct {
+	UserName string
+	Symbol   string
+	Sales    RcSalesData
+}
+
+// ReceiptsHub is the admin unified receipts surface: Sales · Cash · Warranty.
+templ ReceiptsHub(d ReceiptsHubData) {
+	@layouts.Admin("Receipts", d.UserName, "money") {
+		<div class="p-6" x-data="{ tab: 'sales' }">
+			<h1 class="text-2xl font-bold mb-4">Receipts</h1>
+			<div class="flex gap-1 mb-4 border-b">
+				@rcTab("sales", "Sales")
+				@rcTab("cash", "Cash")
+				@rcTab("warranty", "Warranty")
+			</div>
+			<div x-show="tab === 'sales'">
+				@RcSalesTab(d.Sales)
+			</div>
+			<div x-show="tab === 'cash'" hx-get="/admin/receipts/cash" hx-trigger="load once"></div>
+			<div x-show="tab === 'warranty'" hx-get="/admin/receipts/warranty" hx-trigger="load once"></div>
+		</div>
+	}
+}
+
+templ rcTab(key, label string) {
+	<button type="button" x-on:click={ "tab = '" + key + "'" }
+		class="px-4 py-2 text-sm font-medium border-b-2 -mb-px"
+		x-bind:class={ "tab === '" + key + "' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500'" }>
+		{ label }
+	</button>
+}
+
+templ RcSalesTab(d RcSalesData) {
+	<div>
+		@shared.RangeForm("/admin/receipts/sales", d.Preset, d.From, d.To) {
+			<input type="search" name="q" value={ d.Query } placeholder="Receipt no / customer…" class="border rounded-lg px-3 py-1.5"/>
+		}
+		<div class="bg-white rounded-2xl shadow-sm overflow-hidden">
+			<table class="w-full text-sm">
+				<thead class="text-left text-slate-500 border-b bg-slate-50">
+					<tr><th class="px-4 py-2">Receipt</th><th class="px-4 py-2">Date</th><th class="px-4 py-2">Type</th><th class="px-4 py-2 text-right">Total</th><th class="px-4 py-2 text-right">Print</th></tr>
+				</thead>
+				<tbody>
+					for _, s := range d.Rows {
+						<tr class="border-b last:border-0">
+							<td class="px-4 py-2 font-medium">{ s.ReceiptNo }</td>
+							<td class="px-4 py-2 text-slate-500">{ datetime.DateTime(s.CreatedAt) }</td>
+							<td class="px-4 py-2 capitalize">{ s.SaleType }</td>
+							<td class="px-4 py-2 text-right">{ money.Format(d.Symbol, s.Total) }</td>
+							<td class="px-4 py-2 text-right">
+								<button type="button" hx-post={ "/cashier/print/" + strconv.FormatInt(s.ID, 10) } hx-swap="none" class="px-3 py-1 rounded-lg bg-indigo-600 text-white text-xs font-medium">🧾 Reprint</button>
+								<a href={ templ.SafeURL("/cashier/receipt/" + strconv.FormatInt(s.ID, 10)) } target="_blank" class="ml-2 px-3 py-1 rounded-lg border text-slate-600 text-xs font-medium">View</a>
+							</td>
+						</tr>
+					}
+					if len(d.Rows) == 0 {
+						<tr><td colspan="5" class="px-4 py-8 text-center text-slate-400">No matching sales.</td></tr>
+					}
+				</tbody>
+			</table>
+		</div>
+	</div>
+}
+
+templ RcCashTab(d RcCashData) {
+	<div>
+		@shared.RangeForm("/admin/receipts/cash", d.Preset, d.From, d.To) {
+			<input type="search" name="q" value={ d.Query } placeholder="No / party / location…" class="border rounded-lg px-3 py-1.5"/>
+			<select name="kind" class="border rounded-lg px-3 py-1.5">
+				@rcKindOption("", "All kinds", d.Kind)
+				@rcKindOption("transfer", "Transfer", d.Kind)
+				@rcKindOption("expense", "Expense", d.Kind)
+				@rcKindOption("supplier_payment", "Supplier payment", d.Kind)
+				@rcKindOption("customer_payment", "Customer payment", d.Kind)
+				@rcKindOption("refund", "Refund", d.Kind)
+				@rcKindOption("bank_charge", "Bank charge", d.Kind)
+			</select>
+		}
+		<div class="bg-white rounded-2xl shadow-sm overflow-hidden">
+			<table class="w-full text-sm">
+				<thead class="text-left text-slate-500 border-b bg-slate-50">
+					<tr><th class="px-4 py-2">Receipt</th><th class="px-4 py-2">Date</th><th class="px-4 py-2">From → To</th><th class="px-4 py-2">Party</th><th class="px-4 py-2 text-right">Amount</th><th class="px-4 py-2 text-right">Print</th></tr>
+				</thead>
+				<tbody>
+					for _, r := range d.Rows {
+						<tr class="border-b last:border-0">
+							<td class="px-4 py-2 font-medium">{ r.ReceiptNo }</td>
+							<td class="px-4 py-2 text-slate-500">{ datetime.DateTime(r.CreatedAt) }</td>
+							<td class="px-4 py-2">{ r.FromLabel } → { r.ToLabel }</td>
+							<td class="px-4 py-2">{ r.Party }</td>
+							<td class="px-4 py-2 text-right">{ money.Format(d.Symbol, r.Amount) }</td>
+							<td class="px-4 py-2 text-right">
+								<button type="button" hx-post={ "/admin/money-receipts/" + strconv.FormatInt(r.ID, 10) + "/print" } hx-swap="none" class="px-3 py-1 rounded-lg bg-indigo-600 text-white text-xs font-medium">🧾 Reprint</button>
+								<a href={ templ.SafeURL("/admin/money-receipts/" + strconv.FormatInt(r.ID, 10)) } target="_blank" class="ml-2 px-3 py-1 rounded-lg border text-slate-600 text-xs font-medium">View</a>
+							</td>
+						</tr>
+					}
+					if len(d.Rows) == 0 {
+						<tr><td colspan="6" class="px-4 py-8 text-center text-slate-400">No matching cash receipts.</td></tr>
+					}
+				</tbody>
+			</table>
+		</div>
+	</div>
+}
+
+templ rcKindOption(val, label, active string) {
+	if val == active {
+		<option value={ val } selected>{ label }</option>
+	} else {
+		<option value={ val }>{ label }</option>
+	}
+}
+
+templ RcWarrantyTab(d RcWarrantyData) {
+	<div>
+		@shared.RangeForm("/admin/receipts/warranty", d.Preset, d.From, d.To) {
+			<input type="search" name="q" value={ d.Query } placeholder="Serial / customer…" class="border rounded-lg px-3 py-1.5"/>
+		}
+		<div class="bg-white rounded-2xl shadow-sm overflow-hidden">
+			<table class="w-full text-sm">
+				<thead class="text-left text-slate-500 border-b bg-slate-50">
+					<tr><th class="px-4 py-2">Date</th><th class="px-4 py-2">Product</th><th class="px-4 py-2">Old → New serial</th><th class="px-4 py-2">Customer</th><th class="px-4 py-2">By</th><th class="px-4 py-2 text-right">Print</th></tr>
+				</thead>
+				<tbody>
+					for _, cl := range d.Rows {
+						<tr class="border-b last:border-0">
+							<td class="px-4 py-2 text-slate-500">{ datetime.DateTime(cl.CreatedAt) }</td>
+							<td class="px-4 py-2">{ cl.ProductName }</td>
+							<td class="px-4 py-2">
+								{ cl.OldSerial } →
+								if cl.ReplacementSerial != nil {
+									{ *cl.ReplacementSerial }
+								} else {
+									—
+								}
+							</td>
+							<td class="px-4 py-2">
+								if cl.CustomerName != nil {
+									{ *cl.CustomerName }
+								} else {
+									Walk-in
+								}
+							</td>
+							<td class="px-4 py-2 text-slate-500">{ cl.HandledByName }</td>
+							<td class="px-4 py-2 text-right">
+								if cl.ReplacementUnitID != nil {
+									<button type="button" hx-post={ "/admin/receipts/warranty/" + strconv.FormatInt(cl.ID, 10) + "/print" } hx-swap="none" class="px-3 py-1 rounded-lg bg-indigo-600 text-white text-xs font-medium">🧾 Reprint</button>
+								}
+							</td>
+						</tr>
+					}
+					if len(d.Rows) == 0 {
+						<tr><td colspan="6" class="px-4 py-8 text-center text-slate-400">No warranty replacements.</td></tr>
+					}
+				</tbody>
+			</table>
+		</div>
+	</div>
+}

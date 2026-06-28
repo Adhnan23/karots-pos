@@ -7,54 +7,83 @@ import (
 	"karots-pos/internal/features/sales"
 	"karots-pos/internal/money"
 	"karots-pos/templates/layouts"
+	"karots-pos/templates/shared"
 )
 
 type ReceiptsData struct {
+	Symbol string
+	Query  string
+	Sales  []sales.Sale
+	Preset string
+	From   string
+	To     string
+}
+
+type ReceiptsPageData struct {
 	CashierName   string
 	Role          string
 	ShowChangePin bool
-	Symbol        string
-	Query         string
-	Sales         []sales.Sale
+	Sales         ReceiptsData
 }
 
-// Receipts lets the cashier find a past sale (by receipt number) and reprint the
-// thermal bill from the terminal.
-templ Receipts(d ReceiptsData) {
+// Receipts is the tabbed receipts shell: Sales (default, inline) · Cash · Warranty.
+templ Receipts(d ReceiptsPageData) {
 	@layouts.Cashier("Receipts", d.CashierName, d.Role, "receipts", d.ShowChangePin) {
-		<div class="h-full overflow-auto p-5">
-			<div class="max-w-3xl mx-auto">
-				<h1 class="text-xl font-bold mb-1">Receipts</h1>
-				<p class="text-sm text-slate-500 mb-4">Find a past sale and reprint the bill.</p>
-				<form method="get" action="/cashier/receipts" class="flex gap-2 mb-4">
-					<input type="search" name="q" value={ d.Query } placeholder="Receipt no (e.g. S-00012)…" class="flex-1 border rounded-lg px-3 py-2"/>
-					<button class="px-4 py-2 rounded-lg bg-slate-800 text-white text-sm">Search</button>
-				</form>
-				<div class="bg-white rounded-2xl shadow-sm overflow-hidden">
-					<table class="w-full text-sm">
-						<thead class="text-left text-slate-500 border-b bg-slate-50">
-							<tr><th class="px-4 py-2">Receipt</th><th class="px-4 py-2">Date</th><th class="px-4 py-2">Type</th><th class="px-4 py-2 text-right">Total</th><th class="px-4 py-2 text-right">Print</th></tr>
-						</thead>
-						<tbody>
-							for _, s := range d.Sales {
-								<tr class="border-b last:border-0">
-									<td class="px-4 py-2 font-medium">{ s.ReceiptNo }</td>
-									<td class="px-4 py-2 text-slate-500">{ datetime.DateTime(s.CreatedAt) }</td>
-									<td class="px-4 py-2 capitalize">{ s.SaleType }</td>
-									<td class="px-4 py-2 text-right">{ money.Format(d.Symbol, s.Total) }</td>
-									<td class="px-4 py-2 text-right">
-										<button type="button" hx-post={ "/cashier/print/" + strconv.FormatInt(s.ID, 10) } hx-swap="none" class="px-3 py-1 rounded-lg bg-indigo-600 text-white text-xs font-medium">🧾 Reprint</button>
-										<a href={ templ.SafeURL("/cashier/receipt/" + strconv.FormatInt(s.ID, 10)) } target="_blank" class="ml-2 px-3 py-1 rounded-lg border text-slate-600 text-xs font-medium">View</a>
-									</td>
-								</tr>
-							}
-							if len(d.Sales) == 0 {
-								<tr><td colspan="5" class="px-4 py-8 text-center text-slate-400">No matching sales.</td></tr>
-							}
-						</tbody>
-					</table>
+		<div class="h-full overflow-auto p-5" x-data="{ tab: 'sales' }">
+			<div class="max-w-4xl mx-auto">
+				<h1 class="text-xl font-bold mb-3">Receipts</h1>
+				<div class="flex gap-1 mb-4 border-b">
+					@receiptTab("sales", "Sales")
+					@receiptTab("cash", "Cash")
+					@receiptTab("warranty", "Warranty")
 				</div>
+				<div id="receipts-sales" x-show="tab === 'sales'">
+					@ReceiptsSalesTab(d.Sales)
+				</div>
+				<div id="receipts-cash" x-show="tab === 'cash'" hx-get="/cashier/receipts/cash" hx-trigger="load once"></div>
+				<div id="receipts-warranty" x-show="tab === 'warranty'" hx-get="/cashier/receipts/warranty" hx-trigger="load once"></div>
 			</div>
 		</div>
 	}
+}
+
+templ receiptTab(key, label string) {
+	<button type="button" x-on:click={ "tab = '" + key + "'" }
+		class="px-4 py-2 text-sm font-medium border-b-2 -mb-px"
+		x-bind:class={ "tab === '" + key + "' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500'" }>
+		{ label }
+	</button>
+}
+
+// ReceiptsSalesTab is the Sales tab body (search + date range + sales table).
+templ ReceiptsSalesTab(d ReceiptsData) {
+	<div>
+		@shared.RangeForm("/cashier/receipts/sales", d.Preset, d.From, d.To) {
+			<input type="search" name="q" value={ d.Query } placeholder="Receipt no / customer…" class="border rounded-lg px-3 py-1.5"/>
+		}
+		<div class="bg-white rounded-2xl shadow-sm overflow-hidden">
+			<table class="w-full text-sm">
+				<thead class="text-left text-slate-500 border-b bg-slate-50">
+					<tr><th class="px-4 py-2">Receipt</th><th class="px-4 py-2">Date</th><th class="px-4 py-2">Type</th><th class="px-4 py-2 text-right">Total</th><th class="px-4 py-2 text-right">Print</th></tr>
+				</thead>
+				<tbody>
+					for _, s := range d.Sales {
+						<tr class="border-b last:border-0">
+							<td class="px-4 py-2 font-medium">{ s.ReceiptNo }</td>
+							<td class="px-4 py-2 text-slate-500">{ datetime.DateTime(s.CreatedAt) }</td>
+							<td class="px-4 py-2 capitalize">{ s.SaleType }</td>
+							<td class="px-4 py-2 text-right">{ money.Format(d.Symbol, s.Total) }</td>
+							<td class="px-4 py-2 text-right">
+								<button type="button" hx-post={ "/cashier/print/" + strconv.FormatInt(s.ID, 10) } hx-swap="none" class="px-3 py-1 rounded-lg bg-indigo-600 text-white text-xs font-medium">🧾 Reprint</button>
+								<a href={ templ.SafeURL("/cashier/receipt/" + strconv.FormatInt(s.ID, 10)) } target="_blank" class="ml-2 px-3 py-1 rounded-lg border text-slate-600 text-xs font-medium">View</a>
+							</td>
+						</tr>
+					}
+					if len(d.Sales) == 0 {
+						<tr><td colspan="5" class="px-4 py-8 text-center text-slate-400">No matching sales.</td></tr>
+					}
+				</tbody>
+			</table>
+		</div>
+	</div>
 }

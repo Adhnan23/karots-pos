@@ -69,6 +69,33 @@ func (s *Service) UnitsForSale(ctx context.Context, saleID int64) ([]Unit, error
 	return s.repo.UnitsForSale(ctx, saleID)
 }
 
+// ListClaims returns recent warranty claims for the receipts/warranty tab.
+func (s *Service) ListClaims(ctx context.Context, f ClaimFilter) ([]Claim, error) {
+	rows, err := s.repo.ListClaims(ctx, f)
+	if err != nil {
+		return nil, apperr.Internal("failed to list warranty claims", err)
+	}
+	return rows, nil
+}
+
+// GetClaim loads one claim (for view / reprint).
+func (s *Service) GetClaim(ctx context.Context, id int64) (*Claim, error) {
+	cl, err := s.repo.GetClaim(ctx, id)
+	if err != nil {
+		return nil, apperr.NotFound("warranty claim")
+	}
+	return cl, nil
+}
+
+// GetUnit loads one warranty unit (for reprinting a replacement slip).
+func (s *Service) GetUnit(ctx context.Context, id int64) (*Unit, error) {
+	u, err := s.repo.FindUnitByID(ctx, id)
+	if err != nil {
+		return nil, apperr.NotFound("warranty unit")
+	}
+	return u, nil
+}
+
 // RecordReplacement replaces a faulty unit: it issues a NEW unit that CONTINUES
 // the original warranty (same expiry date and cover — it does not restart), logs
 // the claim, marks the old unit replaced, and ships the new unit out of stock

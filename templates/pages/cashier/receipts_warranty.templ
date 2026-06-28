@@ -1,0 +1,65 @@
+package cashierpages
+
+import (
+	"strconv"
+
+	"karots-pos/internal/datetime"
+	"karots-pos/internal/features/warranty"
+	"karots-pos/templates/shared"
+)
+
+type ReceiptsWarrantyData struct {
+	Rows   []warranty.Claim
+	Query  string
+	Preset string
+	From   string
+	To     string
+}
+
+// ReceiptsWarrantyTab is the Warranty tab fragment: filter bar + claims table.
+templ ReceiptsWarrantyTab(d ReceiptsWarrantyData) {
+	<div>
+		@shared.RangeForm("/cashier/receipts/warranty", d.Preset, d.From, d.To) {
+			<input type="search" name="q" value={ d.Query } placeholder="Serial / customer…" class="border rounded-lg px-3 py-1.5"/>
+		}
+		<div class="bg-white rounded-2xl shadow-sm overflow-hidden">
+			<table class="w-full text-sm">
+				<thead class="text-left text-slate-500 border-b bg-slate-50">
+					<tr><th class="px-4 py-2">Date</th><th class="px-4 py-2">Product</th><th class="px-4 py-2">Old → New serial</th><th class="px-4 py-2">Customer</th><th class="px-4 py-2">By</th><th class="px-4 py-2 text-right">Print</th></tr>
+				</thead>
+				<tbody>
+					for _, cl := range d.Rows {
+						<tr class="border-b last:border-0">
+							<td class="px-4 py-2 text-slate-500">{ datetime.DateTime(cl.CreatedAt) }</td>
+							<td class="px-4 py-2">{ cl.ProductName }</td>
+							<td class="px-4 py-2">
+								{ cl.OldSerial } →
+								if cl.ReplacementSerial != nil {
+									{ *cl.ReplacementSerial }
+								} else {
+									—
+								}
+							</td>
+							<td class="px-4 py-2">
+								if cl.CustomerName != nil {
+									{ *cl.CustomerName }
+								} else {
+									Walk-in
+								}
+							</td>
+							<td class="px-4 py-2 text-slate-500">{ cl.HandledByName }</td>
+							<td class="px-4 py-2 text-right">
+								if cl.ReplacementUnitID != nil {
+									<button type="button" hx-post={ "/cashier/warranty/" + strconv.FormatInt(cl.ID, 10) + "/print" } hx-swap="none" class="px-3 py-1 rounded-lg bg-indigo-600 text-white text-xs font-medium">🧾 Reprint</button>
+								}
+							</td>
+						</tr>
+					}
+					if len(d.Rows) == 0 {
+						<tr><td colspan="6" class="px-4 py-8 text-center text-slate-400">No warranty replacements.</td></tr>
+					}
+				</tbody>
+			</table>
+		</div>
+	</div>
+}

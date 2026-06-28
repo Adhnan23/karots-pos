@@ -162,6 +162,12 @@ func (h *cashierUI) customerDue(ctx context.Context, detail *sales.Detail) decim
 // raster blocks for the printed receipt. Failures are non-fatal — the receipt
 // still prints without that element.
 func (h *cashierUI) receiptOptions(ctx context.Context, cfg *settings.Settings) escpos.Options {
+	return h.s.receiptImgOptions(ctx, cfg)
+}
+
+// receiptImgOptions builds the logo/sub-name raster options for a thermal slip.
+// Shared by sale receipts and warranty / CR- reprints (UI-agnostic).
+func (s *Server) receiptImgOptions(ctx context.Context, cfg *settings.Settings) escpos.Options {
 	var opts escpos.Options
 	dots := receiptimg.PrinterDots(cfg.ReceiptWidth)
 	if src := cfg.LogoSrc(); src != "" {
@@ -234,23 +240,49 @@ func (h *cashierUI) PrintReceipt(c echo.Context) error {
 	return response.OK(c, map[string]bool{"ok": true})
 }
 
-// Receipts lists recent sales (optionally filtered by receipt number) so the
-// cashier can reprint a bill from the terminal.
+// Receipts renders the tabbed Receipts shell (Sales tab loaded inline as default;
+// Cash + Warranty tabs lazy-load their fragments).
 func (h *cashierUI) Receipts(c echo.Context) error {
-	ctx := c.Request().Context()
-	q := c.QueryParam("q")
-	rows, err := h.s.sales.List(ctx, sales.ListFilter{Query: q, Limit: 50})
+	data, err := h.salesReceiptData(c)
 	if err != nil {
 		return err
 	}
-	return response.RenderPage(c, cashierpages.Receipts(cashierpages.ReceiptsData{
+	return response.RenderPage(c, cashierpages.Receipts(cashierpages.ReceiptsPageData{
 		CashierName:   middleware.CurrentUserName(c),
 		Role:          middleware.CurrentRole(c),
 		ShowChangePin: h.showChangePin(c),
-		Symbol:        h.cashierSymbol(ctx),
-		Query:         q,
-		Sales:         rows,
+		Sales:         data,
 	}))
+}
+
+// ReceiptsSales renders just the Sales tab fragment (search + date range).
+func (h *cashierUI) ReceiptsSales(c echo.Context) error {
+	data, err := h.salesReceiptData(c)
+	if err != nil {
+		return err
+	}
+	return response.RenderFragment(c, cashierpages.ReceiptsSalesTab(data))
+}
+
+func (h *cashierUI) salesReceiptData(c echo.Context) (cashierpages.ReceiptsData, error) {
+	ctx := c.Request().Context()
+	from, to, fromStr, toStr, err := resolveReceiptRange(c)
+	if err != nil {
+		return cashierpages.ReceiptsData{}, err
+	}
+	q := strings.TrimSpace(c.QueryParam("q"))
+	rows, err := h.s.sales.List(ctx, sales.ListFilter{Query: q, From: from, To: to, Limit: 50})
+	if err != nil {
+		return cashierpages.ReceiptsData{}, err
+	}
+	return cashierpages.ReceiptsData{
+		Symbol: h.cashierSymbol(ctx),
+		Query:  q,
+		Sales:  rows,
+		Preset: c.QueryParam("preset"),
+		From:   fromStr,
+		To:     toStr,
+	}, nil
 }
 
 // ============================ Barcode labels ============================
@@ -667,16 +699,7 @@ func (h *cashierUI) printWarrantySlip(c echo.Context, oldSerial string, u *warra
 		log.Printf("warranty slip: load settings: %v", err)
 		return
 	}
-	slip := escpos.WarrantySlip{
-		ProductName:   u.ProductName,
-		OldSerial:     oldSerial,
-		NewSerial:     u.SerialNo,
-		WarrantyUntil: datetime.Date(u.WarrantyUntil),
-	}
-	if u.CustomerName != nil {
-		slip.CustomerName = *u.CustomerName
-	}
-	if err := escpos.Send(ctx, h.receiptQueue(c, cfg), escpos.WarrantyDocument(slip, *cfg, h.receiptOptions(ctx, cfg))); err != nil {
+	if err := escpos.Send(ctx, h.receiptQueue(c, cfg), h.s.buildWarrantySlip(ctx, cfg, oldSerial, u)); err != nil {
 		log.Printf("warranty slip: print for %s: %v", u.SerialNo, err)
 	}
 }

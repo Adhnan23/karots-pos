@@ -61,6 +61,9 @@ type Claim struct {
 	// Joined:
 	HandledByName     string  `db:"handled_by_name"    json:"handled_by_name"`
 	ReplacementSerial *string `db:"replacement_serial" json:"replacement_serial,omitempty"`
+	ProductName       string  `db:"product_name"       json:"product_name"`
+	OldSerial         string  `db:"old_serial"         json:"old_serial"`
+	CustomerName      *string `db:"customer_name"      json:"customer_name,omitempty"`
 }
 
 // NewUnit is the data to insert a warranty unit (at sale or as a replacement).
@@ -182,6 +185,63 @@ func (r *Repository) ClaimsForUnit(ctx context.Context, unitID int64) ([]Claim, 
 		WHERE wc.unit_id = $1
 		ORDER BY wc.id DESC`, unitID)
 	return rows, err
+}
+
+// ClaimFilter narrows the global claims list. To is exclusive (the web layer
+// passes the day after the chosen end date, matching the report range helper).
+type ClaimFilter struct {
+	Search string // matches old/new serial or customer name (blank = any)
+	From   *time.Time
+	To     *time.Time
+	Limit  int
+}
+
+// claimSelect lists claims with everything the receipts table + a reprinted slip
+// need: the faulty (old) unit's product/serial/customer and the replacement
+// unit's serial.
+const claimSelect = `
+	SELECT wc.*, u.name AS handled_by_name,
+	       ou.serial_no AS old_serial,
+	       p.name AS product_name,
+	       c.name AS customer_name,
+	       ru.serial_no AS replacement_serial
+	FROM warranty_claims wc
+	JOIN users u                ON u.id = wc.handled_by
+	JOIN warranty_units ou      ON ou.id = wc.unit_id
+	JOIN products p             ON p.id = ou.product_id
+	LEFT JOIN customers c       ON c.id = ou.customer_id
+	LEFT JOIN warranty_units ru ON ru.id = wc.replacement_unit_id`
+
+// ListClaims returns recent claims across all units, newest first.
+func (r *Repository) ListClaims(ctx context.Context, f ClaimFilter) ([]Claim, error) {
+	limit := f.Limit
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	var s *string
+	if f.Search != "" {
+		s = &f.Search
+	}
+	var rows []Claim
+	err := r.q.SelectContext(ctx, &rows, claimSelect+`
+		WHERE ($1::timestamptz IS NULL OR wc.created_at >= $1)
+		  AND ($2::timestamptz IS NULL OR wc.created_at <  $2)
+		  AND ($3::text IS NULL
+		       OR ou.serial_no ILIKE '%' || $3 || '%'
+		       OR ru.serial_no ILIKE '%' || $3 || '%'
+		       OR c.name       ILIKE '%' || $3 || '%')
+		ORDER BY wc.id DESC
+		LIMIT $4`, f.From, f.To, s, limit)
+	return rows, err
+}
+
+// GetClaim loads one claim with the same joined fields as ListClaims.
+func (r *Repository) GetClaim(ctx context.Context, id int64) (*Claim, error) {
+	var cl Claim
+	if err := r.q.GetContext(ctx, &cl, claimSelect+` WHERE wc.id = $1`, id); err != nil {
+		return nil, err
+	}
+	return &cl, nil
 }
 
 func (r *Repository) InsertClaim(ctx context.Context, unitID int64, reason *string, resolution string, replacementUnitID *int64, userID int64) (int64, error) {
