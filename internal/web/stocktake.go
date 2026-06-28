@@ -114,15 +114,25 @@ func (a *adminUI) StockTakeImport(c echo.Context) error {
 			sum.Skipped++
 			continue
 		}
-		if cur, cerr := a.s.stock.Quantity(ctx, p.ID); cerr == nil && cur.Equal(target) {
-			unchanged++
-			continue
-		}
 		// Set cost first (if given) so the opening/adjustment batch is valued right.
+		// Done before the unchanged-qty check so a cost-only correction still applies.
+		costChanged := false
 		if costStr := get("cost"); costStr != "" {
 			if cost, cerr := money.Parse(costStr); cerr == nil {
-				_ = a.s.products.SetCost(ctx, p.ID, cost)
+				if cp, gerr := a.s.products.Get(ctx, p.ID); gerr == nil && !cp.CostPrice.Equal(cost) {
+					if a.s.products.SetCost(ctx, p.ID, cost) == nil {
+						costChanged = true
+					}
+				}
 			}
+		}
+		if cur, cerr := a.s.stock.Quantity(ctx, p.ID); cerr == nil && cur.Equal(target) {
+			if costChanged {
+				sum.Updated++
+			} else {
+				unchanged++
+			}
+			continue
 		}
 		if aerr := a.s.stock.Adjust(ctx, stock.AdjustInput{ProductID: p.ID, NewQuantity: counted, Note: "stock-take CSV"}, uid); aerr != nil {
 			sum.Errors = append(sum.Errors, adminfragments.ImportRowError{Line: line, Message: importErrMsg(aerr)})

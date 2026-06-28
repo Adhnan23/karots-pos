@@ -125,20 +125,17 @@ func (a *adminUI) productsData(c echo.Context) (adminpages.ProductsData, error) 
 	search := c.QueryParam("search")
 	catParam := c.QueryParam("category_id")
 
-	q := products.ListQuery{Search: search, Page: page, Limit: productPageSize + 1}
+	q := products.ListQuery{Search: search, Page: page, Limit: productPageSize}
 	if catParam != "" {
 		if id, err := strconv.ParseInt(catParam, 10, 64); err == nil {
 			q.CategoryID = &id
 		}
 	}
-	rows, _, err := a.s.products.List(ctx, q)
+	rows, total, err := a.s.products.List(ctx, q)
 	if err != nil {
 		return adminpages.ProductsData{}, err
 	}
-	hasNext := len(rows) > productPageSize
-	if hasNext {
-		rows = rows[:productPageSize]
-	}
+	hasNext := page*productPageSize < total
 	cats, err := a.s.categories.Tree(ctx)
 	if err != nil {
 		return adminpages.ProductsData{}, err
@@ -196,6 +193,35 @@ func (a *adminUI) ProductForm(c echo.Context) error {
 		}
 	}
 	return response.RenderFragment(c, adminfragments.ProductForm(p, cats, us, sups))
+}
+
+// ProductBarcodeForm opens the small modal to add a barcode to an item that has
+// none: a text input plus the shared Generate button. Saving inserts it.
+func (a *adminUI) ProductBarcodeForm(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	p, err := a.s.products.Get(c.Request().Context(), id)
+	if err != nil {
+		return err
+	}
+	return response.RenderFragment(c, adminfragments.BarcodeForm(p))
+}
+
+// ProductBarcodeAssign saves the barcode entered (or generated) in that modal,
+// only when the item still has none.
+func (a *adminUI) ProductBarcodeAssign(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	code := strings.TrimSpace(c.FormValue("barcode"))
+	if err := a.s.products.AssignBarcode(c.Request().Context(), id, code); err != nil {
+		return err
+	}
+	a.s.logAudit(c, audit.ActionUpdate, "product", strconv.FormatInt(id, 10), "added barcode "+code)
+	return htmxDone(c, "Barcode "+code+" added", "reload-products")
 }
 
 func (a *adminUI) ProductCreate(c echo.Context) error {
@@ -421,14 +447,11 @@ func (a *adminUI) stockTakeData(c echo.Context, saved int) (adminpages.StockTake
 	if v, err := strconv.Atoi(c.FormValue("page")); err == nil && v > 1 {
 		page = v
 	}
-	prods, _, err := a.s.products.List(ctx, products.ListQuery{Search: search, Page: page, Limit: stockTakePageSize + 1})
+	prods, total, err := a.s.products.List(ctx, products.ListQuery{Search: search, Page: page, Limit: stockTakePageSize})
 	if err != nil {
 		return adminpages.StockTakeData{}, err
 	}
-	hasNext := len(prods) > stockTakePageSize
-	if hasNext {
-		prods = prods[:stockTakePageSize]
-	}
+	hasNext := page*stockTakePageSize < total
 	return adminpages.StockTakeData{
 		UserName: middleware.CurrentUserName(c),
 		Symbol:   a.symbol(ctx),
@@ -453,35 +476,49 @@ func (a *adminUI) StockTakeApply(c echo.Context) error {
 	if err != nil {
 		return apperr.BadRequest("invalid form")
 	}
+	// Collect every product id referenced by a qty_ or cost_ field, so a cost-only
+	// edit (count left blank or unchanged) is still applied.
+	ids := map[int64]bool{}
+	for key := range form {
+		var idStr string
+		switch {
+		case strings.HasPrefix(key, "qty_"):
+			idStr = strings.TrimPrefix(key, "qty_")
+		case strings.HasPrefix(key, "cost_"):
+			idStr = strings.TrimPrefix(key, "cost_")
+		default:
+			continue
+		}
+		if id, perr := strconv.ParseInt(idStr, 10, 64); perr == nil {
+			ids[id] = true
+		}
+	}
 	saved := 0
-	for key, vals := range form {
-		if !strings.HasPrefix(key, "qty_") || len(vals) == 0 {
-			continue
-		}
-		idStr := strings.TrimPrefix(key, "qty_")
-		id, perr := strconv.ParseInt(idStr, 10, 64)
-		if perr != nil {
-			continue
-		}
-		qty := strings.TrimSpace(vals[0])
-		if qty == "" {
-			continue
-		}
-		target, perr := money.Parse(qty)
-		if perr != nil {
-			continue
-		}
-		// Skip rows whose count is unchanged so "Saved N" reflects real edits.
-		if cur, cerr := a.s.stock.Quantity(ctx, id); cerr == nil && cur.Equal(target) {
-			continue
-		}
-		// Set cost first (if entered) so the opening batch is valued correctly.
+	for id := range ids {
+		idStr := strconv.FormatInt(id, 10)
+		changed := false
+		// Cost: apply first (so an opening batch is valued right) if entered and
+		// different from the current cost.
 		if costStr := strings.TrimSpace(c.FormValue("cost_" + idStr)); costStr != "" {
 			if cost, cerr := money.Parse(costStr); cerr == nil {
-				_ = a.s.products.SetCost(ctx, id, cost)
+				if p, gerr := a.s.products.Get(ctx, id); gerr == nil && !p.CostPrice.Equal(cost) {
+					if a.s.products.SetCost(ctx, id, cost) == nil {
+						changed = true
+					}
+				}
 			}
 		}
-		if err := a.s.stock.Adjust(ctx, stock.AdjustInput{ProductID: id, NewQuantity: qty, Note: "stock-take"}, uid); err == nil {
+		// Quantity: apply as an absolute count if entered and different.
+		if qty := strings.TrimSpace(c.FormValue("qty_" + idStr)); qty != "" {
+			if target, perr := money.Parse(qty); perr == nil {
+				if cur, cerr := a.s.stock.Quantity(ctx, id); !(cerr == nil && cur.Equal(target)) {
+					if a.s.stock.Adjust(ctx, stock.AdjustInput{ProductID: id, NewQuantity: qty, Note: "stock-take"}, uid) == nil {
+						changed = true
+					}
+				}
+			}
+		}
+		if changed {
 			saved++
 		}
 	}

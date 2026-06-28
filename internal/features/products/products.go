@@ -127,7 +127,7 @@ func (r *Repository) List(ctx context.Context, q ListQuery) ([]Product, error) {
 		  AND ($1::text   IS NULL OR p.name ILIKE '%' || $1 || '%' OR p.barcode = $1)
 		  AND ($2::bigint IS NULL OR p.category_id IN (SELECT id FROM subcats))
 		  AND ($3 = false OR COALESCE(s.quantity,0) <= p.reorder_level)
-		ORDER BY p.name
+		ORDER BY p.name, p.id
 		LIMIT $4 OFFSET $5`,
 		nullStr(q.Search), q.CategoryID, q.LowStock, q.Limit, q.offset())
 	return rows, err
@@ -255,6 +255,19 @@ func (r *Repository) SoftDelete(ctx context.Context, id int64) error {
 func (r *Repository) SetCost(ctx context.Context, id int64, cost decimal.Decimal) error {
 	_, err := r.db.ExecContext(ctx, `UPDATE products SET cost_price = $1 WHERE id = $2`, cost, id)
 	return err
+}
+
+// SetBarcodeIfEmpty assigns a barcode only when the product currently has none,
+// so a generate action can never overwrite an existing code. Returns whether a
+// row was actually updated.
+func (r *Repository) SetBarcodeIfEmpty(ctx context.Context, id int64, code string) (bool, error) {
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE products SET barcode = $1 WHERE id = $2 AND barcode IS NULL`, code, id)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
 }
 
 // CountNeedsReview is the number of active products still flagged for review

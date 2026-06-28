@@ -32,6 +32,13 @@ templ ProductRow(p products.Product, symbol string) {
 			</div>
 			if p.Barcode != nil {
 				<div class="text-xs text-slate-400">{ *p.Barcode }</div>
+			} else {
+				<button
+					class="mt-0.5 inline-flex items-center gap-1 text-xs text-indigo-600 hover:underline"
+					hx-get={ "/admin/products/" + strconv.FormatInt(p.ID, 10) + "/barcode" }
+					hx-target="#modal-container"
+					hx-swap="innerHTML"
+				>+ Add barcode</button>
 			}
 		</td>
 		<td class="py-2 px-3 text-slate-600">{ p.CategoryName }</td>
@@ -61,6 +68,33 @@ templ ProductRow(p products.Product, symbol string) {
 			>Delete</button>
 		</td>
 	</tr>
+}
+
+// BarcodeForm is the small modal for adding a barcode to an item that has none:
+// a text input (type or scan) plus the shared Generate button, then Save.
+templ BarcodeForm(p *products.Product) {
+	<div class="fixed inset-0 bg-black/40 flex items-center justify-center z-40 p-4" x-data>
+		<div class="bg-white rounded-2xl shadow-xl w-full max-w-md">
+			<div class="flex items-center justify-between px-6 py-4 border-b">
+				<h3 class="text-lg font-semibold">Add barcode</h3>
+				<button class="text-slate-400 hover:text-slate-600" x-on:click="$dispatch('close-modal')">✕</button>
+			</div>
+			<form class="p-6 space-y-4" hx-post={ "/admin/products/" + strconv.FormatInt(p.ID, 10) + "/barcode" } hx-swap="none">
+				<p class="text-sm text-slate-500">{ p.Name }</p>
+				<div>
+					<label class="block text-sm font-medium mb-1">Barcode</label>
+					<div class="bc-field flex gap-2">
+						<input name="barcode" required autofocus placeholder="Type, scan, or generate" class="flex-1 border rounded-lg px-3 py-2"/>
+						<button type="button" onclick="generateBarcode(this)" class="px-3 py-2 rounded-lg border text-slate-700 whitespace-nowrap disabled:opacity-40">Generate</button>
+					</div>
+				</div>
+				<div class="flex justify-end gap-3 pt-2">
+					<button type="button" class="px-4 py-2 rounded-lg border" x-on:click="$dispatch('close-modal')">Cancel</button>
+					<button type="submit" class="px-4 py-2 rounded-lg bg-indigo-600 text-white">Save</button>
+				</div>
+			</form>
+		</div>
+	</div>
 }
 
 // CategoryPicker is a searchable, hierarchy-aware replacement for a native

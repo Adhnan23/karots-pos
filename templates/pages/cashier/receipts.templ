@@ -30,7 +30,7 @@ type ReceiptsPageData struct {
 templ Receipts(d ReceiptsPageData) {
 	@layouts.Cashier("Receipts", d.CashierName, d.Role, "receipts", d.ShowChangePin) {
 		<div class="h-full overflow-auto p-5" x-data="{ tab: 'sales' }">
-			<div class="max-w-4xl mx-auto">
+			<div class="max-w-6xl mx-auto">
 				<h1 class="text-xl font-bold mb-3">Receipts</h1>
 				<div class="flex gap-1 mb-4 border-b">
 					@receiptTab("sales", "Sales")

@@ -250,6 +250,31 @@ func (s *Service) SetCost(ctx context.Context, id int64, cost decimal.Decimal) e
 	return nil
 }
 
+// AssignBarcode sets a barcode on a product that currently has none (the small
+// "add barcode" action on barcode-less rows). The code must be non-empty and not
+// already used by another product; it never overwrites an existing barcode.
+func (s *Service) AssignBarcode(ctx context.Context, id int64, code string) error {
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return apperr.Validation("enter or generate a barcode")
+	}
+	exists, err := s.repo.BarcodeExists(ctx, code)
+	if err != nil {
+		return apperr.Internal("failed to check barcode", err)
+	}
+	if exists {
+		return apperr.Validation("that barcode is already used by another product")
+	}
+	ok, err := s.repo.SetBarcodeIfEmpty(ctx, id, code)
+	if err != nil {
+		return apperr.Internal("failed to save barcode", err)
+	}
+	if !ok {
+		return apperr.Validation("this item already has a barcode")
+	}
+	return nil
+}
+
 // MarkReviewed clears the review flag once the admin has finished an item.
 func (s *Service) MarkReviewed(ctx context.Context, id int64) error {
 	if err := s.repo.ClearReview(ctx, id); err != nil {

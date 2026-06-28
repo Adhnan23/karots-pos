@@ -326,7 +326,7 @@ func (r *Repository) List(ctx context.Context, f ListFilter) ([]Sale, error) {
 		       s.receipt_no ILIKE '%' || $9 || '%' OR
 		       c.name       ILIKE '%' || $9 || '%' OR
 		       c.phone      ILIKE '%' || $9 || '%')
-		ORDER BY s.created_at DESC
+		ORDER BY s.created_at DESC, s.id DESC
 		LIMIT $6 OFFSET $7`, f.From, f.To, f.CashierID, status, receipt, f.Limit, f.Offset, method, query)
 	return rows, err
 }
