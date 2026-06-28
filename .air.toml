@@ -1,0 +1,25 @@
+# Live-reload config for `make watch`. Rebuilds and restarts the server when a
+# .go or .templ file changes. Templ components are regenerated first (pre_cmd);
+# the resulting *_templ.go are excluded from the watch so they don't re-trigger.
+# The server inherits DATABASE_URL etc. from the shell that ran `make watch`.
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  pre_cmd = ["templ generate"]
+  cmd = "go build -o ./tmp/karots-pos ./cmd/server"
+  bin = "./tmp/karots-pos"
+  include_ext = ["go", "templ"]
+  exclude_dir = ["tmp", "bin", "dist", "node_modules", "backups", ".git", ".playwright-mcp", "docs"]
+  exclude_regex = ["_templ\\.go$", "_test\\.go$"]
+  exclude_unchanged = true
+  stop_on_error = true
+  delay = 500
+  kill_delay = "2s"
+  send_interrupt = true
+
+[log]
+  time = true
+
+[misc]
+  clean_on_exit = true

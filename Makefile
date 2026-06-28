@@ -1,7 +1,7 @@
-.PHONY: help dev build build-windows bootstrap run templ css test migrate seed demo reset reset-seed reset-demo db-up db-down docker-up docker-down tidy
+.PHONY: help dev watch css-watch build build-windows bootstrap run templ css test migrate seed demo reset reset-seed reset-demo db-up db-down docker-up docker-down tidy
 
 help:
-	@echo "Targets: db-up, migrate, seed, demo, reset, reset-seed, reset-demo, dev, build, build-windows, bootstrap, run, test, templ, css, docker-up, docker-down"
+	@echo "Targets: db-up, migrate, seed, demo, reset, reset-seed, reset-demo, dev, watch, css-watch, build, build-windows, bootstrap, run, test, templ, css, docker-up, docker-down"
 
 # Generate Templ components and the stylesheet, then build a fully static,
 # self-contained binary (static assets + migrations are embedded; only the
@@ -36,6 +36,17 @@ run: templ css
 
 dev: db-up templ css
 	set -a && . ./.env && set +a && go run ./cmd/server
+
+# Live-reload dev server (preferred): rebuilds + restarts on any .go/.templ
+# change via air (config in .air.toml). No more manual kill/restart. The server
+# inherits the env loaded here. Run `make css-watch` in a second terminal if you
+# are editing Tailwind classes; otherwise run `make css` once when you add some.
+watch: db-up css
+	set -a && . ./.env && set +a && air
+
+# Rebuild static/css/tailwind.css on change (Tailwind --watch). Pair with `watch`.
+css-watch:
+	npx -y tailwindcss@3 -c tailwind.config.js -i static/css/tailwind.input.css -o static/css/tailwind.css --watch
 
 test:
 	go test ./...
