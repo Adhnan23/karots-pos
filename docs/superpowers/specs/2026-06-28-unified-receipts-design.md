@@ -52,10 +52,12 @@ working sales list is left untouched.
 - **sales `ListFilter`** — already powers the cashier Sales tab. No change.
 - **warranty** — add two read methods (today only `ClaimsForUnit(unitID)`
   exists):
-  - `Repository.ListClaims(ctx, search string, limit int) ([]Claim, error)` —
-    recent claims across all units, newest first, joining product name, old
-    serial, replacement serial, customer name, handled-by name, created_at.
-    `search` matches old/new serial or customer (ILIKE).
+  - `Repository.ListClaims(ctx, f ClaimFilter) ([]Claim, error)` where
+    `ClaimFilter{Search string; From, To *time.Time; Limit int}` — recent claims
+    across all units, newest first, joining product name, old serial, replacement
+    serial, customer name, handled-by name, created_at. `Search` matches old/new
+    serial or customer (ILIKE); `From`/`To` filter by claim `created_at` for the
+    shared date-range presets.
   - `Repository.GetClaim(ctx, claimID int64) (*Claim, error)` — one claim with
     the same joined fields, enough to rebuild the slip.
   - `Service.ListClaims` / `Service.GetClaim` wrappers.
@@ -70,20 +72,22 @@ New routes under the existing `cg` (cashier) group:
 
 ```
 GET  /cashier/receipts            page shell, 3 tabs (existing handler, gains tabs)
-GET  /cashier/receipts/cash       CR- table fragment  (q + date filter)
-GET  /cashier/receipts/warranty   warranty-claims table fragment (q filter)
+GET  /cashier/receipts/sales      sales table fragment   (q + date range)
+GET  /cashier/receipts/cash       CR- table fragment     (q + kind + date range)
+GET  /cashier/receipts/warranty   warranty-claims table fragment (q + date range)
 GET  /cashier/money-receipts/:id  CR- receipt view page (cashier layout)
 POST /cashier/money-receipts/:id/print   reprint CR- slip → toast
 POST /cashier/warranty/:claimId/print    reprint warranty slip → toast
 ```
 
-- The **Sales tab** keeps the current behavior: the page-shell handler still
-  loads `sales.List` for the default (Sales) tab; the search box on that tab is
-  unchanged.
+- The **Sales tab** uses `sales.List`; its existing search already matches
+  receipt number + customer name/phone. It gains the shared date-range presets.
 - The **Cash tab** fragment calls `cashflowReceipts.List` (shop-wide) with the
-  shared report date-range presets (`reports.ResolveRange`, as the locker ledger
-  and admin money-receipts already do) + a text search.
-- The **Warranty tab** fragment calls `warranty.ListClaims`.
+  shared date-range presets, the existing kind filter, and a text search.
+- The **Warranty tab** fragment calls `warranty.ListClaims` with search +
+  date-range presets.
+
+See **Filters** below for the unified filter set applied to all three tabs.
 - **CR- view page**: lift the receipt HTML view so it renders inside the cashier
   layout too (currently admin-only). Reprint posts to the cashier print route,
   which reuses `Server.printMoneyReceipt` / `buildReceiptSlip` (best-effort slip
@@ -117,7 +121,35 @@ hub (Cash tab default), keeping the deep `/admin/money-receipts` reachable.
 - `templates/pages/admin/receipts.templ` — admin hub shell reusing the money-
   receipts table partial + a warranty-claims table partial + a sales table
   partial.
-- Reuse the shared `rptRangeForm` date-preset component on the Cash tabs.
+- Reuse the shared `rptRangeForm` date-preset component on every tab.
+
+## Filters
+
+The same filter bar sits above all three tabs (cashier and admin), so the
+experience is consistent — only the columns differ per type:
+
+- **Date range** — the shared `rptRangeForm` / `reports.ResolveRange` preset
+  buttons (Today / This week / This month / … + exact dates), already used by the
+  locker ledger, admin money-receipts, and reports. Applied to all three tabs
+  (Sales by sale date, Cash by `created_at`, Warranty by claim `created_at`).
+- **Text search (`q`)** — one search box per tab, matching the natural identifiers
+  for that type:
+  - **Sales** — receipt number + customer name/phone (already supported).
+  - **Cash** — receipt number, **party**, and from/to labels. Because a `CR-`
+    receipt stores the trading counterparty in its `party` column, this single
+    search covers **both customers** (credit collection, refunds) **and
+    suppliers** (supplier payments) **and** the location labels (locker/till
+    names) — no separate customer/supplier boxes needed.
+  - **Warranty** — old/new serial + customer name.
+- **Kind filter (Cash tab only)** — the existing money-receipt kind dropdown
+  (transfer / expense / supplier_payment / customer_payment / refund / bank_charge
+  / …), reusing what `/admin/money-receipts` already has.
+
+Filters are plain query params on each tab's HTMX `GET`, so deep links and the
+date presets compose naturally. Party search already covers suppliers and
+customers today: the supplier-payment, customer-payment, credit-collection, and
+refund moves all pass the counterparty name as `Party` on their
+`cashflow.MoveInput` (verified). No migration or call-site change needed.
 
 ## Data flow
 
@@ -140,9 +172,11 @@ hub (Cash tab default), keeping the deep `/admin/money-receipts` reachable.
 
 - `make templ && go build ./... && go vet ./...` green.
 - E2E (Playwright + psql, dev port 3000, admin 0000000001/2273):
-  - Cashier Receipts shows all three tabs; **Cash** lists the `CR-` receipts
-    created in slice-7/credit-pay testing (shop-wide), searchable by number/party
-    and filterable by date preset.
+  - Cashier Receipts shows all three tabs; each tab has the shared date-range
+    presets. **Cash** lists the `CR-` receipts created in slice-7/credit-pay
+    testing (shop-wide), searchable by number, by **customer** party (credit
+    pay / refund), and by **supplier** party (supplier payment), filterable by
+    the kind dropdown and by date preset.
   - Cashier **reprint** of a `CR-` re-sends the slip (toast), record unchanged.
   - Cashier **View** of a `CR-` renders the receipt with shop header.
   - Warranty tab lists a recorded replacement; **reprint** re-sends the warranty
