@@ -26,6 +26,7 @@ import (
 	"karots-pos/internal/features/denominations"
 	"karots-pos/internal/features/expenses"
 	"karots-pos/internal/features/heldsales"
+	"karots-pos/internal/features/productgroups"
 	"karots-pos/internal/features/products"
 	"karots-pos/internal/features/purchasereturns"
 	"karots-pos/internal/features/purchases"
@@ -157,6 +158,7 @@ func main() {
 	units.RegisterAPI(e, sqlxDB, cfg)
 	conversions.RegisterAPI(e, sqlxDB, cfg)
 	products.RegisterAPI(e, sqlxDB, cfg)
+	productgroups.RegisterAPI(e, sqlxDB, cfg)
 	stock.RegisterAPI(e, sqlxDB, cfg)
 	customers.RegisterAPI(e, sqlxDB, cfg)
 	suppliers.RegisterAPI(e, sqlxDB, cfg)

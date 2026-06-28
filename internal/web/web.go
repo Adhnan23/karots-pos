@@ -19,6 +19,7 @@ import (
 	"karots-pos/internal/features/denominations"
 	"karots-pos/internal/features/expenses"
 	"karots-pos/internal/features/lockers"
+	"karots-pos/internal/features/productgroups"
 	"karots-pos/internal/features/products"
 	"karots-pos/internal/features/purchasereturns"
 	"karots-pos/internal/features/purchases"
@@ -65,6 +66,7 @@ type Server struct {
 	audit            *audit.Service
 	warranty         *warranty.Service
 	recovery         *recovery.Service
+	groups           *productgroups.Service
 }
 
 // RegisterUI builds UI services and mounts all server-rendered routes. authSvc
@@ -93,6 +95,7 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 		audit:           audit.NewService(db),
 		warranty:        warranty.NewService(db),
 		recovery:        recovery.NewService(db),
+		groups:          productgroups.NewService(db),
 	}
 	s.cashRegister = cashregister.NewService(db, sales.NewService(db)).WithAudit(s.audit)
 	s.cashflow = cashflow.NewService(db, s.sales)
@@ -175,6 +178,19 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	ag.GET("/products/form/:id", admin.ProductForm)
 	ag.GET("/products/:id/barcode", admin.ProductBarcodeForm)
 	ag.POST("/products/:id/barcode", admin.ProductBarcodeAssign)
+
+	ag.GET("/groups", admin.Groups)
+	ag.GET("/groups/tree", admin.GroupsTree)
+	ag.GET("/groups/form", admin.GroupForm)
+	ag.GET("/groups/form/:id", admin.GroupForm)
+	ag.POST("/groups", admin.GroupCreate)
+	ag.PUT("/groups/:id", admin.GroupUpdate)
+	ag.DELETE("/groups/:id", admin.GroupDelete)
+	ag.POST("/groups/:id/move", admin.GroupMove)
+	ag.GET("/groups/:id/items", admin.GroupItems)
+	ag.POST("/groups/:id/items", admin.GroupItemAdd)
+	ag.DELETE("/groups/:id/items/:productId", admin.GroupItemRemove)
+	ag.PUT("/groups/:id/items/:productId/emoji", admin.GroupItemEmoji)
 	ag.POST("/products", admin.ProductCreate)
 	ag.PUT("/products/:id", admin.ProductUpdate)
 	ag.DELETE("/products/:id", admin.ProductDelete)
