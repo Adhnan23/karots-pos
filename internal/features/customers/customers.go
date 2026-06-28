@@ -487,11 +487,12 @@ type DebtReceipt struct {
 }
 
 // DebtFilter narrows the credit-payment list: Query matches the receipt number
-// or the customer name/phone; From/To bound the created_at range (To exclusive).
+// or the customer name/phone; From/To bound the created_at range (To exclusive,
+// nil = unbounded).
 type DebtFilter struct {
 	Query string
-	From  time.Time
-	To    time.Time
+	From  *time.Time
+	To    *time.Time
 	Limit int
 }
 
@@ -513,14 +514,14 @@ func (s *Service) ListPayments(ctx context.Context, f DebtFilter) ([]DebtReceipt
 		args = append(args, "%"+t+"%")
 		n++
 	}
-	if !f.From.IsZero() {
+	if f.From != nil {
 		q += fmt.Sprintf(` AND cp.created_at >= $%d`, n)
-		args = append(args, f.From)
+		args = append(args, *f.From)
 		n++
 	}
-	if !f.To.IsZero() {
+	if f.To != nil {
 		q += fmt.Sprintf(` AND cp.created_at < $%d`, n)
-		args = append(args, f.To)
+		args = append(args, *f.To)
 		n++
 	}
 	q += ` ORDER BY cp.id DESC`

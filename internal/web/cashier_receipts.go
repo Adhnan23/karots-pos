@@ -128,6 +128,101 @@ func (h *cashierUI) ReceiptsWarranty(c echo.Context) error {
 	}))
 }
 
+// ReceiptsCredit renders the Credit tab fragment: DP- credit-payment receipts.
+func (h *cashierUI) ReceiptsCredit(c echo.Context) error {
+	ctx := c.Request().Context()
+	from, to, fromStr, toStr, err := resolveReceiptRange(c)
+	if err != nil {
+		return err
+	}
+	q := strings.TrimSpace(c.QueryParam("q"))
+	rows, err := h.s.customers.ListPayments(ctx, customers.DebtFilter{Query: q, From: from, To: to, Limit: 50})
+	if err != nil {
+		return err
+	}
+	return response.RenderFragment(c, cashierpages.ReceiptsCreditTab(cashierpages.ReceiptsCreditData{
+		Symbol: h.cashierSymbol(ctx),
+		Rows:   rows,
+		Query:  q,
+		Preset: c.QueryParam("preset"),
+		From:   fromStr,
+		To:     toStr,
+	}))
+}
+
+// DebtReceiptView shows one DP- credit-payment receipt print-friendly.
+func (h *cashierUI) DebtReceiptView(c echo.Context) error {
+	ctx := c.Request().Context()
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	r, err := h.s.customers.GetPayment(ctx, id)
+	if err != nil {
+		return err
+	}
+	cfg, err := h.s.settings.Get(ctx)
+	if err != nil {
+		return err
+	}
+	return response.RenderPage(c, cashierpages.DebtReceiptPage(cashierpages.DebtReceiptViewData{
+		CashierName:   middleware.CurrentUserName(c),
+		Role:          middleware.CurrentRole(c),
+		ShowChangePin: h.showChangePin(c),
+		Symbol:        h.cashierSymbol(ctx),
+		Settings:      *cfg,
+		Receipt:       *r,
+	}))
+}
+
+// DebtReceiptPrint (re)sends the DP- credit-payment slip to the thermal printer.
+func (h *cashierUI) DebtReceiptPrint(c echo.Context) error {
+	ctx := c.Request().Context()
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	r, err := h.s.customers.GetPayment(ctx, id)
+	if err != nil {
+		return err
+	}
+	cfg, err := h.s.settings.Get(ctx)
+	if err != nil {
+		return err
+	}
+	target := h.receiptQueue(c, cfg)
+	if strings.TrimSpace(target) == "" {
+		c.Response().Header().Set("HX-Trigger", response.Toast("No receipt printer configured", "error"))
+		return c.NoContent(200)
+	}
+	if err := printing.Raw(ctx, target, h.s.buildDebtSlip(ctx, cfg, debtReceiptToPayment(*r), debtReceiptToCustomer(*r), cashierNameOf(*r))); err != nil {
+		c.Response().Header().Set("HX-Trigger", response.Toast("Print failed: "+err.Error(), "error"))
+		return c.NoContent(200)
+	}
+	c.Response().Header().Set("HX-Trigger", response.Toast("Slip sent to printer", "success"))
+	return c.NoContent(200)
+}
+
+// debtReceiptToPayment / debtReceiptToCustomer adapt a stored DebtReceipt back
+// into the inputs buildDebtSlip expects, so reprint renders an identical slip.
+func debtReceiptToPayment(r customers.DebtReceipt) customers.CustomerPayment {
+	return customers.CustomerPayment{
+		Amount: r.Amount, Method: r.Method, CreatedAt: r.CreatedAt,
+		ReceiptNo: &r.ReceiptNo, BalanceBefore: r.BalanceBefore, BalanceAfter: r.BalanceAfter,
+	}
+}
+
+func debtReceiptToCustomer(r customers.DebtReceipt) *customers.Customer {
+	return &customers.Customer{Name: r.CustomerName, Phone: r.CustomerPhone, CreditLimit: r.CreditLimit}
+}
+
+func cashierNameOf(r customers.DebtReceipt) string {
+	if r.CashierName != nil {
+		return *r.CashierName
+	}
+	return ""
+}
+
 // WarrantyReprint re-sends a warranty replacement slip from the terminal.
 func (h *cashierUI) WarrantyReprint(c echo.Context) error {
 	ctx := c.Request().Context()
