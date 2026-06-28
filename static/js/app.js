@@ -229,7 +229,8 @@ function pos(symbol, defaultType, askToPrint) {
     discount: 0,
     discountType: "fixed", // bill-level discount: "fixed" (Rs) or "percent" (%)
     // Split tender: one or more payment lines (cash / card / online / wallet).
-    payments: [{ method: "cash", amount: 0, reference: "", deviceId: "" }],
+    // No method is pre-selected — the cashier picks one per sale (see selectMethod).
+    payments: [{ method: "", amount: 0, reference: "", deviceId: "" }],
     walletDevices: [], // recharge plugin tender: devices a wallet payment can credit (with live balance)
     busy: false,
     session: null,
@@ -624,7 +625,7 @@ function pos(symbol, defaultType, askToPrint) {
       this.customerId = h.customer_id ? String(h.customer_id) : "";
       this.discount = Number(h.discount) || 0;
       this.discountType = h.discount_type || "fixed";
-      this.payments = [{ method: "cash", amount: 0, reference: "", deviceId: "" }];
+      this.payments = [{ method: "", amount: 0, reference: "", deviceId: "" }];
       this.receipt = null;
       this.showHolds = false;
       await this.deleteHold(h.id, true);
@@ -852,13 +853,36 @@ function pos(symbol, defaultType, askToPrint) {
     },
 
     // --- split-tender payments ---
+    // Pick a payment method, then jump focus straight to the amount input so the
+    // cashier can type the amount without a second click. (No method is pre-selected,
+    // so the cashier always chooses one deliberately.)
+    selectMethod(p, method, ev) {
+      p.method = method;
+      if (method === "wallet") this.loadWalletDevices();
+      const btnGroup = ev && ev.currentTarget && ev.currentTarget.parentElement;
+      const row = btnGroup && btnGroup.parentElement;
+      const amt = row && row.querySelector('input[type="number"]');
+      if (amt) this.$nextTick(() => amt.focus());
+    },
+    // Tab from the amount input goes to this line's detail field — the card/online
+    // reference input or the reload plugin's wallet device combo — skipping the
+    // fill-remaining button, so the cashier reaches it without another click.
+    focusDetail(ev) {
+      const row = ev && ev.currentTarget && ev.currentTarget.closest(".flex");
+      if (!row) return;
+      const detail = [...row.querySelectorAll("[data-tender-detail]")].find((el) => el.offsetParent !== null);
+      if (detail) {
+        ev.preventDefault();
+        detail.focus();
+      }
+    },
     addPayment() {
-      this.payments.push({ method: "card", amount: 0, reference: "", deviceId: "" });
+      this.payments.push({ method: "", amount: 0, reference: "", deviceId: "" });
     },
     removePayment(idx) {
       this.payments.splice(idx, 1);
       if (this.payments.length === 0) {
-        this.payments.push({ method: "cash", amount: 0, reference: "", deviceId: "" });
+        this.payments.push({ method: "", amount: 0, reference: "", deviceId: "" });
       }
     },
     // Lazily load the devices a wallet (eZ Cash / mCash) payment can credit, each
@@ -1002,6 +1026,13 @@ function pos(symbol, defaultType, askToPrint) {
           return;
         }
       }
+      // Every tendered amount must have a method chosen (nothing defaults to cash).
+      for (const p of this.payments) {
+        if (Number(p.amount) > 0 && !p.method) {
+          toast("Choose a payment method for each amount", "error");
+          return;
+        }
+      }
       // A wallet (eZ Cash / mCash) tender must name the device it credits.
       for (const p of this.payments) {
         if (p.method === "wallet" && Number(p.amount) > 0 && !p.deviceId) {
@@ -1070,7 +1101,7 @@ function pos(symbol, defaultType, askToPrint) {
       this.cart = [];
       this.discount = 0;
       this.discountType = "fixed";
-      this.payments = [{ method: "cash", amount: 0, reference: "", deviceId: "" }];
+      this.payments = [{ method: "", amount: 0, reference: "", deviceId: "" }];
       this.customerId = "";
       this.receipt = null;
     },

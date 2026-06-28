@@ -274,19 +274,19 @@ templ POS(d POSData) {
 								<div class="flex flex-wrap items-center gap-1.5">
 									<!-- Payment method: touch buttons (few fixed options) -->
 									<div class="flex rounded border overflow-hidden text-xs">
-										<button type="button" x-on:click="p.method='cash'" x-bind:class="p.method==='cash' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600'" class="px-2 py-1">Cash</button>
-										<button type="button" x-on:click="p.method='card'" x-bind:class="p.method==='card' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600'" class="px-2 py-1 border-l">Card</button>
-										<button type="button" x-on:click="p.method='online'" x-bind:class="p.method==='online' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600'" class="px-2 py-1 border-l">Online</button>
+										<button type="button" x-on:click="selectMethod(p, 'cash', $event)" x-bind:class="p.method==='cash' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600'" class="px-2 py-1">Cash</button>
+										<button type="button" x-on:click="selectMethod(p, 'card', $event)" x-bind:class="p.method==='card' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600'" class="px-2 py-1 border-l">Card</button>
+										<button type="button" x-on:click="selectMethod(p, 'online', $event)" x-bind:class="p.method==='online' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600'" class="px-2 py-1 border-l">Online</button>
 										if len(plugin.TenderMethods()) > 0 {
 											for _, t := range plugin.TenderMethods() {
-												<button type="button" x-on:click={ "p.method='" + t.Value + "'; if(p.method==='wallet') loadWalletDevices()" } x-bind:class={ "p.method==='" + t.Value + "' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600'" } class="px-2 py-1 border-l">{ t.Label }</button>
+												<button type="button" x-on:click={ "selectMethod(p, '" + t.Value + "', $event)" } x-bind:class={ "p.method==='" + t.Value + "' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600'" } class="px-2 py-1 border-l">{ t.Label }</button>
 											}
 										}
 									</div>
-									<input type="number" step="0.01" min="0" x-model.number="p.amount" class="w-24 border rounded px-2 py-1 text-right text-sm" placeholder="0.00"/>
+									<input type="number" step="0.01" min="0" x-model.number="p.amount" x-on:keydown.tab="if(!$event.shiftKey) focusDetail($event)" class="w-24 border rounded px-2 py-1 text-right text-sm" placeholder="0.00"/>
 									<button type="button" x-on:click="fillRemaining(idx)" class="px-1.5 py-1 text-xs rounded border text-slate-500" title="Fill remaining balance">=</button>
-									<input x-show="p.method !== 'cash' && p.method !== 'wallet'" x-model="p.reference" class="flex-1 min-w-0 border rounded px-2 py-1 text-sm" placeholder="ref / last 4"/>
-									<select x-show="p.method === 'wallet'" x-model="p.deviceId" class="flex-1 min-w-0 border rounded px-2 py-1 text-sm">
+									<input x-show="p.method !== 'cash' && p.method !== 'wallet'" x-model="p.reference" data-tender-detail class="flex-1 min-w-0 border rounded px-2 py-1 text-sm" placeholder="ref / last 4"/>
+									<select x-show="p.method === 'wallet'" x-model="p.deviceId" data-tender-detail class="flex-1 min-w-0 border rounded px-2 py-1 text-sm">
 										<option value="">Device…</option>
 										<template x-for="d in walletDevices" x-bind:key="d.id">
 											<option x-bind:value="d.id" x-text="d.carrier + ' · ' + d.label + ' (' + Number(d.balance).toFixed(2) + ')'"></option>
