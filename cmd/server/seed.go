@@ -127,17 +127,16 @@ func seed(db *sqlx.DB) error {
 		cost, sell, wholesale, tax string
 		reorder                    int
 		qty                        string
-		pin                        bool // surface on the cashier default grid
 	}
 	items := []p{
-		{"Sugar 1kg", "", "1000000000017", groceries, kg, "230", "250", "", "", 10, "40", true},
-		{"Tea Leaves 100g", "තේ කොළ 100g", "1000000000031", groceries, pcs, "120", "150", "", "", 10, "30", true},
-		{"Dhal (Mysoor) 1kg", "", "1000000000062", groceries, kg, "300", "340", "320", "", 8, "35", false},
-		{"Rice 1kg (Samba)", "", "1000000000024", riceGrains, kg, "210", "240", "225", "", 15, "60", true},
-		{"Red Rice 1kg", "", "1000000000079", riceGrains, kg, "260", "300", "280", "", 15, "45", false},
-		{"Coca-Cola 1.5L", "", "1000000000048", softDrinks, pcs, "320", "380", "", "", 10, "24", true},
-		{"Sprite 1L", "", "1000000000086", softDrinks, pcs, "260", "310", "", "", 10, "18", false},
-		{"Mineral Water 1L", "", "1000000000055", beverages, pcs, "60", "90", "", "", 20, "50", true},
+		{"Sugar 1kg", "", "1000000000017", groceries, kg, "230", "250", "", "", 10, "40"},
+		{"Tea Leaves 100g", "තේ කොළ 100g", "1000000000031", groceries, pcs, "120", "150", "", "", 10, "30"},
+		{"Dhal (Mysoor) 1kg", "", "1000000000062", groceries, kg, "300", "340", "320", "", 8, "35"},
+		{"Rice 1kg (Samba)", "", "1000000000024", riceGrains, kg, "210", "240", "225", "", 15, "60"},
+		{"Red Rice 1kg", "", "1000000000079", riceGrains, kg, "260", "300", "280", "", 15, "45"},
+		{"Coca-Cola 1.5L", "", "1000000000048", softDrinks, pcs, "320", "380", "", "", 10, "24"},
+		{"Sprite 1L", "", "1000000000086", softDrinks, pcs, "260", "310", "", "", 10, "18"},
+		{"Mineral Water 1L", "", "1000000000055", beverages, pcs, "60", "90", "", "", 20, "50"},
 	}
 	for _, it := range items {
 		bc := it.barcode
@@ -151,7 +150,6 @@ func seed(db *sqlx.DB) error {
 			WholesalePrice: it.wholesale,
 			TaxRate:        it.tax,
 			ReorderLevel:   it.reorder,
-			IsPinned:       it.pin,
 		}
 		if it.nameSi != "" {
 			ns := it.nameSi

@@ -29,17 +29,6 @@ func (h *APIHandler) List(c echo.Context) error {
 	return response.Paged(c, rows, response.NewPageMeta(q.Page, q.Limit, total))
 }
 
-// DefaultGrid returns the cashier's opening product grid (pinned first, then best
-// sellers of the last 30 days). Used by the till on load instead of a blank grid.
-func (h *APIHandler) DefaultGrid(c echo.Context) error {
-	limit, _ := strconv.Atoi(c.QueryParam("limit"))
-	rows, err := h.svc.DefaultGrid(c.Request().Context(), limit)
-	if err != nil {
-		return err
-	}
-	return response.OK(c, rows)
-}
-
 func (h *APIHandler) Get(c echo.Context) error {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
@@ -122,7 +111,6 @@ func RegisterAPI(e *echo.Echo, db *sqlx.DB, cfg *config.Config) {
 
 	g := e.Group("/api/products", jwt)
 	g.GET("", api.List)
-	g.GET("/default", api.DefaultGrid)
 	g.GET("/:id", api.Get)
 	g.GET("/barcode/generate", api.GenerateBarcode)
 	g.GET("/barcode/:code", api.GetByBarcode)

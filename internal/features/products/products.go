@@ -30,7 +30,6 @@ type Product struct {
 	WarrantyMonths      int             `db:"warranty_months"       json:"warranty_months"`
 	IsActive            bool            `db:"is_active"             json:"is_active"`
 	IsService           bool            `db:"is_service"            json:"is_service"`
-	IsPinned            bool            `db:"is_pinned"             json:"is_pinned"`
 	NeedsReview         bool            `db:"needs_review"          json:"needs_review"`
 	PreferredSupplierID *int64          `db:"preferred_supplier_id" json:"preferred_supplier_id,omitempty"`
 	CreatedBy           *int64          `db:"created_by"            json:"created_by,omitempty"`
@@ -65,8 +64,6 @@ type CreateInput struct {
 	// IsService marks a non-stocked service line. Not on the normal admin form
 	// (defaults false); set by plugins via the products service.
 	IsService bool `json:"is_service" form:"is_service"`
-	// IsPinned surfaces the product first on the cashier default grid.
-	IsPinned bool `json:"is_pinned" form:"is_pinned"`
 	// PreferredSupplierID is an optional default supplier (nil/0 = none). The form
 	// posts an empty string for "none"; bind to *int64 so 0 stays nil.
 	PreferredSupplierID *int64 `json:"preferred_supplier_id" form:"preferred_supplier_id"`
@@ -133,26 +130,6 @@ func (r *Repository) List(ctx context.Context, q ListQuery) ([]Product, error) {
 	return rows, err
 }
 
-// DefaultGrid returns the cashier's opening product grid: pinned products first,
-// then the best sellers of the last 30 days, then the rest by name. It powers the
-// till so it opens to common items instead of an empty search.
-func (r *Repository) DefaultGrid(ctx context.Context, limit int) ([]Product, error) {
-	if limit <= 0 || limit > 100 {
-		limit = 60
-	}
-	var rows []Product
-	err := r.db.SelectContext(ctx, &rows, selectProduct+`
-		LEFT JOIN LATERAL (
-			SELECT SUM(si.quantity - si.returned_qty) AS sold
-			FROM sale_items si JOIN sales sa ON sa.id = si.sale_id
-			WHERE si.product_id = p.id AND sa.status <> 'void'
-			  AND sa.created_at >= now() - interval '30 days') sold ON true
-		WHERE p.is_active = true AND p.is_service = false
-		ORDER BY p.is_pinned DESC, COALESCE(sold.sold,0) DESC, p.name
-		LIMIT $1`, limit)
-	return rows, err
-}
-
 func (r *Repository) Count(ctx context.Context, q ListQuery) (int, error) {
 	var n int
 	err := r.db.GetContext(ctx, &n, subcatsCTE+`
@@ -203,7 +180,6 @@ type writeRow struct {
 	TrackSerial                   bool
 	WarrantyMonths                int
 	IsService                     bool   // non-stocked service line (plugin seam)
-	IsPinned                      bool   // surface first on the cashier default grid
 	NeedsReview                   bool   // set by the till quick-add; false for normal creates
 	CreatedBy                     *int64 // the user who quick-added it (nil otherwise)
 	PreferredSupplier             *int64 // optional default supplier (nil = none)
@@ -216,13 +192,13 @@ func (r *Repository) Insert(ctx context.Context, w writeRow) (int64, error) {
 			(name, name_local, barcode, category_id, unit_id,
 			 cost_price, selling_price, wholesale_price, tax_rate, reorder_level,
 			 track_serial, warranty_months, needs_review, created_by, preferred_supplier_id,
-			 is_service, is_pinned)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+			 is_service)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
 		RETURNING id`,
 		w.Name, w.NameLocal, w.Barcode, w.CategoryID, w.UnitID,
 		w.Cost, w.Selling, w.Wholesale, w.Tax, w.Reorder,
 		w.TrackSerial, w.WarrantyMonths, w.NeedsReview, w.CreatedBy, w.PreferredSupplier,
-		w.IsService, w.IsPinned)
+		w.IsService)
 	return id, err
 }
 
@@ -231,11 +207,11 @@ func (r *Repository) Update(ctx context.Context, id int64, w writeRow) error {
 		UPDATE products SET
 			name=$1, name_local=$2, barcode=$3, category_id=$4, unit_id=$5,
 			cost_price=$6, selling_price=$7, wholesale_price=$8, tax_rate=$9, reorder_level=$10,
-			track_serial=$11, warranty_months=$12, preferred_supplier_id=$13, is_pinned=$14
-		WHERE id=$15 AND is_active = true`,
+			track_serial=$11, warranty_months=$12, preferred_supplier_id=$13
+		WHERE id=$14 AND is_active = true`,
 		w.Name, w.NameLocal, w.Barcode, w.CategoryID, w.UnitID,
 		w.Cost, w.Selling, w.Wholesale, w.Tax, w.Reorder,
-		w.TrackSerial, w.WarrantyMonths, w.PreferredSupplier, w.IsPinned, id)
+		w.TrackSerial, w.WarrantyMonths, w.PreferredSupplier, id)
 	if err != nil {
 		return err
 	}
