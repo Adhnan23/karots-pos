@@ -125,6 +125,15 @@ and `/api/customers`. Product entries reuse the shape the cart already expects.
 - `loadDefaultGrid()` and the `/api/products/default` call in `static/js/app.js`
   (replaced by the group view — see Cashier UI).
 
+## Permissions
+
+Group management is **admin/manager only** — it lives entirely in the admin panel,
+which is already gated by `RequireRole(admin, manager)`. Cashiers interact with the
+menu **read-only** at the till (browse + tap to add to cart); the till exposes no edit
+controls. This matches how products/categories/prices already work. The `/api/groups`
+read endpoints are available to any signed-in till user; all mutating group endpoints
+sit under the admin route group.
+
 ## Admin UI
 
 New page **Setup → "Cashier Menu"** (`/admin/groups`), added to the Setup section in
