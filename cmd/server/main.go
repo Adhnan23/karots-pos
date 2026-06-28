@@ -18,13 +18,14 @@ import (
 	"karots-pos/internal/db"
 	"karots-pos/internal/features/audit"
 	"karots-pos/internal/features/auth"
+	"karots-pos/internal/features/cashflow"
 	"karots-pos/internal/features/cashregister"
-	"karots-pos/internal/features/denominations"
-	"karots-pos/internal/features/heldsales"
 	"karots-pos/internal/features/categories"
 	"karots-pos/internal/features/conversions"
 	"karots-pos/internal/features/customers"
+	"karots-pos/internal/features/denominations"
 	"karots-pos/internal/features/expenses"
+	"karots-pos/internal/features/heldsales"
 	"karots-pos/internal/features/products"
 	"karots-pos/internal/features/purchasereturns"
 	"karots-pos/internal/features/purchases"
@@ -166,7 +167,11 @@ func main() {
 	sales.RegisterAPI(e, sqlxDB, cfg)
 	denominations.RegisterAPI(e, sqlxDB, cfg)
 	heldsales.RegisterAPI(e, sqlxDB, cfg)
-	cashregister.RegisterAPI(e, sqlxDB, cfg, sales.NewService(sqlxDB), audit.NewService(sqlxDB))
+	crSvc := cashregister.RegisterAPI(e, sqlxDB, cfg, sales.NewService(sqlxDB), audit.NewService(sqlxDB))
+	// Wire the locker side of till cash events (opening float from a locker,
+	// banking at close, mid-shift moves to/from a locker) through cashflow, which
+	// imports cashregister — so the hook is injected here rather than imported.
+	crSvc.WithLockerLeg(cashflow.NewService(sqlxDB, sales.NewService(sqlxDB)).TillLockerLeg)
 
 	// UI routes (HTMX + Templ)
 	web.RegisterUI(e, sqlxDB, cfg, authSvc)

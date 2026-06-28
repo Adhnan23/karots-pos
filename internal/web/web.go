@@ -129,6 +129,7 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	cg.GET("/receipt/:id", cashier.Receipt)
 	cg.POST("/print/:id", cashier.PrintReceipt)
 	cg.GET("/receipts", cashier.Receipts)
+	cg.GET("/lockers", cashier.CashierLockers) // active lockers for drawer dialogs
 	cg.GET("/labels", cashier.Labels)
 	cg.POST("/labels/send", cashier.LabelsSend)
 	cg.GET("/z/:id", cashier.ZReport) // day-end (Z) report — own session

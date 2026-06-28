@@ -241,6 +241,12 @@ function pos(symbol, defaultType, askToPrint) {
     showDeposit: false,
     depositAmount: 0,
     depositReason: "",
+    // Cash lockers (vault/safe) the drawer can draw float from / bank cash to.
+    lockers: [],
+    openLockerId: "",
+    closeLockerId: "",
+    withdrawLockerId: "",
+    depositLockerId: "",
     showAddCustomer: false,
     newCustomer: { name: "", phone: "", credit_limit: "" },
     closeResult: null,
@@ -260,6 +266,19 @@ function pos(symbol, defaultType, askToPrint) {
       await this.loadCustomers();
       await this.loadUnits();
       await this.loadHolds();
+      await this.loadLockers();
+    },
+
+    // Cash lockers available as a float source (drawer open / pay-in) or
+    // destination (close / withdraw). Best-effort: an empty list just hides the
+    // pickers and the drawer behaves exactly as before.
+    async loadLockers() {
+      try {
+        const json = await apiFetch("GET", "/cashier/lockers");
+        this.lockers = json.data || [];
+      } catch (e) {
+        this.lockers = [];
+      }
     },
 
     money(v) {
@@ -443,10 +462,13 @@ function pos(symbol, defaultType, askToPrint) {
     async openRegister() {
       const json = await apiFetch("POST", "/api/cash-register/open", {
         breakdown: this.buildBreakdown(this.openCounts),
+        source_locker_id: Number(this.openLockerId) || 0,
       });
       this.session = json.data;
       this.openCounts = {};
+      this.openLockerId = "";
       await this.loadSummary();
+      await this.loadLockers();
       // Let plugin quick-action panels (e.g. Reload) that need an open drawer
       // load their session-scoped data now, in case they initialised first.
       window.dispatchEvent(new CustomEvent("register-opened"));
@@ -460,10 +482,13 @@ function pos(symbol, defaultType, askToPrint) {
     async submitClose() {
       const json = await apiFetch("POST", "/api/cash-register/close", {
         breakdown: this.buildBreakdown(this.closeCounts),
+        dest_locker_id: Number(this.closeLockerId) || 0,
       });
       this.closeResult = json.data;
       this.session = null;
+      this.closeLockerId = "";
       await this.loadSummary();
+      await this.loadLockers();
     },
     async withdraw() {
       if (Number(this.withdrawAmount) <= 0) {
@@ -479,11 +504,14 @@ function pos(symbol, defaultType, askToPrint) {
       await apiFetch("POST", "/api/cash-register/withdraw", {
         amount: String(this.withdrawAmount),
         reason: this.withdrawReason,
+        counter_locker_id: Number(this.withdrawLockerId) || 0,
       });
       this.showWithdraw = false;
       this.withdrawAmount = 0;
       this.withdrawReason = "";
+      this.withdrawLockerId = "";
       await this.loadSummary();
+      await this.loadLockers();
       toast("Cash withdrawn", "success");
     },
     async deposit() {
@@ -494,11 +522,14 @@ function pos(symbol, defaultType, askToPrint) {
       await apiFetch("POST", "/api/cash-register/pay-in", {
         amount: String(this.depositAmount),
         reason: this.depositReason,
+        counter_locker_id: Number(this.depositLockerId) || 0,
       });
       this.showDeposit = false;
       this.depositAmount = 0;
       this.depositReason = "";
+      this.depositLockerId = "";
       await this.loadSummary();
+      await this.loadLockers();
       toast("Cash deposited", "success");
     },
     async addCustomer() {

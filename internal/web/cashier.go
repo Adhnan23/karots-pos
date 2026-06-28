@@ -381,6 +381,25 @@ func (h *cashierUI) ReturnSubmit(c echo.Context) error {
 	return response.OK(c, detail)
 }
 
+// CashierLockers returns the active cash lockers as JSON for the POS drawer
+// dialogs (opening float from / banking to / mid-shift move to-from a locker).
+func (h *cashierUI) CashierLockers(c echo.Context) error {
+	ctx := c.Request().Context()
+	rows, err := h.s.lockers.List(ctx, true)
+	if err != nil {
+		return err
+	}
+	out := make([]map[string]any, 0, len(rows))
+	for _, l := range rows {
+		out = append(out, map[string]any{
+			"id":      l.ID,
+			"name":    l.Name,
+			"balance": l.Balance,
+		})
+	}
+	return response.OK(c, out)
+}
+
 // ============================ Damage ============================
 
 func (h *cashierUI) Damage(c echo.Context) error {

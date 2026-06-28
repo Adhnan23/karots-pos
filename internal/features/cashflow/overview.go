@@ -5,9 +5,73 @@ import (
 	"time"
 
 	"karots-pos/internal/apperr"
+	"karots-pos/internal/features/cashregister"
+	"karots-pos/internal/features/lockers"
+	"karots-pos/internal/money"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/shopspring/decimal"
 )
+
+// TillLockerLeg books the locker side (+ a CR- receipt) of a till cash event,
+// inside the cashregister tx. It is injected into cashregister via WithLockerLeg
+// so that package never imports cashflow. The till side is handled by the
+// cashregister itself (opening_cash, closing, or the drawer movement), so this
+// only writes the locker ledger row and the receipt.
+//
+// Direction (delta on the locker):
+//   - open  / payin    : cash came FROM the locker → locker decreases (guarded)
+//   - close / withdraw : cash went   TO the locker → locker increases
+func (s *Service) TillLockerLeg(ctx context.Context, tx *sqlx.Tx, ev cashregister.TillCashEvent) error {
+	lrepo := lockers.NewRepository(tx)
+	out := ev.Kind == "open" || ev.Kind == "payin" // money leaving the locker
+
+	l, err := lrepo.GetForUpdate(ctx, ev.LockerID)
+	if err != nil {
+		return apperr.NotFound("locker")
+	}
+	if out && !l.AllowNegative && ev.Amount.GreaterThan(l.Balance) {
+		return apperr.Conflict(l.Name + " only has " + money.Display(l.Balance) + " available")
+	}
+
+	delta := ev.Amount
+	if out {
+		delta = ev.Amount.Neg()
+	}
+	sessID := ev.SessionID
+	counter := "till"
+	if _, err := lrepo.AddEntry(ctx, lockers.LedgerInput{
+		LockerID: ev.LockerID, BalanceDelta: delta, Kind: "transfer",
+		Counterparty: &counter, CounterTillSession: &sessID, Note: ev.Reason,
+		CreatedBy: actorPtr(ev.UserID),
+	}); err != nil {
+		return apperr.Internal("failed to record locker movement", err)
+	}
+
+	tillLabel := "Till"
+	var name string
+	if err := tx.GetContext(ctx, &name, `SELECT name FROM users WHERE id = $1`, ev.UserID); err == nil && name != "" {
+		tillLabel = "Till — " + name
+	}
+	from, to := tillLabel, l.Name // money into the locker (close / withdraw)
+	if out {
+		from, to = l.Name, tillLabel
+	}
+	if _, err := NewReceiptRepository(tx).Insert(ctx, ReceiptInput{
+		Kind: "transfer", FromLabel: from, ToLabel: to, Amount: ev.Amount,
+		Note: ev.Reason, CreatedBy: actorPtr(ev.UserID),
+	}); err != nil {
+		return apperr.Internal("failed to record money receipt", err)
+	}
+	return nil
+}
+
+func actorPtr(id int64) *int64 {
+	if id <= 0 {
+		return nil
+	}
+	return &id
+}
 
 // LedgerRow is one line of the unified cash-flow ledger — a locker ledger entry
 // or a till cash movement, normalized to a single shape. Delta is signed from the

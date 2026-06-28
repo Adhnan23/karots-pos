@@ -77,18 +77,43 @@ type SessionRow struct {
 type OpenInput struct {
 	OpeningCash string          `json:"opening_cash" form:"opening_cash"`
 	Breakdown   json.RawMessage `json:"breakdown"`
+	// SourceLockerID, when > 0, takes the opening float FROM that locker (debits
+	// it + writes a receipt) instead of treating the float as untracked capital.
+	SourceLockerID int64 `json:"source_locker_id" form:"source_locker_id"`
 }
 
 type CloseInput struct {
 	ClosingCash string          `json:"closing_cash" form:"closing_cash"`
 	Breakdown   json.RawMessage `json:"breakdown"`
+	// DestLockerID, when > 0, banks the counted closing cash INTO that locker
+	// (credits it + writes a receipt).
+	DestLockerID int64 `json:"dest_locker_id" form:"dest_locker_id"`
 }
 
 // MovementInput is a mid-shift withdrawal or pay-in.
 type MovementInput struct {
 	Amount string `json:"amount" form:"amount" validate:"required"`
 	Reason string `json:"reason" form:"reason"`
+	// CounterLockerID, when > 0, names the locker the cash moves to (withdraw) or
+	// from (pay-in), so the move is tracked with a receipt instead of vanishing.
+	CounterLockerID int64 `json:"counter_locker_id" form:"counter_locker_id"`
 }
+
+// TillCashEvent describes a till cash event whose locker side must be booked.
+// Passed to a LockerLeg hook (injected by the web layer) so cashregister never
+// imports cashflow (cashflow already imports cashregister).
+type TillCashEvent struct {
+	Kind      string // "open" | "close" | "withdraw" | "payin"
+	UserID    int64
+	SessionID int64
+	LockerID  int64
+	Amount    decimal.Decimal
+	Reason    string
+}
+
+// LockerLeg books the locker side (+ receipt) of a till cash event, inside the
+// caller's transaction. Injected via WithLockerLeg; nil = locker integration off.
+type LockerLeg func(ctx context.Context, tx *sqlx.Tx, ev TillCashEvent) error
 
 // CloseResult is returned after closing so the UI can show the reconciliation.
 type CloseResult struct {
@@ -243,10 +268,11 @@ func (r *Repository) FindByID(ctx context.Context, id int64) (*SessionRow, error
 }
 
 type Service struct {
-	db    *sqlx.DB
-	repo  *Repository
-	sales *sales.Service
-	audit *audit.Service // optional; nil = no audit recording
+	db        *sqlx.DB
+	repo      *Repository
+	sales     *sales.Service
+	audit     *audit.Service // optional; nil = no audit recording
+	lockerLeg LockerLeg      // optional; nil = locker integration off
 }
 
 func NewService(db *sqlx.DB, salesSvc *sales.Service) *Service {
@@ -257,6 +283,15 @@ func NewService(db *sqlx.DB, salesSvc *sales.Service) *Service {
 // logged. Returns the service for chaining.
 func (s *Service) WithAudit(a *audit.Service) *Service {
 	s.audit = a
+	return s
+}
+
+// WithLockerLeg injects the hook that books the locker side of a till cash event
+// (opening float from a locker, banking at close, mid-shift moves to/from a
+// locker). The web layer supplies it (cashflow.TillLockerLeg) so this package
+// never imports cashflow. Returns the service for chaining.
+func (s *Service) WithLockerLeg(fn LockerLeg) *Service {
+	s.lockerLeg = fn
 	return s
 }
 
@@ -329,7 +364,18 @@ func (s *Service) Open(ctx context.Context, userID int64, in OpenInput) (*Sessio
 		if ierr != nil {
 			return ierr
 		}
-		return repo.AddMovement(ctx, sess.ID, userID, MoveOpening, opening, "opening float", raw)
+		if ierr = repo.AddMovement(ctx, sess.ID, userID, MoveOpening, opening, "opening float", raw); ierr != nil {
+			return ierr
+		}
+		// Take the opening float from a locker (debit it + receipt) when chosen.
+		// The till side is the session's opening_cash, so no extra drawer movement.
+		if in.SourceLockerID > 0 && s.lockerLeg != nil && opening.IsPositive() {
+			return s.lockerLeg(ctx, tx, TillCashEvent{
+				Kind: "open", UserID: userID, SessionID: sess.ID,
+				LockerID: in.SourceLockerID, Amount: opening, Reason: "opening float",
+			})
+		}
+		return nil
 	})
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "idx_cash_register_open_session") {
@@ -367,7 +413,17 @@ func (s *Service) Close(ctx context.Context, userID int64, in CloseInput) (*Clos
 		if cerr := repo.Close(ctx, sess.ID, closing, expected, diff, raw); cerr != nil {
 			return cerr
 		}
-		return repo.AddMovement(ctx, sess.ID, userID, MoveClosing, closing, "counted at close", raw)
+		if cerr := repo.AddMovement(ctx, sess.ID, userID, MoveClosing, closing, "counted at close", raw); cerr != nil {
+			return cerr
+		}
+		// Bank the counted cash into a locker (credit it + receipt) when chosen.
+		if in.DestLockerID > 0 && s.lockerLeg != nil && closing.IsPositive() {
+			return s.lockerLeg(ctx, tx, TillCashEvent{
+				Kind: "close", UserID: userID, SessionID: sess.ID,
+				LockerID: in.DestLockerID, Amount: closing, Reason: "banked at close",
+			})
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, apperr.Internal("failed to close register", err)
@@ -423,8 +479,25 @@ func (s *Service) adjust(ctx context.Context, userID int64, in MovementInput, mt
 	if negate {
 		signed = amt.Neg()
 	}
-	if err := s.repo.AddMovement(ctx, sess.ID, userID, mtype, signed, in.Reason, nil); err != nil {
-		return nil, apperr.Internal("failed to record cash movement", err)
+	// The drawer movement and its locker leg (when a counterparty locker is
+	// chosen) commit together so the till and locker can never drift.
+	if err := appdb.WithTx(ctx, s.db, func(tx *sqlx.Tx) error {
+		if merr := NewRepository(tx).AddMovement(ctx, sess.ID, userID, mtype, signed, in.Reason, nil); merr != nil {
+			return apperr.Internal("failed to record cash movement", merr)
+		}
+		if in.CounterLockerID > 0 && s.lockerLeg != nil {
+			kind := "withdraw"
+			if mtype == MovePayIn {
+				kind = "payin"
+			}
+			return s.lockerLeg(ctx, tx, TillCashEvent{
+				Kind: kind, UserID: userID, SessionID: sess.ID,
+				LockerID: in.CounterLockerID, Amount: amt, Reason: in.Reason,
+			})
+		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 	if mtype == MoveWithdrawal {
 		s.recordAudit(ctx, userID, audit.ActionWithdraw,
