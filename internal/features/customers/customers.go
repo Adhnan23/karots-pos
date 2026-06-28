@@ -62,14 +62,17 @@ type PaymentInput struct {
 
 // CustomerPayment is one recorded credit repayment (the statement ledger).
 type CustomerPayment struct {
-	ID         int64           `db:"id"          json:"id"`
-	CustomerID int64           `db:"customer_id" json:"customer_id"`
-	Amount     decimal.Decimal `db:"amount"      json:"amount"`
-	Method     string          `db:"method"      json:"method"`
-	Reference  *string         `db:"reference"   json:"reference,omitempty"`
-	Note       *string         `db:"note"        json:"note,omitempty"`
-	CreatedBy  *int64          `db:"created_by"  json:"created_by,omitempty"`
-	CreatedAt  time.Time       `db:"created_at"  json:"created_at"`
+	ID            int64            `db:"id"            json:"id"`
+	CustomerID    int64            `db:"customer_id"   json:"customer_id"`
+	Amount        decimal.Decimal  `db:"amount"        json:"amount"`
+	Method        string           `db:"method"        json:"method"`
+	Reference     *string          `db:"reference"     json:"reference,omitempty"`
+	Note          *string          `db:"note"          json:"note,omitempty"`
+	CreatedBy     *int64           `db:"created_by"    json:"created_by,omitempty"`
+	CreatedAt     time.Time        `db:"created_at"    json:"created_at"`
+	ReceiptNo     *string          `db:"receipt_no"    json:"receipt_no"`
+	BalanceBefore *decimal.Decimal `db:"balance_before" json:"balance_before"`
+	BalanceAfter  *decimal.Decimal `db:"balance_after"  json:"balance_after"`
 }
 
 type Repository struct{ q db.Queryer }
@@ -408,9 +411,12 @@ func (s *Service) RecordPayment(ctx context.Context, id int64, in PaymentInput, 
 
 // PaymentResult summarises a recorded credit repayment for the cash mirror.
 type PaymentResult struct {
-	PaymentID int64
-	Amount    decimal.Decimal
-	Method    string
+	PaymentID     int64
+	Amount        decimal.Decimal
+	Method        string
+	ReceiptNo     string
+	BalanceBefore decimal.Decimal
+	BalanceAfter  decimal.Decimal
 }
 
 // RecordPaymentTx records a credit repayment over an existing transaction, so the
@@ -426,20 +432,40 @@ func (s *Service) RecordPaymentTx(ctx context.Context, tx *sqlx.Tx, id int64, in
 		method = "cash"
 	}
 	r := NewRepository(tx)
-	if _, err := r.FindByID(ctx, id); err != nil {
+	cust, err := r.FindByID(ctx, id)
+	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, apperr.NotFound("customer")
 		}
 		return nil, apperr.Internal("failed to load customer", err)
 	}
+	before := cust.OutstandingBalance
+	after := before.Sub(amt)
 	if err := r.AddBalance(ctx, id, amt.Neg()); err != nil {
 		return nil, apperr.Internal("failed to record payment", err)
 	}
-	payID, err := r.InsertPayment(ctx, id, amt, method, in.Reference, in.Note, createdBy)
+	var cb *int64
+	if createdBy > 0 {
+		cb = &createdBy
+	}
+	var payID int64
+	var receiptNo string
+	err = tx.QueryRowxContext(ctx, `
+		INSERT INTO customer_payments
+			(customer_id, amount, method, reference, note, created_by,
+			 receipt_no, balance_before, balance_after)
+		VALUES ($1,$2,$3,$4,$5,$6,
+			'DP-' || lpad(nextval('debt_receipt_seq')::text, 6, '0'), $7, $8)
+		RETURNING id, receipt_no`,
+		id, amt, method, in.Reference, in.Note, cb, before, after,
+	).Scan(&payID, &receiptNo)
 	if err != nil {
 		return nil, apperr.Internal("failed to record payment", err)
 	}
-	return &PaymentResult{PaymentID: payID, Amount: amt, Method: method}, nil
+	return &PaymentResult{
+		PaymentID: payID, Amount: amt, Method: method,
+		ReceiptNo: receiptNo, BalanceBefore: before, BalanceAfter: after,
+	}, nil
 }
 
 // LedgerEntry is one line of a customer statement (a debit raises what the
