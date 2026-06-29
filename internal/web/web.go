@@ -6,6 +6,7 @@
 package web
 
 import (
+	"context"
 	"net/http"
 
 	"karots-pos/internal/config"
@@ -105,6 +106,18 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	cashier := &cashierUI{s: s}
 
 	limiter := auth.NewLoginLimiter()
+	// Reject tokens whose user has since been deleted or deactivated. One small
+	// indexed lookup per authenticated request — negligible for a single-shop POS,
+	// and it gives an immediate force-logout. Fails closed (missing user / query
+	// error → rejected). The hidden system admin is a real, always-active row, so
+	// it is never affected. Installed once here; every JWTAuth instance honours it.
+	middleware.SetUserValidator(func(ctx context.Context, userID int64) bool {
+		var active bool
+		if err := db.GetContext(ctx, &active, `SELECT is_active FROM users WHERE id = $1`, userID); err != nil {
+			return false
+		}
+		return active
+	})
 	jwt := middleware.JWTAuth(cfg.JWTSecret)
 	// pinGuard forces users carrying a server-assigned PIN to change it before
 	// using the app. The /account/pin routes themselves stay ungated.
@@ -114,6 +127,10 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	e.GET("/login", a.ShowLogin)
 	e.POST("/login", a.Login, limiter)
 	e.POST("/logout", a.Logout)
+	// Also accept GET so a bookmarked/typed /logout (or a plain link) logs out
+	// cleanly instead of returning a bare 405. Logout only clears the caller's
+	// own cookie and redirects, so it is safe over GET.
+	e.GET("/logout", a.Logout)
 
 	// Self-service / forced PIN change (all authenticated roles; NOT pin-gated,
 	// so a user forced to change can always reach it).

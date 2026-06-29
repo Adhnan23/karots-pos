@@ -20,7 +20,10 @@ import (
 func (a *adminUI) setupStatus(ctx context.Context) []adminpages.SetupStep {
 	shopNamed, printerSet := false, false
 	if cfg, err := a.s.settings.Get(ctx); err == nil {
-		shopNamed = strings.TrimSpace(cfg.ShopName) != ""
+		// "My Shop" is the migration default, not a real name — keep the step
+		// open until the owner actually renames the shop.
+		name := strings.TrimSpace(cfg.ShopName)
+		shopNamed = name != "" && !strings.EqualFold(name, "My Shop")
 		printerSet = strings.TrimSpace(cfg.ReceiptPrinter) != ""
 	}
 

@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"strings"
 
 	"karots-pos/internal/apperr"
@@ -8,6 +9,21 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/labstack/echo/v4"
 )
+
+// UserValidator reports whether the user behind a verified token may still act —
+// i.e. the account still exists and is active. It is injected so this package
+// keeps no dependency on the auth feature.
+type UserValidator func(ctx context.Context, userID int64) bool
+
+// userValidator is set once at startup (SetUserValidator) and consulted by every
+// JWTAuth instance. A package-level hook keeps JWTAuth's signature unchanged, so
+// the many feature API routes that build their own JWTAuth all get the check for
+// free. When nil, tokens are trusted on signature + expiry alone.
+var userValidator UserValidator
+
+// SetUserValidator installs the account-still-active check used by all JWTAuth
+// middleware. Call it once during startup, before serving requests.
+func SetUserValidator(v UserValidator) { userValidator = v }
 
 const (
 	ctxUserID        = "user_id"
@@ -51,6 +67,12 @@ func JWTAuth(secret string) echo.MiddlewareFunc {
 			})
 			if err != nil {
 				return apperr.Unauthorized("invalid or expired session")
+			}
+			// A valid signature isn't enough: the account may have been deleted or
+			// deactivated since the token was issued. Reject it so a fired/disabled
+			// user is forced out instead of riding their cookie until it expires.
+			if userValidator != nil && !userValidator(c.Request().Context(), claims.UserID) {
+				return apperr.Unauthorized("your account is no longer active — please sign in again")
 			}
 			c.Set(ctxUserID, claims.UserID)
 			c.Set(ctxRole, claims.Role)
