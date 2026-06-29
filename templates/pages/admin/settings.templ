@@ -207,7 +207,9 @@ templ SettingsPage(d SettingsData) {
 			>
 				<label class="block text-sm font-medium mb-1">Restore from a backup file</label>
 				<div class="flex flex-wrap items-center gap-3">
-					<input type="file" name="backup" accept=".gz,.json,.json.gz" required class="text-sm"/>
+					// Include the sniffed MIME types alongside the extensions, else GTK/XFCE
+					// greys out the chooser's OK button for valid .gz/.json.gz backups.
+					<input type="file" name="backup" accept=".gz,.json,.json.gz,application/gzip,application/x-gzip,application/json" required class="text-sm"/>
 					<button type="submit" class="px-5 py-2.5 rounded-lg bg-rose-600 text-white font-medium">⚠ Restore (replaces data)</button>
 				</div>
 				<p class="text-xs text-slate-400 mt-2">Runs over the database connection — works whether Postgres is in Docker or on a VPS, with nothing extra to install.</p>
