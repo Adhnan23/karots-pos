@@ -26,7 +26,10 @@ templ ImportModal(cfg ImportConfig) {
 					<a href={ templ.SafeURL(cfg.TemplateURL) } class="inline-block text-indigo-600 hover:underline text-sm">↓ Download CSV template</a>
 				</div>
 				<form hx-post={ cfg.PostURL } hx-encoding="multipart/form-data" hx-target="#import-result" hx-swap="innerHTML">
-					<input type="file" name="file" accept=".csv,text/csv" required class="block w-full text-sm border rounded-lg p-2"/>
+					// accept lists the extension AND the MIME types Linux desktops (esp.
+					// GTK/XFCE) sniff a .csv as — text/plain and vnd.ms-excel are common;
+					// omitting them greys out the file chooser's OK button for valid CSVs.
+					<input type="file" name="file" accept=".csv,text/csv,application/csv,application/vnd.ms-excel,text/plain" required class="block w-full text-sm border rounded-lg p-2"/>
 					<div class="flex justify-end gap-3 pt-4">
 						<button type="button" class="px-4 py-2 rounded-lg border" x-on:click="$dispatch('close-modal')">Close</button>
 						<button type="submit" class="px-4 py-2 rounded-lg bg-indigo-600 text-white">Upload &amp; Import</button>
