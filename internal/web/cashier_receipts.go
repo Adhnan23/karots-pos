@@ -2,8 +2,10 @@ package web
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"karots-pos/internal/apperr"
 	"karots-pos/internal/datetime"
@@ -19,6 +21,20 @@ import (
 
 	"github.com/labstack/echo/v4"
 )
+
+// monthsLeftLabel formats how much warranty cover remains from now until until,
+// e.g. "11 mo left". Returns "expired" once past, "<1 mo left" within a month.
+func monthsLeftLabel(until time.Time) string {
+	now := time.Now()
+	if !until.After(now) {
+		return "expired"
+	}
+	months := int(until.Sub(now).Hours() / 24 / 30.4375)
+	if months < 1 {
+		return "<1 mo left"
+	}
+	return fmt.Sprintf("%d mo left", months)
+}
 
 // txMethodLabel converts a raw payment method string to a display label.
 func txMethodLabel(method string) string {
@@ -266,6 +282,7 @@ func (s *Server) buildWarrantySlip(ctx context.Context, cfg *settings.Settings, 
 		OldSerial:     oldSerial,
 		NewSerial:     u.SerialNo,
 		WarrantyUntil: datetime.Date(u.WarrantyUntil),
+		WarrantyLeft:  monthsLeftLabel(u.WarrantyUntil),
 	}
 	if u.CustomerName != nil {
 		slip.CustomerName = *u.CustomerName

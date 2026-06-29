@@ -150,6 +150,34 @@ func TestReturnDocumentWalkInOmitsBalance(t *testing.T) {
 	}
 }
 
+func TestWarrantyDocumentShowsMonthsLeft(t *testing.T) {
+	out := WarrantyDocument(WarrantySlip{
+		ProductName:   "Power Bank",
+		OldSerial:     "OLD-1",
+		NewSerial:     "NEW-2",
+		WarrantyUntil: "2027-06-13",
+		WarrantyLeft:  "11 mo left",
+		CustomerName:  "Nimal Perera",
+	}, cfg("80"), Options{})
+	s := string(out)
+	for _, want := range []string{"WARRANTY REPLACEMENT", "2027-06-13", "(11 mo left)", "NEW-2"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("warranty slip missing %q", want)
+		}
+	}
+}
+
+func TestWarrantyDocumentOmitsLeftWhenEmpty(t *testing.T) {
+	out := WarrantyDocument(WarrantySlip{
+		ProductName:   "Power Bank",
+		NewSerial:     "NEW-2",
+		WarrantyUntil: "2027-06-13",
+	}, cfg("80"), Options{})
+	if strings.Contains(string(out), "(") {
+		t.Errorf("warranty slip should omit the months-left parenthetical when empty")
+	}
+}
+
 func TestColumnsByWidth(t *testing.T) {
 	if got := columns("58"); got != 32 {
 		t.Errorf("58mm => %d, want 32", got)

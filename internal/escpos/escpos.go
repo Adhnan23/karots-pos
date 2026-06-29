@@ -326,6 +326,7 @@ type WarrantySlip struct {
 	OldSerial     string
 	NewSerial     string
 	WarrantyUntil string // pre-formatted date (e.g. "2027-06-13")
+	WarrantyLeft  string // pre-formatted remaining cover (e.g. "11 mo left"); optional
 	CustomerName  string
 }
 
@@ -377,7 +378,11 @@ func WarrantyDocument(s WarrantySlip, cfg settings.Settings, opts Options) []byt
 	}
 	b.Write([]byte{esc, 'E', 0})
 	if s.WarrantyUntil != "" {
-		line(&b, leftRight("Warranty until:", ascii(s.WarrantyUntil), w))
+		until := s.WarrantyUntil
+		if s.WarrantyLeft != "" {
+			until += " (" + s.WarrantyLeft + ")"
+		}
+		line(&b, leftRight("Warranty until:", ascii(until), w))
 	}
 	divider(&b, w)
 
