@@ -136,11 +136,37 @@ func strOrNil(s string) *string {
 	return &s
 }
 
+// validatePay normalizes the method and totals the payment, applying every
+// pre-DB check. Both Pay (before opening a tx) and PayTx call it, so invalid
+// input is rejected without ever touching the database.
+func validatePay(in PayInput) (method string, total decimal.Decimal, err error) {
+	m, ok := normMethod(in.Method)
+	if !ok {
+		return "", decimal.Zero, apperr.Validation("payment method must be cash, card or online")
+	}
+	total = in.Unallocated
+	for _, a := range in.Allocations {
+		if a.Amount.IsNegative() {
+			return "", decimal.Zero, apperr.Validation("allocation amounts must not be negative")
+		}
+		total = total.Add(a.Amount)
+	}
+	if !total.IsPositive() {
+		return "", decimal.Zero, apperr.Validation("payment amount must be greater than zero")
+	}
+	return m, total, nil
+}
+
 // Pay records a supplier payment in one transaction: each allocation advances
 // its purchase's paid_amount/status (guarded against overpay), the payment and
 // allocation rows are written, and the supplier's aggregate balance drops by the
 // full amount. Returns the recorded total (for the cash-drawer mirror).
 func (s *Service) Pay(ctx context.Context, supplierID int64, in PayInput, userID int64) (*Result, error) {
+	// Validate before opening a transaction so bad input never touches the DB
+	// (and so unit tests can exercise these paths without a database).
+	if _, _, err := validatePay(in); err != nil {
+		return nil, err
+	}
 	var res Result
 	err := appdb.WithTx(ctx, s.db, func(tx *sqlx.Tx) error {
 		r, err := s.PayTx(ctx, tx, supplierID, in, userID)
@@ -160,19 +186,9 @@ func (s *Service) Pay(ctx context.Context, supplierID int64, in PayInput, userID
 // can book the matching cash move (cashflow.MoveTx) atomically in the same tx.
 // It re-validates the method/total so it is safe to call directly.
 func (s *Service) PayTx(ctx context.Context, tx *sqlx.Tx, supplierID int64, in PayInput, userID int64) (*Result, error) {
-	method, ok := normMethod(in.Method)
-	if !ok {
-		return nil, apperr.Validation("payment method must be cash, card or online")
-	}
-	total := in.Unallocated
-	for _, a := range in.Allocations {
-		if a.Amount.IsNegative() {
-			return nil, apperr.Validation("allocation amounts must not be negative")
-		}
-		total = total.Add(a.Amount)
-	}
-	if !total.IsPositive() {
-		return nil, apperr.Validation("payment amount must be greater than zero")
+	method, total, err := validatePay(in)
+	if err != nil {
+		return nil, err
 	}
 
 	supRepo := suppliers.NewRepository(tx)
