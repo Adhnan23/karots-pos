@@ -193,6 +193,7 @@ templ RcWarrantyTab(d RcWarrantyData) {
 								if cl.ReplacementUnitID != nil {
 									<button type="button" hx-post={ "/admin/receipts/warranty/" + strconv.FormatInt(cl.ID, 10) + "/print" } hx-swap="none" class="px-3 py-1 rounded-lg bg-indigo-600 text-white text-xs font-medium">🧾 Reprint</button>
 								}
+								<a href={ templ.SafeURL("/admin/receipts/warranty/" + strconv.FormatInt(cl.ID, 10)) } target="_blank" class="ml-2 px-3 py-1 rounded-lg border text-slate-600 text-xs font-medium">View</a>
 							</td>
 						</tr>
 					}
@@ -286,6 +287,70 @@ templ RcDebtReceiptPage(d RcDebtViewData) {
 				<div class="flex gap-2 mt-5 no-print">
 					<button onclick="window.print()" class="flex-1 py-2 rounded-lg bg-slate-800 text-white text-sm">Print</button>
 					<button type="button" hx-post={ "/admin/receipts/credit/" + strconv.FormatInt(d.Receipt.ID, 10) + "/print" } hx-swap="none" class="flex-1 py-2 rounded-lg bg-indigo-600 text-white text-sm">🧾 Reprint slip</button>
+				</div>
+			</div>
+		</div>
+	}
+}
+
+type RcWarrantyViewData struct {
+	UserName      string
+	Settings      settings.Settings
+	Claim         warranty.Claim
+	WarrantyUntil string // formatted end date, empty if no replacement
+	WarrantyLeft  string // e.g. "11 mo left"
+}
+
+// RcWarrantyReceiptPage shows one warranty replacement slip print-friendly (admin).
+templ RcWarrantyReceiptPage(d RcWarrantyViewData) {
+	@layouts.Admin("Warranty slip", d.UserName, "money") {
+		<div class="p-6">
+			<div class="max-w-sm mx-auto bg-white rounded-2xl shadow-sm p-6">
+				<div class="text-center mb-3">
+					<div class="font-bold text-lg">{ d.Settings.ShopName }</div>
+					if d.Settings.Phone != nil {
+						<div class="text-xs text-slate-500">{ *d.Settings.Phone }</div>
+					}
+				</div>
+				<div class="text-center font-semibold uppercase text-sm border-y py-1 mb-3">Warranty Replacement</div>
+				<dl class="text-sm space-y-1">
+					<div class="flex justify-between"><dt class="text-slate-500">Date</dt><dd>{ datetime.DateTime(d.Claim.CreatedAt) }</dd></div>
+					<div class="flex justify-between"><dt class="text-slate-500">Customer</dt>
+						if d.Claim.CustomerName != nil {
+							<dd>{ *d.Claim.CustomerName }</dd>
+						} else {
+							<dd>Walk-in</dd>
+						}
+					</div>
+					<div class="flex justify-between"><dt class="text-slate-500">Product</dt><dd class="text-right">{ d.Claim.ProductName }</dd></div>
+					<div class="flex justify-between border-t pt-1 mt-1"><dt class="text-slate-500">Returned serial</dt><dd>{ d.Claim.OldSerial }</dd></div>
+					<div class="flex justify-between font-semibold"><dt>New serial</dt>
+						if d.Claim.ReplacementSerial != nil {
+							<dd>{ *d.Claim.ReplacementSerial }</dd>
+						} else {
+							<dd>—</dd>
+						}
+					</div>
+					if d.WarrantyUntil != "" {
+						<div class="flex justify-between border-t pt-1 mt-1"><dt class="text-slate-500">Warranty until</dt>
+							<dd>
+								{ d.WarrantyUntil }
+								if d.WarrantyLeft != "" {
+									<span class="text-slate-400">({ d.WarrantyLeft })</span>
+								}
+							</dd>
+						</div>
+					}
+					if d.Claim.Reason != nil && *d.Claim.Reason != "" {
+						<div class="flex justify-between"><dt class="text-slate-500">Reason</dt><dd class="text-right">{ *d.Claim.Reason }</dd></div>
+					}
+					<div class="flex justify-between"><dt class="text-slate-500">Handled by</dt><dd>{ d.Claim.HandledByName }</dd></div>
+				</dl>
+				<div class="flex gap-2 mt-5 no-print">
+					<button onclick="window.print()" class="flex-1 py-2 rounded-lg bg-slate-800 text-white text-sm">Print</button>
+					if d.Claim.ReplacementUnitID != nil {
+						<button type="button" hx-post={ "/admin/receipts/warranty/" + strconv.FormatInt(d.Claim.ID, 10) + "/print" } hx-swap="none" class="flex-1 py-2 rounded-lg bg-indigo-600 text-white text-sm">🧾 Reprint slip</button>
+					}
 				</div>
 			</div>
 		</div>

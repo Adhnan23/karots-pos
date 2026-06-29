@@ -239,6 +239,33 @@ func cashierNameOf(r customers.DebtReceipt) string {
 	return ""
 }
 
+// WarrantyReceiptView shows one warranty replacement slip print-friendly.
+func (h *cashierUI) WarrantyReceiptView(c echo.Context) error {
+	ctx := c.Request().Context()
+	id, err := strconv.ParseInt(c.Param("claimId"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	cl, err := h.s.warranty.GetClaim(ctx, id)
+	if err != nil {
+		return err
+	}
+	cfg, err := h.s.settings.Get(ctx)
+	if err != nil {
+		return err
+	}
+	until, left := h.s.warrantyCover(ctx, cl)
+	return response.RenderPage(c, cashierpages.WarrantyReceiptPage(cashierpages.WarrantyReceiptViewData{
+		CashierName:   middleware.CurrentUserName(c),
+		Role:          middleware.CurrentRole(c),
+		ShowChangePin: h.showChangePin(c),
+		Settings:      *cfg,
+		Claim:         *cl,
+		WarrantyUntil: until,
+		WarrantyLeft:  left,
+	}))
+}
+
 // WarrantyReprint re-sends a warranty replacement slip from the terminal.
 func (h *cashierUI) WarrantyReprint(c echo.Context) error {
 	ctx := c.Request().Context()
@@ -273,6 +300,20 @@ func (h *cashierUI) WarrantyReprint(c echo.Context) error {
 	}
 	c.Response().Header().Set("HX-Trigger", response.Toast("Warranty slip sent to printer", "success"))
 	return c.NoContent(200)
+}
+
+// warrantyCover resolves a claim's replacement-unit cover for the view page:
+// the formatted end date and remaining months. Returns empty strings when the
+// claim has no replacement unit (e.g. repair/refund resolution).
+func (s *Server) warrantyCover(ctx context.Context, cl *warranty.Claim) (until, left string) {
+	if cl.ReplacementUnitID == nil {
+		return "", ""
+	}
+	u, err := s.warranty.GetUnit(ctx, *cl.ReplacementUnitID)
+	if err != nil {
+		return "", ""
+	}
+	return datetime.Date(u.WarrantyUntil), monthsLeftLabel(u.WarrantyUntil)
 }
 
 // buildWarrantySlip renders a replacement slip for (re)printing (UI-agnostic).

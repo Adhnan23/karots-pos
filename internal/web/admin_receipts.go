@@ -125,6 +125,31 @@ func (a *adminUI) WarrantyReprint(c echo.Context) error {
 	return c.NoContent(200)
 }
 
+// WarrantyReceiptView shows one warranty replacement slip print-friendly (admin).
+func (a *adminUI) WarrantyReceiptView(c echo.Context) error {
+	ctx := c.Request().Context()
+	id, err := strconv.ParseInt(c.Param("claimId"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	cl, err := a.s.warranty.GetClaim(ctx, id)
+	if err != nil {
+		return err
+	}
+	cfg, err := a.s.settings.Get(ctx)
+	if err != nil {
+		return err
+	}
+	until, left := a.s.warrantyCover(ctx, cl)
+	return response.RenderPage(c, adminpages.RcWarrantyReceiptPage(adminpages.RcWarrantyViewData{
+		UserName:      middleware.CurrentUserName(c),
+		Settings:      *cfg,
+		Claim:         *cl,
+		WarrantyUntil: until,
+		WarrantyLeft:  left,
+	}))
+}
+
 // ReceiptsCredit renders the admin Credit tab fragment: DP- credit-payment receipts.
 func (a *adminUI) ReceiptsCredit(c echo.Context) error {
 	ctx := c.Request().Context()
