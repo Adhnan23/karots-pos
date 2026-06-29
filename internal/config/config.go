@@ -37,7 +37,11 @@ func Load() *Config {
 		DatabaseURL:    mustEnv("DATABASE_URL"),
 		ServerPort:     mustInt("SERVER_PORT", 3000),
 		JWTSecret:      mustEnv("JWT_SECRET"),
-		JWTAccessTTL:   mustDuration("JWT_EXPIRES_IN", 15*time.Minute),
+		// Default to a full shift: the UI session is a single access-token cookie
+		// with no sliding refresh, so a short TTL silently logs cashiers out mid-task
+		// (e.g. losing a long stock-take) when JWT_EXPIRES_IN isn't set. 12h matches
+		// a working day; lower it via the env var if stricter sessions are needed.
+		JWTAccessTTL:   mustDuration("JWT_EXPIRES_IN", 12*time.Hour),
 		JWTRefreshTTL:  mustDuration("JWT_REFRESH_EXPIRES_IN", 7*24*time.Hour),
 		CORSOrigins:    strings.Split(getEnv("CORS_ORIGINS", "http://localhost:3000"), ","),
 		BackupDir:      getEnv("BACKUP_DIR", ""),
