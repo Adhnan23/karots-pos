@@ -31,8 +31,8 @@ const FormatVersion = 1
 var skipTables = map[string]bool{"goose_db_version": true}
 
 type Table struct {
-	Name    string     `json:"name"`
-	Columns []string   `json:"columns"`
+	Name    string      `json:"name"`
+	Columns []string    `json:"columns"`
 	Rows    [][]*string `json:"rows"`
 }
 
@@ -128,6 +128,14 @@ func Restore(ctx context.Context, db *sqlx.DB, r io.Reader) error {
 		if err := resetSequences(ctx, tx, t.Name, t.Columns); err != nil {
 			return fmt.Errorf("reset sequences for %s: %w", t.Name, err)
 		}
+	}
+
+	// Standalone receipt-number sequences (S-/CR-/DP-) are not owned by a column,
+	// so resetSequences (which relies on pg_get_serial_sequence) cannot see them.
+	// Advance them explicitly or the first post-restore receipt collides on the
+	// unique receipt_no constraint.
+	if err := resetReceiptSequences(ctx, tx, exists); err != nil {
+		return fmt.Errorf("reset receipt sequences: %w", err)
 	}
 
 	return tx.Commit()
@@ -254,6 +262,44 @@ func resetSequences(ctx context.Context, tx *sqlx.Tx, table string, cols []strin
 		_, err := tx.ExecContext(ctx, fmt.Sprintf(
 			`SELECT setval('%s', GREATEST((SELECT COALESCE(MAX(%s), 0) FROM %s), 1), (SELECT COUNT(*) FROM %s) > 0)`,
 			seq.String, quoteIdent(c), quoteIdent(table), quoteIdent(table)))
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// receiptSequences lists the standalone (non-column-owned) sequences that mint
+// human-friendly receipt numbers, paired with the table/column those numbers
+// live in. The numeric value is recovered by stripping the prefix (e.g. "CR-").
+var receiptSequences = []struct{ Seq, Table, Col string }{
+	{"sales_receipt_seq", "sales", "receipt_no"},            // S-00001
+	{"money_receipt_seq", "money_receipts", "receipt_no"},   // CR-000001
+	{"debt_receipt_seq", "customer_payments", "receipt_no"}, // DP-000001
+}
+
+// resetReceiptSequences advances each receipt-number sequence past the largest
+// number already present, so future receipts don't collide with restored ones.
+// It is tolerant of missing tables/sequences (older or plugin-trimmed schemas).
+func resetReceiptSequences(ctx context.Context, tx *sqlx.Tx, exists map[string]bool) error {
+	for _, rs := range receiptSequences {
+		if !exists[rs.Table] {
+			continue
+		}
+		var hasSeq bool
+		if err := tx.GetContext(ctx, &hasSeq,
+			`SELECT EXISTS (SELECT 1 FROM pg_class WHERE relkind = 'S' AND relname = $1)`, rs.Seq); err != nil {
+			return err
+		}
+		if !hasSeq {
+			continue
+		}
+		// max numeric suffix across the column (non-digits stripped); 0 when empty.
+		_, err := tx.ExecContext(ctx, fmt.Sprintf(
+			`SELECT setval('%s',
+				GREATEST((SELECT COALESCE(MAX(NULLIF(regexp_replace(%s, '\D', '', 'g'), '')::bigint), 0) FROM %s), 1),
+				(SELECT COUNT(*) FROM %s) > 0)`,
+			rs.Seq, quoteIdent(rs.Col), quoteIdent(rs.Table), quoteIdent(rs.Table)))
 		if err != nil {
 			return err
 		}
