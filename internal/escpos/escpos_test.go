@@ -16,16 +16,16 @@ func sampleDetail() sales.Detail {
 	cust := "Walk-in"
 	return sales.Detail{
 		Sale: sales.Sale{
-			ReceiptNo:   "R-0001",
-			Subtotal:    d("1500.00"),
-			Discount:    d("100.00"),
-			Total:       d("1400.00"),
-			PaidAmount:  d("2000.00"),
-			ChangeGiven: d("600.00"),
-			Status:      "paid",
-			CashierName: "Kamal",
+			ReceiptNo:    "R-0001",
+			Subtotal:     d("1500.00"),
+			Discount:     d("100.00"),
+			Total:        d("1400.00"),
+			PaidAmount:   d("2000.00"),
+			ChangeGiven:  d("600.00"),
+			Status:       "paid",
+			CashierName:  "Kamal",
 			CustomerName: &cust,
-			CreatedAt:   time.Date(2026, 6, 10, 14, 30, 0, 0, time.UTC),
+			CreatedAt:    time.Date(2026, 6, 10, 14, 30, 0, 0, time.UTC),
 		},
 		Items: []sales.SaleItem{
 			{ProductName: "Onion", Quantity: d("2.25"), UnitAbbr: "kg", UnitPrice: d("400.00"), Subtotal: d("900.00")},
@@ -107,6 +107,46 @@ func TestReturnDocumentIsASCIIAndCut(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Errorf("refund slip missing %q", want)
 		}
+	}
+}
+
+func TestReturnDocumentShowsRemainingBalance(t *testing.T) {
+	d := decimal.RequireFromString
+	name := "Nimal Perera"
+	bal := d("1920.00")
+	rr := sales.ReturnReceipt{
+		ReceiptNo:        "S-0008",
+		CreatedAt:        time.Date(2026, 6, 11, 9, 0, 0, 0, time.UTC),
+		Refund:           d("0.00"),
+		CreditReduction:  d("400.00"),
+		CustomerName:     &name,
+		RemainingBalance: &bal,
+		Items: []sales.ReturnReceiptItem{
+			{ProductName: "Onion", UnitAbbr: "kg", Quantity: d("1.00"), Refund: d("0.00")},
+		},
+	}
+	s := string(ReturnDocument(rr, cfg("80"), Options{}))
+	for _, want := range []string{"Customer:", "Nimal Perera", "Balance due", "1,920.00"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("refund slip missing %q", want)
+		}
+	}
+}
+
+func TestReturnDocumentWalkInOmitsBalance(t *testing.T) {
+	d := decimal.RequireFromString
+	rr := sales.ReturnReceipt{
+		ReceiptNo:       "S-0009",
+		CreatedAt:       time.Date(2026, 6, 11, 9, 0, 0, 0, time.UTC),
+		Refund:          d("400.00"),
+		CreditReduction: d("0.00"),
+		Items: []sales.ReturnReceiptItem{
+			{ProductName: "Onion", UnitAbbr: "kg", Quantity: d("1.00"), Refund: d("400.00")},
+		},
+	}
+	s := string(ReturnDocument(rr, cfg("80"), Options{}))
+	if strings.Contains(s, "Customer:") || strings.Contains(s, "Balance due") {
+		t.Errorf("walk-in refund slip should omit customer/balance: %q", s)
 	}
 }
 

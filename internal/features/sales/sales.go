@@ -206,13 +206,15 @@ func (r *Repository) InsertSaleReturnItem(ctx context.Context, returnID, saleIte
 // ReturnReceipt is the data for a printed refund slip: the most recent return on
 // a sale, with its returned lines and refund/credit split.
 type ReturnReceipt struct {
-	ReturnID        int64           `db:"id"`
-	ReceiptNo       string          `db:"receipt_no"`
-	CreatedAt       time.Time       `db:"created_at"`
-	Reason          *string         `db:"reason"`
-	Refund          decimal.Decimal `db:"refund_amount"`
-	CreditReduction decimal.Decimal `db:"credit_reduction"`
-	Items           []ReturnReceiptItem
+	ReturnID         int64            `db:"id"`
+	ReceiptNo        string           `db:"receipt_no"`
+	CreatedAt        time.Time        `db:"created_at"`
+	Reason           *string          `db:"reason"`
+	Refund           decimal.Decimal  `db:"refund_amount"`
+	CreditReduction  decimal.Decimal  `db:"credit_reduction"`
+	CustomerName     *string          `db:"customer_name"`
+	RemainingBalance *decimal.Decimal `db:"remaining_balance"`
+	Items            []ReturnReceiptItem
 }
 
 type ReturnReceiptItem struct {
@@ -227,8 +229,10 @@ type ReturnReceiptItem struct {
 func (r *Repository) LatestReturn(ctx context.Context, saleID int64) (*ReturnReceipt, error) {
 	var rr ReturnReceipt
 	if err := r.q.GetContext(ctx, &rr, `
-		SELECT sr.id, s.receipt_no, sr.created_at, sr.reason, sr.refund_amount, sr.credit_reduction
+		SELECT sr.id, s.receipt_no, sr.created_at, sr.reason, sr.refund_amount, sr.credit_reduction,
+		       c.name AS customer_name, c.outstanding_balance AS remaining_balance
 		FROM sale_returns sr JOIN sales s ON s.id = sr.sale_id
+		LEFT JOIN customers c ON c.id = s.customer_id
 		WHERE sr.sale_id = $1 ORDER BY sr.id DESC LIMIT 1`, saleID); err != nil {
 		return nil, err
 	}

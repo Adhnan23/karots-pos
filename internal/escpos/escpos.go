@@ -75,8 +75,8 @@ func Document(d sales.Detail, cfg settings.Settings, opts Options) []byte {
 	b.Write([]byte{esc, 'E', 1})   // bold on
 	b.Write([]byte{gs, '!', 0x11}) // double width + height
 	line(&b, ascii(cfg.ShopName))
-	b.Write([]byte{gs, '!', 0x00})  // normal size
-	b.Write([]byte{esc, 'E', 0})    // bold off
+	b.Write([]byte{gs, '!', 0x00}) // normal size
+	b.Write([]byte{esc, 'E', 0})   // bold off
 	// Secondary shop name (Sinhala/Tamil) is rendered as an image by the caller
 	// because the built-in font can't draw it; printed here if supplied.
 	if len(opts.SubName) > 0 {
@@ -277,6 +277,9 @@ func ReturnDocument(rr sales.ReturnReceipt, cfg settings.Settings, opts Options)
 	divider(&b, w)
 	line(&b, leftRight("Orig. receipt:", rr.ReceiptNo, w))
 	line(&b, leftRight("Date:", datetime.DateTime(rr.CreatedAt), w))
+	if rr.CustomerName != nil && *rr.CustomerName != "" {
+		line(&b, leftRight("Customer:", ascii(*rr.CustomerName), w))
+	}
 	if rr.Reason != nil && *rr.Reason != "" {
 		for _, ln := range wrap("Reason: "+ascii(*rr.Reason), w) {
 			line(&b, ln)
@@ -300,6 +303,9 @@ func ReturnDocument(rr sales.ReturnReceipt, cfg settings.Settings, opts Options)
 	b.Write([]byte{esc, 'E', 0})
 	if rr.CreditReduction.IsPositive() {
 		line(&b, leftRight("Credit reduced", money.Format(sym, rr.CreditReduction), w))
+	}
+	if rr.RemainingBalance != nil {
+		line(&b, leftRight("Balance due", money.Format(sym, *rr.RemainingBalance), w))
 	}
 	divider(&b, w)
 
@@ -389,8 +395,8 @@ func WarrantyDocument(s WarrantySlip, cfg settings.Settings, opts Options) []byt
 // customer is handed after making a payment toward their outstanding balance.
 type DebtSlip struct {
 	ReceiptNo, Date, CustomerName, CustomerPhone, Method, CashierName string
-	Amount                                   decimal.Decimal
-	BalanceBefore, BalanceAfter, CreditLimit *decimal.Decimal
+	Amount                                                            decimal.Decimal
+	BalanceBefore, BalanceAfter, CreditLimit                          *decimal.Decimal
 }
 
 // DebtDocument builds the ESC/POS byte stream for a credit payment slip.
