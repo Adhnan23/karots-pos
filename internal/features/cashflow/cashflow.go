@@ -199,7 +199,7 @@ func (s *Service) writeReceipt(ctx context.Context, q appdb.Queryer, lrepo *lock
 	return rec, nil
 }
 
-// label renders one endpoint for a receipt: a locker's name, "Till — <cashier>",
+// label renders one endpoint for a receipt: a locker's name, "Till - <cashier>",
 // or the party name (else "External") for the trading counterparty. It reads over
 // the same queryer (tx) as the move so the label reflects the committed state.
 func label(ctx context.Context, q appdb.Queryer, lrepo *lockers.Repository, loc Location, sess *cashregister.Session, party string) string {
@@ -217,7 +217,7 @@ func label(ctx context.Context, q appdb.Queryer, lrepo *lockers.Repository, loc 
 		if name == "" {
 			return "Till"
 		}
-		return "Till — " + name
+		return "Till - " + name
 	default: // External
 		if party != "" {
 			return party

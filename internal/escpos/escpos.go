@@ -574,6 +574,12 @@ func deref(p *string) string {
 // multibyte runes) with '?', so the printer's PC437 code page never renders
 // the CJK garbage seen when raw bytes are misinterpreted. Non-Latin shop text
 // (e.g. Sinhala) won't print on the built-in font — use the HTML receipt for that.
+// ASCII sanitises an arbitrary string to the printable ASCII subset the built-in
+// thermal font can render (anything else becomes '?'). Exported for callers that
+// hand-build slips outside this package (e.g. the cashflow money receipt), so a
+// stray em-dash or a non-Latin name can't reach the printer as codepage garbage.
+func ASCII(s string) string { return ascii(s) }
+
 func ascii(s string) string {
 	var b strings.Builder
 	for _, r := range s {
