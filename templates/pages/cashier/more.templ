@@ -72,7 +72,7 @@ templ ReturnsTable(d ReturnsData) {
 						</td>
 						<td class="py-2 px-3 text-right whitespace-nowrap">
 							<button type="button" hx-post={ "/cashier/print/" + strconv.FormatInt(s.ID, 10) } hx-swap="none" class="text-indigo-600 hover:underline mr-3">🧾 Print</button>
-							<a href={ templ.SafeURL("/cashier/receipt/" + strconv.FormatInt(s.ID, 10)) } target="_blank" class="text-slate-500 hover:underline mr-3">View</a>
+							<a href={ templ.SafeURL("/cashier/receipt/" + strconv.FormatInt(s.ID, 10)) } class="text-slate-500 hover:underline mr-3">View</a>
 							if s.Status != "returned" {
 								<button
 									hx-get={ "/cashier/returns/" + strconv.FormatInt(s.ID, 10) }

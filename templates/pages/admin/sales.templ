@@ -89,7 +89,7 @@ templ SalesRows(rows []sales.Sale, symbol string) {
 		for _, s := range rows {
 			<tr class="border-b last:border-0">
 				<td class="py-2 px-3 font-medium">
-					<a class="text-indigo-600 hover:underline" href={ templ.SafeURL("/cashier/receipt/" + strconv.FormatInt(s.ID, 10)) } target="_blank">{ s.ReceiptNo }</a>
+					<a class="text-indigo-600 hover:underline" href={ templ.SafeURL("/cashier/receipt/" + strconv.FormatInt(s.ID, 10)) }>{ s.ReceiptNo }</a>
 				</td>
 				<td class="py-2 px-3 text-slate-500">{ s.CreatedAt.Format("2006-01-02 15:04") }</td>
 				<td class="py-2 px-3">{ s.CashierName }</td>

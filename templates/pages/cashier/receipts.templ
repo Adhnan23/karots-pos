@@ -77,7 +77,7 @@ templ ReceiptsSalesTab(d ReceiptsData) {
 							<td class="px-4 py-2 text-right">{ money.Format(d.Symbol, s.Total) }</td>
 							<td class="px-4 py-2 text-right">
 								<button type="button" hx-post={ "/cashier/print/" + strconv.FormatInt(s.ID, 10) } hx-swap="none" class="px-3 py-1 rounded-lg bg-indigo-600 text-white text-xs font-medium">🧾 Reprint</button>
-								<a href={ templ.SafeURL("/cashier/receipt/" + strconv.FormatInt(s.ID, 10)) } target="_blank" class="ml-2 px-3 py-1 rounded-lg border text-slate-600 text-xs font-medium">View</a>
+								<a href={ templ.SafeURL("/cashier/receipt/" + strconv.FormatInt(s.ID, 10)) } class="ml-2 px-3 py-1 rounded-lg border text-slate-600 text-xs font-medium">View</a>
 							</td>
 						</tr>
 					}

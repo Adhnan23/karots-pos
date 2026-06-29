@@ -8,6 +8,7 @@ import (
 	"karots-pos/internal/features/settings"
 	"karots-pos/internal/money"
 	"karots-pos/templates/layouts"
+	"karots-pos/templates/shared"
 )
 
 type MoneyReceiptsData struct {
@@ -92,65 +93,30 @@ templ MoneyReceiptsPage(d MoneyReceiptsData) {
 }
 
 type MoneyReceiptData struct {
-	UserName string
+	Thermal  shared.ThermalData
 	Settings settings.Settings
 	Receipt  cashflow.Receipt
 }
 
+// MoneyReceiptPage shows one CR- receipt as a roll-sized thermal slip (58/80mm
+// from settings) — identical to the cashier Cash receipt view.
 templ MoneyReceiptPage(d MoneyReceiptData) {
-	@layouts.Admin("Receipt "+d.Receipt.ReceiptNo, d.UserName, "money-receipts") {
-		<div class="no-print flex items-center justify-between mb-6">
-			<a href="/admin/money-receipts" class="text-sm text-indigo-600 hover:underline">← Cash Receipts</a>
-			<div class="flex gap-2">
-				<button onclick="window.print()" class="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium">🖨 Print</button>
-				<button
-					hx-post={ "/admin/money-receipts/" + strconv.FormatInt(d.Receipt.ID, 10) + "/print" }
-					hx-swap="none"
-					class="px-4 py-2 rounded-lg bg-white border text-slate-700 text-sm font-medium">Reprint slip</button>
-			</div>
-		</div>
-
-		<div class="bg-white rounded-2xl shadow-sm max-w-md mx-auto p-8 print:shadow-none">
-			<div class="text-center border-b pb-4 mb-4">
-				if d.Settings.LogoSrc() != "" {
-					<img class="h-12 mx-auto mb-2" src={ templ.SafeURL(d.Settings.LogoSrc()) } alt="logo"/>
-				}
-				<div class="text-lg font-bold">{ d.Settings.ShopName }</div>
-				if d.Settings.Address != nil && *d.Settings.Address != "" {
-					<div class="text-xs text-slate-500">{ *d.Settings.Address }</div>
-				}
-				if d.Settings.Phone != nil && *d.Settings.Phone != "" {
-					<div class="text-xs text-slate-500">Tel: { *d.Settings.Phone }</div>
-				}
-			</div>
-
-			<div class="text-center mb-4">
-				<div class="text-xs uppercase tracking-wide text-slate-400">{ mrKindLabel(d.Receipt.Kind) } receipt</div>
-				<div class="text-2xl font-bold">{ d.Receipt.ReceiptNo }</div>
-			</div>
-
-			<dl class="text-sm space-y-1.5">
-				<div class="flex justify-between"><dt class="text-slate-500">Date</dt><dd>{ datetime.DateTime(d.Receipt.CreatedAt) }</dd></div>
-				<div class="flex justify-between"><dt class="text-slate-500">From</dt><dd class="font-medium">{ d.Receipt.FromLabel }</dd></div>
-				<div class="flex justify-between"><dt class="text-slate-500">To</dt><dd class="font-medium">{ d.Receipt.ToLabel }</dd></div>
-				if d.Receipt.Party != "" {
-					<div class="flex justify-between"><dt class="text-slate-500">Party</dt><dd>{ d.Receipt.Party }</dd></div>
-				}
-				if d.Receipt.Note != "" {
-					<div class="flex justify-between"><dt class="text-slate-500">Note</dt><dd>{ d.Receipt.Note }</dd></div>
-				}
-				if d.Receipt.CreatedByName != nil {
-					<div class="flex justify-between"><dt class="text-slate-500">By</dt><dd>{ *d.Receipt.CreatedByName }</dd></div>
-				}
-			</dl>
-
-			<div class="flex justify-between items-baseline border-t mt-4 pt-4">
-				<span class="text-slate-500">Amount</span>
-				<span class="text-2xl font-bold">{ money.Format(d.Settings.CurrencySymbol, d.Receipt.Amount) }</span>
-			</div>
-
-			<div class="text-center text-xs text-slate-400 mt-6">Signature: ____________________</div>
-		</div>
+	@shared.ThermalReceipt(d.Thermal) {
+		@shared.ThermalHeader(d.Settings.ShopName, d.Settings.LogoSrc(), d.Settings.ShopNameSi, d.Settings.Address, d.Settings.Phone, mrKindLabel(d.Receipt.Kind)+" receipt", d.Receipt.ReceiptNo)
+		<div class="r-row r-small"><span>Date:</span><span>{ datetime.DateTime(d.Receipt.CreatedAt) }</span></div>
+		<div class="r-row r-small"><span>From:</span><span class="r-right">{ d.Receipt.FromLabel }</span></div>
+		<div class="r-row r-small"><span>To:</span><span class="r-right">{ d.Receipt.ToLabel }</span></div>
+		if d.Receipt.Party != "" {
+			<div class="r-row r-small"><span>Party:</span><span class="r-right">{ d.Receipt.Party }</span></div>
+		}
+		if d.Receipt.Note != "" {
+			<div class="r-row r-small"><span>Note:</span><span class="r-right">{ d.Receipt.Note }</span></div>
+		}
+		if d.Receipt.CreatedByName != nil {
+			<div class="r-row r-small"><span>By:</span><span>{ *d.Receipt.CreatedByName }</span></div>
+		}
+		<div class="r-hr"></div>
+		<div class="r-row r-total"><span>Amount</span><span>{ money.Format(d.Settings.CurrencySymbol, d.Receipt.Amount) }</span></div>
 	}
 }
 

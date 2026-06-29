@@ -1,0 +1,80 @@
+package shared
+
+// ThermalData configures the standalone, thermal-styled receipt shell shared by
+// every printable receipt view (sales, credit, cash, warranty). The shell sizes
+// to the configured roll (80mm default, 58mm when Narrow), prints server-side via
+// PrintURL (a POST that sends the ESC/POS slip), and offers Back + a size switch —
+// so every receipt prints identically to the sales receipt regardless of UI.
+type ThermalData struct {
+	Title      string // page <title>
+	Narrow     bool   // 58mm when true, else 80mm
+	PrintURL   string // POST endpoint that (re)prints the thermal slip
+	SwitchURL  string // GET link that toggles the paper size
+	SwitchText string // label for the switch link, e.g. "Switch to 58mm"
+}
+
+// thermalStyle is the per-receipt print stylesheet so the printed page matches the
+// chosen roll: a fixed width and auto height (continuous roll) instead of A4.
+func thermalStyle(narrow bool) string {
+	w := "80mm"
+	if narrow {
+		w = "58mm"
+	}
+	return "@media print{@page{size:" + w + " auto;margin:0}html,body{width:" + w + ";height:auto;margin:0}}"
+}
+
+// ThermalReceipt is the standalone slip page. Callers supply the slip body
+// (shop header + lines) as children; this wraps it with the roll-sized print
+// styling and the Print / Back / size-switch controls.
+templ ThermalReceipt(d ThermalData) {
+	<!DOCTYPE html>
+	<html lang="en">
+		<head>
+			<meta charset="UTF-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<title>{ d.Title }</title>
+			<link rel="stylesheet" href="/static/css/app.css"/>
+			@templ.Raw("<style>" + thermalStyle(d.Narrow) + "</style>")
+			// Print server-side (ESC/POS) instead of window.print(): a browser print
+			// sends a PDF that a raw thermal queue mis-prints as garbage.
+			@templ.Raw("<script>function printThermal(){var m=document.getElementById('printmsg');if(m)m.textContent='Printing…';fetch('" + d.PrintURL + "',{method:'POST',credentials:'same-origin'}).then(function(r){if(m)m.textContent=r.ok?'✓ Sent to printer':'Print failed';}).catch(function(){if(m)m.textContent='Print failed';});}</script>")
+		</head>
+		<body class="receipt-body">
+			<div class={ "receipt", templ.KV("narrow", d.Narrow) } id="receipt">
+				{ children... }
+				<div class="r-print-btn">
+					<button onclick="printThermal()">🖨 Print</button>
+					<button type="button" class="r-secondary" onclick="window.history.length>1?window.history.back():window.close()">← Back</button>
+					<div id="printmsg" class="r-small r-center"></div>
+					<a href={ templ.SafeURL(d.SwitchURL) }>{ d.SwitchText }</a>
+				</div>
+			</div>
+		</body>
+	</html>
+}
+
+// ThermalHeader renders the shop logo/name/contact block shared by every slip,
+// plus the title strip (e.g. "CREDIT PAYMENT" and the receipt number). Pointer
+// args are the optional Settings fields, passed directly so this package needn't
+// import settings (which would create an import cycle via middleware).
+templ ThermalHeader(shopName, logoSrc string, shopNameSi, address, phone *string, title, receiptNo string) {
+	if logoSrc != "" {
+		<div class="r-center"><img class="r-logo" src={ templ.SafeURL(logoSrc) } alt="logo"/></div>
+	}
+	<div class="r-center r-shop">{ shopName }</div>
+	if shopNameSi != nil && *shopNameSi != "" {
+		<div class="r-center r-small">{ *shopNameSi }</div>
+	}
+	if address != nil && *address != "" {
+		<div class="r-center r-small">{ *address }</div>
+	}
+	if phone != nil && *phone != "" {
+		<div class="r-center r-small">Tel: { *phone }</div>
+	}
+	<div class="r-hr"></div>
+	<div class="r-center r-shop">{ title }</div>
+	if receiptNo != "" {
+		<div class="r-center r-small">{ receiptNo }</div>
+	}
+	<div class="r-hr"></div>
+}

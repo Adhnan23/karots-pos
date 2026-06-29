@@ -13,6 +13,7 @@ import (
 	"karots-pos/internal/printing"
 	"karots-pos/internal/response"
 	adminpages "karots-pos/templates/pages/admin"
+	"karots-pos/templates/shared"
 
 	"github.com/labstack/echo/v4"
 )
@@ -141,8 +142,9 @@ func (a *adminUI) WarrantyReceiptView(c echo.Context) error {
 		return err
 	}
 	until, left := a.s.warrantyCover(ctx, cl)
+	base := "/admin/receipts/warranty/" + strconv.FormatInt(id, 10)
 	return response.RenderPage(c, adminpages.RcWarrantyReceiptPage(adminpages.RcWarrantyViewData{
-		UserName:      middleware.CurrentUserName(c),
+		Thermal:       shared.ThermalFrom(cfg.ReceiptWidth, c.QueryParam("size"), "Warranty slip", base, base+"/print"),
 		Settings:      *cfg,
 		Claim:         *cl,
 		WarrantyUntil: until,
@@ -182,8 +184,9 @@ func (a *adminUI) DebtReceiptView(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	base := "/admin/receipts/credit/" + strconv.FormatInt(id, 10)
 	return response.RenderPage(c, adminpages.RcDebtReceiptPage(adminpages.RcDebtViewData{
-		UserName: middleware.CurrentUserName(c),
+		Thermal:  shared.ThermalFrom(cfg.ReceiptWidth, c.QueryParam("size"), "Receipt "+r.ReceiptNo, base, base+"/print"),
 		Symbol:   a.symbol(ctx),
 		Settings: *cfg,
 		Receipt:  *r,

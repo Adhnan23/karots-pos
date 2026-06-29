@@ -7,7 +7,6 @@ import (
 	"karots-pos/internal/features/customers"
 	"karots-pos/internal/features/settings"
 	"karots-pos/internal/money"
-	"karots-pos/templates/layouts"
 	"karots-pos/templates/shared"
 )
 
@@ -41,7 +40,7 @@ templ ReceiptsCreditTab(d ReceiptsCreditData) {
 							<td class="px-4 py-2 text-right whitespace-nowrap">{ money.Format(d.Symbol, r.Amount) }</td>
 							<td class="px-4 py-2 text-right whitespace-nowrap">
 								<button type="button" hx-post={ "/cashier/receipts/credit/" + strconv.FormatInt(r.ID, 10) + "/print" } hx-swap="none" class="px-3 py-1 rounded-lg bg-indigo-600 text-white text-xs font-medium">🧾 Reprint</button>
-								<a href={ templ.SafeURL("/cashier/receipts/credit/" + strconv.FormatInt(r.ID, 10)) } target="_blank" class="ml-2 px-3 py-1 rounded-lg border text-slate-600 text-xs font-medium">View</a>
+								<a href={ templ.SafeURL("/cashier/receipts/credit/" + strconv.FormatInt(r.ID, 10)) } class="ml-2 px-3 py-1 rounded-lg border text-slate-600 text-xs font-medium">View</a>
 							</td>
 						</tr>
 					}
@@ -55,49 +54,35 @@ templ ReceiptsCreditTab(d ReceiptsCreditData) {
 }
 
 type DebtReceiptViewData struct {
-	CashierName   string
-	Role          string
-	ShowChangePin bool
-	Symbol        string
-	Settings      settings.Settings
-	Receipt       customers.DebtReceipt
+	Thermal  shared.ThermalData
+	Symbol   string
+	Settings settings.Settings
+	Receipt  customers.DebtReceipt
 }
 
-// DebtReceiptPage shows one DP- credit-payment receipt print-friendly inside the
-// cashier shell, with the balance-before → balance-after detail.
+// DebtReceiptPage shows one DP- credit-payment receipt as a roll-sized thermal
+// slip (58/80mm from settings), with the balance-before → balance-after detail.
 templ DebtReceiptPage(d DebtReceiptViewData) {
-	@layouts.Cashier("Receipt "+d.Receipt.ReceiptNo, d.CashierName, d.Role, "receipts", d.ShowChangePin) {
-		<div class="h-full overflow-auto p-5">
-			<div class="max-w-sm mx-auto bg-white rounded-2xl shadow-sm p-6">
-				<div class="text-center mb-3">
-					<div class="font-bold text-lg">{ d.Settings.ShopName }</div>
-					if d.Settings.Phone != nil {
-						<div class="text-xs text-slate-500">{ *d.Settings.Phone }</div>
-					}
-				</div>
-				<div class="text-center font-semibold uppercase text-sm border-y py-1 mb-3">Credit Payment · { d.Receipt.ReceiptNo }</div>
-				<dl class="text-sm space-y-1">
-					<div class="flex justify-between"><dt class="text-slate-500">Date</dt><dd>{ datetime.DateTime(d.Receipt.CreatedAt) }</dd></div>
-					<div class="flex justify-between"><dt class="text-slate-500">Customer</dt><dd>{ d.Receipt.CustomerName }</dd></div>
-					if d.Receipt.CustomerPhone != nil {
-						<div class="flex justify-between"><dt class="text-slate-500">Phone</dt><dd>{ *d.Receipt.CustomerPhone }</dd></div>
-					}
-					<div class="flex justify-between font-semibold text-base border-t pt-1 mt-1"><dt>Amount paid</dt><dd>{ money.Format(d.Symbol, d.Receipt.Amount) }</dd></div>
-					<div class="flex justify-between"><dt class="text-slate-500">Method</dt><dd class="capitalize">{ d.Receipt.Method }</dd></div>
-					if d.Receipt.BalanceBefore != nil && d.Receipt.BalanceAfter != nil {
-						<div class="flex justify-between border-t pt-1 mt-1"><dt class="text-slate-500">Previous balance</dt><dd>{ money.Format(d.Symbol, *d.Receipt.BalanceBefore) }</dd></div>
-						<div class="flex justify-between font-semibold"><dt>Remaining balance</dt><dd>{ money.Format(d.Symbol, *d.Receipt.BalanceAfter) }</dd></div>
-						<div class="flex justify-between"><dt class="text-slate-500">Credit limit</dt><dd>{ money.Format(d.Symbol, d.Receipt.CreditLimit) }</dd></div>
-					}
-					if d.Receipt.CashierName != nil {
-						<div class="flex justify-between"><dt class="text-slate-500">Served by</dt><dd>{ *d.Receipt.CashierName }</dd></div>
-					}
-				</dl>
-				<div class="flex gap-2 mt-5 no-print">
-					<button onclick="window.print()" class="flex-1 py-2 rounded-lg bg-slate-800 text-white text-sm">Print</button>
-					<button type="button" hx-post={ "/cashier/receipts/credit/" + strconv.FormatInt(d.Receipt.ID, 10) + "/print" } hx-swap="none" class="flex-1 py-2 rounded-lg bg-indigo-600 text-white text-sm">🧾 Reprint slip</button>
-				</div>
-			</div>
-		</div>
+	@shared.ThermalReceipt(d.Thermal) {
+		@shared.ThermalHeader(d.Settings.ShopName, d.Settings.LogoSrc(), d.Settings.ShopNameSi, d.Settings.Address, d.Settings.Phone, "CREDIT PAYMENT", d.Receipt.ReceiptNo)
+		<div class="r-row r-small"><span>Date:</span><span>{ datetime.DateTime(d.Receipt.CreatedAt) }</span></div>
+		<div class="r-row r-small"><span>Customer:</span><span>{ d.Receipt.CustomerName }</span></div>
+		if d.Receipt.CustomerPhone != nil {
+			<div class="r-row r-small"><span>Phone:</span><span>{ *d.Receipt.CustomerPhone }</span></div>
+		}
+		<div class="r-hr"></div>
+		<div class="r-row r-total"><span>Amount paid</span><span>{ money.Format(d.Symbol, d.Receipt.Amount) }</span></div>
+		<div class="r-row r-small"><span class="r-cap">Method</span><span class="r-cap">{ d.Receipt.Method }</span></div>
+		if d.Receipt.BalanceBefore != nil && d.Receipt.BalanceAfter != nil {
+			<div class="r-hr"></div>
+			<div class="r-row r-small"><span>Previous balance</span><span>{ money.Format(d.Symbol, *d.Receipt.BalanceBefore) }</span></div>
+			<div class="r-row r-big"><span>Remaining</span><span>{ money.Format(d.Symbol, *d.Receipt.BalanceAfter) }</span></div>
+			<div class="r-row r-small"><span>Credit limit</span><span>{ money.Format(d.Symbol, d.Receipt.CreditLimit) }</span></div>
+		}
+		if d.Receipt.CashierName != nil {
+			<div class="r-row r-small"><span>Served by</span><span>{ *d.Receipt.CashierName }</span></div>
+		}
+		<div class="r-hr"></div>
+		<div class="r-center r-small">Thank you!</div>
 	}
 }

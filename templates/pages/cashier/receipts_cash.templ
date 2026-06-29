@@ -7,7 +7,6 @@ import (
 	"karots-pos/internal/features/cashflow"
 	"karots-pos/internal/features/settings"
 	"karots-pos/internal/money"
-	"karots-pos/templates/layouts"
 	"karots-pos/templates/shared"
 )
 
@@ -51,7 +50,7 @@ templ ReceiptsCashTab(d ReceiptsCashData) {
 							<td class="px-4 py-2 text-right whitespace-nowrap">{ money.Format(d.Symbol, r.Amount) }</td>
 							<td class="px-4 py-2 text-right whitespace-nowrap">
 								<button type="button" hx-post={ "/cashier/money-receipts/" + strconv.FormatInt(r.ID, 10) + "/print" } hx-swap="none" class="px-3 py-1 rounded-lg bg-indigo-600 text-white text-xs font-medium">🧾 Reprint</button>
-								<a href={ templ.SafeURL("/cashier/money-receipts/" + strconv.FormatInt(r.ID, 10)) } target="_blank" class="ml-2 px-3 py-1 rounded-lg border text-slate-600 text-xs font-medium">View</a>
+								<a href={ templ.SafeURL("/cashier/money-receipts/" + strconv.FormatInt(r.ID, 10)) } class="ml-2 px-3 py-1 rounded-lg border text-slate-600 text-xs font-medium">View</a>
 							</td>
 						</tr>
 					}
@@ -73,43 +72,26 @@ templ cashKindOption(val, label, active string) {
 }
 
 type MoneyReceiptViewData struct {
-	CashierName   string
-	Role          string
-	ShowChangePin bool
-	Symbol        string
-	Settings      settings.Settings
-	Receipt       cashflow.Receipt
+	Thermal  shared.ThermalData
+	Symbol   string
+	Settings settings.Settings
+	Receipt  cashflow.Receipt
 }
 
-// MoneyReceiptPage shows one CR- receipt print-friendly inside the cashier shell.
+// MoneyReceiptPage shows one CR- receipt as a roll-sized thermal slip (58/80mm).
 templ MoneyReceiptPage(d MoneyReceiptViewData) {
-	@layouts.Cashier("Receipt "+d.Receipt.ReceiptNo, d.CashierName, d.Role, "receipts", d.ShowChangePin) {
-		<div class="h-full overflow-auto p-5">
-			<div class="max-w-sm mx-auto bg-white rounded-2xl shadow-sm p-6">
-				<div class="text-center mb-3">
-					<div class="font-bold text-lg">{ d.Settings.ShopName }</div>
-					if d.Settings.Phone != nil {
-						<div class="text-xs text-slate-500">{ *d.Settings.Phone }</div>
-					}
-				</div>
-				<div class="text-center font-semibold uppercase text-sm border-y py-1 mb-3">Cash Receipt · { d.Receipt.ReceiptNo }</div>
-				<dl class="text-sm space-y-1">
-					<div class="flex justify-between"><dt class="text-slate-500">Date</dt><dd>{ datetime.DateTime(d.Receipt.CreatedAt) }</dd></div>
-					<div class="flex justify-between"><dt class="text-slate-500">From</dt><dd>{ d.Receipt.FromLabel }</dd></div>
-					<div class="flex justify-between"><dt class="text-slate-500">To</dt><dd>{ d.Receipt.ToLabel }</dd></div>
-					if d.Receipt.Party != "" {
-						<div class="flex justify-between"><dt class="text-slate-500">Party</dt><dd>{ d.Receipt.Party }</dd></div>
-					}
-					<div class="flex justify-between font-semibold text-base border-t pt-1 mt-1"><dt>Amount</dt><dd>{ money.Format(d.Symbol, d.Receipt.Amount) }</dd></div>
-					if d.Receipt.Note != "" {
-						<div class="flex justify-between"><dt class="text-slate-500">Note</dt><dd>{ d.Receipt.Note }</dd></div>
-					}
-				</dl>
-				<div class="flex gap-2 mt-5 no-print">
-					<button onclick="window.print()" class="flex-1 py-2 rounded-lg bg-slate-800 text-white text-sm">Print</button>
-					<button type="button" hx-post={ "/cashier/money-receipts/" + strconv.FormatInt(d.Receipt.ID, 10) + "/print" } hx-swap="none" class="flex-1 py-2 rounded-lg bg-indigo-600 text-white text-sm">🧾 Reprint slip</button>
-				</div>
-			</div>
-		</div>
+	@shared.ThermalReceipt(d.Thermal) {
+		@shared.ThermalHeader(d.Settings.ShopName, d.Settings.LogoSrc(), d.Settings.ShopNameSi, d.Settings.Address, d.Settings.Phone, "CASH RECEIPT", d.Receipt.ReceiptNo)
+		<div class="r-row r-small"><span>Date:</span><span>{ datetime.DateTime(d.Receipt.CreatedAt) }</span></div>
+		<div class="r-row r-small"><span>From:</span><span class="r-right">{ d.Receipt.FromLabel }</span></div>
+		<div class="r-row r-small"><span>To:</span><span class="r-right">{ d.Receipt.ToLabel }</span></div>
+		if d.Receipt.Party != "" {
+			<div class="r-row r-small"><span>Party:</span><span class="r-right">{ d.Receipt.Party }</span></div>
+		}
+		if d.Receipt.Note != "" {
+			<div class="r-row r-small"><span>Note:</span><span class="r-right">{ d.Receipt.Note }</span></div>
+		}
+		<div class="r-hr"></div>
+		<div class="r-row r-total"><span>Amount</span><span>{ money.Format(d.Symbol, d.Receipt.Amount) }</span></div>
 	}
 }

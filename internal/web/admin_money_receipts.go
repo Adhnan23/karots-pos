@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"karots-pos/internal/apperr"
+	"karots-pos/internal/escpos"
 	"karots-pos/internal/features/cashflow"
 	"karots-pos/internal/features/reports"
 	"karots-pos/internal/features/settings"
@@ -16,6 +17,7 @@ import (
 	"karots-pos/internal/printing"
 	"karots-pos/internal/response"
 	adminpages "karots-pos/templates/pages/admin"
+	"karots-pos/templates/shared"
 
 	"github.com/labstack/echo/v4"
 )
@@ -68,8 +70,9 @@ func (a *adminUI) MoneyReceipt(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	base := "/admin/money-receipts/" + strconv.FormatInt(id, 10)
 	return response.RenderPage(c, adminpages.MoneyReceiptPage(adminpages.MoneyReceiptData{
-		UserName: middleware.CurrentUserName(c),
+		Thermal:  shared.ThermalFrom(cfg.ReceiptWidth, c.QueryParam("size"), "Receipt "+rec.ReceiptNo, base, base+"/print"),
 		Settings: *cfg,
 		Receipt:  *rec,
 	}))
@@ -172,8 +175,11 @@ func buildReceiptSlip(cfg *settings.Settings, r cashflow.Receipt) []byte {
 			b.Write([]byte{0x1B, 0x45, 0x00})
 		}
 	}
-	line := func(s string) { b.WriteString(s); b.WriteByte('\n') }
-	rule := func() { line(strings.Repeat("-", width)) }
+	// Sanitise every free-text/label field to printable ASCII: the built-in
+	// thermal font has no glyphs for en/em dashes or non-Latin names, so raw
+	// bytes print as codepage garbage (e.g. a "—" shows up as a CJK character).
+	line := func(s string) { b.WriteString(escpos.ASCII(s)); b.WriteByte('\n') }
+	rule := func() { b.WriteString(strings.Repeat("-", width)); b.WriteByte('\n') }
 
 	center()
 	bold(true)

@@ -14,10 +14,10 @@ import (
 	"karots-pos/internal/features/customers"
 	"karots-pos/internal/features/settings"
 	"karots-pos/internal/features/warranty"
-	"karots-pos/internal/middleware"
 	"karots-pos/internal/printing"
 	"karots-pos/internal/response"
 	cashierpages "karots-pos/templates/pages/cashier"
+	"karots-pos/templates/shared"
 
 	"github.com/labstack/echo/v4"
 )
@@ -89,13 +89,12 @@ func (h *cashierUI) MoneyReceipt(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	base := "/cashier/money-receipts/" + strconv.FormatInt(id, 10)
 	return response.RenderPage(c, cashierpages.MoneyReceiptPage(cashierpages.MoneyReceiptViewData{
-		CashierName:   middleware.CurrentUserName(c),
-		Role:          middleware.CurrentRole(c),
-		ShowChangePin: h.showChangePin(c),
-		Symbol:        h.cashierSymbol(ctx),
-		Settings:      *cfg,
-		Receipt:       *rec,
+		Thermal:  shared.ThermalFrom(cfg.ReceiptWidth, c.QueryParam("size"), "Receipt "+rec.ReceiptNo, base, base+"/print"),
+		Symbol:   h.cashierSymbol(ctx),
+		Settings: *cfg,
+		Receipt:  *rec,
 	}))
 }
 
@@ -181,13 +180,12 @@ func (h *cashierUI) DebtReceiptView(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	base := "/cashier/receipts/credit/" + strconv.FormatInt(id, 10)
 	return response.RenderPage(c, cashierpages.DebtReceiptPage(cashierpages.DebtReceiptViewData{
-		CashierName:   middleware.CurrentUserName(c),
-		Role:          middleware.CurrentRole(c),
-		ShowChangePin: h.showChangePin(c),
-		Symbol:        h.cashierSymbol(ctx),
-		Settings:      *cfg,
-		Receipt:       *r,
+		Thermal:  shared.ThermalFrom(cfg.ReceiptWidth, c.QueryParam("size"), "Receipt "+r.ReceiptNo, base, base+"/print"),
+		Symbol:   h.cashierSymbol(ctx),
+		Settings: *cfg,
+		Receipt:  *r,
 	}))
 }
 
@@ -255,10 +253,9 @@ func (h *cashierUI) WarrantyReceiptView(c echo.Context) error {
 		return err
 	}
 	until, left := h.s.warrantyCover(ctx, cl)
+	base := "/cashier/receipts/warranty/" + strconv.FormatInt(id, 10)
 	return response.RenderPage(c, cashierpages.WarrantyReceiptPage(cashierpages.WarrantyReceiptViewData{
-		CashierName:   middleware.CurrentUserName(c),
-		Role:          middleware.CurrentRole(c),
-		ShowChangePin: h.showChangePin(c),
+		Thermal:       shared.ThermalFrom(cfg.ReceiptWidth, c.QueryParam("size"), "Warranty slip", base, "/cashier/warranty/"+strconv.FormatInt(id, 10)+"/print"),
 		Settings:      *cfg,
 		Claim:         *cl,
 		WarrantyUntil: until,
