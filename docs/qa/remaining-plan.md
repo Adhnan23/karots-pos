@@ -9,11 +9,24 @@ tracks what is **still ⚠️ / never-tested / deferred** so the next sessions c
 After each area: update the `findings.md` status matrix + the `qa-audit-progress` memory.
 
 **How to run:** core binary on `:3000` (`make templ && make css && go build`); psql via
-`docker exec pos_db psql -U pos_user -d pos_db -c "…"`. Playwright MCP was **disconnected** last
-session — either reconnect it or drive flows via authenticated `curl` (login → cookie jar →
-hit endpoints), which worked well. Logins: system-admin `0000000001/2273`, cashier
-`0771111111/1111`, admin `0770000001/…`. For plugin tiers, add the blank import to
+`docker exec pos_db psql -U pos_user -d pos_db -c "…"`. Logins: system-admin `0000000001/2273`,
+cashier `0771111111/1111`, admin `0770000001/…`. For plugin tiers, add the blank import to
 `cmd/server/enabled_plugins.go`, `make migrate`, rebuild — then **restore it to core-only**.
+
+**FIRST THING NEXT SESSION — finish the Playwright browser install (so the MCP works):**
+The Playwright MCP config is healthy (`claude mcp list` → ✔ Connected) but it crashes mid-use
+because `@playwright/mcp@latest` bundles **playwright-core 1.61.0-alpha**, which needs **chromium
+v1226 (Chrome 149)** while only **v1223** is installed. Run (≈177 MB download, started but
+cancelled last session):
+
+```
+npx -y playwright@1.61.0-alpha-1781023400000 install chromium chromium-headless-shell
+```
+
+Then verify `~/.cache/ms-playwright/` has `chromium-1226` + `chromium_headless_shell-1226`, and
+do a quick MCP `browser_navigate http://localhost:3000/login` to confirm it drives a page.
+Until then (or if it drops again), drive flows via authenticated `curl` (login → cookie jar →
+hit endpoints) — that worked well last session.
 
 ---
 
