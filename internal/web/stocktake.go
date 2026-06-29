@@ -30,7 +30,7 @@ var stockTakeSynonyms = map[string]string{
 
 func stockTakeImportConfig() adminfragments.ImportConfig {
 	return adminfragments.ImportConfig{
-		Title:       "Import Stock Count (CSV)",
+		Title:       "Import Stock Count",
 		Columns:     strings.Join(stockTakeColumns, ", "),
 		PostURL:     "/admin/stock/take/import",
 		TemplateURL: "/admin/stock/take/sheet",
@@ -65,7 +65,7 @@ func (a *adminUI) StockTakeSheet(c echo.Context) error {
 			barcode, p.Name, csvMoney(p.StockQty), "", csvMoney(p.CostPrice),
 		})
 	}
-	return writeCSV(c, "stock-count-sheet", stockTakeColumns, out)
+	return writeSheet(c, "stock-count-sheet", stockTakeColumns, out)
 }
 
 // StockTakeImport applies a filled count sheet: for each row matched by barcode it

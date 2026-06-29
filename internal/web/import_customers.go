@@ -1,16 +1,14 @@
 package web
 
 import (
-	"encoding/csv"
-	"errors"
 	"fmt"
-	"io"
 	"strings"
 
 	"karots-pos/internal/apperr"
 	"karots-pos/internal/features/audit"
 	"karots-pos/internal/features/customers"
 	"karots-pos/internal/response"
+	"karots-pos/internal/sheet"
 	adminfragments "karots-pos/templates/fragments/admin"
 
 	"github.com/labstack/echo/v4"
@@ -34,7 +32,7 @@ var customerImportSynonyms = map[string]string{
 
 func customerImportConfig() adminfragments.ImportConfig {
 	return adminfragments.ImportConfig{
-		Title:       "Import Customers (CSV)",
+		Title:       "Import Customers",
 		Columns:     strings.Join(customerImportColumns, ", "),
 		PostURL:     "/admin/customers/import",
 		TemplateURL: "/admin/customers/import/template",
@@ -53,7 +51,7 @@ func (a *adminUI) CustomerImportModal(c echo.Context) error {
 
 // CustomerImportTemplate streams an empty CSV with just the header row.
 func (a *adminUI) CustomerImportTemplate(c echo.Context) error {
-	return writeCSV(c, "customers-template", customerImportColumns, nil)
+	return writeSheet(c, "customers-template", customerImportColumns, nil)
 }
 
 // CustomerExportCSV streams active customers in the import column layout for round-trip edits.
@@ -70,7 +68,7 @@ func (a *adminUI) CustomerExportCSV(c echo.Context) error {
 			csvMoney(cu.CreditLimit), csvMoney(cu.OutstandingBalance),
 		})
 	}
-	return writeCSV(c, "customers-export", customerImportColumns, out)
+	return writeSheet(c, "customers-export", customerImportColumns, out)
 }
 
 // CustomerImport parses an uploaded CSV and upserts each row (best-effort).
@@ -131,10 +129,13 @@ func (a *adminUI) CustomerImport(c echo.Context) error {
 
 // readImportCSV opens the uploaded "file", reads the header (mapping synonyms),
 // and returns the column index map plus all data records.
+// readImportCSV reads the uploaded spreadsheet (CSV, XLSX or ODS \u2014 chosen by the
+// file's extension), maps its header to canonical columns via synonyms, and
+// returns the column index map plus the data rows.
 func readImportCSV(c echo.Context, synonyms map[string]string) (map[string]int, [][]string, error) {
 	fh, err := c.FormFile("file")
 	if err != nil {
-		return nil, nil, apperr.BadRequest("please choose a CSV file")
+		return nil, nil, apperr.BadRequest("please choose a file to import")
 	}
 	f, err := fh.Open()
 	if err != nil {
@@ -142,14 +143,23 @@ func readImportCSV(c echo.Context, synonyms map[string]string) (map[string]int, 
 	}
 	defer f.Close()
 
-	r := csv.NewReader(f)
-	r.FieldsPerRecord = -1
-	r.TrimLeadingSpace = true
-
-	header, err := r.Read()
+	rows, err := sheet.Read(fh.Filename, f)
 	if err != nil {
-		return nil, nil, apperr.BadRequest("the file is empty or not valid CSV")
+		return nil, nil, apperr.BadRequest("could not read the file \u2014 is it a valid CSV, Excel or ODF spreadsheet?")
 	}
+	if len(rows) == 0 {
+		return nil, nil, apperr.BadRequest("the file is empty")
+	}
+	col := mapImportHeaderWith(rows[0], synonyms)
+	if _, ok := col["name"]; !ok {
+		return nil, nil, apperr.BadRequest("the file must have a 'name' column")
+	}
+	return col, rows[1:], nil
+}
+
+// mapImportHeaderWith builds the canonical-column\u2192index map from a header row,
+// applying the given synonyms and keeping the first occurrence of each column.
+func mapImportHeaderWith(header []string, synonyms map[string]string) map[string]int {
 	col := map[string]int{}
 	for i, h := range header {
 		key := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(h, "\ufeff")))
@@ -160,21 +170,7 @@ func readImportCSV(c echo.Context, synonyms map[string]string) (map[string]int, 
 			col[key] = i
 		}
 	}
-	if _, ok := col["name"]; !ok {
-		return nil, nil, apperr.BadRequest("CSV must have a 'name' column")
-	}
-	var recs [][]string
-	for {
-		rec, rerr := r.Read()
-		if errors.Is(rerr, io.EOF) {
-			break
-		}
-		if rerr != nil {
-			return nil, nil, apperr.BadRequest("could not parse CSV: " + rerr.Error())
-		}
-		recs = append(recs, rec)
-	}
-	return col, recs, nil
+	return col
 }
 
 // cellGetter returns a trimmed-cell accessor for a record by canonical column name.

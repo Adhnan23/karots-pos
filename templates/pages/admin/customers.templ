@@ -21,13 +21,13 @@ templ CustomersPage(d CustomersData) {
 		<div class="flex items-center justify-between mb-6">
 			<h1 class="text-2xl font-bold">Customers</h1>
 			<div class="flex gap-2">
-				<a href="/admin/customers/export" class="px-4 py-2 rounded-lg border text-slate-700 font-medium">Export CSV</a>
+				@adminfragments.ExportMenu("/admin/customers/export", "Export")
 				<button
 					class="px-4 py-2 rounded-lg border text-slate-700 font-medium"
 					hx-get="/admin/customers/import"
 					hx-target="#modal-container"
 					hx-swap="innerHTML"
-				>Import CSV</button>
+				>Import</button>
 				<button
 					class="px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium"
 					hx-get="/admin/customers/form"

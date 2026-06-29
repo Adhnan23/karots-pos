@@ -31,7 +31,7 @@ var supplierImportSynonyms = map[string]string{
 
 func supplierImportConfig() adminfragments.ImportConfig {
 	return adminfragments.ImportConfig{
-		Title:       "Import Suppliers (CSV)",
+		Title:       "Import Suppliers",
 		Columns:     strings.Join(supplierImportColumns, ", "),
 		PostURL:     "/admin/suppliers/import",
 		TemplateURL: "/admin/suppliers/import/template",
@@ -50,7 +50,7 @@ func (a *adminUI) SupplierImportModal(c echo.Context) error {
 
 // SupplierImportTemplate streams an empty CSV with just the header row.
 func (a *adminUI) SupplierImportTemplate(c echo.Context) error {
-	return writeCSV(c, "suppliers-template", supplierImportColumns, nil)
+	return writeSheet(c, "suppliers-template", supplierImportColumns, nil)
 }
 
 // SupplierExportCSV streams active suppliers in the import column layout for round-trip edits.
@@ -67,7 +67,7 @@ func (a *adminUI) SupplierExportCSV(c echo.Context) error {
 			fmt.Sprintf("%d", sp.CreditDays), csvMoney(sp.OutstandingBalance),
 		})
 	}
-	return writeCSV(c, "suppliers-export", supplierImportColumns, out)
+	return writeSheet(c, "suppliers-export", supplierImportColumns, out)
 }
 
 // SupplierImport parses an uploaded CSV and upserts each row (best-effort).

@@ -1,0 +1,23 @@
+package adminfragments
+
+// ExportMenu renders a single "Export" button that opens a small menu to pick the
+// download format (CSV, Excel or ODF). baseURL is the export endpoint; the format
+// is passed as ?format=. label customises the button text (e.g. "Count sheet").
+templ ExportMenu(baseURL, label string) {
+	<div class="relative inline-block" x-data="{open:false}" @click.outside="open=false">
+		<button type="button" @click="open=!open" class="px-4 py-2 rounded-lg border text-slate-700 font-medium">
+			{ label }
+			<span class="text-slate-400">▾</span>
+		</button>
+		<div
+			x-show="open"
+			x-transition
+			style="display:none"
+			class="absolute right-0 mt-1 w-44 bg-white border rounded-lg shadow-lg z-20 py-1"
+		>
+			<a href={ templ.SafeURL(baseURL + "?format=csv") } class="block px-4 py-2 text-sm hover:bg-slate-50">CSV (.csv)</a>
+			<a href={ templ.SafeURL(baseURL + "?format=xlsx") } class="block px-4 py-2 text-sm hover:bg-slate-50">Excel (.xlsx)</a>
+			<a href={ templ.SafeURL(baseURL + "?format=ods") } class="block px-4 py-2 text-sm hover:bg-slate-50">ODF (.ods)</a>
+		</div>
+	</div>
+}

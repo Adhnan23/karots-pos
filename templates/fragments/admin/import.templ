@@ -23,13 +23,21 @@ templ ImportModal(cfg ImportConfig) {
 							}
 						</ul>
 					}
-					<a href={ templ.SafeURL(cfg.TemplateURL) } class="inline-block text-indigo-600 hover:underline text-sm">↓ Download CSV template</a>
+					<div class="text-sm">
+						<span class="text-slate-500">↓ Download template:</span>
+						<a href={ templ.SafeURL(cfg.TemplateURL + "?format=csv") } class="text-indigo-600 hover:underline ml-1">CSV</a>
+						<span class="text-slate-300">·</span>
+						<a href={ templ.SafeURL(cfg.TemplateURL + "?format=xlsx") } class="text-indigo-600 hover:underline">Excel</a>
+						<span class="text-slate-300">·</span>
+						<a href={ templ.SafeURL(cfg.TemplateURL + "?format=ods") } class="text-indigo-600 hover:underline">ODF</a>
+					</div>
 				</div>
 				<form hx-post={ cfg.PostURL } hx-encoding="multipart/form-data" hx-target="#import-result" hx-swap="innerHTML">
-					// accept lists the extension AND the MIME types Linux desktops (esp.
-					// GTK/XFCE) sniff a .csv as — text/plain and vnd.ms-excel are common;
-					// omitting them greys out the file chooser's OK button for valid CSVs.
-					<input type="file" name="file" accept=".csv,text/csv,application/csv,application/vnd.ms-excel,text/plain" required class="block w-full text-sm border rounded-lg p-2"/>
+					<p class="text-xs text-slate-500 mb-1">Choose a CSV, Excel (.xlsx) or ODF (.ods) file:</p>
+					// accept lists each extension AND the MIME types Linux desktops (esp.
+					// GTK/XFCE) sniff these files as; omitting them greys out the file
+					// chooser's OK button for otherwise-valid spreadsheets.
+					<input type="file" name="file" accept=".csv,text/csv,application/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,.ods,application/vnd.oasis.opendocument.spreadsheet,text/plain" required class="block w-full text-sm border rounded-lg p-2"/>
 					<div class="flex justify-end gap-3 pt-4">
 						<button type="button" class="px-4 py-2 rounded-lg border" x-on:click="$dispatch('close-modal')">Close</button>
 						<button type="submit" class="px-4 py-2 rounded-lg bg-indigo-600 text-white">Upload &amp; Import</button>

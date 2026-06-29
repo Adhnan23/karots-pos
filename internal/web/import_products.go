@@ -1,10 +1,7 @@
 package web
 
 import (
-	"encoding/csv"
-	"errors"
 	"fmt"
-	"io"
 	"strconv"
 	"strings"
 
@@ -14,6 +11,7 @@ import (
 	"karots-pos/internal/middleware"
 	"karots-pos/internal/money"
 	"karots-pos/internal/response"
+	"karots-pos/internal/sheet"
 	adminfragments "karots-pos/templates/fragments/admin"
 
 	"github.com/labstack/echo/v4"
@@ -53,7 +51,7 @@ const maxImportRows = 5000
 // productImportConfig parameterizes the generic import modal for products.
 func productImportConfig() adminfragments.ImportConfig {
 	return adminfragments.ImportConfig{
-		Title:       "Import Products (CSV)",
+		Title:       "Import Products",
 		Columns:     strings.Join(importColumns, ", "),
 		PostURL:     "/admin/products/import",
 		TemplateURL: "/admin/products/import/template",
@@ -73,7 +71,7 @@ func (a *adminUI) ProductImportModal(c echo.Context) error {
 
 // ProductImportTemplate streams an empty CSV with just the header row.
 func (a *adminUI) ProductImportTemplate(c echo.Context) error {
-	return writeCSV(c, "products-template", importColumns, nil)
+	return writeSheet(c, "products-template", importColumns, nil)
 }
 
 // ProductExportCSV streams the whole active catalog in the import column layout,
@@ -128,7 +126,7 @@ func (a *adminUI) ProductExportCSV(c echo.Context) error {
 			strconv.FormatBool(p.TrackSerial), strconv.Itoa(p.WarrantyMonths),
 		})
 	}
-	return writeCSV(c, "products-export", importColumns, out)
+	return writeSheet(c, "products-export", importColumns, out)
 }
 
 // ProductImport parses an uploaded CSV and upserts each row, returning a summary
@@ -138,7 +136,7 @@ func (a *adminUI) ProductImport(c echo.Context) error {
 	ctx := c.Request().Context()
 	fh, err := c.FormFile("file")
 	if err != nil {
-		return apperr.BadRequest("please choose a CSV file")
+		return apperr.BadRequest("please choose a file to import")
 	}
 	f, err := fh.Open()
 	if err != nil {
@@ -146,18 +144,18 @@ func (a *adminUI) ProductImport(c echo.Context) error {
 	}
 	defer f.Close()
 
-	r := csv.NewReader(f)
-	r.FieldsPerRecord = -1
-	r.TrimLeadingSpace = true
-
-	header, err := r.Read()
+	allRows, err := sheet.Read(fh.Filename, f)
 	if err != nil {
-		return apperr.BadRequest("the file is empty or not valid CSV")
+		return apperr.BadRequest("could not read the file — is it a valid CSV, Excel or ODF spreadsheet?")
 	}
-	col := mapImportHeader(header)
+	if len(allRows) == 0 {
+		return apperr.BadRequest("the file is empty")
+	}
+	col := mapImportHeader(allRows[0])
 	if _, ok := col["name"]; !ok {
-		return apperr.BadRequest("CSV must have a 'name' column")
+		return apperr.BadRequest("the file must have a 'name' column")
 	}
+	recs := allRows[1:]
 
 	// Resolve units once: match by lower-case name or abbreviation; fall back to
 	// the first unit when a row leaves it blank.
@@ -177,17 +175,8 @@ func (a *adminUI) ProductImport(c echo.Context) error {
 
 	var sum adminfragments.ImportSummary
 	line := 1 // header was line 1
-	for {
-		rec, rerr := r.Read()
-		if errors.Is(rerr, io.EOF) {
-			break
-		}
+	for _, rec := range recs {
 		line++
-		if rerr != nil {
-			sum.Errors = append(sum.Errors, adminfragments.ImportRowError{Line: line, Message: "unreadable row: " + rerr.Error()})
-			sum.Skipped++
-			continue
-		}
 		if line-1 > maxImportRows {
 			sum.Notes = append(sum.Notes, fmt.Sprintf("stopped at %d rows (limit)", maxImportRows))
 			break
