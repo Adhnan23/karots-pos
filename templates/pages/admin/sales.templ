@@ -129,7 +129,7 @@ templ SaleReturnForm(d sales.Detail) {
 			<p class="text-sm text-slate-500">Enter the quantity to return for each line (max = remaining).</p>
 			<table class="w-full text-sm">
 				<thead class="text-left text-slate-500 border-b">
-					<tr><th class="py-1">Product</th><th class="py-1 text-right">Sold</th><th class="py-1 text-right">Returnable</th><th class="py-1 text-right w-28">Return qty</th></tr>
+					<tr><th class="py-1">Product</th><th class="py-1 text-right">Sold</th><th class="py-1 text-right">Returnable</th><th class="py-1 text-right w-28">Return qty</th><th class="py-1 text-right w-36">Goods</th></tr>
 				</thead>
 				<tbody>
 					for _, it := range d.Items {
@@ -147,11 +147,21 @@ templ SaleReturnForm(d sales.Detail) {
 										x-on:input={ "setQty(" + strconv.FormatInt(it.ID, 10) + ", $event.target.value, " + it.ReturnableQty().String() + ")" }
 									/>
 								</td>
+								<td class="py-1 pl-4 text-right">
+									<select
+										class="w-full border rounded px-2 py-1 text-sm"
+										x-on:change={ "setDispo(" + strconv.FormatInt(it.ID, 10) + ", $event.target.value)" }
+									>
+										<option value="restock">Back to stock</option>
+										<option value="damage">Send to damage</option>
+									</select>
+								</td>
 							</tr>
 						}
 					}
 				</tbody>
 			</table>
+			<p class="text-xs text-slate-500">Pick "Send to damage" for faulty goods: the customer is still refunded, but the item is written off instead of put back on the shelf.</p>
 			<div>
 				<label class="block text-sm font-medium mb-1">Reason (optional)</label>
 				<input x-model="reason" class="w-full border rounded-lg px-3 py-2" placeholder="damaged, wrong item…"/>

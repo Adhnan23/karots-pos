@@ -586,6 +586,10 @@ func strPtr(s string) *string { return &s }
 type ReturnLineInput struct {
 	SaleItemID int64  `json:"sale_item_id" validate:"required,gt=0"`
 	Quantity   string `json:"quantity"     validate:"required"`
+	// Disposition decides what happens to the returned goods: "restock" (default)
+	// puts them back into sellable stock; "damage" writes them off as a loss so
+	// faulty items never re-enter inventory. The customer is refunded either way.
+	Disposition string `json:"disposition"`
 }
 
 type PartialReturnInput struct {
@@ -691,6 +695,34 @@ func (s *Service) PartialReturnTx(ctx context.Context, tx *sqlx.Tx, saleID int64
 			}
 			if err := saleRepo.InsertSaleReturnItem(ctx, returnID, it.ID, it.ProductID, qty, lineRefund); err != nil {
 				return apperr.Internal("failed to record return line", err)
+			}
+
+			// "Send to damage": the cashier judged these goods faulty, so don't
+			// leave them in sellable stock. They came back in just above (return
+			// movement + batch); now write them straight back out through the same
+			// path as the Damage screen — a damage movement valued at FEFO cost.
+			// Net sellable stock is unchanged and BOTH the returns and the
+			// damage/loss reports stay accurate. The refund is unaffected.
+			if strings.EqualFold(strings.TrimSpace(ln.Disposition), "damage") {
+				ok, err := stkRepo.DecrementGuarded(ctx, it.ProductID, qty)
+				if err != nil {
+					return apperr.Internal("failed to write off damaged return", err)
+				}
+				if !ok {
+					return apperr.Conflict("not enough stock to write off the damaged return")
+				}
+				cost, err := stkRepo.DepleteFEFO(ctx, it.ProductID, qty)
+				if err != nil {
+					return apperr.Internal("failed to deplete batches", err)
+				}
+				if err := stkRepo.InsertMovement(ctx, stock.MovementInput{
+					ProductID: it.ProductID, Type: stock.MoveDamage, Quantity: qty.Neg(),
+					ReferenceID: &returnID, ReferenceType: &ref, UserID: userID,
+					Note: strPtr("damaged on return of " + sale.ReceiptNo),
+					Cost: cost.Mul(qty),
+				}); err != nil {
+					return apperr.Internal("failed to record damage movement", err)
+				}
 			}
 		}
 

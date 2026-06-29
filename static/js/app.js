@@ -1743,6 +1743,7 @@ function saleReturn(saleId, opts) {
   return {
     saleId: saleId,
     qtys: {},
+    dispos: {},
     reason: "",
     busy: false,
     setQty(itemId, value, max) {
@@ -1751,22 +1752,30 @@ function saleReturn(saleId, opts) {
       if (q > max) q = max;
       this.qtys[itemId] = q;
     },
+    setDispo(itemId, value) {
+      this.dispos[itemId] = value;
+    },
     async submit() {
       if (this.busy) return;
       const lines = Object.keys(this.qtys)
         .filter((k) => Number(this.qtys[k]) > 0)
-        .map((k) => ({ sale_item_id: Number(k), quantity: String(this.qtys[k]) }));
+        .map((k) => ({
+          sale_item_id: Number(k),
+          quantity: String(this.qtys[k]),
+          disposition: this.dispos[k] || "restock",
+        }));
       if (lines.length === 0) {
         toast("Enter at least one quantity to return", "error");
         return;
       }
+      const anyDamaged = lines.some((l) => l.disposition === "damage");
       this.busy = true;
       try {
         await apiFetch("POST", endpoint, {
           reason: this.reason || null,
           lines: lines,
         });
-        toast("Return processed & restocked", "success");
+        toast(anyDamaged ? "Return processed" : "Return processed & restocked", "success");
         window.dispatchEvent(new CustomEvent("close-modal"));
         document.body.dispatchEvent(new CustomEvent(reloadEvent));
       } catch (_) {
