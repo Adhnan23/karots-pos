@@ -6,6 +6,7 @@ import (
 
 	"karots-pos/internal/apperr"
 	"karots-pos/internal/features/cashflow"
+	"karots-pos/internal/features/customers"
 	"karots-pos/internal/features/sales"
 	"karots-pos/internal/features/warranty"
 	"karots-pos/internal/middleware"
@@ -121,5 +122,72 @@ func (a *adminUI) WarrantyReprint(c echo.Context) error {
 		return c.NoContent(200)
 	}
 	c.Response().Header().Set("HX-Trigger", response.Toast("Warranty slip sent to printer", "success"))
+	return c.NoContent(200)
+}
+
+// ReceiptsCredit renders the admin Credit tab fragment: DP- credit-payment receipts.
+func (a *adminUI) ReceiptsCredit(c echo.Context) error {
+	ctx := c.Request().Context()
+	from, to, fromStr, toStr, err := resolveReceiptRange(c)
+	if err != nil {
+		return err
+	}
+	q := strings.TrimSpace(c.QueryParam("q"))
+	rows, err := a.s.customers.ListPayments(ctx, customers.DebtFilter{Query: q, From: from, To: to, Limit: 100})
+	if err != nil {
+		return err
+	}
+	return response.RenderFragment(c, adminpages.RcCreditTab(adminpages.RcCreditData{
+		Symbol: a.symbol(ctx), Rows: rows, Query: q, Preset: c.QueryParam("preset"), From: fromStr, To: toStr,
+	}))
+}
+
+// DebtReceiptView shows one DP- credit-payment receipt print-friendly (admin).
+func (a *adminUI) DebtReceiptView(c echo.Context) error {
+	ctx := c.Request().Context()
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	r, err := a.s.customers.GetPayment(ctx, id)
+	if err != nil {
+		return err
+	}
+	cfg, err := a.s.settings.Get(ctx)
+	if err != nil {
+		return err
+	}
+	return response.RenderPage(c, adminpages.RcDebtReceiptPage(adminpages.RcDebtViewData{
+		UserName: middleware.CurrentUserName(c),
+		Symbol:   a.symbol(ctx),
+		Settings: *cfg,
+		Receipt:  *r,
+	}))
+}
+
+// DebtReceiptPrint (re)sends a DP- credit-payment slip to the printer (admin).
+func (a *adminUI) DebtReceiptPrint(c echo.Context) error {
+	ctx := c.Request().Context()
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	r, err := a.s.customers.GetPayment(ctx, id)
+	if err != nil {
+		return err
+	}
+	cfg, err := a.s.settings.Get(ctx)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(cfg.ReceiptPrinter) == "" {
+		c.Response().Header().Set("HX-Trigger", response.Toast("No receipt printer configured", "error"))
+		return c.NoContent(200)
+	}
+	if err := printing.Raw(ctx, cfg.ReceiptPrinter, a.s.buildDebtSlip(ctx, cfg, debtReceiptToPayment(*r), debtReceiptToCustomer(*r), cashierNameOf(*r))); err != nil {
+		c.Response().Header().Set("HX-Trigger", response.Toast("Print failed: "+err.Error(), "error"))
+		return c.NoContent(200)
+	}
+	c.Response().Header().Set("HX-Trigger", response.Toast("Slip sent to printer", "success"))
 	return c.NoContent(200)
 }
