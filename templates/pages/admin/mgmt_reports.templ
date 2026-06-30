@@ -192,7 +192,7 @@ templ FinanceReport(d FinanceReportData) {
 				@plMoney(d.Symbol, "Stock losses (damage + warranty)", d.PL.Losses, true)
 				@plMoney(d.Symbol, "Supplier recoveries", d.PL.Recoveries, false)
 				@plMoney(d.Symbol, "Net profit", d.PL.NetProfit, false)
-				@plMoney(d.Symbol, "Cash received", d.PL.Received, false)
+				@plMoney(d.Symbol, "Sale tender (paid at sale)", d.PL.Received, false)
 				@plMoney(d.Symbol, "Receivables (customer dues)", d.PL.Receivables, false)
 				@plMoney(d.Symbol, "Payables (supplier dues)", d.PL.Payables, false)
 				@plMoney(d.Symbol, "Cash withdrawn (drawer)", d.PL.CashWithdrawn, false)

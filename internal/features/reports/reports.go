@@ -25,7 +25,7 @@ type PL struct {
 	GrossRevenue  decimal.Decimal  `json:"gross_revenue"`  // sale totals before returns (excl. void)
 	Returns       decimal.Decimal  `json:"returns"`        // value of returned lines, by sale date
 	Revenue       decimal.Decimal  `json:"revenue"`        // net revenue = gross - returns
-	Received      decimal.Decimal  `json:"received"`       // cash/card/online actually collected
+	Received      decimal.Decimal  `json:"received"`       // tender taken AT point of sale (excludes later debt collections — see Cashflow view for true cash in)
 	COGS          decimal.Decimal  `json:"cogs"`           // cost of goods sold, net of returns
 	GrossProfit   decimal.Decimal  `json:"gross_profit"`   // revenue - COGS
 	GrossMargin   decimal.Decimal  `json:"gross_margin"`   // gross profit / revenue, percent

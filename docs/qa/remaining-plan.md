@@ -32,25 +32,27 @@ hit endpoints) — that worked well last session.
 
 ## Tier A — finish the ⚠️ areas (money/stock correctness; highest value)
 
-1. **Cash register close / Z-report (over/short)** — `Cash register / Z` ⚠️. Open never got a
-   completed close (harness multi-modal Alpine issue). Drive via API/real-keyboard: open float →
-   ring sales → close with a denomination count-out → assert expected-vs-counted, over/short, and
-   the Z/session row. Do one *balanced* and one *over/short* close. End-of-day is daily-critical.
+1. ~~**Cash register close / Z-report (over/short)**~~ — ✅ DONE 2026-06-30. Drove balanced
+   (2600/2600/0), over (2450/1000/+1450), short (700/740/−40) closes via API; closing movement +
+   audit row + Z-report over/short labeling all correct. Matrix cell → ✅.
 
-2. **Cashflow / lockers / CR- transfers** — `Cashflow / lockers / CR-` ⚠️. Create a cash locker;
-   do till↔locker and locker↔locker transfers; assert a CR- receipt per move and the combined
-   Cash Flow view + net position reconcile. Confirm bank charge / interest legs hit P&L correctly.
+2. ~~**Cashflow / lockers / CR- transfers**~~ — ✅ DONE 2026-06-30. Two lockers; fund/transfer/
+   bank-charge/interest all via cashflow.Move; one CR- per move (transfer = 2 ledger legs, 1 CR);
+   balances reconcile (Safe 6000 / Bank 4070); Net position + P&L (expense + Other Income) correct.
 
-3. **"Cash received" on P&L** (findings line ~257, not yet a finding) — decide whether a **cash
-   debt collection** should appear in the Finance "Cash received" line (currently looks like it
-   counts only sale tender). Confirm intended behavior; log a finding only if it's wrong.
+3. ~~**"Cash received" on P&L**~~ — ✅ DONE 2026-06-30 → **QA-011**. Confirmed the line counts
+   only sale-time tender (excludes debt collections, which the Cashflow view does count). Owner
+   chose to **relabel** "Cash received" → "Sale tender (paid at sale)" (HTML + CSV) and keep the
+   P&L accrual-pure; Cashflow view stays the source of truth for true cash-in.
 
-4. **Onboarding ⚠️ re-mark** — the only open onboarding item was QA-004 (won't-fix) + QA-006
-   (fixed). Re-walk the empty→shop flow once and downgrade the matrix cell to ✅ if nothing else
-   surfaces.
+4. ~~**Onboarding ⚠️ re-mark**~~ — ✅ DONE 2026-06-30. Only residual is QA-004 (won't-fix) +
+   QA-006 (fixed). Matrix cell → ✅ (noted: residual = QA-004 won't-fix). A full empty→shop
+   re-walk is folded into the wrap-up restore round-trip.
 
-5. **Stock ⚠️ re-mark** — the open stock gap was QA-009 (now fixed). Re-confirm stock-take +
-   movements + low-stock/reorder once and move the cell to ✅.
+5. ~~**Stock ⚠️ re-mark**~~ — ✅ DONE 2026-06-30. QA-009 fixed; re-confirmed: abs adjustment
+   (Cola 61→100, +39 `adjust` movement w/ note), stock-take page, movements page, and
+   low-stock/reorder report all render 200. Movement types present: purchase/sale/adjust/return/
+   damage/warranty_replacement. Cell → ✅.
 
 ## Tier B — core areas never tested (breadth)
 

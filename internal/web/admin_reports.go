@@ -95,7 +95,7 @@ func (a *adminUI) FinanceReport(c echo.Context) error {
 			{"Supplier recoveries", csvMoney(pl.Recoveries)},
 			{"Other income (interest)", csvMoney(pl.OtherIncome)},
 			{"Net profit", csvMoney(pl.NetProfit)},
-			{"Cash received", csvMoney(pl.Received)},
+			{"Sale tender (paid at sale)", csvMoney(pl.Received)},
 			{"Receivables", csvMoney(pl.Receivables)},
 			{"Payables", csvMoney(pl.Payables)},
 		}

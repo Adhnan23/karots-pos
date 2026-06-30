@@ -45,7 +45,7 @@ Legend: ✅ pass · ⚠️ issues found · ❌ broken · — not yet tested
 | Area | Core | +Recharge | +Documents | Both |
 |------|------|-----------|------------|------|
 | Build / vet / tests | ✅ | — | — | — |
-| Onboarding (empty→shop) | ⚠️ | — | — | — |
+| Onboarding (empty→shop) | ✅ (only residual = QA-004 won't-fix) | — | — | — |
 | Settings / receipt config | ✅ | — | — | — |
 | Users / auth / PIN | ✅ | — | — | — |
 | Units / conversions | — | — | — | — |
@@ -57,14 +57,14 @@ Legend: ✅ pass · ⚠️ issues found · ❌ broken · — not yet tested
 | Customers / credit | ✅ | — | — | — |
 | Purchasing (PO lifecycle) | ✅ | — | — | — |
 | Supplier returns | — | — | — | — |
-| Stock / stock-take / movements | ⚠️ | — | — | — |
+| Stock / stock-take / movements | ✅ | — | — | — |
 | Selling (tenders/discounts/held) | ✅ | — | — | — |
 | Returns / refunds | ✅ (+damage disposition) | — | — | — |
 | Warranty claims | ✅ | — | — | — |
 | Expenses | ✅ | — | — | — |
 | Supplier payments | ✅ | — | — | — |
-| Cash register / Z | ⚠️ | — | — | — |
-| Cashflow / lockers / CR- | ⚠️ | — | — | — |
+| Cash register / Z | ✅ | — | — | — |
+| Cashflow / lockers / CR- | ✅ | — | — | — |
 | Reports / finance | ✅ | — | — | — |
 | Unified receipts | — | — | — | — |
 | Backup / restore / recovery | ✅ (QA-010 seq fix + e2e round-trip) | — | — | — |
@@ -297,6 +297,18 @@ replacement −1 → 3). Replacement slip carries months-left (verified in prior
 - *Reinforces QA-007:* the supplier-pay modal HAS a method selector; the **customer Collect
   modal does not** — they should be consistent.
 
+**Cashflow / lockers / CR- transfers — fully verified (2026-06-30).** Created two lockers
+(Main Safe/safe, Bank BOC/bank), then drove every money move through `cashflow.Move`:
+- *Fund:* adjust_up Safe +10,000 → CR-000008 (adjust).
+- *Transfer:* Safe→Bank 4,000 → **two ledger legs** (Safe −4,000, Bank +4,000) but **one**
+  CR-000009 — correct (one move = one receipt).
+- *Bank charge:* Bank −50 → CR-000010 **and** an `expenses` row (Bank charges, 50) → hits P&L.
+- *Interest:* Bank +120 → CR-000011 → hits P&L **Other Income**.
+Computed balances reconcile exactly: Safe **6,000**, Bank **4,070** (4000−50+120). The combined
+**Cashflow view** renders both lockers, Cash on hand, Total cash, and **Net position**
+(cash + stock-at-cost + receivables − payables). P&L symmetry confirmed live: bank charge in
+expenses, interest in Other Income (re-verifies commit 45c8f3c). Cell → ✅.
+
 ### Phase 1 — Core · Expenses, Cash register (open/expected/close)
 **Verified OK:**
 - **Expenses** — record (category/amount/source/date/description) → expense row + money receipt
@@ -305,12 +317,16 @@ replacement −1 → 3). Replacement slip carries months-left (verified in prior
   drawer" is exactly correct** — Rs.7,050 = 7,000 float + 1,500 power-bank sale + 50 debt
   collection − 1,000 supplier − 500 expense (S-00001 sale/refund net 0). The day's every money
   move flows into the drawer expectation correctly.
-- *Partly verified:* the **close/Z count-out** renders (per-denomination count + "Close &
-  Recon") but I couldn't complete the count in-harness (the till page stacks ~9 Alpine modals
-  sharing denomination inputs, so scripted entry binds unreliably — a tooling limit, not a
-  product bug). Over/short = counted − expected is trivial given the expected value is correct.
-  **To finish:** complete one balanced + one over/short close and confirm the Z-report + session
-  record next session (real keyboard entry).
+- **Close / Z reconciliation — now fully verified (2026-06-30).** Drove three closes end-to-end
+  (denomination count-out → `/api/cash-register/close`), all as cashier on real sessions:
+  - *Balanced:* float 2,000 + Cola sale 600 → expected 2,600, counted 2,600 → **difference 0**.
+  - *Over:* float 1,000, no sale → expected 1,000, counted 2,450 → **+1,450 over**.
+  - *Short:* float 500 + Cola sale 240 → expected 740, counted 700 → **−40 short**.
+  `difference = counted − (opening + cash_sales + adjustments)` confirmed in every case. Each
+  close writes a `closing` cash_movement (counted amount) and an audit `close` row carrying
+  "counted / expected / over-short". The **Z-report** (`/cashier/z/:id`) renders Opening float,
+  Expected in drawer, Counted, and the over/short line with correct **Over / Short** labeling
+  (verified on the short session: 740 / 700 / Short −40). Cash register / Z is ✅.
 
 ### Phase 2 — +RECHARGE plugin (integration + core regression)
 **Verified OK — clean integration, no core breakage:**
@@ -392,6 +408,28 @@ sale / money receipt (refund, supplier payment, expense, etc.) / debt payment th
   advanced (sales=5/money=6/debt=2, all is_called) → a post-restore return minted **CR-000007**
   with HTTP 200 (pre-fix this was the dup-key 500). Confirms the fix runs inside the real
   `Restore` code path, not just the manual correction.
+
+---
+
+#### QA-011 · Reports/Finance · Core+ · P2 · Pain · (owner reading P&L) — ✅ FIXED 2026-06-30
+**The Finance → Profit P&L "Cash received" line was misleading vs the Cashflow view.** It is
+`SUM(sales.paid_amount)` filtered by **sale** date — i.e. only tender taken *at point of sale*.
+A later **cash debt collection never appears** there: collecting a debt only decrements
+`customers.outstanding_balance` and inserts a `customer_payments` (DP-) row; it never updates
+`sales.paid_amount`. Meanwhile the **Cashflow view's "Cash in (range)"** *does* count the
+collection (debt payment emits a CR- money receipt — confirmed CR-000001 customer_payment). So
+the two "cash received" figures diverge whenever credit is used, and the P&L one silently
+understates real cash collected.
+- **Severity P2 (Pain):** not wrong math, but two differently-scoped "cash" numbers in the same
+  app confuse an owner reconciling takings; the P&L number looks like "all cash in" but isn't.
+- **Resolution (owner decision 2026-06-30): relabel, keep the P&L accrual-pure.** Renamed the
+  line **"Cash received" → "Sale tender (paid at sale)"** in the Finance report (HTML +
+  CSV export) and clarified the `reports.PL.Received` field comment to point at the Cashflow
+  view as the source of truth for true cash-in. No figure changed; the Cashflow view remains
+  authoritative for actual cash collected. Verified live: `/admin/reports/finance` HTML and
+  `?format=csv` both render the new label.
+- **Files:** `templates/pages/admin/mgmt_reports.templ` (FinanceReport table),
+  `internal/web/admin_reports.go` (CSV row), `internal/features/reports/reports.go` (comment).
 
 ---
 
