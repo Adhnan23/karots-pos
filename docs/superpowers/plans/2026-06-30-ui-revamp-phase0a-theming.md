@@ -214,7 +214,6 @@ Create `internal/features/theme/theme.go`:
 package theme
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -359,9 +358,6 @@ func CurrentCSS() string {
 	}
 	return CSSVars(Theme{Palette: "classic", Mode: "auto", Density: "comfortable"})
 }
-
-// ensure fmt is used (kept for future diagnostics formatting).
-var _ = fmt.Sprintf
 ```
 
 - [ ] **Step 4: Run the test to verify it passes**
