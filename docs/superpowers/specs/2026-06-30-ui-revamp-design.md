@@ -48,6 +48,28 @@ stays cleanly discardable. A SPA rewrite was rejected as a functionality rewrite
 disguise (months of work, two codebases, behavior risk) — and responsive/touch/keyboard
 goals are all achievable in Tailwind + Alpine.
 
+## Binding design principles (apply to EVERY phase and every subagent)
+
+These are non-negotiable, owner-stated rules for the whole revamp:
+
+1. **Design fresh — take no reference from the existing implementation, at all.** Do not
+   read, copy, or imitate the markup, classes, layout, or components of any existing page,
+   shared component, layout, or plugin page. The current UI is what we are replacing; it is
+   not a reference of any kind. Design from a blank slate against the design tokens,
+   informed only by *what each feature needs to do*.
+2. **Design from the product's full capability, not from the old screens.** The system's
+   whole feature set is known (selling, inventory, purchasing, money/cashflow/lockers,
+   reports/finance, setup, audit, plus the recharge & documents plugins). Design the *best*
+   UI for each capability, not a reskin of how it happens to be laid out today.
+3. **The new IA does NOT map 1:1 to the old pages.** One old page may split into several
+   new pages; several old pages may merge into one. **Adding new pages and omitting/removing
+   pages is expected and encouraged** wherever it makes the product clearer and easier.
+4. **Aim for a genuinely excellent, easy UI/UX** — professional, consistent, approachable;
+   anyone can use it from admin to cashier. Easy-to-use beats feature-dense layout.
+5. **Behavior is preserved; only presentation/IA changes.** Business logic, money math,
+   permissions, and data stay intact (except the additive theming data). When a new page
+   needs server data, it reuses existing services/handlers — but never inherits old markup.
+
 ---
 
 ## 1. Design system foundations
