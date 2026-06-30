@@ -23,6 +23,37 @@ module.exports = {
     "text-rose-600",
     "text-slate-600",
   ],
-  theme: { extend: {} },
+  theme: {
+    extend: {
+      colors: {
+        surface:   "var(--surface)",
+        "surface-2": "var(--surface-2)",
+        line:      "var(--border)",
+        body:      "var(--text)",
+        muted:     "var(--text-muted)",
+        accent: {
+          DEFAULT: "var(--accent)",
+          fg:      "var(--accent-fg)",
+          weak:    "var(--accent-weak)",
+        },
+        ok:    "var(--success)",
+        warn:  "var(--warning)",
+        bad:   "var(--danger)",
+        info:  "var(--info)",
+        area: {
+          sell:       "var(--area-sell)",
+          inventory:  "var(--area-inventory)",
+          purchasing: "var(--area-purchasing)",
+          money:      "var(--area-money)",
+          reports:    "var(--area-reports)",
+          setup:      "var(--area-setup)",
+        },
+      },
+      borderRadius: { token: "var(--radius)" },
+      spacing: { token: "var(--space)" },
+      height: { control: "var(--control-h)" },
+      minHeight: { control: "var(--control-h)" },
+    },
+  },
   plugins: [],
 };
