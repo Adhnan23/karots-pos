@@ -203,3 +203,12 @@ html.dark body.bg-slate-100 { background-color: #0b1120 !important; color: #e2e8
   .po-break { break-after: page; page-break-after: always; }
   @page { margin: 12mm; }
 }
+
+/* Design tokens are emitted at runtime into #theme-vars (see base layout).
+   These rules apply them to the document shell. */
+:root { color-scheme: light; }
+.dark { color-scheme: dark; }
+body {
+  background: var(--surface-2);
+  color: var(--text);
+}

@@ -1,5 +1,7 @@
 package layouts
 
+import "karots-pos/internal/features/theme"
+
 // Base is the bare HTML shell: head assets, a global toast host, and a modal
 // container that HTMX swaps fragments into. Pages with chrome (admin sidebar,
 // cashier topbar) compose this via Admin()/Cashier() below.
@@ -17,6 +19,7 @@ templ Base(title string) {
 			<script src="/static/vendor/htmx.min.js"></script>
 			<script src="/static/js/app.js"></script>
 			<script defer src="/static/vendor/alpine.min.js"></script>
+			@templ.Raw("<style id=\"theme-vars\">" + theme.CurrentCSS() + "</style>")
 			<link rel="stylesheet" href="/static/css/tailwind.css"/>
 			<link rel="stylesheet" href="/static/css/app.css"/>
 		</head>
