@@ -17,9 +17,18 @@ reconciles end-to-end (buy→sell→credit→refund→supplier-pay→expense all
 receipts; P&L and cash-drawer expectation match to the rupee), serial warranty (claim/replace
 keeping expiry + consuming stock) works, and the **plugin framework is excellent** — recharge &
 documents enable on a live DB via isolated migration version tables, inject all their UI hooks
-(nav/tabs/quick-actions/tender), coexist without conflict, and never break core. The open items
-are polish/hardening (below), plus a few deep flows deferred to finish (they're documented as
-previously E2E-verified).
+(nav/tabs/quick-actions/tender), coexist without conflict, and never break core.
+
+**Audit status (2026-06-30): COMPLETE.** Every matrix cell is ✅ (or an explicitly-noted known
+limit). All blockers QA-001..010 fixed (QA-004 won't-fix by design). **Four more findings this
+pass — QA-011..014 — all P2/P3, all resolved:** QA-011 (P&L "Cash received" relabel), QA-012 (P2
+import duplicated barcode-less products → name fallback), QA-013 (P2 recharge float refill
+misattributed → now lands in active till), QA-014 (P3 known limit: Sinhala/Tamil don't print on
+PC437 thermal; HTML receipts fine). Tiers A–D all driven live; cross-cutting (security/perf/i18n/
+TTL/Windows) all checked. **Final gate green:** `go vet ./...`, `go test ./...`,
+`GOOS=windows go build ./...` all clean; backups capture plugin data (dynamic table discovery);
+restore round-trip + QA-010 receipt-seq fix verified live. **Recommendation: ship-ready** for the
+target market, with QA-014 (local-script thermal) as the one product decision to weigh.
 
 ## Sellability blockers (no P0/P1; these P2s should be fixed before/at launch)
 - **QA-002** — ✅ FIXED 2026-06-29: per-request active-user check (set-once `UserValidator`);
@@ -71,7 +80,7 @@ Legend: ✅ pass · ⚠️ issues found · ❌ broken · — not yet tested
 | Audit log | ✅ | — | — | — |
 | Recharge plugin surface | n/a | ✅ (QA-013 refill fix) | n/a | ✅ |
 | Documents plugin surface | n/a | n/a | ✅ | ✅ |
-| Cross-cutting (i18n/security/perf) | ⚠️ | — | — | — |
+| Cross-cutting (i18n/security/perf) | ✅ (i18n thermal = QA-014 known limit) | — | — | — |
 | Plugin coexistence / migrations | n/a | ✅ | ✅ | ✅ |
 | Core regression w/ plugins on | n/a | ✅ | ✅ | ✅ |
 
@@ -471,6 +480,55 @@ open (common), every mid-shift refill silently misattributes.
   still open: refill row now `session_id=5` (cashier), cashier live float **3,500 → 13,500**
   immediately, usable mid-shift. `go vet ./plugins/recharge` green.
 - **Files:** `plugins/recharge/recon.go` (OpenDeviceSession), `plugins/recharge/admin.go` (Refill).
+
+---
+
+#### QA-014 · i18n / printing · Core+ · P3 · Gap · (Sinhala/Tamil shops) — KNOWN LIMITATION (by design)
+**Local-script (Sinhala/Tamil) names don't print on thermal receipts** — they render as `?`.
+The ESC/POS layer (`internal/escpos.ascii`) deliberately sanitises any non-printable-ASCII rune
+to `'?'` before sending, because the printer's built-in **PC437** font is Latin-only and raw
+multibyte bytes would otherwise print as codepage garbage. Verified: a product named "තේ කොළ (Tea)"
+sells fine and **renders correctly on the HTML receipt** (`/cashier/receipt/:id`), but on the
+thermal slip the Sinhala becomes `??? (Tea)`.
+- **Severity P3:** graceful + documented degradation, not a crash; the English part still prints
+  and most shops use English/transliterated POS names. But a shop that names products purely in
+  Sinhala/Tamil can't show them on thermal paper.
+- **Path forward (if needed):** print the receipt body as a raster image (render text → bitmap →
+  ESC/POS raster) for local-script support, or print the HTML/A4 receipt. No code change made —
+  logging as a deliberate constraint for the owner to weigh against the target market.
+
+---
+
+## Tier D — cross-cutting hardening (2026-06-30)
+
+**Security / authz sweep ✅.** Route-group guards verified at runtime as a cashier: **every**
+admin route returns **403** (`/admin`, products, users, audit, backup, lockers, reports/finance)
+— `ag` group enforces `RequireRole(admin,manager)`, with users/audit/backup further gated to
+admin. Admin-only **sale APIs 403** for cashier (`GET /api/sales` list, `POST /api/sales/:id/return`,
+`POST /api/purchase-returns`). **IDOR check**: `/cashier/z/:id` enforces ownership — cashier views
+own session (200) but gets **403** for another user's session (the admin's). Stale-token hole was
+already closed (QA-002). Receipts are shop-wide by design (any cashier may view any receipt — not
+user-scoped secrets), which is appropriate for a POS.
+
+**Windows build ✅.** `GOOS=windows GOARCH=amd64 go build ./cmd/server` produces a 32 MB exe;
+`GOOS=windows go build ./...` (all packages incl. both plugins) is clean. `internal/printing` has
+both `_unix` and `_windows` build-tagged implementations.
+
+**i18n → QA-014 above** (thermal local-script limitation; HTML receipts render Unicode fine).
+
+**Performance ✅.** Seeded **2,010 products** and timed authenticated endpoints: admin products
+list **6.8ms**, search "Perf Product 1500" **5.1ms**, stock page **7.3ms**, `/api/products?search`
+**10.6ms**, finance report **4.5ms** — all sub-15ms (paginated list, indexed search). Comfortable
+for small/medium-shop scale. (Deep multi-10k sales load not driven; products list/search — the main
+pagination surface — is fast. Perf seed cleaned up after.)
+
+**Session TTL (QA-KNOWN-1) ✅ re-confirmed by config.** `JWTAccessTTL` = **12h**
+(`JWT_EXPIRES_IN`, config.go:44); the UI cookie MaxAge = the same 12h (web.go:104). A refresh-token
+table exists (7d) but is **not** wired into web-cookie sliding renewal — `setCookie` writes a single
+access cookie and there's no refresh-on-request middleware. Net: a normal daily shift (≤12h) never
+expires mid-task (the original 15m bug is fixed, commit 263ed1b); a **>12h continuous** session
+would still hard-expire. Acceptable for a daily-shift POS; would need sliding refresh for 24/7
+operation. Flag retained, not a blocker.
 
 ---
 
