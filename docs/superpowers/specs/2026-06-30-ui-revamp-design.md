@@ -108,10 +108,23 @@ remain available as a fallback; SVG is the consistent default.
 - **Appearance settings section** (on the Settings page): list themes as live swatches,
   set active, and create/edit/delete custom themes (add as many as you like). Curated
   presets are contrast-checked; the optional custom accent runs a contrast guard.
-- **Quick-switcher** in both shells (next to the dark-mode toggle): one-tap switch of the
-  active theme — "quick switch is easier."
+- **Quick-switcher** (next to the dark-mode toggle): one-tap switch of the active theme —
+  "quick switch is easier." **Phase 0a scope:** the switcher lives in the **admin shell
+  only**, because activation (`POST /admin/themes/:id/activate`) is an admin-gated,
+  shop-level action — a cashier-role control would only 403. The **cashier shell still
+  recolors automatically** via the base-layout `#theme-vars` injection; it simply has no
+  switch control. A cashier-visible *read-only* current-theme indicator is a later
+  decision and must not widen the activation permission.
 
 This is the only data-model change in the revamp, and it is purely additive.
+
+> **Phase 0a deferral (entry condition for Phase 0b/0c):** `Theme.Mode`
+> (`light`/`dark`/`auto`) is stored but **not yet consumed** — the legacy `html.dark`
+> toggle + its `!important` neutral overrides still own the base background/text in dark
+> mode, so a theme's *own* dark neutrals are currently inert (palette/accent/area colors
+> do flow through in both modes). Wiring `Theme.Mode` to drive the light/dark default and
+> migrating the hardcoded `body bg-slate-100 text-slate-800` classes onto tokens is
+> Phase 0b/0c work.
 
 ---
 
