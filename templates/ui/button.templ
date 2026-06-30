@@ -1,0 +1,21 @@
+package ui
+
+// ButtonProps configures the Button component. Attrs spreads arbitrary
+// attributes (hx-*, x-on:click, name, value, disabled, ...) onto the element so
+// the component stays behavior-agnostic.
+type ButtonProps struct {
+	Variant string // primary | secondary | ghost | danger (default primary)
+	Size    string // sm | md | lg (default md)
+	Type    string // button | submit (default button)
+	Attrs   templ.Attributes
+}
+
+templ Button(p ButtonProps) {
+	<button
+		type={ buttonType(p.Type) }
+		class={ ButtonClass(p.Variant, p.Size) }
+		{ p.Attrs... }
+	>
+		{ children... }
+	</button>
+}
