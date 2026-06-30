@@ -162,6 +162,20 @@ func (r *Repository) FindByBarcode(ctx context.Context, barcode string) (*Produc
 	return &p, nil
 }
 
+// FindByName matches an active product by case-insensitive name. Used by the
+// catalog import to make the export→edit→re-upload round-trip idempotent for
+// barcode-less products (which can't be matched on barcode). When several share
+// a name it returns the oldest, so repeated imports converge on one row.
+func (r *Repository) FindByName(ctx context.Context, name string) (*Product, error) {
+	var p Product
+	err := r.db.GetContext(ctx, &p,
+		selectProduct+` WHERE LOWER(p.name) = LOWER($1) AND p.is_active = true ORDER BY p.id LIMIT 1`, name)
+	if err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
 // BarcodeExists reports whether any product (active or not) already carries this
 // barcode, so a generated code never shadows an existing or deactivated product.
 func (r *Repository) BarcodeExists(ctx context.Context, code string) (bool, error) {

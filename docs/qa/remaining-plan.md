@@ -56,22 +56,25 @@ hit endpoints) — that worked well last session.
 
 ## Tier B — core areas never tested (breadth)
 
-6. **Units / conversions** — unit CRUD; product conversions (the consume-on-sale seam shared with
-   plugins). Run a conversion, verify stock math + movement + cost.
+6. ~~**Units / conversions**~~ — ✅ DONE 2026-06-30. Unit CRUD clean; conversion sack→1kg (ratio
+   25) run 2→50, value preserved (10000=10000, dest 200/kg), movements + run logged; overdraw
+   guard 409. See findings Tier B section.
 
-7. **Suppliers CRUD + Supplier returns (debit notes)** — supplier create/edit/deactivate;
-   `purchase-returns` new/detail flow → stock down + supplier balance/credit note correct.
+7. ~~**Suppliers CRUD + Supplier returns (debit notes)**~~ — ✅ DONE 2026-06-30. Supplier
+   create+edit; supplier return 5×Cola@80 → 201, balance 600→200, stock 100→95, purchase_return
+   movement −5, detail + dues report render. See findings Tier B.
 
-8. **Import / export (csv / xlsx / ods)** — shipped this cycle, not yet QA-driven. Round-trip
-   each of products / customers / suppliers / stock-take: download template → fill → import →
-   export → re-import (idempotent). Test the broadened file-picker accept on Linux (GTK/XFCE),
-   bad rows, and the row-limit cap.
+8. ~~**Import / export (csv / xlsx / ods)**~~ — ✅ DONE 2026-06-30 → found+fixed **QA-012**
+   (barcode-less products duplicated on re-import; added name fallback → idempotent). Products CSV
+   round-trip (update+create+opening stock), xlsx/ods export valid + xlsx read path, bad-row
+   skip+report, customer/supplier export headers. (Linux file-picker accept = UI-only, not driven.)
 
-9. **Product groups / Cashier Menu** — admin Cashier Menu build (groups + items + emoji); till
-   drill-down, breadcrumb, Back.
+9. ~~**Product groups / Cashier Menu**~~ — ✅ DONE 2026-06-30. Drinks›{Cold,Hot} built; cashier
+   drill-down API (top/children/breadcrumb/products+emoji), item-emoji update, reorder all work.
 
-10. **Unified receipts — 58/80mm reprint** — across S- / CR- / DP- / warranty on **both** cashier
-    and admin: view (kiosk same-tab + Back), reprint, size switch. Verify ESC/POS bytes + HTML.
+10. ~~**Unified receipts — 58/80mm reprint**~~ — ✅ DONE 2026-06-30. All 4 types view 200 on both
+    roles; all 4 hub tabs render both roles; ?size=58/80 switch differs; reprint POST 200 {"ok"};
+    ESC/POS covered by escpos+tspl unit tests. **Tier B complete.**
 
 ## Tier C — plugin deep flows (deferred; previously E2E-verified, re-run live)
 

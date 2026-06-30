@@ -415,10 +415,18 @@ func (s *Service) ImportOne(ctx context.Context, in ImportRow) (ImportResult, er
 	var res ImportResult
 	err := appdb.WithTx(ctx, s.db, func(tx *sqlx.Tx) error {
 		repo := NewRepository(tx)
-		// Try to match an existing active product by barcode.
+		// Match an existing active product: prefer barcode, else fall back to name
+		// so barcode-less products round-trip on re-import instead of duplicating.
 		var existing *Product
 		if w.Barcode != nil {
 			if p, ferr := repo.FindByBarcode(ctx, *w.Barcode); ferr == nil {
+				existing = p
+			} else if !errors.Is(ferr, sql.ErrNoRows) {
+				return ferr
+			}
+		}
+		if existing == nil {
+			if p, ferr := repo.FindByName(ctx, name); ferr == nil {
 				existing = p
 			} else if !errors.Is(ferr, sql.ErrNoRows) {
 				return ferr

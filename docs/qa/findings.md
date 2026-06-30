@@ -48,15 +48,15 @@ Legend: ✅ pass · ⚠️ issues found · ❌ broken · — not yet tested
 | Onboarding (empty→shop) | ✅ (only residual = QA-004 won't-fix) | — | — | — |
 | Settings / receipt config | ✅ | — | — | — |
 | Users / auth / PIN | ✅ | — | — | — |
-| Units / conversions | — | — | — | — |
+| Units / conversions | ✅ | — | — | — |
 | Categories | ✅ | — | — | — |
 | Products (+barcode/serial/warranty) | ✅ | — | — | — |
-| Import/export (csv/xlsx/ods) | — | — | — | — |
-| Product groups / cashier menu | — | — | — | — |
-| Suppliers | — | — | — | — |
+| Import/export (csv/xlsx/ods) | ✅ (QA-012 dup-on-reimport fixed) | — | — | — |
+| Product groups / cashier menu | ✅ | — | — | — |
+| Suppliers | ✅ | — | — | — |
 | Customers / credit | ✅ | — | — | — |
 | Purchasing (PO lifecycle) | ✅ | — | — | — |
-| Supplier returns | — | — | — | — |
+| Supplier returns | ✅ | — | — | — |
 | Stock / stock-take / movements | ✅ | — | — | — |
 | Selling (tenders/discounts/held) | ✅ | — | — | — |
 | Returns / refunds | ✅ (+damage disposition) | — | — | — |
@@ -66,7 +66,7 @@ Legend: ✅ pass · ⚠️ issues found · ❌ broken · — not yet tested
 | Cash register / Z | ✅ | — | — | — |
 | Cashflow / lockers / CR- | ✅ | — | — | — |
 | Reports / finance | ✅ | — | — | — |
-| Unified receipts | — | — | — | — |
+| Unified receipts | ✅ | — | — | — |
 | Backup / restore / recovery | ✅ (QA-010 seq fix + e2e round-trip) | — | — | — |
 | Audit log | ✅ | — | — | — |
 | Recharge plugin surface | n/a | ⚠️ | n/a | ⚠️ |
@@ -430,6 +430,70 @@ understates real cash collected.
   `?format=csv` both render the new label.
 - **Files:** `templates/pages/admin/mgmt_reports.templ` (FinanceReport table),
   `internal/web/admin_reports.go` (CSV row), `internal/features/reports/reports.go` (comment).
+
+---
+
+#### QA-012 · Import/Export · Core+ · P2 · Bug · (owner, data integrity) — ✅ FIXED 2026-06-30
+**Catalog import duplicated every barcode-less product on re-upload**, despite the export being
+explicitly sold as a round-trip ("export, edit in a spreadsheet, and re-upload"). `ImportOne`
+matched an existing product **by barcode only** (`internal/features/products/service.go`); when a
+row had no barcode it always `Insert`ed a new row. Reproduced: exported 5 products → re-imported
+the unchanged file → **"2 created, 3 updated"**, leaving duplicate `Rice 1kg` (id4+id6) and
+`Rice 25kg sack` (id3+id7). Many real products have no barcode (loose groceries, services,
+weighed goods), so an owner doing export→edit→re-upload silently corrupts their catalog, doubling
+rows (and seeding extra opening stock) every cycle.
+- **Severity P2 (data integrity):** silent, cumulative catalog corruption on an advertised workflow.
+- **Fix:** added `Repository.FindByName` (case-insensitive, active, oldest-first) and a fallback
+  in `ImportOne` — match by barcode first, else by name — so barcode-less rows update in place.
+  Re-verified: re-importing the export now reports **"0 created, 5 updated"**, product count
+  unchanged, zero duplicates. `go vet` + `go test ./internal/web ./internal/sheet` green.
+- **Files:** `internal/features/products/products.go` (FindByName),
+  `internal/features/products/service.go` (ImportOne fallback).
+
+---
+
+## Tier B — core breadth verified (2026-06-30, no defects unless noted)
+
+**Import / export (csv / xlsx / ods) ✅ — one bug found+fixed (QA-012 above).** Products CSV
+round-trip: export (correct 14-col header) → edit (Cola price 120→130, add Sprite) → import →
+**Cola updated + Sprite created with opening stock 40**. Format coverage: `?format=xlsx` and
+`?format=ods` exports produce valid files (`file` → "Microsoft Excel 2007+" / "OpenDocument
+Spreadsheet", correct MIME). **xlsx read path** works (re-imported the .xlsx). Bad-row handling:
+a blank-name row is reported "missing name" + skipped while the valid row (Fanta) still imports.
+Customers + suppliers CSV export headers correct. The barcode-less duplication bug (QA-012) was
+found here and fixed; re-import is now idempotent.
+
+**Suppliers + Supplier returns (debit notes) ✅.** Supplier create + edit clean. Drove a
+supplier return (`POST /api/purchase-returns`, admin/manager-gated): 5 × Cola @ cost 80 to Lanka
+Distributors → **HTTP 201**, total 400. Effects all correct: supplier balance **600→200**
+(returning goods reduces what we owe), Cola stock **100→95**, `purchase_return` movement **−5**
+(FEFO-depleted). Detail page (`/admin/purchase-returns/1`) renders supplier/Cola/total/reason;
+supplier-dues + suppliers reports render. (Suppliers list/pay was already ✅ in Phase 1.)
+
+**Unified receipts — 58/80mm reprint ✅.** All four receipt types view (HTTP 200) on **both**
+cashier and admin: sale **S-** (`/cashier/receipt/1`), money **CR-** (`/{cashier,admin}/money-
+receipts/1`), debt **DP-** (`/{cashier,admin}/receipts/credit/1`), warranty
+(`/{cashier,admin}/receipts/warranty/1`). All four hub tabs (sales/cash/credit/warranty) render
+on both roles. **Size switch works**: `?size=58` vs `?size=80` produce different HTML for both
+the sale and CR- receipts (paper-width override on top of the saved `receipt_width` setting).
+Reprint POSTs return `200 {"ok":true}` (dev printer queue accepts; no crash with no hardware).
+ESC/POS byte generation is covered by `internal/escpos` + `internal/tspl` unit tests (green).
+
+**Product groups / Cashier Menu ✅.** Built a 2-level menu in admin: top group **Drinks** (🥤)
+→ children **Cold** (❄️) + **Hot** (🔥); linked Cola + Sprite into Cold with per-item emoji.
+Cashier drill-down API verified: `/api/groups` returns Drinks (has_children=true); `/api/groups/1`
+→ breadcrumb [Drinks], child Cold; `/api/groups/2` → breadcrumb [Drinks › Cold], products Cola
+(🥤) + Sprite. Per-item emoji update (Sprite → 🥶) and group reorder (`?dir=up` query param —
+Hot↔Cold sort_order swap) both work. Admin Groups + tree pages render. (Note: `move` takes `dir`
+as a **query** param, not form — fine, just noting for any future UI wiring.)
+
+**Units / conversions ✅.** Unit CRUD clean (create Carton/ctn → update → delete, 0 left).
+Conversion E2E: created Rice 25kg sack (id3, cost 5000) → Rice 1kg (id4) at **ratio 25**;
+stocked 4 sacks; ran 2 → **source 4→2, dest 0→50 kg**, two `conversion` movements (−2 / +50),
+`conversion_runs` logged (from 2 / to 50). **Value preserved exactly**: source out 2×5000 =
+10,000 = dest in 50×200 → dest batch valued **200/kg** (source='conversion'). **Overdraw guard
+works**: running 99 sacks (only 2 on hand) → **HTTP 409** "not enough stock of the source
+product", source stock unchanged. This is the consume-on-sale value seam shared with plugins.
 
 ---
 
