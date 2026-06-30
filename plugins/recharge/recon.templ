@@ -25,6 +25,11 @@ templ ReconBody(d ReconData) {
 				Open your cash drawer first — reload-balance reconciliation is tied to the open cash session.
 			</div>
 		} else {
+			if d.LogoutMode {
+				<div class="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-4 text-sm">
+					Close your reload float before logging out — count each device's closing balance, then <strong>Save closing</strong> to finish signing out.
+				</div>
+			}
 			<div class="text-sm text-slate-500">
 				Cash session #{ strconv.FormatInt(d.Session.ID, 10) } · opened { d.Session.OpenedAt.Format("Mon 02 Jan, 15:04") }
 			</div>
@@ -57,6 +62,9 @@ templ ReconBody(d ReconData) {
 						hx-include="#recon-floats"
 						hx-target="#recon-body"
 						hx-swap="outerHTML"
+						if d.LogoutMode {
+							hx-vals={ `{"logout":"1"}` }
+						}
 						hx-confirm="Save the counted closing balances? This finalises each device for this session."
 						class="px-4 py-2.5 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700"
 					>Save closing & show bonus/loss</button>

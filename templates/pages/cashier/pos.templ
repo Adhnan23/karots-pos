@@ -491,6 +491,9 @@ templ POS(d POSData) {
 				<div class="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-full overflow-auto p-6">
 					<template x-if="!closeResult">
 						<div>
+							<div x-show="logoutMode" class="mb-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm px-3 py-2">
+								Close your till before logging out — count the drawer to finish.
+							</div>
 							<h3 class="text-lg font-semibold mb-1">Close Register</h3>
 							<p class="text-sm text-slate-500 mb-3">Count the drawer to close the session.</p>
 							<div class="space-y-1.5 max-h-72 overflow-auto pr-1">
@@ -536,7 +539,8 @@ templ POS(d POSData) {
 								</div>
 							</div>
 							<a x-bind:href="'/cashier/z/' + closeResult.session.id" target="_blank" class="block w-full mt-4 py-2.5 rounded-lg bg-slate-800 text-white font-medium">🖨 Print Day-End (Z)</a>
-							<button x-on:click="showClose = false; closeResult = null" class="w-full mt-2 py-2.5 rounded-lg bg-indigo-600 text-white font-medium">Done</button>
+							<button x-show="!logoutMode" x-on:click="showClose = false; closeResult = null" class="w-full mt-2 py-2.5 rounded-lg bg-indigo-600 text-white font-medium">Done</button>
+							<a x-show="logoutMode" href="/logout" class="block w-full mt-2 py-2.5 rounded-lg bg-indigo-600 text-white font-medium">Finish &amp; Log out</a>
 						</div>
 					</template>
 				</div>

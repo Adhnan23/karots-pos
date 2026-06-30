@@ -101,7 +101,12 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	s.cashRegister = cashregister.NewService(db, sales.NewService(db)).WithAudit(s.audit)
 	s.cashflow = cashflow.NewService(db, s.sales)
 	s.cashflowReceipts = cashflow.NewReceiptService(db)
-	a := &authUI{svc: authSvc, cookie: CookieConfig{Secure: cfg.CookieSecure, MaxAge: cfg.JWTAccessTTL}}
+	a := &authUI{
+		svc:          authSvc,
+		cookie:       CookieConfig{Secure: cfg.CookieSecure, MaxAge: cfg.JWTAccessTTL},
+		cashRegister: s.cashRegister,
+		jwtSecret:    cfg.JWTSecret,
+	}
 	admin := &adminUI{s: s, db: db}
 	cashier := &cashierUI{s: s}
 

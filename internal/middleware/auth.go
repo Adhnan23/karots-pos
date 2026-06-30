@@ -93,6 +93,28 @@ func extractToken(c echo.Context) string {
 	return ""
 }
 
+// ParseClaims validates a token's signature + expiry and returns its claims. It
+// does NOT run the user-active check, so it is suitable for handlers that are
+// intentionally ungated (e.g. logout) but still want to know who the caller is.
+// Returns false when the token is missing, malformed, expired, or wrongly signed.
+func ParseClaims(c echo.Context, secret string) (*Claims, bool) {
+	tokenStr := extractToken(c)
+	if tokenStr == "" {
+		return nil, false
+	}
+	claims := &Claims{}
+	_, err := jwt.ParseWithClaims(tokenStr, claims, func(t *jwt.Token) (any, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, apperr.Unauthorized("invalid signing method")
+		}
+		return []byte(secret), nil
+	})
+	if err != nil {
+		return nil, false
+	}
+	return claims, true
+}
+
 // RequireRole authorizes the request against an allowlist of roles. Must run
 // after JWTAuth.
 func RequireRole(roles ...string) echo.MiddlewareFunc {

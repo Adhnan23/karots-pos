@@ -235,6 +235,20 @@ func (s *Store) OpenDeviceSession(ctx context.Context, deviceID int64) (int64, e
 	return sid, err
 }
 
+// HasOpenFloat reports whether any device float is still open under the given
+// cash session (an un-closed recharge_device_sessions row). Used by the logout
+// guard to force a float close before the till it belongs to is closed, and to
+// know when the last float has been closed so logout can proceed. Carry rows
+// (session_id=0) are never "open floats", so the session filter excludes them.
+func (s *Store) HasOpenFloat(ctx context.Context, sessionID int64) (bool, error) {
+	var exists bool
+	err := s.db.GetContext(ctx, &exists, `
+		SELECT EXISTS(
+			SELECT 1 FROM recharge_device_sessions
+			WHERE session_id=$1 AND closed_at IS NULL)`, sessionID)
+	return exists, err
+}
+
 // DeviceRecon is one device's reconciliation line within a carrier.
 type DeviceRecon struct {
 	DeviceID  int64            `json:"device_id"`

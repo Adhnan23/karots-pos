@@ -241,6 +241,10 @@ function pos(symbol, defaultType, askToPrint) {
     lastClosing: null,
     lastBreakdown: null,
     showClose: false,
+    // Set when the page was opened via /cashier?logout=1 — the user tried to log
+    // out with the till still open, so we force the close/count flow and, once it
+    // succeeds, send them on to /logout instead of back to the POS.
+    logoutMode: false,
     showWithdraw: false,
     withdrawAmount: 0,
     withdrawReason: "",
@@ -273,6 +277,14 @@ function pos(symbol, defaultType, askToPrint) {
       await this.loadUnits();
       await this.loadHolds();
       await this.loadLockers();
+      // Logout was blocked because the till is still open: jump straight to the
+      // count/close dialog. If the session somehow closed already, just finish
+      // logging out so the user isn't stranded.
+      this.logoutMode = new URLSearchParams(location.search).get("logout") === "1";
+      if (this.logoutMode) {
+        if (this.session) this.startClose();
+        else window.location.assign("/logout");
+      }
     },
 
     // Cash lockers available as a float source (drawer open / pay-in) or

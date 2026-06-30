@@ -40,6 +40,10 @@ type ReconData struct {
 	Carriers      []Carrier
 	Devices       []Device
 	Cards         []BankCard
+	// LogoutMode is set when the page was reached via /cashier/recharge?logout=1 —
+	// the user tried to log out with a float still open. The page then shows a
+	// banner and, once the last float is closed, routes on to /logout.
+	LogoutMode bool
 }
 
 func (h *cashierUI) showChangePin(c echo.Context) bool {
@@ -63,6 +67,7 @@ func (h *cashierUI) reconData(c echo.Context) (ReconData, error) {
 		Role:          middleware.CurrentRole(c),
 		ShowChangePin: h.showChangePin(c),
 		Session:       sess,
+		LogoutMode:    c.QueryParam("logout") == "1",
 	}
 	if cfg, err := h.p.core.Settings.Get(ctx); err == nil {
 		d.Symbol = cfg.CurrencySymbol
@@ -116,23 +121,40 @@ func (h *cashierUI) requireSession(c echo.Context) (*cashregister.Session, error
 
 // SaveOpening stores each device's opening float at shift start.
 func (h *cashierUI) SaveOpening(c echo.Context) error {
-	return h.saveFloats(c, "opening_", h.p.store.SaveOpening, "Opening floats saved")
+	if _, err := h.saveFloats(c, "opening_", h.p.store.SaveOpening); err != nil {
+		return err
+	}
+	return h.reconFragment(c, response.Toast("Opening floats saved", "success"))
 }
 
 // SaveClosing stores each device's counted closing float and reveals bonus/loss.
+// When the close was triggered from a logout (logout=1) and no float remains open
+// under the till session, it sends the user on to /logout so the original sign-out
+// completes instead of leaving them on the recon page.
 func (h *cashierUI) SaveClosing(c echo.Context) error {
-	return h.saveFloats(c, "closing_", h.p.store.SaveClosing, "Closing floats saved")
-}
-
-func (h *cashierUI) saveFloats(c echo.Context, prefix string, save func(context.Context, int64, int64, decimal.Decimal) error, msg string) error {
-	ctx := c.Request().Context()
-	sess, err := h.requireSession(c)
+	sess, err := h.saveFloats(c, "closing_", h.p.store.SaveClosing)
 	if err != nil {
 		return err
 	}
+	if c.FormValue("logout") == "1" {
+		open, err := h.p.store.HasOpenFloat(c.Request().Context(), sess.ID)
+		if err == nil && !open {
+			c.Response().Header().Set("HX-Redirect", "/logout")
+			return c.NoContent(http.StatusOK)
+		}
+	}
+	return h.reconFragment(c, response.Toast("Closing floats saved", "success"))
+}
+
+func (h *cashierUI) saveFloats(c echo.Context, prefix string, save func(context.Context, int64, int64, decimal.Decimal) error) (*cashregister.Session, error) {
+	ctx := c.Request().Context()
+	sess, err := h.requireSession(c)
+	if err != nil {
+		return nil, err
+	}
 	form, err := c.FormParams()
 	if err != nil {
-		return apperr.BadRequest("invalid form")
+		return nil, apperr.BadRequest("invalid form")
 	}
 	for key, vals := range form {
 		id, ok := strings.CutPrefix(key, prefix)
@@ -148,10 +170,10 @@ func (h *cashierUI) saveFloats(c echo.Context, prefix string, save func(context.
 			continue
 		}
 		if err := save(ctx, sess.ID, did, amt); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	return h.reconFragment(c, response.Toast(msg, "success"))
+	return sess, nil
 }
 
 // Tx records a money transaction (deposit / withdrawal / bill-pay / topup): it

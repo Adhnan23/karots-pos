@@ -6,6 +6,7 @@
 package recharge
 
 import (
+	"context"
 	"io/fs"
 
 	"karots-pos/internal/plugin"
@@ -61,6 +62,21 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 	reg.Cashier().POST("/recharge/card-tx", ch.CardTx)
 	reg.Cashier().POST("/recharge/reload", ch.Reload)
 	reg.Cashier().POST("/recharge/wallet", ch.Wallet)
+	// Block logout while a reload float is still open under the user's till
+	// session, so it is counted/closed before the till it belongs to. Fails open
+	// (any error → don't block) so a plugin hiccup can never trap a user signed in.
+	reg.AddLogoutGuard(func(ctx context.Context, userID int64) (bool, string, string) {
+		sess, err := p.core.CashRegister.Current(ctx, userID)
+		if err != nil || sess == nil {
+			return false, "", ""
+		}
+		open, err := p.store.HasOpenFloat(ctx, sess.ID)
+		if err != nil || !open {
+			return false, "", ""
+		}
+		return true, "/cashier/recharge", "Close your reload float before logging out"
+	})
+
 	reg.AddQuickActionTab(plugin.QuickActionTab{Key: "reload", Label: "📶 Reload", Component: ReloadPanel()})
 	reg.AddCashierTab(plugin.CashierTab{Href: "/cashier/recharge", Label: "Reload & Bills", Key: "recharge"})
 	reg.AddTenderMethod(plugin.TenderMethod{Value: "wallet", Label: "Wallet (eZ Cash / mCash)"})

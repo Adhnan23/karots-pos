@@ -1,6 +1,10 @@
 package plugin
 
-import "github.com/a-h/templ"
+import (
+	"context"
+
+	"github.com/a-h/templ"
+)
 
 // Additive UI hooks. A plugin's Setup registers these; the template layer reads
 // them through the exported getters to weave plugin UI into the core shell. They
@@ -80,6 +84,14 @@ type QuickActionTab struct {
 	Component templ.Component
 }
 
+// LogoutGuard reports whether a user has unfinished plugin work that must be
+// resolved before they may log out — e.g. an open recharge float session. When
+// Block is true the web layer refuses to log the user out and instead sends them
+// to Redirect (a page where they can resolve it) with Reason shown as a banner.
+// Guards must be cheap (one indexed query) and fail open (return Block=false on
+// error) so a plugin issue can never trap a user in a non-logout-able state.
+type LogoutGuard func(ctx context.Context, userID int64) (block bool, redirect, reason string)
+
 var (
 	adminNav        []AdminNavEntry
 	cashierTabs     []CashierTab
@@ -90,6 +102,7 @@ var (
 	posActions      []PosAction
 	quickActionTabs []QuickActionTab
 	tenderMethods   []TenderMethod
+	logoutGuards    []LogoutGuard
 )
 
 // Hook registration — plugins call these from Setup.
@@ -102,6 +115,7 @@ func (r *Registry) AddReportCard(rc ReportCard)          { reportCards = append(
 func (r *Registry) AddPosAction(a PosAction)             { posActions = append(posActions, a) }
 func (r *Registry) AddQuickActionTab(t QuickActionTab)   { quickActionTabs = append(quickActionTabs, t) }
 func (r *Registry) AddTenderMethod(t TenderMethod)       { tenderMethods = append(tenderMethods, t) }
+func (r *Registry) AddLogoutGuard(g LogoutGuard)         { logoutGuards = append(logoutGuards, g) }
 
 // Getters for the template layer.
 func AdminNav() []AdminNavEntry           { return adminNav }
@@ -113,3 +127,4 @@ func ReportCards() []ReportCard           { return reportCards }
 func PosActions() []PosAction             { return posActions }
 func QuickActionTabs() []QuickActionTab   { return quickActionTabs }
 func TenderMethods() []TenderMethod       { return tenderMethods }
+func LogoutGuards() []LogoutGuard         { return logoutGuards }

@@ -2,11 +2,14 @@ package web
 
 import (
 	"net/http"
+	"net/url"
 	"time"
 
 	"karots-pos/internal/apperr"
 	"karots-pos/internal/features/auth"
+	"karots-pos/internal/features/cashregister"
 	"karots-pos/internal/middleware"
+	"karots-pos/internal/plugin"
 	"karots-pos/internal/response"
 	authpages "karots-pos/templates/pages/auth"
 
@@ -23,8 +26,10 @@ type CookieConfig struct {
 // the web layer (not the auth feature) so the auth package never imports
 // templates — that mutual import would be a cycle.
 type authUI struct {
-	svc    *auth.Service
-	cookie CookieConfig
+	svc          *auth.Service
+	cookie       CookieConfig
+	cashRegister *cashregister.Service
+	jwtSecret    string
 }
 
 func (h *authUI) ShowLogin(c echo.Context) error {
@@ -52,9 +57,52 @@ func (h *authUI) Login(c echo.Context) error {
 	return c.Redirect(http.StatusSeeOther, auth.HomePath(pair.User.Role))
 }
 
+// Logout signs the caller out — but first refuses to drop the session while the
+// user has unfinished cash work open, so the cash trail stays honest. If their
+// till (or any plugin float, via a registered LogoutGuard) is still open, we keep
+// the cookie and bounce them to the matching close/count screen (with ?logout=1
+// so it auto-opens and returns here when done). Only once nothing is open do we
+// clear the cookie and land on /login. The whole gate is best-effort: a token we
+// can't read, or a guard/lookup that errors, falls through to a clean logout so a
+// user can never get trapped unable to sign out.
 func (h *authUI) Logout(c echo.Context) error {
+	claims, ok := middleware.ParseClaims(c, h.jwtSecret)
+	if !ok || claims.UserID == 0 {
+		h.clearCookie(c)
+		return c.Redirect(http.StatusSeeOther, "/login")
+	}
+	ctx := c.Request().Context()
+
+	// Plugin guards first (e.g. recharge float, which is scoped to the open till
+	// session) so the float is closed before the till it belongs to.
+	for _, guard := range plugin.LogoutGuards() {
+		if block, redirect, _ := guard(ctx, claims.UserID); block && redirect != "" {
+			return c.Redirect(http.StatusSeeOther, withLogoutFlag(redirect))
+		}
+	}
+
+	// Core: an open cash-register session must be counted and closed.
+	if h.cashRegister != nil {
+		if sess, err := h.cashRegister.Current(ctx, claims.UserID); err == nil && sess != nil {
+			return c.Redirect(http.StatusSeeOther, withLogoutFlag("/cashier"))
+		}
+	}
+
 	h.clearCookie(c)
 	return c.Redirect(http.StatusSeeOther, "/login")
+}
+
+// withLogoutFlag adds ?logout=1 to a close-screen path so it knows to auto-open
+// the close dialog and, once the close succeeds, send the user back to /logout.
+func withLogoutFlag(path string) string {
+	u, err := url.Parse(path)
+	if err != nil {
+		return path
+	}
+	q := u.Query()
+	q.Set("logout", "1")
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
 // pinChangeBlocked reports whether this user may NOT change their own PIN: a
