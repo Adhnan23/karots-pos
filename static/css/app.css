@@ -8,7 +8,9 @@
    keyboard users, and larger tap targets on touch devices only (coarse pointer)
    so the desktop layout is left untouched. */
 *:focus-visible {
-  outline: 2px solid #4f46e5;
+  /* Follows the active theme's accent (--ring is emitted into #theme-vars);
+     falls back to indigo if the token is ever absent. */
+  outline: 2px solid var(--ring, #4f46e5);
   outline-offset: 2px;
   border-radius: 4px;
 }
