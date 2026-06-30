@@ -496,6 +496,8 @@ thermal slip the Sinhala becomes `??? (Tea)`.
 - **Path forward (if needed):** print the receipt body as a raster image (render text → bitmap →
   ESC/POS raster) for local-script support, or print the HTML/A4 receipt. No code change made —
   logging as a deliberate constraint for the owner to weigh against the target market.
+- **Owner decision 2026-06-30: WON'T FIX (non-issue in practice).** Even Sinhala/Tamil shops use
+  English product names on the POS, so thermal slips are fine as-is. Raster thermal dropped.
 
 ---
 

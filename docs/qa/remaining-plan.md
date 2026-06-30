@@ -111,14 +111,14 @@ hit endpoints) — that worked well last session.
 ## Wrap-up gate (do last) — ✅ DONE 2026-06-30
 
 - ✅ `go vet ./...`, `go test ./...`, `GOOS=windows go build ./...` — all green.
-- ✅ **Plugin-data backup confirmed**: a live backup (even under the core binary) captures all
-  plugin tables + their goose version tables via dynamic `pg_tables` discovery (verified by
-  decompressing the dump: recharge_carriers/devices/transactions + doc_service/consumable + both
-  goose tables all present). Plugin sequences are **column-owned** (handled by the standard
-  `resetSequences`); plugins mint no standalone S-/CR-/DP- sequences (those are core, covered by
-  QA-010). Core restore round-trip + QA-010 fix were verified live last session. **Remaining
-  (low-risk, deferred):** a live *destructive* reset+restore under the plugin binary — same
-  per-table reload code already proven for core; mechanism + data-capture confirmed by analysis.
+- ✅ **Plugin-data restore round-trip — VERIFIED LIVE under the plugin binary (2026-06-30).**
+  recharge + documents enabled & populated → backup → `-reset` (drops schema, re-migrates core +
+  both plugins empty) → restart → `POST /admin/restore`. Every table came back identical, core
+  (sales/money/debt/products/lockers/users) AND plugin (recharge_carriers/devices/transactions,
+  doc_service/consumable). Post-restore writes mint clean new numbers, **no collision** (sale →
+  S-00012, money → CR-000012) — QA-010's sequence fix holds for the plugin build too. Backup
+  captures plugin tables via dynamic `pg_tables` discovery; plugin seqs are column-owned.
+  enabled_plugins.go restored to core-only after.
 - ✅ Final `findings.md` pass: matrix all ✅ / noted; exec summary refreshed; audit marked COMPLETE.
 
 **Audit complete.** Findings QA-001..014: all fixed/resolved except QA-004 (won't-fix) and QA-014
