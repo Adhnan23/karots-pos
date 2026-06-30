@@ -212,3 +212,10 @@ body {
   background: var(--surface-2);
   color: var(--text);
 }
+
+/* Theme picker swatches: small recognizable chips per palette (the live app
+   colors come from the runtime --accent var injected via #theme-vars). */
+.theme-chip-classic { background:#4f46e5; }
+.theme-chip-emerald { background:#059669; }
+.theme-chip-ocean   { background:#0284c7; }
+.theme-chip-sunset  { background:#ea580c; }

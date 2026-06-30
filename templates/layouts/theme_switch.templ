@@ -1,0 +1,26 @@
+package layouts
+
+import "strconv"
+import "karots-pos/internal/features/theme"
+
+// ThemeSwitch is a compact dropdown of saved themes for one-tap switching. It is
+// rendered in both shells next to the dark-mode toggle. themes/activeID are
+// passed in by the shell (loaded by the page handler).
+templ ThemeSwitch(themes []theme.Theme, activeID int64) {
+	<div x-data="{ open: false }" class="relative">
+		<button type="button" x-on:click="open = !open" title="Theme" class="text-slate-300 hover:text-white text-base leading-none">🎨</button>
+		<div x-show="open" x-cloak x-on:click.outside="open = false" class="absolute right-0 mt-2 w-48 bg-surface text-body rounded-xl shadow-lg border border-line py-1 z-50">
+			for _, t := range themes {
+				<button
+					hx-post={ "/admin/themes/" + strconv.FormatInt(t.ID, 10) + "/activate" }
+					class="w-full text-left px-3 py-2 text-sm hover:bg-surface-2 flex items-center justify-between"
+				>
+					<span>{ t.Name }</span>
+					if t.ID == activeID {
+						<span class="text-xs text-muted">●</span>
+					}
+				</button>
+			}
+		</div>
+	</div>
+}

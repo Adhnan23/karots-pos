@@ -39,6 +39,7 @@ type Settings struct {
 	LabelWidthMM          int       `db:"label_width_mm"    json:"label_width_mm"`
 	LabelHeightMM         int       `db:"label_height_mm"   json:"label_height_mm"`
 	LabelGapMM            int       `db:"label_gap_mm"      json:"label_gap_mm"`
+	ActiveThemeID         *int64    `db:"active_theme_id"   json:"active_theme_id,omitempty"`
 	UpdatedAt             time.Time `db:"updated_at"        json:"updated_at"`
 }
 

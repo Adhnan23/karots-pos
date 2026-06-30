@@ -1,0 +1,94 @@
+package adminpages
+
+import "strconv"
+import "karots-pos/internal/features/theme"
+
+// AppearanceSection lists saved themes as swatches with an Activate button and a
+// create form. activeID highlights the current theme.
+templ AppearanceSection(themes []theme.Theme, activeID int64) {
+	<div id="appearance-section" class="space-y-6">
+		<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+			for _, t := range themes {
+				@themeCard(t, t.ID == activeID)
+			}
+		</div>
+		<details class="rounded-xl border border-line p-4">
+			<summary class="cursor-pointer font-medium">Add a custom theme</summary>
+			<form
+				hx-post="/admin/themes"
+				hx-target="#appearance-section"
+				hx-swap="outerHTML"
+				class="mt-4 grid gap-3 sm:grid-cols-2"
+			>
+				<label class="text-sm">Name
+					<input name="name" required class="mt-1 w-full border rounded-lg px-3 py-2"/>
+				</label>
+				<label class="text-sm">Palette
+					<select name="palette" class="mt-1 w-full border rounded-lg px-3 py-2">
+						<option value="classic">Classic (indigo)</option>
+						<option value="emerald">Emerald</option>
+						<option value="ocean">Ocean</option>
+						<option value="sunset">Sunset</option>
+					</select>
+				</label>
+				<label class="text-sm">Mode
+					<select name="mode" class="mt-1 w-full border rounded-lg px-3 py-2">
+						<option value="auto">Auto</option>
+						<option value="light">Light</option>
+						<option value="dark">Dark</option>
+					</select>
+				</label>
+				<label class="text-sm">Density
+					<select name="density" class="mt-1 w-full border rounded-lg px-3 py-2">
+						<option value="comfortable">Comfortable</option>
+						<option value="compact">Compact</option>
+						<option value="large_touch">Large touch</option>
+					</select>
+				</label>
+				<label class="text-sm sm:col-span-2">Custom accent (optional, e.g. #4f46e5)
+					<input name="accent" placeholder="#4f46e5" class="mt-1 w-full border rounded-lg px-3 py-2"/>
+				</label>
+				<div class="sm:col-span-2">
+					<button type="submit" class="px-4 py-2 rounded-lg bg-accent text-accent-fg font-medium">Save theme</button>
+				</div>
+			</form>
+		</details>
+	</div>
+}
+
+templ themeCard(t theme.Theme, active bool) {
+	<div class="rounded-xl border border-line p-4 flex items-center justify-between gap-3">
+		<div class="flex items-center gap-3">
+			@themeSwatch(t)
+			<div>
+				<div class="font-medium">{ t.Name }</div>
+				<div class="text-xs text-muted">{ t.Palette } · { t.Mode } · { t.Density }</div>
+			</div>
+		</div>
+		<div class="flex items-center gap-2">
+			if active {
+				<span class="text-xs px-2 py-1 rounded-full bg-accent-weak text-body">Active</span>
+			} else {
+				<button
+					hx-post={ "/admin/themes/" + strconv.FormatInt(t.ID, 10) + "/activate" }
+					class="text-sm px-3 py-1.5 rounded-lg border border-line hover:bg-surface-2"
+				>Use</button>
+			}
+			if !t.IsBuiltin {
+				<button
+					hx-post={ "/admin/themes/" + strconv.FormatInt(t.ID, 10) + "/delete" }
+					hx-target="#appearance-section"
+					hx-swap="outerHTML"
+					hx-confirm="Delete this theme?"
+					class="text-sm px-2 py-1.5 rounded-lg text-bad"
+				>✕</button>
+			}
+		</div>
+	</div>
+}
+
+// themeSwatch shows the theme's accent via an inline style (palette colors live
+// in Go; here we render a small recognizable chip per palette).
+templ themeSwatch(t theme.Theme) {
+	<span class={ "inline-block w-8 h-8 rounded-lg border border-line", "theme-chip-" + t.Palette }></span>
+}

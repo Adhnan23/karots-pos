@@ -117,10 +117,13 @@ templ Admin(title, userName, active string) {
 					}
 				</nav>
 				<div class="px-3 py-4 border-t border-slate-800 space-y-1 text-sm">
-					<button type="button" x-data="themeToggle()" x-on:click="toggle()" class="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-slate-800">
-						<span x-text="dark ? '☀️' : '🌙'"></span>
-						<span x-text="dark ? 'Light mode' : 'Dark mode'">Dark mode</span>
-					</button>
+					<div class="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg hover:bg-slate-800">
+						<button type="button" x-data="themeToggle()" x-on:click="toggle()" class="flex-1 flex items-center gap-2">
+							<span x-text="dark ? '☀️' : '🌙'"></span>
+							<span x-text="dark ? 'Light mode' : 'Dark mode'">Dark mode</span>
+						</button>
+						<div hx-get="/admin/appearance/switch" hx-trigger="load" hx-swap="innerHTML" class="inline-block"></div>
+					</div>
 					<a href="/cashier" class="block px-3 py-2 rounded-lg hover:bg-slate-800">Open Cashier →</a>
 					<a href="/account/pin" class="block px-3 py-2 rounded-lg hover:bg-slate-800">Change PIN</a>
 					<form method="post" action="/logout">

@@ -192,6 +192,13 @@ templ SettingsPage(d SettingsData) {
 			}
 			<p class="text-xs text-slate-400 mt-3">Stored at a small size (max 400px) so it's lightweight. Any resolution is accepted — large images are scaled down automatically.</p>
 		</div>
+		<!-- Appearance (theme) -->
+		<div class="bg-white rounded-2xl shadow-sm p-6 max-w-2xl mt-6">
+			<h2 class="text-lg font-semibold mb-3">Appearance</h2>
+			<div hx-get="/admin/appearance" hx-trigger="load" hx-swap="innerHTML">
+				<p class="text-sm text-slate-500">Loading themes…</p>
+			</div>
+		</div>
 		<!-- Backup & restore -->
 		<div class="bg-white rounded-2xl shadow-sm p-6 max-w-2xl mt-6">
 			<h2 class="text-lg font-semibold">Backup &amp; Restore</h2>

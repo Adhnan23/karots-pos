@@ -31,6 +31,7 @@ import (
 	"karots-pos/internal/features/stock"
 	"karots-pos/internal/features/supplierpay"
 	"karots-pos/internal/features/suppliers"
+	"karots-pos/internal/features/theme"
 	"karots-pos/internal/features/units"
 	"karots-pos/internal/features/warranty"
 	"karots-pos/internal/middleware"
@@ -68,6 +69,7 @@ type Server struct {
 	warranty         *warranty.Service
 	recovery         *recovery.Service
 	groups           *productgroups.Service
+	theme            *theme.Service
 }
 
 // RegisterUI builds UI services and mounts all server-rendered routes. authSvc
@@ -101,6 +103,11 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	s.cashRegister = cashregister.NewService(db, sales.NewService(db)).WithAudit(s.audit)
 	s.cashflow = cashflow.NewService(db, s.sales)
 	s.cashflowReceipts = cashflow.NewReceiptService(db)
+	s.theme = theme.NewService(db)
+	if err := s.theme.RefreshCurrent(context.Background()); err != nil {
+		// Non-fatal: CurrentCSS falls back to the classic theme.
+		_ = err
+	}
 	a := &authUI{
 		svc:          authSvc,
 		cookie:       CookieConfig{Secure: cfg.CookieSecure, MaxAge: cfg.JWTAccessTTL},
@@ -436,6 +443,12 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	ag.POST("/settings/printer/test", admin.PrinterTest)
 	ag.POST("/settings/logo", admin.LogoUpload)
 	ag.POST("/settings/logo/clear", admin.LogoClear)
+
+	ag.GET("/appearance", admin.Appearance)
+	ag.GET("/appearance/switch", admin.ThemeSwitchFragment)
+	ag.POST("/themes/:id/activate", admin.ThemeActivate)
+	ag.POST("/themes", admin.ThemeCreate)
+	ag.POST("/themes/:id/delete", admin.ThemeDelete)
 
 	// Backup & restore (admin only — restore replaces all data).
 	ag.GET("/backup", admin.Backup, middleware.RequireRole(auth.RoleAdmin))
