@@ -2,6 +2,8 @@ package recharge
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"strconv"
 	"time"
 
@@ -215,6 +217,22 @@ func (s *Store) SaveClosing(ctx context.Context, sessionID, deviceID int64, clos
 		DO UPDATE SET closing = EXCLUDED.closing, closed_at = now()`,
 		sessionID, deviceID, closing)
 	return err
+}
+
+// OpenDeviceSession returns the cash-session id under which this device's float
+// is currently open (its un-closed recharge_device_sessions row), or 0 if none.
+// Used to attribute an admin float refill to the till that is actually using the
+// device's float, so the working cashier sees it live (else it carries via 0).
+func (s *Store) OpenDeviceSession(ctx context.Context, deviceID int64) (int64, error) {
+	var sid int64
+	err := s.db.GetContext(ctx, &sid, `
+		SELECT session_id FROM recharge_device_sessions
+		WHERE device_id=$1 AND closed_at IS NULL
+		ORDER BY session_id DESC LIMIT 1`, deviceID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	return sid, err
 }
 
 // DeviceRecon is one device's reconciliation line within a carrier.

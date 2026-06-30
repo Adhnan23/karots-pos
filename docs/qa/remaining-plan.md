@@ -78,15 +78,18 @@ hit endpoints) — that worked well last session.
 
 ## Tier C — plugin deep flows (deferred; previously E2E-verified, re-run live)
 
-11. **+recharge live** — per-device float: deposit / withdraw / billpay / topup; overdraw hard-
-    block (409 + client guard); Wallet tender at checkout; reconciliation; admin float refill;
-    bank cards (no-float); service charge; all slips. Then regress core.
+11. ~~**+recharge live**~~ — ✅ DONE 2026-06-30 → found+fixed **QA-013** (admin float refill
+    misattributed to refiller's session → now lands in active cashier till). Verified: deposit +svc
+    + overdraw 409, bank-card billpay + overdraw 409, refill, reload, wallet tender, reconciliation,
+    all admin pages, core regression clean. See findings Tier C.
 
-12. **+documents live** — a real service sale (photocopy/print/laminate/bind/custom labour) with
-    consume-on-sale + `sale_items.description` + FEFO cost-per-unit. Then regress core.
+12. ~~**+documents live**~~ — ✅ DONE 2026-06-30. Photocopy service (consumable=1 A4 sheet/copy);
+    20-copy sale S-00010 → consume-on-sale fired (paper 500→480), line cost_price FEFO-rolled
+    (2.00/unit), description persisted. Admin pages render.
 
-13. **Both plugins live** — run real recharge + documents txns together; assert no double-count in
-    reports/cashflow and no receipt-number collisions across plugins.
+13. ~~**Both plugins live**~~ — ✅ DONE 2026-06-30. Both migrate cleanly (own goose tables, core
+    v42); both nav hooks + both ReportCard hooks coexist; zero receipt-number collisions; no
+    double-count. **Tier C complete.** enabled_plugins.go restored to core-only.
 
 ## Tier D — cross-cutting hardening (`Cross-cutting` ⚠️)
 

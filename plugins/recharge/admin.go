@@ -449,11 +449,15 @@ func (a *adminUI) Refill(c echo.Context) error {
 		return err
 	}
 
-	// Attribute to the current open cash session if one exists; else session-less
-	// (sessionID 0), which the opening-carry picks up for the next shift.
-	var sessionID int64
-	if sess, err := a.p.core.CashRegister.Current(ctx, uid); err == nil && sess != nil {
-		sessionID = sess.ID
+	// Attribute to the till that actually has this device's float open, so the
+	// working cashier sees the refilled float live (overdraw guard included). If no
+	// till has it open, fall back to session-less (0) → the opening-carry picks it
+	// up at the device's next opening. (Previously this used the *refiller's* own
+	// open session, so a refill done by an admin with their own till open was
+	// stranded in that session and invisible to the cashier — QA-013.)
+	sessionID, err := a.p.store.OpenDeviceSession(ctx, deviceID)
+	if err != nil {
+		return err
 	}
 	expID := exp.ID
 	if _, err := a.p.store.RecordTransaction(ctx, TxInput{

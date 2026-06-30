@@ -69,8 +69,8 @@ Legend: ✅ pass · ⚠️ issues found · ❌ broken · — not yet tested
 | Unified receipts | ✅ | — | — | — |
 | Backup / restore / recovery | ✅ (QA-010 seq fix + e2e round-trip) | — | — | — |
 | Audit log | ✅ | — | — | — |
-| Recharge plugin surface | n/a | ⚠️ | n/a | ⚠️ |
-| Documents plugin surface | n/a | n/a | ⚠️ | ⚠️ |
+| Recharge plugin surface | n/a | ✅ (QA-013 refill fix) | n/a | ✅ |
+| Documents plugin surface | n/a | n/a | ✅ | ✅ |
 | Cross-cutting (i18n/security/perf) | ⚠️ | — | — | — |
 | Plugin coexistence / migrations | n/a | ✅ | ✅ | ✅ |
 | Core regression w/ plugins on | n/a | ✅ | ✅ | ✅ |
@@ -449,6 +449,64 @@ rows (and seeding extra opening stock) every cycle.
   unchanged, zero duplicates. `go vet` + `go test ./internal/web ./internal/sheet` green.
 - **Files:** `internal/features/products/products.go` (FindByName),
   `internal/features/products/service.go` (ImportOne fallback).
+
+---
+
+#### QA-013 · Recharge plugin · +Recharge/Both · P2 · Bug · (admin refill / cashier) — ✅ FIXED 2026-06-30
+**Admin float refill landed in the refiller's own till session, not the till using the device's
+float** — so the refilled float was invisible to the working cashier and didn't carry forward.
+`Refill` (`plugins/recharge/admin.go`) resolved the session via
+`CashRegister.Current(ctx, adminUID)`. Reproduced: cashier had Dialog SIM 1 float open under
+session 5 (live balance 3,500); the system-admin (with their own leftover open till, session 1)
+refilled +10,000 → the `refill` row got `session_id=1`. Result: cashier's live balance **stayed
+3,500** (the overdraw guard would block the just-added 10,000), the admin "where's my money"
+panel showed a third number (8,500), and the float was stranded in session 1 — it never reached
+the cashier's session **or** the session-0 carry. In any shop where the owner also keeps a till
+open (common), every mid-shift refill silently misattributes.
+- **Severity P2:** float/money correctness — the agent can't use float they actually loaded.
+- **Resolution (owner decision 2026-06-30: apply to the active cashier till now).** Added
+  `Store.OpenDeviceSession(deviceID)` → the session id of the device's un-closed
+  `recharge_device_sessions` row (the till actually holding that float), else 0 (carry). `Refill`
+  now attributes there instead of the refiller's session. Re-verified with the admin's own till
+  still open: refill row now `session_id=5` (cashier), cashier live float **3,500 → 13,500**
+  immediately, usable mid-shift. `go vet ./plugins/recharge` green.
+- **Files:** `plugins/recharge/recon.go` (OpenDeviceSession), `plugins/recharge/admin.go` (Refill).
+
+---
+
+## Tier C — plugin deep flows verified (2026-06-30)
+
+**+Documents live ✅.** Enabled alongside recharge ("both" build) — migrations via own
+`goose_db_version_documents` (5 tables), core still v42. Set up a metered service **Photocopy A4**
+(@10/copy) with a **consumable** of 1 × A4 Paper sheet per copy (paper product stocked 500).
+Recorded a service sale: 20 copies @10 = **S-00010 total 200**, line carries `components` →
+**consume-on-sale fired in the core sale tx**: A4 Paper **500→480** (−20 `sale` movement). The
+service line's **cost_price rolled up from FEFO** (20 sheets × cost 2 = 40 / 20 = **2.00/unit**)
+and the per-line **description** "Photocopy A4 B&W 1-side x20" persisted to `sale_items`. Admin
+documents hub/report/labour pages render.
+
+**+Both plugins live ✅ (#13).** With recharge + documents both enabled: both migration version
+tables apply cleanly with **no conflict** (core v42, recharge v9, documents own table); **both
+admin nav hooks coexist** (/admin/recharge "Reload & Bills" + /admin/documents "Communication
+Store"); **both ReportCard hooks** render on the reports hub. **No receipt-number collisions**
+across plugins (0 duplicate S-/CR-/DP-). No double-count: recharge cash movements mirror the
+drawer (not revenue), the documents service sale is a normal sale counted once. Core regression
+clean throughout.
+
+**+Recharge live ✅ — one bug found+fixed (QA-013 above).** Enabled via `enabled_plugins.go`
+blank import; migrations applied through its own `goose_db_version_recharge` (8 tables), **core
+untouched** (core still v42). Drove the full per-device-float model: carrier + float device
+create; opening float 5,000; **deposit** 1,500 (+20 service charge) → float −1,500 / drawer
++1,520 (pay-in 1,520); **overdraw hard-block 409** ("not enough float on this device") on an
+oversized deposit. **Bank cards** (no-float): create + load 5,000 → **billpay** 2,000 (+30 svc)
+→ card 5,000→3,000, drawer +2,030; **billpay overdraw 409** ("not enough balance on this card").
+**Admin float refill** (QA-013 fix): +10,000 books a "Float top-up" expense (no drawer move) and
+now lands in the active cashier till → live float 13,500. **Reload** (airtime via sale path):
+float −500, cash-neutral (sale collected it). **Wallet tender** (wallet-paid sale): float +300.
+**Reconciliation**: recon page shows Opening 5,000 / Expected 13,300; closing count 13,300 books
+the device-session close. All recharge admin pages (hub/report/ledger/refills/balances) render;
+**core regression clean** (products/stock/finance/money-receipts all 200, normal cash + wallet
+sales succeed, Reload & Bills nav hook present).
 
 ---
 
