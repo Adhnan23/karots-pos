@@ -1,0 +1,62 @@
+package ui
+
+// Field wraps a control with a label, optional hint, and optional error. The
+// control itself is passed as children so the wrapper stays control-agnostic.
+templ Field(p FieldProps) {
+	<label class="block space-y-1">
+		<span class="text-sm font-medium text-body">
+			{ p.Label }
+			if p.Required {
+				<span class="text-bad">*</span>
+			}
+		</span>
+		{ children... }
+		if p.Hint != "" && p.Error == "" {
+			<span class="block text-xs text-muted">{ p.Hint }</span>
+		}
+		if p.Error != "" {
+			<span class="block text-xs text-bad">{ p.Error }</span>
+		}
+	</label>
+}
+
+templ Input(attrs templ.Attributes) {
+	<input class={ ControlClass } { attrs... }/>
+}
+
+templ Textarea(attrs templ.Attributes) {
+	<textarea class={ ControlClass } { attrs... }></textarea>
+}
+
+templ Select(options []Option, selected string, attrs templ.Attributes) {
+	<select class={ ControlClass } { attrs... }>
+		for _, o := range options {
+			if o.Value == selected {
+				<option value={ o.Value } selected>{ o.Label }</option>
+			} else {
+				<option value={ o.Value }>{ o.Label }</option>
+			}
+		}
+	</select>
+}
+
+templ Checkbox(label string, attrs templ.Attributes) {
+	<label class="flex items-center gap-2 min-h-control cursor-pointer">
+		<input type="checkbox" class="w-5 h-5 rounded border-line text-accent focus-visible:outline-none" { attrs... }/>
+		<span class="text-sm text-body">{ label }</span>
+	</label>
+}
+
+// Toggle is a switch-style boolean control: the label on the left, an accent
+// track + sliding knob on the right. Driven by a visually-hidden checkbox so it
+// stays keyboard- and form-native; peer-checked animates the on state.
+templ Toggle(label string, attrs templ.Attributes) {
+	<label class="flex items-center justify-between gap-3 min-h-control cursor-pointer">
+		<span class="text-sm text-body">{ label }</span>
+		<span class="relative inline-flex shrink-0">
+			<input type="checkbox" class="peer sr-only" { attrs... }/>
+			<span class="block w-10 h-6 rounded-full bg-surface-2 border border-line transition-colors peer-checked:bg-accent"></span>
+			<span class="absolute left-0.5 top-0.5 w-5 h-5 rounded-full bg-surface shadow transition-transform peer-checked:translate-x-4"></span>
+		</span>
+	</label>
+}
