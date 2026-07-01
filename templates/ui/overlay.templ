@@ -6,7 +6,8 @@ import "karots-pos/templates/ui/icons"
 // Open it from anywhere by dispatching a matching event, e.g.
 //   x-on:click="$dispatch('open-modal-<id>')"
 // The dispatch bubbles to window, where x-init registers the listener.
-// Closes on Esc, the ✕ button, or a backdrop click.
+// Closes on Esc or the ✕ button only — a backdrop click is intentionally NOT a
+// dismiss, so an accidental outside click never discards an in-progress form.
 templ Modal(id, title string) {
 	<div
 		x-data="{ open: false }"
@@ -16,7 +17,7 @@ templ Modal(id, title string) {
 		x-cloak
 		class="fixed inset-0 z-50 flex items-end sm:items-center justify-center"
 	>
-		<div class="absolute inset-0 bg-black/40" x-on:click="open = false"></div>
+		<div class="absolute inset-0 bg-black/40"></div>
 		<div class="relative bg-surface text-body w-full sm:max-w-lg sm:rounded-token rounded-t-token shadow-xl p-token max-h-[90vh] overflow-y-auto">
 			<div class="flex items-center justify-between gap-3 mb-3">
 				<h3 class="text-lg font-semibold">{ title }</h3>
