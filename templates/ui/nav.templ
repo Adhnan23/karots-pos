@@ -1,0 +1,54 @@
+package ui
+
+// Tabs renders a token-styled tab strip. Each tab is a server-rendered link;
+// the tab whose Key matches active gets the accent underline.
+templ Tabs(tabs []Tab, active string) {
+	<div class="border-b border-line mb-4">
+		<nav class="flex flex-wrap gap-1 -mb-px">
+			for _, tb := range tabs {
+				if tb.Key == active {
+					<a href={ templ.SafeURL(tb.Target) } class="px-4 py-2 border-b-2 border-accent text-accent font-medium min-h-control inline-flex items-center">{ tb.Label }</a>
+				} else {
+					<a href={ templ.SafeURL(tb.Target) } class="px-4 py-2 border-b-2 border-transparent text-muted hover:text-body min-h-control inline-flex items-center">{ tb.Label }</a>
+				}
+			}
+		</nav>
+	</div>
+}
+
+// FilterBar is a responsive wrapper row for filter controls (children).
+templ FilterBar() {
+	<div class="flex flex-wrap items-end gap-3 mb-4">
+		{ children... }
+	</div>
+}
+
+// DateRangeBar is a fresh token-styled date range control: quick preset chips +
+// exact from/to inputs. It is self-contained: preset chips GET action?preset=…,
+// the form GETs action with from/to. The adopting page resolves the params.
+templ DateRangeBar(action, preset, from, to string) {
+	<div class="no-print mb-4 space-y-3">
+		<div class="flex flex-wrap gap-2">
+			for _, rp := range rangePresets {
+				if rp.Key == preset {
+					<a href={ templ.SafeURL(action + "?preset=" + rp.Key) } class="px-3 py-1.5 rounded-token bg-accent text-accent-fg text-sm min-h-control inline-flex items-center">{ rp.Label }</a>
+				} else {
+					<a href={ templ.SafeURL(action + "?preset=" + rp.Key) } class="px-3 py-1.5 rounded-token border border-line text-muted hover:text-body hover:bg-surface-2 text-sm min-h-control inline-flex items-center">{ rp.Label }</a>
+				}
+			}
+		</div>
+		<form method="get" action={ templ.SafeURL(action) } class="flex flex-wrap items-end gap-3">
+			<label class="text-sm text-body">
+				<span class="block text-xs text-muted mb-1">From</span>
+				<input type="date" name="from" value={ from } class={ ControlClass }/>
+			</label>
+			<label class="text-sm text-body">
+				<span class="block text-xs text-muted mb-1">To</span>
+				<input type="date" name="to" value={ to } class={ ControlClass }/>
+			</label>
+			@Button(ButtonProps{Variant: "secondary", Type: "submit"}) {
+				Apply
+			}
+		</form>
+	</div>
+}
