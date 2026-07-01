@@ -1,0 +1,67 @@
+package ui
+
+import "karots-pos/templates/ui/icons"
+
+// Card is a surface panel. Children are the panel body.
+templ Card() {
+	<div class="bg-surface border border-line rounded-token p-token">
+		{ children... }
+	</div>
+}
+
+// SectionHeader is a titled row; children are the right-aligned actions slot.
+templ SectionHeader(title string) {
+	<div class="flex items-center justify-between gap-3 mb-3">
+		<h2 class="text-lg font-semibold text-body">{ title }</h2>
+		<div class="flex items-center gap-2">
+			{ children... }
+		</div>
+	</div>
+}
+
+// PageHeader is the top-of-page block: optional breadcrumb, title, subtitle,
+// and a right-aligned actions slot (children).
+templ PageHeader(p PageHeaderProps) {
+	<div class="mb-6 space-y-2">
+		if len(p.Crumbs) > 0 {
+			<nav class="flex items-center gap-1 text-xs text-muted">
+				for i, c := range p.Crumbs {
+					if i > 0 {
+						@icons.Icon("chevron-right", "w-3 h-3")
+					}
+					if c.Href != "" {
+						<a href={ templ.SafeURL(c.Href) } class="hover:text-body">{ c.Label }</a>
+					} else {
+						<span class="text-body">{ c.Label }</span>
+					}
+				}
+			</nav>
+		}
+		<div class="flex flex-wrap items-center justify-between gap-3">
+			<div>
+				<h1 class="text-2xl font-bold text-body">{ p.Title }</h1>
+				if p.Subtitle != "" {
+					<p class="text-sm text-muted">{ p.Subtitle }</p>
+				}
+			</div>
+			<div class="flex items-center gap-2">
+				{ children... }
+			</div>
+		</div>
+	</div>
+}
+
+// EmptyState is a centered icon + title + message, with an optional action slot
+// (children) — used when a list or page has nothing to show yet.
+templ EmptyState(icon, title, message string) {
+	<div class="flex flex-col items-center justify-center text-center py-12 px-4 gap-3">
+		<div class="text-muted">
+			@icons.Icon(icon, "w-10 h-10")
+		</div>
+		<div class="text-lg font-semibold text-body">{ title }</div>
+		<p class="text-sm text-muted max-w-sm">{ message }</p>
+		<div class="mt-2">
+			{ children... }
+		</div>
+	</div>
+}
