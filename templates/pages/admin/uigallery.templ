@@ -1,0 +1,128 @@
+package adminpages
+
+import (
+	"karots-pos/templates/layouts"
+	"karots-pos/templates/ui"
+	"karots-pos/templates/ui/icons"
+)
+
+// UIGallery is the Phase 0b visual-QA surface: every ui.* component and every
+// registered icon on one themeable page. Switching the active theme (Settings →
+// Appearance) should recolor this entire page.
+templ UIGallery() {
+	@layouts.Base("UI Gallery") {
+		<div class="p-6 max-w-5xl mx-auto space-y-10">
+			@ui.PageHeader(ui.PageHeaderProps{Title: "UI Gallery", Subtitle: "Phase 0b component library", Crumbs: []ui.Crumb{{Label: "Admin", Href: "/admin"}, {Label: "UI Gallery"}}}) {
+				@ui.Button(ui.ButtonProps{Variant: "primary"}) {
+					Primary action
+				}
+			}
+			@ui.SectionHeader("Buttons") {
+			}
+			<div class="flex flex-wrap gap-3">
+				@ui.Button(ui.ButtonProps{Variant: "primary"}) {
+					Primary
+				}
+				@ui.Button(ui.ButtonProps{Variant: "secondary"}) {
+					Secondary
+				}
+				@ui.Button(ui.ButtonProps{Variant: "ghost"}) {
+					Ghost
+				}
+				@ui.Button(ui.ButtonProps{Variant: "danger"}) {
+					Danger
+				}
+			</div>
+			@ui.SectionHeader("Badges") {
+			}
+			<div class="flex flex-wrap gap-2">
+				@ui.Badge("neutral") {
+					Neutral
+				}
+				@ui.Badge("ok") {
+					OK
+				}
+				@ui.Badge("warn") {
+					Warn
+				}
+				@ui.Badge("bad") {
+					Bad
+				}
+				@ui.Badge("info") {
+					Info
+				}
+				@ui.Badge("accent") {
+					Accent
+				}
+			</div>
+			@ui.SectionHeader("Form controls") {
+			}
+			@ui.Card() {
+				<div class="grid gap-4 sm:grid-cols-2">
+					@ui.Field(ui.FieldProps{Label: "Name", Required: true}) {
+						@ui.Input(templ.Attributes{"placeholder": "e.g. Widget"})
+					}
+					@ui.Field(ui.FieldProps{Label: "Category", Hint: "Pick one"}) {
+						@ui.Select([]ui.Option{{Value: "a", Label: "Alpha"}, {Value: "b", Label: "Beta"}}, "b", templ.Attributes{})
+					}
+					@ui.Field(ui.FieldProps{Label: "With error", Error: "This field is required"}) {
+						@ui.Input(templ.Attributes{})
+					}
+					<div class="space-y-3">
+						@ui.Checkbox("Enable feature", templ.Attributes{})
+						@ui.Toggle("Auto-print receipts", templ.Attributes{"checked": true})
+					</div>
+				</div>
+			}
+			@ui.SectionHeader("Stat tiles") {
+			}
+			<div class="grid gap-3 sm:grid-cols-3">
+				@ui.StatTile(ui.StatTileProps{Label: "Today sales", Value: "Rs 12,500", Icon: "chart", Area: "reports"})
+				@ui.StatTile(ui.StatTileProps{Label: "Items in stock", Value: "1,204", Icon: "boxes", Area: "inventory"})
+				@ui.StatTile(ui.StatTileProps{Label: "Open credit", Value: "Rs 3,200", Sub: "8 customers", Icon: "wallet", Area: "money"})
+			</div>
+			@ui.SectionHeader("Action tiles") {
+			}
+			<div class="grid gap-3 sm:grid-cols-3">
+				@ui.ActionTile(ui.ActionTileProps{Title: "New Sale", Desc: "Start a transaction", Href: "/cashier", Icon: "receipt", Area: "sell"})
+				@ui.ActionTile(ui.ActionTileProps{Title: "Add Product", Desc: "Create a catalog item", Href: "/admin/products/form", Icon: "box", Area: "inventory"})
+				@ui.ActionTile(ui.ActionTileProps{Title: "Reports", Desc: "Sales & finance", Href: "/admin/reports", Icon: "chart", Area: "reports"})
+			</div>
+			@ui.SectionHeader("Tabs") {
+			}
+			@ui.Tabs([]ui.Tab{{Label: "Sales", Target: "/admin/ui?tab=sales", Key: "sales"}, {Label: "Cash", Target: "/admin/ui?tab=cash", Key: "cash"}, {Label: "Warranty", Target: "/admin/ui?tab=warranty", Key: "warranty"}}, "cash")
+			@ui.SectionHeader("Date range bar") {
+			}
+			@ui.DateRangeBar("/admin/ui", "this-month", "", "")
+			@ui.SectionHeader("Empty state") {
+			}
+			@ui.Card() {
+				@ui.EmptyState("box", "No products yet", "Add your first product to get started.") {
+					@ui.Button(ui.ButtonProps{Variant: "primary"}) {
+						Add product
+					}
+				}
+			}
+			@ui.SectionHeader("Modal") {
+			}
+			<div>
+				@ui.Button(ui.ButtonProps{Variant: "secondary", Attrs: templ.Attributes{"x-data": "", "x-on:click": "$dispatch('open-modal-demo')"}}) {
+					Open modal
+				}
+				@ui.Modal("demo", "Demo modal") {
+					<p class="text-sm text-muted">This is a themeable modal. Press Esc, click ✕, or click the backdrop to close.</p>
+				}
+			</div>
+			@ui.SectionHeader("Icons") {
+			}
+			<div class="grid grid-cols-4 sm:grid-cols-8 gap-4">
+				for _, n := range icons.Names() {
+					<div class="flex flex-col items-center gap-1 text-muted">
+						@icons.Icon(n, "w-6 h-6 text-body")
+						<span class="text-[10px]">{ n }</span>
+					</div>
+				}
+			</div>
+		</div>
+	}
+}
