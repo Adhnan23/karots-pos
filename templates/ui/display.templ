@@ -1,0 +1,67 @@
+package ui
+
+import "karots-pos/templates/ui/icons"
+
+// Badge is a small status pill; children are the label.
+templ Badge(tone string) {
+	<span class={ BadgeClass(tone) }>
+		{ children... }
+	</span>
+}
+
+// StatTile is a value-forward metric card, tinted by its area accent.
+templ StatTile(p StatTileProps) {
+	<div class="bg-surface border border-line rounded-token p-4 flex items-start justify-between gap-3">
+		<div>
+			<div class="text-sm text-muted">{ p.Label }</div>
+			<div class="text-2xl font-bold text-body tabular-nums">{ p.Value }</div>
+			if p.Sub != "" {
+				<div class="text-xs text-muted">{ p.Sub }</div>
+			}
+		</div>
+		if p.Icon != "" {
+			<div class={ areaText(p.Area) }>
+				@icons.Icon(p.Icon, "w-7 h-7")
+			</div>
+		}
+	</div>
+}
+
+// ActionTile is a large tappable nav tile: an area-colored icon over a title +
+// description, linking to Href. The primary browse-first navigation unit.
+templ ActionTile(p ActionTileProps) {
+	<a
+		href={ templ.SafeURL(p.Href) }
+		class="group bg-surface border border-line rounded-token p-5 flex flex-col gap-3 min-h-control hover:border-accent hover:shadow-sm transition"
+	>
+		<div class={ areaText(p.Area) }>
+			@icons.Icon(p.Icon, "w-8 h-8")
+		</div>
+		<div>
+			<div class="font-semibold text-body">{ p.Title }</div>
+			if p.Desc != "" {
+				<div class="text-sm text-muted">{ p.Desc }</div>
+			}
+		</div>
+	</a>
+}
+
+// Table renders a responsive table. On phone widths the header row is hidden so
+// the caller's rows can stack; headers drive the desktop <thead>. Rows are
+// supplied by the caller as children (<tr>…</tr>).
+templ Table(headers []string) {
+	<div class="overflow-x-auto -mx-1">
+		<table class="w-full text-sm">
+			<thead class="hidden sm:table-header-group">
+				<tr class="text-left text-muted border-b border-line">
+					for _, h := range headers {
+						<th class="py-2 px-3 font-medium">{ h }</th>
+					}
+				</tr>
+			</thead>
+			<tbody class="divide-y divide-line">
+				{ children... }
+			</tbody>
+		</table>
+	</div>
+}
