@@ -43,7 +43,7 @@ templ StockTakePage(d StockTakeData) {
 		<p class="text-sm text-slate-500 mb-4 max-w-3xl">
 			Enter the counted quantity for each product to set its on-hand level. Each change is recorded as an
 			audited adjustment, not a purchase, so it does not affect expenses or supplier dues. Optionally set the
-			cost so future sales of this stock show the right profit. Leave a row blank to skip it; you can save one
+			cost, selling and wholesale prices so future sales of this stock show the right prices and profit. Leave a row blank to skip it; you can save one
 			section at a time.
 		</p>
 
@@ -74,11 +74,13 @@ templ StockTakePage(d StockTakeData) {
 						<th class="py-2 px-3 text-right">On hand now</th>
 						<th class="py-2 px-3 text-right">Counted qty</th>
 						<th class="py-2 px-3 text-right">Cost <span class="font-normal text-slate-400">{ d.Symbol }</span></th>
+						<th class="py-2 px-3 text-right">Selling <span class="font-normal text-slate-400">{ d.Symbol }</span></th>
+						<th class="py-2 px-3 text-right">Wholesale <span class="font-normal text-slate-400">{ d.Symbol }</span></th>
 					</tr>
 				</thead>
 				<tbody>
 					if len(d.Rows) == 0 {
-						<tr><td colspan="4" class="py-10 text-center text-slate-400">No products found.</td></tr>
+						<tr><td colspan="6" class="py-10 text-center text-slate-400">No products found.</td></tr>
 					} else {
 						for _, p := range d.Rows {
 							<tr class="border-b last:border-0">
@@ -92,6 +94,12 @@ templ StockTakePage(d StockTakeData) {
 								</td>
 								<td class="py-2 px-3 text-right">
 									<input type="number" step="0.01" min="0" name={ "cost_" + strconv.FormatInt(p.ID, 10) } value={ money.Display(p.CostPrice) } class="w-28 border rounded px-2 py-1 text-right"/>
+								</td>
+								<td class="py-2 px-3 text-right">
+									<input type="number" step="0.01" min="0" name={ "sell_" + strconv.FormatInt(p.ID, 10) } value={ money.Display(p.SellingPrice) } class="w-28 border rounded px-2 py-1 text-right"/>
+								</td>
+								<td class="py-2 px-3 text-right">
+									<input type="number" step="0.01" min="0" name={ "whole_" + strconv.FormatInt(p.ID, 10) } value={ money.Display(p.WholesalePrice) } class="w-28 border rounded px-2 py-1 text-right"/>
 								</td>
 							</tr>
 						}

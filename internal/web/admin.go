@@ -486,6 +486,10 @@ func (a *adminUI) StockTakeApply(c echo.Context) error {
 			idStr = strings.TrimPrefix(key, "qty_")
 		case strings.HasPrefix(key, "cost_"):
 			idStr = strings.TrimPrefix(key, "cost_")
+		case strings.HasPrefix(key, "sell_"):
+			idStr = strings.TrimPrefix(key, "sell_")
+		case strings.HasPrefix(key, "whole_"):
+			idStr = strings.TrimPrefix(key, "whole_")
 		default:
 			continue
 		}
@@ -503,6 +507,30 @@ func (a *adminUI) StockTakeApply(c echo.Context) error {
 			if cost, cerr := money.Parse(costStr); cerr == nil {
 				if p, gerr := a.s.products.Get(ctx, id); gerr == nil && !p.CostPrice.Equal(cost) {
 					if a.s.products.SetCost(ctx, id, cost) == nil {
+						changed = true
+					}
+				}
+			}
+		}
+		// Selling / wholesale prices: apply if either is entered and differs from
+		// the current value; a blank field keeps that price unchanged.
+		sellStr := strings.TrimSpace(c.FormValue("sell_" + idStr))
+		wholeStr := strings.TrimSpace(c.FormValue("whole_" + idStr))
+		if sellStr != "" || wholeStr != "" {
+			if p, gerr := a.s.products.Get(ctx, id); gerr == nil {
+				sell, whole := p.SellingPrice, p.WholesalePrice
+				if sellStr != "" {
+					if v, verr := money.Parse(sellStr); verr == nil {
+						sell = v
+					}
+				}
+				if wholeStr != "" {
+					if v, verr := money.Parse(wholeStr); verr == nil {
+						whole = v
+					}
+				}
+				if !sell.Equal(p.SellingPrice) || !whole.Equal(p.WholesalePrice) {
+					if a.s.products.SetPrices(ctx, id, sell, whole) == nil {
 						changed = true
 					}
 				}

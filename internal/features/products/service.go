@@ -241,6 +241,18 @@ func (s *Service) SetCost(ctx context.Context, id int64, cost decimal.Decimal) e
 	return nil
 }
 
+// SetPrices updates a product's selling and wholesale prices (bulk set from the
+// stock-take screen / count-sheet import). Both must be non-negative.
+func (s *Service) SetPrices(ctx context.Context, id int64, selling, wholesale decimal.Decimal) error {
+	if selling.IsNegative() || wholesale.IsNegative() {
+		return apperr.Validation("prices must be non-negative amounts")
+	}
+	if err := s.repo.SetPrices(ctx, id, selling, wholesale); err != nil {
+		return apperr.Internal("failed to update prices", err)
+	}
+	return nil
+}
+
 // AssignBarcode sets a barcode on a product that currently has none (the small
 // "add barcode" action on barcode-less rows). The code must be non-empty and not
 // already used by another product; it never overwrites an existing barcode.

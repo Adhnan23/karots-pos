@@ -247,6 +247,14 @@ func (r *Repository) SetCost(ctx context.Context, id int64, cost decimal.Decimal
 	return err
 }
 
+// SetPrices updates a product's selling and wholesale prices together (the
+// stock-take screen and count-sheet import set these alongside cost/quantity).
+func (r *Repository) SetPrices(ctx context.Context, id int64, selling, wholesale decimal.Decimal) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE products SET selling_price = $1, wholesale_price = $2 WHERE id = $3`, selling, wholesale, id)
+	return err
+}
+
 // SetBarcodeIfEmpty assigns a barcode only when the product currently has none,
 // so a generate action can never overwrite an existing code. Returns whether a
 // row was actually updated.

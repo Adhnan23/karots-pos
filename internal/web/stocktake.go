@@ -16,7 +16,7 @@ import (
 )
 
 // stockTakeColumns is the CSV layout for the count-sheet download and upload.
-var stockTakeColumns = []string{"barcode", "name", "current_qty", "counted_qty", "cost"}
+var stockTakeColumns = []string{"barcode", "name", "current_qty", "counted_qty", "cost", "selling_price", "wholesale_price"}
 
 // stockTakeSynonyms maps alternative headers to canonical stock-take columns.
 var stockTakeSynonyms = map[string]string{
@@ -26,6 +26,9 @@ var stockTakeSynonyms = map[string]string{
 	"count": "counted_qty", "counted": "counted_qty", "qty": "counted_qty",
 	"quantity": "counted_qty", "physical": "counted_qty", "actual": "counted_qty",
 	"cost price": "cost", "cost_price": "cost", "buying price": "cost",
+	"selling": "selling_price", "selling price": "selling_price", "sell price": "selling_price",
+	"retail": "selling_price", "retail price": "selling_price", "price": "selling_price",
+	"wholesale": "wholesale_price", "wholesale price": "wholesale_price", "trade price": "wholesale_price",
 }
 
 func stockTakeImportConfig() adminfragments.ImportConfig {
@@ -37,7 +40,7 @@ func stockTakeImportConfig() adminfragments.ImportConfig {
 		Help: []string{
 			"Download the count sheet, fill the <b>counted_qty</b> column, then upload it here.",
 			"Rows are matched by <b>barcode</b>; a blank counted_qty is left unchanged.",
-			"Each change is an audited stock adjustment (not a purchase). An optional <b>cost</b> values the opening stock.",
+			"Each change is an audited stock adjustment (not a purchase). Optional <b>cost</b>, <b>selling_price</b> and <b>wholesale_price</b> value the stock and set its prices.",
 		},
 	}
 }
@@ -63,6 +66,7 @@ func (a *adminUI) StockTakeSheet(c echo.Context) error {
 		}
 		out = append(out, []string{
 			barcode, p.Name, csvMoney(p.StockQty), "", csvMoney(p.CostPrice),
+			csvMoney(p.SellingPrice), csvMoney(p.WholesalePrice),
 		})
 	}
 	return writeSheet(c, "stock-count-sheet", stockTakeColumns, out)
@@ -121,6 +125,28 @@ func (a *adminUI) StockTakeImport(c echo.Context) error {
 			if cost, cerr := money.Parse(costStr); cerr == nil {
 				if cp, gerr := a.s.products.Get(ctx, p.ID); gerr == nil && !cp.CostPrice.Equal(cost) {
 					if a.s.products.SetCost(ctx, p.ID, cost) == nil {
+						costChanged = true
+					}
+				}
+			}
+		}
+		// Selling / wholesale prices (optional): a blank column keeps the current
+		// value. Counts as an update so a price-only correction isn't "unchanged".
+		if sp, wp := get("selling_price"), get("wholesale_price"); sp != "" || wp != "" {
+			if cp, gerr := a.s.products.Get(ctx, p.ID); gerr == nil {
+				sell, whole := cp.SellingPrice, cp.WholesalePrice
+				if sp != "" {
+					if v, verr := money.Parse(sp); verr == nil {
+						sell = v
+					}
+				}
+				if wp != "" {
+					if v, verr := money.Parse(wp); verr == nil {
+						whole = v
+					}
+				}
+				if !sell.Equal(cp.SellingPrice) || !whole.Equal(cp.WholesalePrice) {
+					if a.s.products.SetPrices(ctx, p.ID, sell, whole) == nil {
 						costChanged = true
 					}
 				}
