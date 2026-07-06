@@ -38,12 +38,12 @@ templ Receipts(d ReceiptsPageData) {
 					@receiptTab("credit", "Credit")
 					@receiptTab("warranty", "Warranty")
 				</div>
-				<div id="receipts-sales" x-show="tab === 'sales'">
+				<div id="receipts-sales" data-tabpanel x-show="tab === 'sales'">
 					@ReceiptsSalesTab(d.Sales)
 				</div>
-				<div id="receipts-cash" x-show="tab === 'cash'" hx-get="/cashier/receipts/cash" hx-trigger="load once"></div>
-				<div id="receipts-credit" x-show="tab === 'credit'" hx-get="/cashier/receipts/credit" hx-trigger="load once"></div>
-				<div id="receipts-warranty" x-show="tab === 'warranty'" hx-get="/cashier/receipts/warranty" hx-trigger="load once"></div>
+				<div id="receipts-cash" data-tabpanel x-show="tab === 'cash'" hx-get="/cashier/receipts/cash" hx-trigger="load once"></div>
+				<div id="receipts-credit" data-tabpanel x-show="tab === 'credit'" hx-get="/cashier/receipts/credit" hx-trigger="load once"></div>
+				<div id="receipts-warranty" data-tabpanel x-show="tab === 'warranty'" hx-get="/cashier/receipts/warranty" hx-trigger="load once"></div>
 			</div>
 		</div>
 	}

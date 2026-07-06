@@ -18,7 +18,7 @@ type SettingsData struct {
 templ SettingsPage(d SettingsData) {
 	@layouts.Admin("Settings", d.UserName, "settings") {
 		<h1 class="text-2xl font-bold mb-6">Shop Settings</h1>
-		<div class="bg-white rounded-2xl shadow-sm p-6 max-w-2xl">
+		<div class="bg-white rounded-2xl shadow-sm p-6">
 			<form hx-put="/admin/settings" hx-swap="none" class="space-y-4">
 				<div class="grid grid-cols-2 gap-4">
 					<div>
@@ -164,7 +164,7 @@ templ SettingsPage(d SettingsData) {
 			</form>
 		</div>
 		<!-- Logo (offline-friendly upload) -->
-		<div class="bg-white rounded-2xl shadow-sm p-6 max-w-2xl mt-6">
+		<div class="bg-white rounded-2xl shadow-sm p-6 mt-6">
 			<h2 class="text-lg font-semibold">Logo</h2>
 			<p class="text-sm text-slate-500 mt-1 mb-4">Upload a logo to store it inside the app — it prints and previews even with no internet (recommended). A URL only works when the device is online.</p>
 			if d.S.LogoSrc() != "" {
@@ -193,7 +193,7 @@ templ SettingsPage(d SettingsData) {
 			<p class="text-xs text-slate-400 mt-3">Stored at a small size (max 400px) so it's lightweight. Any resolution is accepted — large images are scaled down automatically.</p>
 		</div>
 		<!-- Backup & restore -->
-		<div class="bg-white rounded-2xl shadow-sm p-6 max-w-2xl mt-6">
+		<div class="bg-white rounded-2xl shadow-sm p-6 mt-6">
 			<h2 class="text-lg font-semibold">Backup &amp; Restore</h2>
 			<p class="text-sm text-slate-500 mt-1 mb-4">Download a full copy of your data, or restore from a previous backup. Keep backups somewhere safe.</p>
 			<a href="/admin/backup" class="inline-block px-5 py-2.5 rounded-lg bg-emerald-600 text-white font-medium">⬇ Download backup</a>
@@ -216,7 +216,7 @@ templ SettingsPage(d SettingsData) {
 			</form>
 		</div>
 		for _, sec := range plugin.SettingsSections() {
-			<div class="bg-white rounded-2xl shadow-sm p-6 max-w-2xl mt-6">
+			<div class="bg-white rounded-2xl shadow-sm p-6 mt-6">
 				<h2 class="text-lg font-semibold mb-4">{ sec.Title }</h2>
 				@sec.Body
 			</div>

@@ -44,3 +44,27 @@ func ToastAnd(message, level string, events ...string) string {
 	b.WriteByte('}')
 	return b.String()
 }
+
+// PrintPrompt builds an HX-Trigger that shows a success toast, then fires a
+// "money-print" event carrying the slip reprint url (and whether to reload after,
+// for admin balance views), then the given trailing bare events (e.g. "close-modal"
+// or a "reload-*" list refresh). "money-print" precedes the trailing events so it
+// bubbles to the body bridge before the triggering modal/form is torn down. Used
+// when "ask before printing" is on, so the client offers Print / Skip.
+func PrintPrompt(message, url string, reload bool, trailing ...string) string {
+	toast, _ := json.Marshal(map[string]string{"message": message, "level": "success"})
+	mp, _ := json.Marshal(map[string]any{"url": url, "reload": reload})
+	var b strings.Builder
+	b.WriteString(`{"show-toast":`)
+	b.Write(toast)
+	b.WriteString(`,"money-print":`)
+	b.Write(mp)
+	for _, e := range trailing {
+		key, _ := json.Marshal(e)
+		b.WriteString(",")
+		b.Write(key)
+		b.WriteString(":true")
+	}
+	b.WriteByte('}')
+	return b.String()
+}

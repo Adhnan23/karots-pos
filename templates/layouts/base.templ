@@ -26,6 +26,7 @@ templ Base(title string) {
 			@ToastHost()
 			@ModalHost()
 			@ConfirmHost()
+			@PrintPromptHost()
 		</body>
 	</html>
 }
@@ -74,6 +75,27 @@ templ ConfirmHost() {
 					<button type="button" x-on:click="no()" class="px-4 py-2 rounded-lg border text-slate-600">Cancel</button>
 					<button type="button" x-ref="yes" x-on:click="yes()" class="px-4 py-2 rounded-lg bg-rose-600 text-white font-medium">Confirm</button>
 				</div>
+			</div>
+		</div>
+	</div>
+}
+
+// PrintPromptHost is the shared "Print receipt?" prompt shown after a money move
+// when "ask before printing" is on. Any flow (cashier drawer JS, or an admin /
+// cashier HTMX handler via the "money-print" HX-Trigger) opens it through the
+// "app-print-prompt" window event; the printPromptHost() component prints or skips.
+templ PrintPromptHost() {
+	<div
+		x-data="printPromptHost()"
+		x-on:app-print-prompt.window="open($event.detail)"
+		x-on:keydown.escape.window="doSkip()"
+	>
+		<div x-show="show" x-cloak class="fixed inset-0 z-[66] flex items-center justify-center p-4 bg-black/40">
+			<div class="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 text-center">
+				<div class="text-lg font-bold text-slate-800">Print receipt?</div>
+				<div class="text-sm text-slate-500 mt-1">A cash receipt was recorded for this money movement.</div>
+				<button type="button" x-on:click="doPrint()" class="w-full mt-4 py-2.5 rounded-lg bg-slate-800 text-white font-medium">🧾 Print</button>
+				<button type="button" x-on:click="doSkip()" class="w-full mt-2 py-2.5 rounded-lg bg-slate-200 text-slate-700 font-medium">Skip</button>
 			</div>
 		</div>
 	</div>

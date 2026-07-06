@@ -22,48 +22,72 @@ import (
 // Direction (delta on the locker):
 //   - open  / payin    : cash came FROM the locker → locker decreases (guarded)
 //   - close / withdraw : cash went   TO the locker → locker increases
-func (s *Service) TillLockerLeg(ctx context.Context, tx *sqlx.Tx, ev cashregister.TillCashEvent) error {
+func (s *Service) TillLockerLeg(ctx context.Context, tx *sqlx.Tx, ev cashregister.TillCashEvent) (int64, error) {
 	lrepo := lockers.NewRepository(tx)
-	out := ev.Kind == "open" || ev.Kind == "payin" // money leaving the locker
+	out := ev.Kind == "open" || ev.Kind == "payin" // money leaving the counterparty
 
-	l, err := lrepo.GetForUpdate(ctx, ev.LockerID)
-	if err != nil {
-		return apperr.NotFound("locker")
-	}
-	if out && !l.AllowNegative && ev.Amount.GreaterThan(l.Balance) {
-		return apperr.Conflict(l.Name + " only has " + money.Display(l.Balance) + " available")
-	}
-
-	delta := ev.Amount
-	if out {
-		delta = ev.Amount.Neg()
-	}
-	sessID := ev.SessionID
-	counter := "till"
-	if _, err := lrepo.AddEntry(ctx, lockers.LedgerInput{
-		LockerID: ev.LockerID, BalanceDelta: delta, Kind: "transfer",
-		Counterparty: &counter, CounterTillSession: &sessID, Note: ev.Reason,
-		CreatedBy: actorPtr(ev.UserID),
-	}); err != nil {
-		return apperr.Internal("failed to record locker movement", err)
+	// The counterparty label is the locker's name when one is involved, else a
+	// generic cash label describing the drawer event (opening float, plain
+	// pay-in / withdrawal). A locker-less move writes only the receipt — the till
+	// side is already booked by the cashregister (opening_cash / drawer movement).
+	counterLabel := tillCashLabel(ev.Kind)
+	if ev.LockerID > 0 {
+		l, err := lrepo.GetForUpdate(ctx, ev.LockerID)
+		if err != nil {
+			return 0, apperr.NotFound("locker")
+		}
+		if out && !l.AllowNegative && ev.Amount.GreaterThan(l.Balance) {
+			return 0, apperr.Conflict(l.Name + " only has " + money.Display(l.Balance) + " available")
+		}
+		delta := ev.Amount
+		if out {
+			delta = ev.Amount.Neg()
+		}
+		sessID := ev.SessionID
+		counter := "till"
+		if _, err := lrepo.AddEntry(ctx, lockers.LedgerInput{
+			LockerID: ev.LockerID, BalanceDelta: delta, Kind: "transfer",
+			Counterparty: &counter, CounterTillSession: &sessID, Note: ev.Reason,
+			CreatedBy: actorPtr(ev.UserID),
+		}); err != nil {
+			return 0, apperr.Internal("failed to record locker movement", err)
+		}
+		counterLabel = l.Name
 	}
 
 	tillLabel := "Till"
 	var name string
 	if err := tx.GetContext(ctx, &name, `SELECT name FROM users WHERE id = $1`, ev.UserID); err == nil && name != "" {
-		tillLabel = "Till — " + name
+		tillLabel = "Till - " + name // plain hyphen: the thermal font has no em-dash glyph
 	}
-	from, to := tillLabel, l.Name // money into the locker (close / withdraw)
+	from, to := tillLabel, counterLabel // money into the counterparty (close / withdraw)
 	if out {
-		from, to = l.Name, tillLabel
+		from, to = counterLabel, tillLabel
 	}
-	if _, err := NewReceiptRepository(tx).Insert(ctx, ReceiptInput{
+	rec, err := NewReceiptRepository(tx).Insert(ctx, ReceiptInput{
 		Kind: "transfer", FromLabel: from, ToLabel: to, Amount: ev.Amount,
 		Note: ev.Reason, CreatedBy: actorPtr(ev.UserID),
-	}); err != nil {
-		return apperr.Internal("failed to record money receipt", err)
+	})
+	if err != nil {
+		return 0, apperr.Internal("failed to record money receipt", err)
 	}
-	return nil
+	return rec.ID, nil
+}
+
+// tillCashLabel is the counterparty label shown on the receipt for a locker-less
+// till cash event (no vault/locker chosen).
+func tillCashLabel(kind string) string {
+	switch kind {
+	case "open":
+		return "Opening float"
+	case "payin":
+		return "Cash in"
+	case "close":
+		return "Cash counted"
+	case "withdraw":
+		return "Cash out"
+	}
+	return "Cash"
 }
 
 func actorPtr(id int64) *int64 {

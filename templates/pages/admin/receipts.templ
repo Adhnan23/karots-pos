@@ -58,12 +58,12 @@ templ ReceiptsHub(d ReceiptsHubData) {
 				@rcTab("credit", "Credit")
 				@rcTab("warranty", "Warranty")
 			</div>
-			<div x-show="tab === 'sales'">
+			<div data-tabpanel x-show="tab === 'sales'">
 				@RcSalesTab(d.Sales)
 			</div>
-			<div x-show="tab === 'cash'" hx-get="/admin/receipts/cash" hx-trigger="load once"></div>
-			<div x-show="tab === 'credit'" hx-get="/admin/receipts/credit" hx-trigger="load once"></div>
-			<div x-show="tab === 'warranty'" hx-get="/admin/receipts/warranty" hx-trigger="load once"></div>
+			<div data-tabpanel x-show="tab === 'cash'" hx-get="/admin/receipts/cash" hx-trigger="load once"></div>
+			<div data-tabpanel x-show="tab === 'credit'" hx-get="/admin/receipts/credit" hx-trigger="load once"></div>
+			<div data-tabpanel x-show="tab === 'warranty'" hx-get="/admin/receipts/warranty" hx-trigger="load once"></div>
 		</div>
 	}
 }

@@ -588,6 +588,22 @@ func ascii(s string) string {
 			b.WriteRune(r)
 		case r == '\n' || r == '\t':
 			b.WriteByte(' ')
+		// Map the common typographic punctuation to its ASCII equivalent so a
+		// stray "smart" character prints as itself, not as '?'. Em/en/figure
+		// dashes and the horizontal bar all become a plain hyphen.
+		case r == '‐' || r == '‑' || r == '‒' || r == '–' ||
+			r == '—' || r == '―' || r == '−':
+			b.WriteByte('-')
+		case r == '‘' || r == '’' || r == '‚' || r == '′':
+			b.WriteByte('\'')
+		case r == '“' || r == '”' || r == '„' || r == '″':
+			b.WriteByte('"')
+		case r == '…': // ellipsis
+			b.WriteString("...")
+		case r == ' ': // non-breaking space
+			b.WriteByte(' ')
+		case r == '•' || r == '·': // bullet / middle dot
+			b.WriteByte('*')
 		default:
 			b.WriteByte('?')
 		}

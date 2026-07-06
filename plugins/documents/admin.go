@@ -254,7 +254,7 @@ func (a *adminUI) PayJob(c echo.Context) error {
 		if err != nil || tillUID == 0 {
 			return apperr.Validation("choose which till the cash came from")
 		}
-		reason := "Labour — " + job.ServiceName
+		reason := "Labour - " + job.ServiceName
 		if note != "" {
 			reason += " (" + note + ")"
 		}
@@ -265,7 +265,7 @@ func (a *adminUI) PayJob(c echo.Context) error {
 		in.TillUID = &tillUID
 	}
 
-	desc := "Documents labour — " + job.ServiceName
+	desc := "Documents labour - " + job.ServiceName
 	exp, err := a.p.core.Expenses.Create(ctx, expenses.CreateInput{
 		Category: "Labour", Amount: amt.StringFixed(2), Description: &desc,
 		ExpenseDate: time.Now().Format("2006-01-02"),

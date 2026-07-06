@@ -55,6 +55,9 @@ type Session struct {
 	ClosingBreakdown []byte           `db:"closing_breakdown" json:"closing_breakdown,omitempty"`
 	OpenedAt         time.Time        `db:"opened_at"         json:"opened_at"`
 	ClosedAt         *time.Time       `db:"closed_at"         json:"closed_at,omitempty"`
+	// ReceiptID is the CR- money receipt written for the opening float (transient;
+	// not a column). Non-nil lets the terminal print/prompt for the slip.
+	ReceiptID *int64 `db:"-" json:"receipt_id,omitempty"`
 }
 
 type Movement struct {
@@ -111,9 +114,13 @@ type TillCashEvent struct {
 	Reason    string
 }
 
-// LockerLeg books the locker side (+ receipt) of a till cash event, inside the
-// caller's transaction. Injected via WithLockerLeg; nil = locker integration off.
-type LockerLeg func(ctx context.Context, tx *sqlx.Tx, ev TillCashEvent) error
+// LockerLeg books the money side (+ receipt) of a till cash event, inside the
+// caller's transaction. When ev.LockerID > 0 it moves cash to/from that locker;
+// when 0 the till leg stands alone (opening float / plain drawer pay-in or
+// withdrawal) and only the receipt is written. It returns the id of the CR-
+// money receipt it created so the caller can print it. Injected via
+// WithLockerLeg; nil = money integration off (no receipt, returns 0).
+type LockerLeg func(ctx context.Context, tx *sqlx.Tx, ev TillCashEvent) (int64, error)
 
 // CloseResult is returned after closing so the UI can show the reconciliation.
 type CloseResult struct {
@@ -121,6 +128,8 @@ type CloseResult struct {
 	CashSales    decimal.Decimal `json:"cash_sales"`
 	ExpectedCash decimal.Decimal `json:"expected_cash"`
 	Difference   decimal.Decimal `json:"difference"`
+	// ReceiptID is the CR- money receipt written for the counted/banked close.
+	ReceiptID *int64 `json:"receipt_id,omitempty"`
 }
 
 // Summary is the live state of the open drawer, for the cashier terminal.
@@ -133,6 +142,9 @@ type Summary struct {
 	Movements     []Movement       `json:"movements"`
 	LastClosing   *decimal.Decimal `json:"last_closing,omitempty"`
 	LastBreakdown []byte           `json:"last_breakdown,omitempty"`
+	// ReceiptID is the CR- money receipt written for the just-recorded pay-in or
+	// withdrawal (transient; only set on the Summary returned by that action).
+	ReceiptID *int64 `json:"receipt_id,omitempty"`
 }
 
 type Repository struct{ q appdb.Queryer }
@@ -357,6 +369,7 @@ func (s *Service) Open(ctx context.Context, userID int64, in OpenInput) (*Sessio
 		return nil, apperr.Validation("opening cash must be a non-negative amount")
 	}
 	var sess *Session
+	var receiptID int64
 	err := appdb.WithTx(ctx, s.db, func(tx *sqlx.Tx) error {
 		repo := NewRepository(tx)
 		var ierr error
@@ -367,13 +380,16 @@ func (s *Service) Open(ctx context.Context, userID int64, in OpenInput) (*Sessio
 		if ierr = repo.AddMovement(ctx, sess.ID, userID, MoveOpening, opening, "opening float", raw); ierr != nil {
 			return ierr
 		}
-		// Take the opening float from a locker (debit it + receipt) when chosen.
-		// The till side is the session's opening_cash, so no extra drawer movement.
-		if in.SourceLockerID > 0 && s.lockerLeg != nil && opening.IsPositive() {
-			return s.lockerLeg(ctx, tx, TillCashEvent{
+		// Book the money side + receipt. With a source locker chosen, the opening
+		// float is debited from it; without one it's untracked capital and only the
+		// receipt is written. The till side is the session's opening_cash either way.
+		if s.lockerLeg != nil && opening.IsPositive() {
+			rid, lerr := s.lockerLeg(ctx, tx, TillCashEvent{
 				Kind: "open", UserID: userID, SessionID: sess.ID,
 				LockerID: in.SourceLockerID, Amount: opening, Reason: "opening float",
 			})
+			receiptID = rid
+			return lerr
 		}
 		return nil
 	})
@@ -382,6 +398,9 @@ func (s *Service) Open(ctx context.Context, userID int64, in OpenInput) (*Sessio
 			return nil, apperr.Conflict("you already have an open register session")
 		}
 		return nil, apperr.Internal("failed to open register", err)
+	}
+	if receiptID > 0 {
+		sess.ReceiptID = &receiptID
 	}
 	return sess, nil
 }
@@ -408,6 +427,7 @@ func (s *Service) Close(ctx context.Context, userID int64, in CloseInput) (*Clos
 	}
 	expected := sess.OpeningCash.Add(cashSales).Add(adj)
 	diff := closing.Sub(expected)
+	var receiptID int64
 	err = appdb.WithTx(ctx, s.db, func(tx *sqlx.Tx) error {
 		repo := NewRepository(tx)
 		if cerr := repo.Close(ctx, sess.ID, closing, expected, diff, raw); cerr != nil {
@@ -416,12 +436,19 @@ func (s *Service) Close(ctx context.Context, userID int64, in CloseInput) (*Clos
 		if cerr := repo.AddMovement(ctx, sess.ID, userID, MoveClosing, closing, "counted at close", raw); cerr != nil {
 			return cerr
 		}
-		// Bank the counted cash into a locker (credit it + receipt) when chosen.
-		if in.DestLockerID > 0 && s.lockerLeg != nil && closing.IsPositive() {
-			return s.lockerLeg(ctx, tx, TillCashEvent{
+		// Book the money side + receipt. With a destination locker chosen the counted
+		// cash is banked into it; without one only the receipt is written.
+		if s.lockerLeg != nil && closing.IsPositive() {
+			reason := "counted at close"
+			if in.DestLockerID > 0 {
+				reason = "banked at close"
+			}
+			rid, lerr := s.lockerLeg(ctx, tx, TillCashEvent{
 				Kind: "close", UserID: userID, SessionID: sess.ID,
-				LockerID: in.DestLockerID, Amount: closing, Reason: "banked at close",
+				LockerID: in.DestLockerID, Amount: closing, Reason: reason,
 			})
+			receiptID = rid
+			return lerr
 		}
 		return nil
 	})
@@ -433,7 +460,11 @@ func (s *Service) Close(ctx context.Context, userID int64, in CloseInput) (*Clos
 	sess.Difference = &diff
 	s.recordAudit(ctx, userID, audit.ActionClose,
 		"closed register: counted "+money.Display(closing)+", expected "+money.Display(expected)+", over/short "+money.Display(diff))
-	return &CloseResult{Session: *sess, CashSales: cashSales, ExpectedCash: expected, Difference: diff}, nil
+	res := &CloseResult{Session: *sess, CashSales: cashSales, ExpectedCash: expected, Difference: diff}
+	if receiptID > 0 {
+		res.ReceiptID = &receiptID
+	}
+	return res, nil
 }
 
 // Withdraw records cash taken out of the drawer mid-shift (e.g. banked, paid to
@@ -479,21 +510,25 @@ func (s *Service) adjust(ctx context.Context, userID int64, in MovementInput, mt
 	if negate {
 		signed = amt.Neg()
 	}
-	// The drawer movement and its locker leg (when a counterparty locker is
-	// chosen) commit together so the till and locker can never drift.
+	// The drawer movement and its money leg (locker side when a counterparty locker
+	// is chosen, plus the receipt) commit together so the till and locker can never
+	// drift.
+	var receiptID int64
 	if err := appdb.WithTx(ctx, s.db, func(tx *sqlx.Tx) error {
 		if merr := NewRepository(tx).AddMovement(ctx, sess.ID, userID, mtype, signed, in.Reason, nil); merr != nil {
 			return apperr.Internal("failed to record cash movement", merr)
 		}
-		if in.CounterLockerID > 0 && s.lockerLeg != nil {
+		if s.lockerLeg != nil {
 			kind := "withdraw"
 			if mtype == MovePayIn {
 				kind = "payin"
 			}
-			return s.lockerLeg(ctx, tx, TillCashEvent{
+			rid, lerr := s.lockerLeg(ctx, tx, TillCashEvent{
 				Kind: kind, UserID: userID, SessionID: sess.ID,
 				LockerID: in.CounterLockerID, Amount: amt, Reason: in.Reason,
 			})
+			receiptID = rid
+			return lerr
 		}
 		return nil
 	}); err != nil {
@@ -503,7 +538,14 @@ func (s *Service) adjust(ctx context.Context, userID int64, in MovementInput, mt
 		s.recordAudit(ctx, userID, audit.ActionWithdraw,
 			"withdrew "+money.Display(amt)+" — "+in.Reason)
 	}
-	return s.Summary(ctx, userID)
+	sum, err := s.Summary(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if receiptID > 0 {
+		sum.ReceiptID = &receiptID
+	}
+	return sum, nil
 }
 
 // RecordCreditCash logs cash collected against a customer's credit into the

@@ -584,12 +584,20 @@ func (h *cashierUI) CreditPay(c echo.Context) error {
 		ReceiptNo: &res.ReceiptNo, BalanceBefore: &res.BalanceBefore, BalanceAfter: &res.BalanceAfter,
 	}
 	cfg, _ := h.s.settings.Get(ctx)
+	msg := "Payment recorded · " + res.ReceiptNo
+	h.s.logAudit(c, audit.ActionPayment, "customer", strconv.FormatInt(id, 10), "credit collected "+in.Amount+" from "+cust.Name)
+	// Print policy (mirrors sales & money moves): ask before printing on → offer
+	// the shared Print / Skip prompt for the slip; off → auto-print best-effort.
+	if cfg != nil && cfg.AskToPrint {
+		printURL := "/cashier/receipts/credit/" + strconv.FormatInt(res.PaymentID, 10) + "/print"
+		c.Response().Header().Set("HX-Trigger",
+			response.PrintPrompt(msg, printURL, false, "reload-ccredit", "close-modal"))
+		return c.NoContent(200)
+	}
 	if cfg != nil {
 		slip := h.s.buildDebtSlip(ctx, cfg, pay, cust, middleware.CurrentUserName(c))
 		_ = escpos.Send(ctx, h.receiptQueue(c, cfg), slip)
 	}
-	msg := "Payment recorded · " + res.ReceiptNo
-	h.s.logAudit(c, audit.ActionPayment, "customer", strconv.FormatInt(id, 10), "credit collected "+in.Amount+" from "+cust.Name)
 	return htmxDone(c, msg, "reload-ccredit")
 }
 

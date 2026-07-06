@@ -481,7 +481,7 @@ func (a *adminUI) ExpenseCreate(c echo.Context) error {
 	// the expense, the source debit and the receipt always commit together.
 	reason := strings.TrimSpace(in.Category)
 	if in.Description != nil && strings.TrimSpace(*in.Description) != "" {
-		reason += " — " + strings.TrimSpace(*in.Description)
+		reason += " - " + strings.TrimSpace(*in.Description)
 	}
 	var rec *cashflow.Receipt
 	var expenseID int64

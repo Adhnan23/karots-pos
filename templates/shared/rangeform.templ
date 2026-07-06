@@ -1,9 +1,12 @@
 package shared
 
 // RangeForm renders the shared quick date-range picker (preset buttons + exact
-// from/to inputs) used across reports, the locker ledger, and the receipts tabs.
-// It GETs `action` with preset / from / to query params (server side resolves
-// them via reports.ResolveRange).
+// from/to inputs) used by the receipts tabs (cashier + admin). Each tab loads its
+// body as an HTMX fragment (no page layout), so the presets and the Apply form
+// must swap the tab body IN PLACE via HTMX — a plain link would navigate the
+// browser straight to the layout-less fragment and render it unstyled. The target
+// is the enclosing tab panel (marked data-tabpanel); the server resolves the
+// preset / from / to query params via reports.ResolveRange.
 templ RangeForm(action, preset, from, to string) {
 	<div class="no-print mb-4 space-y-3">
 		<div class="flex flex-wrap gap-2">
@@ -14,7 +17,13 @@ templ RangeForm(action, preset, from, to string) {
 			@rangePreset(action, "last-month", "Last month", preset)
 			@rangePreset(action, "this-year", "This year", preset)
 		</div>
-		<form method="get" action={ templ.SafeURL(action) } class="flex flex-wrap items-end gap-3">
+		<form
+			hx-get={ action }
+			hx-target="closest [data-tabpanel]"
+			hx-swap="innerHTML"
+			hx-push-url="false"
+			class="flex flex-wrap items-end gap-3"
+		>
 			<div>
 				<label class="block text-xs text-slate-500 mb-1">From</label>
 				<input type="date" name="from" value={ from } class="border rounded-lg px-3 py-1.5"/>
@@ -31,8 +40,22 @@ templ RangeForm(action, preset, from, to string) {
 
 templ rangePreset(action, key, label, active string) {
 	if key == active {
-		<a href={ templ.SafeURL(action + "?preset=" + key) } class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-sm">{ label }</a>
+		<a
+			href={ templ.SafeURL(action + "?preset=" + key) }
+			hx-get={ action + "?preset=" + key }
+			hx-target="closest [data-tabpanel]"
+			hx-swap="innerHTML"
+			hx-push-url="false"
+			class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-sm cursor-pointer"
+		>{ label }</a>
 	} else {
-		<a href={ templ.SafeURL(action + "?preset=" + key) } class="px-3 py-1.5 rounded-lg border text-slate-600 text-sm hover:bg-slate-50">{ label }</a>
+		<a
+			href={ templ.SafeURL(action + "?preset=" + key) }
+			hx-get={ action + "?preset=" + key }
+			hx-target="closest [data-tabpanel]"
+			hx-swap="innerHTML"
+			hx-push-url="false"
+			class="px-3 py-1.5 rounded-lg border text-slate-600 text-sm hover:bg-slate-50 cursor-pointer"
+		>{ label }</a>
 	}
 }

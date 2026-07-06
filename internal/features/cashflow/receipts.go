@@ -68,7 +68,7 @@ func (r *ReceiptRepository) Insert(ctx context.Context, in ReceiptInput) (*Recei
 			(receipt_no, kind, from_label, to_label, party, amount, note, ref_kind, ref_id, created_by)
 		VALUES ('CR-' || lpad(nextval('money_receipt_seq')::text, 6, '0'),
 			$1, $2, $3, $4, $5, $6, $7, $8, $9)
-		RETURNING *, NULL::text AS created_by_name`,
+		RETURNING *, (SELECT name FROM users WHERE id = created_by) AS created_by_name`,
 		in.Kind, in.FromLabel, in.ToLabel, in.Party, in.Amount, in.Note, in.RefKind, in.RefID, in.CreatedBy)
 	if err != nil {
 		return nil, err

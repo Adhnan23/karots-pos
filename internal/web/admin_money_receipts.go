@@ -120,21 +120,23 @@ func resolveReceiptRange(c echo.Context) (from, to *time.Time, fromStr, toStr st
 }
 
 // afterMoneyMove applies the shop's print policy after an ADMIN money move,
-// identically for every admin money-move handler. With AskToPrint on, it
-// redirects to the receipt page (a Print button, nothing auto-printed); off, it
-// best-effort prints the thermal slip and stays put with a toast. Mirrors the
-// sale checkout path. (It lives on Server so admin handlers reach it via a.s.)
+// identically for every admin money-move handler. With AskToPrint on, it fires
+// the shared Print / Skip prompt (via the "money-print" HX-Trigger) and reloads
+// the page once the operator decides; off, it best-effort prints the thermal slip
+// and refreshes in place. Mirrors the sale + drawer paths. (It lives on Server so
+// admin handlers reach it via a.s.)
 func (s *Server) afterMoneyMove(c echo.Context, rec *cashflow.Receipt) error {
 	ctx := c.Request().Context()
 	cfg, err := s.settings.Get(ctx)
 	if err != nil {
 		return err
 	}
-	receiptURL := "/admin/money-receipts/" + strconv.FormatInt(rec.ID, 10)
 	if cfg.AskToPrint {
-		// HX-Redirect navigates the whole page to the receipt (which carries a
-		// Print button); the open modal is replaced along with it.
-		c.Response().Header().Set("HX-Redirect", receiptURL)
+		// Prompt in place: close the modal, ask Print/Skip, reload after so the
+		// cash-flow balances refresh once the operator has decided.
+		printURL := "/admin/money-receipts/" + strconv.FormatInt(rec.ID, 10) + "/print"
+		c.Response().Header().Set("HX-Trigger",
+			response.PrintPrompt("Receipt "+rec.ReceiptNo+" recorded", printURL, true, "close-modal"))
 		return c.NoContent(200)
 	}
 	// Skip & print: send the slip best-effort, then refresh in place.

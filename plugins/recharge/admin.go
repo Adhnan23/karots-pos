@@ -640,7 +640,7 @@ func (a *adminUI) CardAdjust(c echo.Context) error {
 		}
 		reason := card + " bank deposit"
 		if note != "" {
-			reason += " — " + note
+			reason += " - " + note
 		}
 		if _, err := a.p.core.CashRegister.Withdraw(ctx, tillUID, cashregister.MovementInput{Amount: amt.String(), Reason: reason}); err != nil {
 			return err

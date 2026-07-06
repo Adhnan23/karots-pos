@@ -46,6 +46,12 @@ document.addEventListener("DOMContentLoaded", function () {
       }),
     );
   });
+  // Bridge the server's "money-print" HX-Trigger (fired on the request element)
+  // to a window event the global print-prompt host listens for. Done before the
+  // triggering modal/form is torn down so the detail survives.
+  document.body.addEventListener("money-print", function (e) {
+    window.dispatchEvent(new CustomEvent("app-print-prompt", { detail: e.detail || {} }));
+  });
 });
 
 // toastHost: renders transient notifications fired via the "show-toast" event
@@ -202,6 +208,56 @@ async function printBill(id) {
   } catch (_) {
     /* apiFetch already surfaced the error */
   }
+}
+
+// printMoneySlip sends a CR- money receipt (till open/close/withdraw/pay-in and
+// other cash moves) to the thermal printer, mirroring printBill for sales. The
+// server re-loads the receipt (resolving the operator name) and prints it.
+async function printMoneySlip(id) {
+  if (!id) return;
+  await postPrint("/cashier/money-receipts/" + id + "/print");
+}
+
+// postPrint POSTs to a slip-reprint endpoint (cashier or admin money receipt).
+// The endpoint returns 200 and emits its own success/failure toast via HX-Trigger
+// when hit by HTMX; over fetch we just confirm it was sent.
+async function postPrint(url) {
+  if (!url) return;
+  try {
+    await apiFetch("POST", url);
+    toast("Receipt sent to printer", "success");
+  } catch (_) {
+    /* apiFetch already surfaced the error */
+  }
+}
+
+// printPromptHost backs the shared "Print receipt?" prompt shown after a money
+// move when "ask before printing" is on. Opened via the "app-print-prompt"
+// window event with { url, reload }. Print sends the slip; Skip dismisses; either
+// reloads the page afterwards when reload was requested (admin balance views).
+function printPromptHost() {
+  return {
+    show: false,
+    url: "",
+    reload: false,
+    open(d) {
+      this.url = (d && d.url) || "";
+      this.reload = !!(d && d.reload);
+      this.show = true;
+    },
+    async doPrint() {
+      this.show = false;
+      await postPrint(this.url);
+      if (this.reload) this.reloadSoon();
+    },
+    doSkip() {
+      this.show = false;
+      if (this.reload) this.reloadSoon();
+    },
+    reloadSoon() {
+      setTimeout(() => location.reload(), 500);
+    },
+  };
 }
 
 // pos: the cashier terminal. Cart math here is a live preview only — the server
@@ -503,6 +559,22 @@ function pos(symbol, defaultType, askToPrint) {
     clearCounts(which) {
       this[which] = {};
     },
+    // afterDrawerMove applies the print policy after a till cash move, given the
+    // API response data (which carries receipt_id for the CR- slip). With
+    // askToPrint off it auto-prints; on, it opens the shared Print / Skip prompt.
+    afterDrawerMove(data) {
+      const id = data && data.receipt_id;
+      if (!id) return;
+      if (this.askToPrint) {
+        window.dispatchEvent(
+          new CustomEvent("app-print-prompt", {
+            detail: { url: "/cashier/money-receipts/" + id + "/print" },
+          })
+        );
+      } else {
+        printMoneySlip(id);
+      }
+    },
     async openRegister() {
       const json = await apiFetch("POST", "/api/cash-register/open", {
         breakdown: this.buildBreakdown(this.openCounts),
@@ -517,6 +589,7 @@ function pos(symbol, defaultType, askToPrint) {
       // load their session-scoped data now, in case they initialised first.
       window.dispatchEvent(new CustomEvent("register-opened"));
       toast("Register opened", "success");
+      this.afterDrawerMove(json.data);
     },
     startClose() {
       this.closeCounts = {};
@@ -533,6 +606,7 @@ function pos(symbol, defaultType, askToPrint) {
       this.closeLockerId = "";
       await this.loadSummary();
       await this.loadLockers();
+      this.afterDrawerMove(json.data);
     },
     async withdraw() {
       if (Number(this.withdrawAmount) <= 0) {
@@ -545,7 +619,7 @@ function pos(symbol, defaultType, askToPrint) {
         toast("Can't withdraw more than what's in the drawer", "error");
         return;
       }
-      await apiFetch("POST", "/api/cash-register/withdraw", {
+      const json = await apiFetch("POST", "/api/cash-register/withdraw", {
         amount: String(this.withdrawAmount),
         reason: this.withdrawReason,
         counter_locker_id: Number(this.withdrawLockerId) || 0,
@@ -557,13 +631,14 @@ function pos(symbol, defaultType, askToPrint) {
       await this.loadSummary();
       await this.loadLockers();
       toast("Cash withdrawn", "success");
+      this.afterDrawerMove(json.data);
     },
     async deposit() {
       if (Number(this.depositAmount) <= 0) {
         toast("Enter an amount to deposit", "error");
         return;
       }
-      await apiFetch("POST", "/api/cash-register/pay-in", {
+      const json = await apiFetch("POST", "/api/cash-register/pay-in", {
         amount: String(this.depositAmount),
         reason: this.depositReason,
         counter_locker_id: Number(this.depositLockerId) || 0,
@@ -575,6 +650,7 @@ function pos(symbol, defaultType, askToPrint) {
       await this.loadSummary();
       await this.loadLockers();
       toast("Cash deposited", "success");
+      this.afterDrawerMove(json.data);
     },
     async addCustomer() {
       if (!this.newCustomer.name.trim()) {

@@ -621,3 +621,94 @@ product", source stock unchanged. This is the consume-on-sale value seam shared 
   Fixed this session (default → 12h, commit `263ed1b`). **Re-verify** the long-task scenario
   still can't expire an active operator (sliding/keepalive not implemented — flag if it bites).
 - **QA-KNOWN-2** → confirmed in Phase 0, logged as **QA-001** above.
+
+---
+
+## Session 2026-07-06 — Printing coverage & the "ask before printing" toggle (owner-reported)
+
+Owner reported that several money operations produce **no printed slip**, unlike sales. Traced
+in code (clean DB + docker ESC/POS emulator on `tcp://127.0.0.1:9100`, viewer :8631). The
+root cause is **structural, not the earlier DB pollution**: the receipt-print machinery lives
+in `internal/web` and is only wired into some handlers. A full audit of every money flow vs the
+`settings.ask_to_print` toggle:
+
+**Intended toggle semantics** (from the working sale path, `static/js/app.js:1094` +
+`internal/web/cashier.go:96`): **ON → ask the operator (Print / Skip choice); OFF → auto-print
+silently.**
+
+| Flow | Handler | Prints today? | Honors toggle? |
+|------|---------|---------------|----------------|
+| Sale checkout | POS / `/api/sales` + `printBill` | ✅ | ✅ (ON=prompt, OFF=auto) |
+| Admin transfer / expense / supplier-pay / bank-charge | `afterMoneyMove` (admin_money_receipts.go:127) | ✅ | ⚠️ ON=**full-page redirect** to receipt page, OFF=auto |
+| Cashier credit collect | `CreditPay` (cashier.go:589) | ✅ always | ❌ ignores toggle |
+| Cashier refund slip | `printRefundSlip` (cashier.go:213) | ✅ always | ❌ ignores toggle |
+| Cashier warranty replace | `WarrantyReplace` (cashier.go:711) | ✅ always | ❌ ignores toggle |
+| Cashier money-receipt (helper) | `printMoneyReceipt` (admin_money_receipts.go:152) | ✅ always | ❌ ignores toggle |
+| **Till open / close / withdraw / deposit** | `cashregister.APIHandler` (cashregister.go:613–665) | ❌ **never** | ❌ no print path exists |
+
+### ✅ RESOLVED 2026-07-06 (QA-015 + QA-016)
+Implemented + live-verified against the docker ESC/POS emulator. Summary of the change:
+- `cashregister` open/close/withdraw/pay-in now always book a `CR-` money receipt (the
+  `LockerLeg` hook writes one even with **no** locker chosen, via `cashflow.tillCashLabel`) and
+  return its id (`Session/Summary/CloseResult.ReceiptID`).
+- One shared print policy everywhere: **OFF → auto-print; ON → inline Print/Skip prompt**
+  (`PrintPromptHost` in base.templ + `printPromptHost()` in app.js, opened by the
+  `app-print-prompt` window event; HTMX flows bridge it via a `money-print` HX-Trigger built by
+  `response.PrintPrompt`). Admin `afterMoneyMove` **dropped the full-page redirect** for the
+  prompt; cashier `CreditPay` now honours the toggle.
+- **"Who did it" fix:** `ReceiptRepository.Insert` now resolves `created_by_name` in its
+  `RETURNING` (was `NULL`), so slips printed straight from a `Move`/locker-leg return show the
+  operator ("By: <name>"). Also fixed a **pre-existing** em-dash bug: the till label used "Till —
+  <name>" (em-dash), which the PC437 thermal font prints as "?"; changed to a plain hyphen.
+- **Live-verified:** cashier locker-less withdraw (CR-000006) + deposit (CR-000007) → inline
+  prompt → Print → slip reached the emulator with correct labels + "By: Cashier".
+- **Still auto-print regardless of toggle (minor, by design for now):** cashier refund &
+  warranty-replace slips (not `CR-` money receipts; a printed slip there is arguably always
+  wanted). Note for a future consistency pass if desired.
+
+### ✅ RESOLVED 2026-07-06 (QA-017 · receipts date-preset renders unstyled)
+`shared.RangeForm` (used only by the receipts tabs, cashier + admin) rendered its preset
+buttons + Apply form as plain links/`method=get` pointing at the **fragment** endpoint
+(`/cashier|admin/receipts/<tab>?preset=…`). Clicking navigated the whole browser to a
+layout-less fragment → the page rendered with **no CSS**. Fixed: RangeForm now swaps in place
+via HTMX (`hx-get` + `hx-target="closest [data-tabpanel]"` + `hx-swap="innerHTML"` +
+`hx-push-url=false`); added `data-tabpanel` to all 8 tab containers. Reports (separate
+`rptRangeForm`) were unaffected. Live-verified: cashier "This week" now filters in place with
+full layout intact.
+
+### ✅ RESOLVED 2026-07-06 (QA-018 · em-dash prints as "?" on thermal slips)
+`escpos.ascii()` mapped every non-ASCII rune (incl. em/en-dashes and smart quotes) to `?`, so
+any label/note containing "—" printed a literal `?` (e.g. "Till ? Cashier", "Misc ? print test
+expense"). Fixed at the sanitizer: em/en/figure dashes + horizontal bar → `-`, curly quotes →
+`'`/`"`, ellipsis → `...`, bullet/middot → `*`, NBSP → space. Also normalized the source
+strings that reach a slip (till label in `cashflow/overview.go`, expense note in
+`admin_more.go`, documents-labour desc + recharge reason in the two plugins). Live-verified: a
+reprint of a receipt that still stores "—" now prints "Misc - print test expense".
+
+### ✅ RESOLVED 2026-07-06 (QA-019 · settings page cards narrower than other pages)
+The four `SettingsPage` cards used `max-w-2xl` while every other admin page uses full-width
+cards; the settings content looked cramped/inconsistent. Removed the cap; cards now span the
+main column like the rest. Live-verified (cards ~1601px in a 1665px main).
+
+_Original findings below (kept for the record)._
+
+### QA-015 · Cashier + Admin · **P1** · Bug — till open/close/withdraw/deposit never print
+The cash-register money moves are served by a self-contained JSON API in
+`internal/features/cashregister/cashregister.go` (`Open`/`Close`/`Withdraw`/`PayIn`, lines
+613–665) that returns a `Session`/`Summary` and **never invokes any print code** — the entire
+print stack (`escpos.Send`, `afterMoneyMove`, `printMoneyReceipt`) lives in `internal/web` and
+is not reachable from here. When a counterparty **locker** is chosen (banking to/from a
+location — the owner's "move money to/from those locations"), `cashflow.TillLockerLeg`
+(`overview.go:60`) *does* insert a `CR-` money receipt (so it's searchable & reprintable from
+Money Receipts) — it is simply **never auto-printed**. A drawer-only move (no locker) creates
+**no receipt at all**. **Repro:** open till / withdraw / deposit / close as cashier with the
+printer set to the emulator → nothing appears at :8631. **Expected:** a slip per the toggle,
+like a sale. **Fix:** wire the drawer flows into the same print policy (below).
+
+### QA-016 · Cashier + Admin · **P2** · Bug — `ask_to_print` is applied inconsistently
+Only sales fully honor the toggle. Admin money moves treat "ON" as a **full-page redirect** to
+the receipt page (loses the operator's place; not the lightweight "ask" sales gives). Cashier
+credit-collect, refund, warranty, and the `printMoneyReceipt` helper **ignore the toggle
+entirely** and always auto-print — so turning "ask before printing" ON does not make them ask.
+**Fix:** route every money flow through one shared print-policy helper so ON=ask / OFF=auto is
+uniform everywhere (cashier counter, drawer, and admin).
