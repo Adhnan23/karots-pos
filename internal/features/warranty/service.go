@@ -100,14 +100,15 @@ func (s *Service) GetUnit(ctx context.Context, id int64) (*Unit, error) {
 // the original warranty (same expiry date and cover — it does not restart), logs
 // the claim, marks the old unit replaced, and ships the new unit out of stock
 // (FEFO) — a cost, never revenue. All in one transaction.
-func (s *Service) RecordReplacement(ctx context.Context, unitID int64, newSerial, reason string, userID int64) (*Unit, error) {
+func (s *Service) RecordReplacement(ctx context.Context, unitID int64, newSerial, reason string, userID int64) (*Unit, int64, error) {
 	newSerial = strings.TrimSpace(newSerial)
 	if newSerial == "" {
-		return nil, apperr.Validation("a new serial number is required")
+		return nil, 0, apperr.Validation("a new serial number is required")
 	}
 	reason = strings.TrimSpace(reason)
 
 	var result *Unit
+	var resultClaimID int64
 	err := appdb.WithTx(ctx, s.db, func(tx *sqlx.Tx) error {
 		repo := NewRepository(tx)
 		stk := stock.NewRepository(tx)
@@ -158,6 +159,7 @@ func (s *Service) RecordReplacement(ctx context.Context, unitID int64, newSerial
 		if err != nil {
 			return apperr.Internal("failed to record claim", err)
 		}
+		resultClaimID = claimID
 
 		// 3. Retire the old unit.
 		if err := repo.MarkUnitReplaced(ctx, unitID, newID); err != nil {
@@ -200,7 +202,7 @@ func (s *Service) RecordReplacement(ctx context.Context, unitID int64, newSerial
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	return result, nil
+	return result, resultClaimID, nil
 }

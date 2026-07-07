@@ -20,7 +20,6 @@ import (
 	"karots-pos/internal/features/sales"
 	"karots-pos/internal/features/settings"
 	"karots-pos/internal/features/stock"
-	"karots-pos/internal/features/warranty"
 	"karots-pos/internal/middleware"
 	"karots-pos/internal/receiptimg"
 	"karots-pos/internal/response"
@@ -691,32 +690,24 @@ func (h *cashierUI) WarrantyReplace(c echo.Context) error {
 	reason := c.FormValue("reason")
 	oldSerial := c.FormValue("old_serial")
 
-	newUnit, err := h.s.warranty.RecordReplacement(ctx, unitID, newSerial, reason, middleware.CurrentUserID(c))
+	newUnit, claimID, err := h.s.warranty.RecordReplacement(ctx, unitID, newSerial, reason, middleware.CurrentUserID(c))
 	if err != nil {
 		return err
 	}
 	h.s.logAudit(c, audit.ActionUpdate, "warranty", strconv.FormatInt(unitID, 10), "replaced "+oldSerial+" -> "+newUnit.SerialNo)
-	// Hand the customer a replacement slip. Non-fatal: a printer problem must
-	// never fail the replacement (it's already recorded).
-	h.printWarrantySlip(c, oldSerial, newUnit)
 
 	detail, err := h.s.warranty.Lookup(ctx, newUnit.SerialNo)
 	if err != nil {
 		return err
 	}
-	return response.RenderFragment(c, cashierpages.WarrantyResult(detail, newUnit.SerialNo, "/cashier"),
-		response.ToastAnd("Replacement recorded", "success", "reload-warranty"))
-}
-
-// printWarrantySlip prints the replacement slip best-effort (logged, swallowed).
-func (h *cashierUI) printWarrantySlip(c echo.Context, oldSerial string, u *warranty.Unit) {
-	ctx := c.Request().Context()
+	// Hand the customer a replacement slip under the shop's print policy: AskToPrint
+	// on → Print / Skip prompt; off → best-effort auto-print (its previous
+	// always-print behaviour). A printer hiccup never fails the replacement.
 	cfg, err := h.s.settings.Get(ctx)
 	if err != nil {
-		log.Printf("warranty slip: load settings: %v", err)
-		return
+		return err
 	}
-	if err := escpos.Send(ctx, h.receiptQueue(c, cfg), h.s.buildWarrantySlip(ctx, cfg, oldSerial, u)); err != nil {
-		log.Printf("warranty slip: print for %s: %v", u.SerialNo, err)
-	}
+	reprintURL := "/cashier/warranty/" + strconv.FormatInt(claimID, 10) + "/print"
+	trig := h.s.warrantyReplaceTrigger(ctx, cfg, h.receiptQueue(c, cfg), reprintURL, oldSerial, newUnit)
+	return response.RenderFragment(c, cashierpages.WarrantyResult(detail, newUnit.SerialNo, "/cashier"), trig)
 }

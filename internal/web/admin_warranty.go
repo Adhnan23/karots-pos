@@ -82,7 +82,7 @@ func (a *adminUI) WarrantyReplace(c echo.Context) error {
 	reason := c.FormValue("reason")
 	oldSerial := c.FormValue("old_serial")
 
-	newUnit, err := a.s.warranty.RecordReplacement(ctx, unitID, newSerial, reason, middleware.CurrentUserID(c))
+	newUnit, claimID, err := a.s.warranty.RecordReplacement(ctx, unitID, newSerial, reason, middleware.CurrentUserID(c))
 	if err != nil {
 		return err
 	}
@@ -92,8 +92,16 @@ func (a *adminUI) WarrantyReplace(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	return response.RenderFragment(c, cashierpages.WarrantyResult(detail, newUnit.SerialNo, "/admin"),
-		response.ToastAnd("Replacement recorded", "success", "reload-warranty"))
+	// Hand the customer a replacement slip under the shop's print policy, like every
+	// other counter action: AskToPrint on → Print / Skip prompt; off → best-effort
+	// auto-print. (Previously the admin flow printed nothing at all.)
+	cfg, err := a.s.settings.Get(ctx)
+	if err != nil {
+		return err
+	}
+	reprintURL := "/admin/receipts/warranty/" + strconv.FormatInt(claimID, 10) + "/print"
+	trig := a.s.warrantyReplaceTrigger(ctx, cfg, cfg.ReceiptPrinter, reprintURL, oldSerial, newUnit)
+	return response.RenderFragment(c, cashierpages.WarrantyResult(detail, newUnit.SerialNo, "/admin"), trig)
 }
 
 // ============================ Damage report ============================

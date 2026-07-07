@@ -313,6 +313,21 @@ func (s *Server) warrantyCover(ctx context.Context, cl *warranty.Claim) (until, 
 	return datetime.Date(u.WarrantyUntil), monthsLeftLabel(u.WarrantyUntil)
 }
 
+// warrantyReplaceTrigger applies the shop's print policy after a warranty
+// replacement, identically for the admin and cashier flows. AskToPrint on → the
+// shared Print / Skip prompt pointing at the slip's reprint URL; off → best-effort
+// auto-print now. Either way it returns the HX-Trigger payload (carrying the
+// "reload-warranty" refresh) to attach to the WarrantyResult fragment.
+func (s *Server) warrantyReplaceTrigger(ctx context.Context, cfg *settings.Settings, target, reprintURL, oldSerial string, u *warranty.Unit) string {
+	if cfg != nil && cfg.AskToPrint {
+		return response.PrintPrompt("Replacement recorded", reprintURL, false, "reload-warranty")
+	}
+	if cfg != nil && strings.TrimSpace(target) != "" {
+		_ = printing.Raw(ctx, target, s.buildWarrantySlip(ctx, cfg, oldSerial, u))
+	}
+	return response.ToastAnd("Replacement recorded", "success", "reload-warranty")
+}
+
 // buildWarrantySlip renders a replacement slip for (re)printing (UI-agnostic).
 func (s *Server) buildWarrantySlip(ctx context.Context, cfg *settings.Settings, oldSerial string, u *warranty.Unit) []byte {
 	slip := escpos.WarrantySlip{
