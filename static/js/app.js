@@ -262,7 +262,7 @@ function printPromptHost() {
 
 // pos: the cashier terminal. Cart math here is a live preview only — the server
 // recomputes every amount authoritatively when the sale is posted.
-function pos(symbol, defaultType, askToPrint, pluginRoots) {
+function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections) {
   return {
     sym: symbol,
     // When false, completing a sale auto-prints the receipt and resets straight
@@ -279,6 +279,9 @@ function pos(symbol, defaultType, askToPrint, pluginRoots) {
     // plugin.CashierMenuRoots(). Rendered as cards alongside product groups at
     // the top of the menu; tapping one drills into the menu-node protocol.
     pluginRoots: pluginRoots || [],
+    // Plugin drawer sections (e.g. recharge float): input fragments loaded into the
+    // till Open/Close dialogs, saved to each section's endpoint around the drawer call.
+    drawerSections: drawerSections || [],
     // menuMode drives which of the 3 card/step views is shown inside the same
     // drill-down region: the group/plugin card grids, an inline amount-entry
     // step (plugin 'amount' leaves), or an inline HTML detail fragment
@@ -349,6 +352,7 @@ function pos(symbol, defaultType, askToPrint, pluginRoots) {
       await this.loadUnits();
       await this.loadHolds();
       await this.loadLockers();
+      if (!this.session) await this.loadDrawerSections("open");
       // Logout was blocked because the till is still open: jump straight to the
       // count/close dialog. If the session somehow closed already, just finish
       // logging out so the user isn't stranded.
@@ -371,6 +375,63 @@ function pos(symbol, defaultType, askToPrint, pluginRoots) {
       }
     },
 
+    // Load each plugin drawer section's input fragment into the Open ('open') or
+    // Close ('close') dialog slot. Fragments are plain inputs (no hx-*), so no
+    // Alpine/HTMX init is needed — saveDrawerSections reads their values directly.
+    async loadDrawerSections(which) {
+      const box = which === "open" ? this.$refs.openSections : this.$refs.closeSections;
+      if (!box) return;
+      box.innerHTML = "";
+      for (const s of this.drawerSections) {
+        const url = which === "open" ? s.openFormUrl : s.closeFormUrl;
+        if (!url) continue;
+        try {
+          const res = await fetch(url, { credentials: "same-origin" });
+          if (!res.ok) continue;
+          const wrap = document.createElement("div");
+          wrap.setAttribute("data-drawer-save", which === "open" ? s.saveOpenUrl : s.saveCloseUrl);
+          wrap.innerHTML = await res.text();
+          box.appendChild(wrap);
+        } catch (_) {
+          /* a missing section just doesn't render */
+        }
+      }
+    },
+    // POST each loaded section's inputs (form-encoded) to its save URL. Returns
+    // false if any 'close' save failed (caller aborts the till close). 'open'
+    // saves are best-effort (reconciliation auto-carries the last close).
+    async saveDrawerSections(which) {
+      const box = which === "open" ? this.$refs.openSections : this.$refs.closeSections;
+      if (!box) return true;
+      const wraps = box.querySelectorAll("[data-drawer-save]");
+      for (const w of wraps) {
+        const url = w.getAttribute("data-drawer-save");
+        if (!url) continue;
+        const params = new URLSearchParams();
+        w.querySelectorAll("input[name], select[name], textarea[name]").forEach((el) => {
+          if (String(el.value).trim() !== "") params.append(el.name, el.value);
+        });
+        try {
+          const res = await fetch(url, {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: params.toString(),
+          });
+          if (!res.ok && which === "close") {
+            const j = await res.json().catch(() => ({}));
+            toast((j.error && j.error.message) || "Could not save float counts", "error");
+            return false;
+          }
+        } catch (_) {
+          if (which === "close") {
+            toast("Could not save float counts", "error");
+            return false;
+          }
+        }
+      }
+      return true;
+    },
     money(v) {
       const n = Number(v) || 0;
       return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -694,6 +755,7 @@ function pos(symbol, defaultType, askToPrint, pluginRoots) {
       this.openLockerId = "";
       await this.loadSummary();
       await this.loadLockers();
+      await this.saveDrawerSections("open");
       // Let plugin quick-action panels (e.g. Reload) that need an open drawer
       // load their session-scoped data now, in case they initialised first.
       window.dispatchEvent(new CustomEvent("register-opened"));
@@ -704,8 +766,10 @@ function pos(symbol, defaultType, askToPrint, pluginRoots) {
       this.closeCounts = {};
       this.closeResult = null;
       this.showClose = true;
+      this.loadDrawerSections("close");
     },
     async submitClose() {
+      if (!(await this.saveDrawerSections("close"))) return;
       const json = await apiFetch("POST", "/api/cash-register/close", {
         breakdown: this.buildBreakdown(this.closeCounts),
         dest_locker_id: Number(this.closeLockerId) || 0,

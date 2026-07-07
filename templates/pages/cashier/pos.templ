@@ -20,7 +20,7 @@ templ POS(d POSData) {
 	@layouts.Cashier("Cashier", d.CashierName, d.Role, "pos", d.ShowChangePin) {
 		<div
 			class="h-full"
-			x-data={ "pos('" + d.Symbol + "', '" + d.DefaultSaleType + "', " + jsBool(d.AskToPrint) + ", " + plugin.CashierMenuRootsJSON() + ")" }
+			x-data={ "pos('" + d.Symbol + "', '" + d.DefaultSaleType + "', " + jsBool(d.AskToPrint) + ", " + plugin.CashierMenuRootsJSON() + ", " + plugin.DrawerSectionsJSON() + ")" }
 			x-init="init()"
 			x-on:keydown.window="onKey($event)"
 			x-on:pos-add-service.window="addServiceLine($event.detail)"
@@ -57,6 +57,8 @@ templ POS(d POSData) {
 						<span class="font-medium">Opening float</span>
 						<span class="text-xl font-bold" x-text="sym + ' ' + money(countTotal(openCounts))"></span>
 					</div>
+					<!-- Plugin drawer sections (e.g. recharge float opening) -->
+					<div x-ref="openSections" class="space-y-3 mt-3"></div>
 					<template x-if="lockers.length">
 						<div class="mt-3">
 							<label class="block text-sm text-slate-600 mb-1">Take float from</label>
@@ -537,6 +539,8 @@ templ POS(d POSData) {
 								<span class="font-medium">Counted</span>
 								<span class="text-xl font-bold" x-text="sym + ' ' + money(countTotal(closeCounts))"></span>
 							</div>
+							<!-- Plugin drawer sections (e.g. recharge float closing) -->
+							<div x-ref="closeSections" class="space-y-3 mt-3"></div>
 							<template x-if="lockers.length">
 								<div class="mt-3">
 									<label class="block text-sm text-slate-600 mb-1">Bank cash into</label>
