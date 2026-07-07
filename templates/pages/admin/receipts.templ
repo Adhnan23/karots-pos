@@ -10,6 +10,7 @@ import (
 	"karots-pos/internal/features/settings"
 	"karots-pos/internal/features/warranty"
 	"karots-pos/internal/money"
+	"karots-pos/internal/plugin"
 	"karots-pos/templates/layouts"
 	"karots-pos/templates/shared"
 )
@@ -57,6 +58,9 @@ templ ReceiptsHub(d ReceiptsHubData) {
 				@rcTab("cash", "Cash")
 				@rcTab("credit", "Credit")
 				@rcTab("warranty", "Warranty")
+				for _, t := range plugin.ReceiptTabs() {
+					@rcTab(t.Key, t.Label)
+				}
 			</div>
 			<div data-tabpanel x-show="tab === 'sales'">
 				@RcSalesTab(d.Sales)
@@ -64,6 +68,9 @@ templ ReceiptsHub(d ReceiptsHubData) {
 			<div data-tabpanel x-show="tab === 'cash'" hx-get="/admin/receipts/cash" hx-trigger="load once"></div>
 			<div data-tabpanel x-show="tab === 'credit'" hx-get="/admin/receipts/credit" hx-trigger="load once"></div>
 			<div data-tabpanel x-show="tab === 'warranty'" hx-get="/admin/receipts/warranty" hx-trigger="load once"></div>
+			for _, t := range plugin.ReceiptTabs() {
+				<div id={ "receipts-" + t.Key } data-tabpanel x-show={ "tab === '" + t.Key + "'" } hx-get={ t.AdminHref } hx-trigger="load once"></div>
+			}
 		</div>
 	}
 }

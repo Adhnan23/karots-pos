@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"karots-pos/internal/apperr"
+	appdb "karots-pos/internal/db"
+	"karots-pos/internal/features/cashflow"
 	"karots-pos/internal/features/cashregister"
 	"karots-pos/internal/features/expenses"
 	"karots-pos/internal/features/products"
@@ -17,14 +19,35 @@ import (
 	"karots-pos/internal/middleware"
 	"karots-pos/internal/money"
 	"karots-pos/internal/response"
+	adminfragments "karots-pos/templates/fragments/admin"
 	"karots-pos/templates/layouts"
 	"karots-pos/templates/shared"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/labstack/echo/v4"
 	"github.com/shopspring/decimal"
 )
 
 type adminUI struct{ p *Plugin }
+
+// receiptsRange reads the shared date-range query params for a receipts tab. With
+// no preset/dates it returns an all-time filter (empty preset), matching the core
+// receipts tabs; otherwise it resolves the preset to a [from, to) window.
+func receiptsRange(c echo.Context) (LedgerFilter, string, string, string, error) {
+	f := LedgerFilter{Limit: 500}
+	preset := c.QueryParam("preset")
+	from := c.QueryParam("from")
+	to := c.QueryParam("to")
+	if preset == "" && from == "" && to == "" {
+		return f, "", "", "", nil
+	}
+	fr, t, fromStr, toStr, err := reports.ResolveRange(preset, from, to)
+	if err != nil {
+		return f, "", "", "", err
+	}
+	f.From, f.To = &fr, &t
+	return f, preset, fromStr, toStr, nil
+}
 
 // Hub is the Reload & Bills landing page: it lists the section's sub-pages as
 // cards (carriers/devices, report, ledger, float refills), mirroring the core
@@ -45,15 +68,7 @@ func (a *adminUI) Carriers(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	cards, err := a.p.store.ListBankCards(ctx, false)
-	if err != nil {
-		return err
-	}
-	tills, err := a.p.core.CashRegister.OpenSessions(ctx)
-	if err != nil {
-		return err
-	}
-	return response.RenderPage(c, CarriersPage(middleware.CurrentUserName(c), cs, ds, cards, tills))
+	return response.RenderPage(c, CarriersPage(middleware.CurrentUserName(c), cs, ds))
 }
 
 // CarriersTable is the HTMX row fragment.
@@ -189,14 +204,6 @@ func (a *adminUI) Report(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	cards, err := a.p.store.ListBankCards(ctx, false)
-	if err != nil {
-		return err
-	}
-	cardLed, err := a.p.store.CardLedger(ctx, 50)
-	if err != nil {
-		return err
-	}
 	symbol := a.symbol(ctx)
 	vm := ReportVM{
 		UserName:      middleware.CurrentUserName(c),
@@ -205,8 +212,6 @@ func (a *adminUI) Report(c echo.Context) error {
 		From:          fromStr,
 		To:            toStr,
 		Balances:      balances,
-		Cards:         cards,
-		CardLedger:    cardLed,
 		Blocks:        blocks,
 		ServiceEarned: sumServiceCharge(led),
 		FloatOnHand:   sumBalances(balances),
@@ -337,24 +342,34 @@ func (a *adminUI) TxView(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	return response.RenderPage(c, TxSlipPage(middleware.CurrentUserName(c), a.symbol(ctx), a.shopInfo(ctx), t))
+	cfg, err := a.p.core.Settings.Get(ctx)
+	if err != nil {
+		return err
+	}
+	base := "/admin/recharge/tx/" + strconv.FormatInt(t.ID, 10)
+	thermal := shared.ThermalFrom(cfg.ReceiptWidth, c.QueryParam("size"), "Slip "+floatNo(t.ID), base, base+"/print")
+	return response.RenderPage(c, TxSlipPage(*cfg, thermal, t))
 }
 
-// shopInfo resolves the shop header (name/address/phone) for the HTML slip view,
-// matching the printed receipt. Empty on error.
-func (a *adminUI) shopInfo(ctx context.Context) ShopInfo {
+// BillView renders a single bill-payment / get-money slip as a printable HTML
+// page (the View link on the admin "Bills" receipts tab).
+func (a *adminUI) BillView(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	ctx := c.Request().Context()
+	t, err := a.p.store.BillTxByID(ctx, id)
+	if err != nil {
+		return err
+	}
 	cfg, err := a.p.core.Settings.Get(ctx)
-	if err != nil || cfg == nil {
-		return ShopInfo{}
+	if err != nil {
+		return err
 	}
-	s := ShopInfo{Name: cfg.ShopName}
-	if cfg.Address != nil {
-		s.Address = *cfg.Address
-	}
-	if cfg.Phone != nil {
-		s.Phone = *cfg.Phone
-	}
-	return s
+	base := "/admin/recharge/bill/" + strconv.FormatInt(t.ID, 10)
+	thermal := shared.ThermalFrom(cfg.ReceiptWidth, c.QueryParam("size"), "Slip "+billNo(t.ID), base, base+"/print")
+	return response.RenderPage(c, BillSlipPage(*cfg, thermal, t))
 }
 
 // TxPrint reprints a transaction slip to the receipt printer.
@@ -378,6 +393,120 @@ func (a *adminUI) TxPrint(c echo.Context) error {
 	return response.NoContent(c)
 }
 
+// BillPrint reprints a bill-payment / get-money slip from the admin Receipts tab.
+// Best-effort like TxPrint.
+func (a *adminUI) BillPrint(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	ctx := c.Request().Context()
+	t, err := a.p.store.BillTxByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if err := a.p.reprintBill(ctx, t); err != nil {
+		c.Response().Header().Set("HX-Trigger", response.Toast("Could not reach the printer", "error"))
+		return response.NoContent(c)
+	}
+	c.Response().Header().Set("HX-Trigger", response.Toast("Slip sent to printer", "success"))
+	return response.NoContent(c)
+}
+
+// ReceiptsBill renders the admin "Bills" receipts tab with admin-scoped reprints.
+func (a *adminUI) ReceiptsBill(c echo.Context) error {
+	ctx := c.Request().Context()
+	f, preset, fromStr, toStr, err := receiptsRange(c)
+	if err != nil {
+		return err
+	}
+	rows, err := a.p.store.BillLedger(ctx, f)
+	if err != nil {
+		return err
+	}
+	vm := ReceiptsTabVM{
+		Symbol: a.symbol(ctx), Preset: preset, From: fromStr, To: toStr,
+		Action:      "/admin/recharge/receipts/bill",
+		ReprintBase: "/admin/recharge/bill/", ViewBase: "/admin/recharge/bill/",
+	}
+	return response.RenderFragment(c, BillReceiptsTab(vm, rows))
+}
+
+// ReceiptsFloat renders the admin "Reload" receipts tab (float transactions).
+func (a *adminUI) ReceiptsFloat(c echo.Context) error {
+	ctx := c.Request().Context()
+	f, preset, fromStr, toStr, err := receiptsRange(c)
+	if err != nil {
+		return err
+	}
+	rows, err := a.p.store.Ledger(ctx, f)
+	if err != nil {
+		return err
+	}
+	vm := ReceiptsTabVM{
+		Symbol: a.symbol(ctx), Preset: preset, From: fromStr, To: toStr,
+		Action:      "/admin/recharge/receipts/recharge",
+		ReprintBase: "/admin/recharge/tx/", ViewBase: "/admin/recharge/tx/",
+	}
+	return response.RenderFragment(c, FloatReceiptsTab(vm, rows))
+}
+
+// parseLocation turns a LocationPicker value ("locker:3", "till:5") into a
+// cashflow.Location for the refill cash source. Mirrors the core helper (the
+// plugin can't import internal/web). External is not a pickable own-pile.
+func parseLocation(v string) (cashflow.Location, error) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return cashflow.Location{}, apperr.Validation("pick where the cash comes from")
+	}
+	kind, idStr, ok := strings.Cut(v, ":")
+	if !ok {
+		return cashflow.Location{}, apperr.Validation("invalid cash location")
+	}
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		return cashflow.Location{}, apperr.Validation("invalid cash location")
+	}
+	switch kind {
+	case "locker":
+		return cashflow.Locker(id), nil
+	case "till":
+		return cashflow.Till(id), nil
+	}
+	return cashflow.Location{}, apperr.Validation("invalid cash location")
+}
+
+// cashLocationChoices lists the pickable cash sources for the refill picker —
+// active lockers (with live balance) and currently-open tills. Mirrors the core
+// helper so the refill pays the supplier from a real tracked pile.
+func (a *adminUI) cashLocationChoices(ctx context.Context) ([]adminfragments.LocationChoice, error) {
+	sym := a.symbol(ctx)
+	var out []adminfragments.LocationChoice
+	lockerRows, err := a.p.lockers.List(ctx, true)
+	if err != nil {
+		return nil, err
+	}
+	for _, l := range lockerRows {
+		out = append(out, adminfragments.LocationChoice{
+			Value: "locker:" + strconv.FormatInt(l.ID, 10),
+			Label: l.Name + " (" + money.Format(sym, l.Balance) + ")",
+			Group: "Lockers",
+		})
+	}
+	tills, err := a.p.core.CashRegister.OpenSessions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, t := range tills {
+		out = append(out, adminfragments.LocationChoice{
+			Value: "till:" + strconv.FormatInt(t.UserID, 10),
+			Label: "Till — " + t.UserName,
+			Group: "Tills",
+		})
+	}
+	return out, nil
+}
+
 // Refills renders the dedicated supplier float-refill page: the refill form, the
 // live device balances, and the history of past refills.
 func (a *adminUI) Refills(c echo.Context) error {
@@ -390,7 +519,11 @@ func (a *adminUI) Refills(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	return response.RenderPage(c, RefillsPage(middleware.CurrentUserName(c), a.symbol(ctx), balances, rows))
+	choices, err := a.cashLocationChoices(ctx)
+	if err != nil {
+		return err
+	}
+	return response.RenderPage(c, RefillsPage(middleware.CurrentUserName(c), a.symbol(ctx), balances, rows, choices))
 }
 
 // Devices returns active devices with their current (session-independent) float
@@ -413,11 +546,16 @@ func (a *adminUI) Devices(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{"data": rows})
 }
 
-// Refill records an admin supplier float top-up: it increases a device's float
-// and books a shop expense, WITHOUT touching any cash drawer (the admin pays the
-// supplier directly). It attributes to the current open cash session if there is
-// one (so it shows live and in that shift's reconciliation); otherwise it is
-// recorded session-less and carried into the next session's opening.
+// Refill records an admin supplier float top-up: it increases a device's float,
+// books a shop expense, and pays the supplier from a picked cash source (a locker
+// or an open till) via cashflow.Move — so the cash actually leaves a tracked pile
+// (each leg gets a CR- receipt and shows in core Cash Flow). All three commit in
+// ONE transaction, so an overdrawn source rolls the whole thing back.
+//
+// The device-float side attributes to the till that actually has this device's
+// float open (so the working cashier sees the refill live, overdraw guard
+// included); if no till has it open it is recorded session-less (0) and the
+// opening-carry picks it up at the device's next opening (QA-013).
 func (a *adminUI) Refill(c echo.Context) error {
 	ctx := c.Request().Context()
 	uid := middleware.CurrentUserID(c)
@@ -430,6 +568,10 @@ func (a *adminUI) Refill(c echo.Context) error {
 	if err != nil || !amt.IsPositive() {
 		return apperr.Validation("enter a valid amount")
 	}
+	src, err := parseLocation(c.FormValue("source"))
+	if err != nil {
+		return err
+	}
 	carrierID, err := a.p.store.CarrierOfDevice(ctx, deviceID)
 	if err != nil {
 		return err
@@ -440,30 +582,49 @@ func (a *adminUI) Refill(c echo.Context) error {
 	ref := strings.TrimSpace(c.FormValue("reference"))
 	note := strings.TrimSpace(c.FormValue("note"))
 
-	// Book the supplier purchase as a shop expense (no drawer movement).
-	desc := a.p.store.CarrierName(ctx, carrierID) + " supplier float refill"
-	exp, err := a.p.core.Expenses.Create(ctx, expenses.CreateInput{
-		Category: "Float top-up", Amount: amt.String(), Description: &desc,
-	}, uid)
-	if err != nil {
-		return err
+	supplier := a.p.store.CarrierName(ctx, carrierID)
+	desc := supplier + " supplier float refill"
+	reason := desc
+	if ref != "" {
+		reason += " #" + ref
 	}
-
-	// Attribute to the till that actually has this device's float open, so the
-	// working cashier sees the refilled float live (overdraw guard included). If no
-	// till has it open, fall back to session-less (0) → the opening-carry picks it
-	// up at the device's next opening. (Previously this used the *refiller's* own
-	// open session, so a refill done by an admin with their own till open was
-	// stranded in that session and invisible to the cashier — QA-013.)
 	sessionID, err := a.p.store.OpenDeviceSession(ctx, deviceID)
 	if err != nil {
 		return err
 	}
-	expID := exp.ID
-	if _, err := a.p.store.RecordTransaction(ctx, TxInput{
-		SessionID: sessionID, CarrierID: carrierID, DeviceID: deviceID, Type: "refill",
-		Amount: amt, ExpenseID: &expID, Reference: ref, Note: note, CreatedBy: uid,
-	}); err != nil {
+
+	var rec *cashflow.Receipt
+	var txID int64
+	err = appdb.WithTx(ctx, a.p.core.DB, func(tx *sqlx.Tx) error {
+		exp, err := a.p.core.Expenses.CreateInTx(ctx, tx, expenses.CreateInput{
+			Category: "Float top-up", Amount: amt.String(), Description: &desc,
+		}, uid)
+		if err != nil {
+			return err
+		}
+		// Pay the supplier from the picked source (overdraw-guarded).
+		r, err := a.p.cashflow.MoveTx(ctx, tx, cashflow.MoveInput{
+			From: src, To: cashflow.External(),
+			Amount:      amt,
+			Reason:      reason,
+			ReceiptKind: "expense",
+			Party:       supplier,
+			Ref:         &cashflow.Ref{Kind: "expense", ID: exp.ID},
+			ActorID:     uid,
+		})
+		if err != nil {
+			return err
+		}
+		rec = r
+		// Increase the device float, linked to the expense.
+		expID := exp.ID
+		txID, err = a.p.store.RecordTransactionTx(ctx, tx, TxInput{
+			SessionID: sessionID, CarrierID: carrierID, DeviceID: deviceID, Type: "refill",
+			Amount: amt, ExpenseID: &expID, Reference: ref, Note: note, CreatedBy: uid,
+		})
+		return err
+	})
+	if err != nil {
 		return err
 	}
 
@@ -471,7 +632,21 @@ func (a *adminUI) Refill(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	return response.RenderFragment(c, BalancePanel(a.symbol(ctx), balances), response.Toast("Float refilled", "success"))
+
+	// Follow the shop's print policy for the RL- refill slip, like every other money
+	// move: AskToPrint on → the shared Print / Skip prompt (pointing at the slip's
+	// reprint URL); off → best-effort print now. Either way the balance panel swaps
+	// in with the new float.
+	msg := "Float refilled — paid from " + rec.FromLabel
+	reprintURL := "/admin/recharge/tx/" + strconv.FormatInt(txID, 10) + "/print"
+	panel := BalancePanel(a.symbol(ctx), balances)
+	if cfg, cerr := a.p.core.Settings.Get(ctx); cerr == nil && cfg != nil && cfg.AskToPrint {
+		return response.RenderFragment(c, panel, response.PrintPrompt(msg, reprintURL, false))
+	}
+	if t, terr := a.p.store.TxByID(ctx, txID); terr == nil {
+		_ = a.p.reprintTx(ctx, t) // best-effort: a printer hiccup never fails the refill
+	}
+	return response.RenderFragment(c, panel, response.Toast(msg, "success"))
 }
 
 // DeviceCreate adds a device under a carrier.
@@ -534,124 +709,4 @@ func (a *adminUI) CarrierDelete(c echo.Context) error {
 		return err
 	}
 	return response.RenderFragment(c, CarrierRows(cs), response.Trigger(map[string]any{"carriers-changed": true}))
-}
-
-// cardAdjustData is the Alpine x-data for the bank-card adjust form: the action /
-// source toggles plus the till preselected to the first open till.
-func cardAdjustData(tills []cashregister.SessionRow) string {
-	till := ""
-	if len(tills) > 0 {
-		till = strconv.FormatInt(tills[0].UserID, 10)
-	}
-	return "{ type:'deposit', source:'external', till:'" + till + "' }"
-}
-
-// cardRowsFragment re-renders the bank-card table (the HTMX swap target after a
-// card create/delete/adjust).
-func (a *adminUI) cardRowsFragment(c echo.Context, triggers ...string) error {
-	cards, err := a.p.store.ListBankCards(c.Request().Context(), false)
-	if err != nil {
-		return err
-	}
-	return response.RenderFragment(c, CardRows(a.symbol(c.Request().Context()), cards), triggers...)
-}
-
-// CardCreate adds a bank card (a carrier-independent money source with a tracked
-// balance, used for bill-pay / get-money at the till).
-func (a *adminUI) CardCreate(c echo.Context) error {
-	ctx := c.Request().Context()
-	name := strings.TrimSpace(c.FormValue("name"))
-	if name == "" {
-		return apperr.Validation("bank card name is required")
-	}
-	exists, err := a.p.store.BankCardExists(ctx, name)
-	if err != nil {
-		return err
-	}
-	if exists {
-		return apperr.Conflict("a bank card with that name already exists")
-	}
-	if _, err := a.p.store.CreateBankCard(ctx, name); err != nil {
-		return err
-	}
-	return a.cardRowsFragment(c, response.Toast(name+" added", "success"))
-}
-
-// CardDelete retires a bank card (its history is preserved).
-func (a *adminUI) CardDelete(c echo.Context) error {
-	ctx := c.Request().Context()
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		return apperr.BadRequest("invalid id")
-	}
-	if err := a.p.store.DeactivateBankCard(ctx, id); err != nil {
-		return err
-	}
-	return a.cardRowsFragment(c)
-}
-
-// CardAdjust is the admin's deposit/withdrawal on a bank card's tracked balance.
-// By default it is a balance-only adjustment that does NOT touch any cash drawer
-// or book an expense (money moving between the shop's drawer and bank account is
-// an internal transfer, not a cost). A deposit can optionally be sourced "from a
-// till": then it also records that open till's matching cash withdrawal — the
-// cashier-side half of moving drawer cash into the bank — so the drawer stays
-// reconciled in one action.
-func (a *adminUI) CardAdjust(c echo.Context) error {
-	ctx := c.Request().Context()
-	uid := middleware.CurrentUserID(c)
-	cardID, err := strconv.ParseInt(c.FormValue("card_id"), 10, 64)
-	if err != nil || cardID == 0 {
-		return apperr.Validation("choose a bank card")
-	}
-	card := a.p.store.BankCardName(ctx, cardID)
-	if card == "" {
-		return apperr.Validation("unknown bank card")
-	}
-	typ := c.FormValue("type")
-	if typ != "deposit" && typ != "withdrawal" {
-		return apperr.BadRequest("invalid adjustment type")
-	}
-	amt, err := money.Parse(c.FormValue("amount"))
-	if err != nil || !amt.IsPositive() {
-		return apperr.Validation("enter a valid amount")
-	}
-	note := strings.TrimSpace(c.FormValue("note"))
-
-	// deposit: balance +.   withdrawal: balance − (guard against overdraw).
-	balanceDelta := amt
-	if typ == "withdrawal" {
-		over, err := a.p.store.cardWouldOverdraw(ctx, cardID, amt)
-		if err != nil {
-			return err
-		}
-		if over {
-			return apperr.Conflict("not enough balance on this card")
-		}
-		balanceDelta = amt.Neg()
-	}
-
-	// Optional: a deposit whose cash came from an open till also books that till's
-	// withdrawal (done first, so a drawer-overdraw aborts before the balance moves).
-	if typ == "deposit" && c.FormValue("source") == "till" {
-		tillUID, err := strconv.ParseInt(c.FormValue("till_user_id"), 10, 64)
-		if err != nil || tillUID == 0 {
-			return apperr.Validation("choose which till the cash came from")
-		}
-		reason := card + " bank deposit"
-		if note != "" {
-			reason += " - " + note
-		}
-		if _, err := a.p.core.CashRegister.Withdraw(ctx, tillUID, cashregister.MovementInput{Amount: amt.String(), Reason: reason}); err != nil {
-			return err
-		}
-	}
-
-	if _, err := a.p.store.RecordCardTx(ctx, CardTxInput{
-		CardID: cardID, Type: typ, Amount: amt, BalanceDelta: balanceDelta,
-		Note: note, CreatedBy: uid,
-	}); err != nil {
-		return err
-	}
-	return a.cardRowsFragment(c, response.Toast("Balance updated", "success"))
 }

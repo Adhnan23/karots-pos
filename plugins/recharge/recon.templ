@@ -34,9 +34,7 @@ templ ReconBody(d ReconData) {
 				Cash session #{ strconv.FormatInt(d.Session.ID, 10) } · opened { d.Session.OpenedAt.Format("Mon 02 Jan, 15:04") }
 			</div>
 			@txForm(d)
-			if len(d.Cards) > 0 {
-				@cardTxForm(d)
-			}
+			@bankTxForm(d)
 			if len(d.Rows) == 0 {
 				<div class="bg-white rounded-2xl shadow-sm p-6 text-slate-400 text-center">
 					No carriers set up. Add carriers and devices in Admin → Reload & Bills.
@@ -97,9 +95,9 @@ templ txForm(d ReconData) {
 				<label class="block text-sm font-medium text-slate-600 mb-1">Type</label>
 				<input type="hidden" name="type" x-model="type"/>
 				<div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
-					@typeCard("deposit", "Deposit", "cash-in → wallet")
-					@typeCard("withdrawal", "Withdrawal", "give cash out")
-					@typeCard("topup", "Reload top-up", "buy from supplier")
+					@typeCard("deposit", "Deposit to wallet", "Customer gives cash → you load their eZ Cash / mCash (cash in, float down)")
+					@typeCard("withdrawal", "Withdraw from wallet", "Customer takes cash out of their wallet (cash out, float up)")
+					@typeCard("topup", "Buy float from supplier", "Top up this device's reload balance (no drawer, books an expense)")
 				</div>
 			</div>
 			<div class="col-span-full">
@@ -159,20 +157,21 @@ templ txForm(d ReconData) {
 	</div>
 }
 
-// cardTxForm is the bank-card money recorder: pay a bill (card balance ↓, cash in)
-// or get money (card balance ↑, cash out). A bill payment is blocked client-side
-// when the amount exceeds the card balance (the server re-checks authoritatively).
-// Deposits/withdrawals on the balance are admin-only.
-templ cardTxForm(d ReconData) {
+// bankTxForm is the bill-payment / get-money recorder against a core bank locker.
+// Pay a bill (bank ↓, cash in) or hand out cash (bank ↑, cash out); every leg moves
+// through cashflow.Move server-side. A bill payment is blocked client-side when the
+// amount exceeds the bank balance (the server re-checks authoritatively). Banks are
+// created under Money → Cash Lockers (kind = Bank).
+templ bankTxForm(d ReconData) {
 	<div
 		class="bg-white rounded-2xl shadow-sm p-6"
-		x-data="{ type:'billpay', cardId:'', amount:'', svc:'', cards:[], async load(){ try{ const r=await fetch('/cashier/recharge/cards'); const j=await r.json(); this.cards=j.data||[]; if(this.cards.length){ this.cardId=String(this.cards[0].id) } }catch(e){} }, card(){ return this.cards.find(x=>String(x.id)===String(this.cardId)) }, bal(){ const x=this.card(); return x?Number(x.balance):0 }, over(){ return this.type==='billpay' && Number(this.amount)>this.bal() } }"
+		x-data="{ type:'billpay', bankId:'', amount:'', svc:'', banks:[], async load(){ try{ const r=await fetch('/cashier/recharge/banks'); const j=await r.json(); this.banks=j.data||[]; if(this.banks.length){ this.bankId=String(this.banks[0].id) } }catch(e){} }, bank(){ return this.banks.find(x=>String(x.id)===String(this.bankId)) }, bal(){ const x=this.bank(); return x?Number(x.balance):0 }, over(){ return this.type==='billpay' && Number(this.amount)>this.bal() } }"
 		x-init="load()"
 	>
-		<h2 class="text-lg font-semibold mb-1">Bank card — bill payment &amp; cash</h2>
-		<p class="text-xs text-slate-400 mb-4">Pay a bill from a card (balance goes down, cash comes in) or hand out cash (balance goes up, cash goes out). Service charge is extra cash into the drawer.</p>
+		<h2 class="text-lg font-semibold mb-1">Bill payment &amp; cash</h2>
+		<p class="text-xs text-slate-400 mb-4">Pay a bill from a bank (balance goes down, cash comes in) or hand out cash (balance goes up, cash goes out). Service charge is extra cash into the drawer. Each leg is recorded in the shop's cash flow with a receipt.</p>
 		<form
-			hx-post="/cashier/recharge/card-tx"
+			hx-post="/cashier/recharge/bank-tx"
 			hx-target="#recon-body"
 			hx-swap="outerHTML"
 			hx-on::after-request="if(event.detail.successful) this.reset()"
@@ -183,44 +182,45 @@ templ cardTxForm(d ReconData) {
 				<input type="hidden" name="type" x-model="type"/>
 				<div class="grid grid-cols-2 gap-2">
 					<button type="button" x-on:click="type='billpay'" x-bind:class="type==='billpay' ? 'ring-2 ring-emerald-500 bg-emerald-50' : 'border border-slate-200'" class="px-3 py-2.5 rounded-lg text-left">
-						<div class="font-medium text-sm">Pay bill</div>
-						<div class="text-xs text-slate-400">balance ↓ · cash in</div>
+						<div class="font-medium text-sm">Pay a bill</div>
+						<div class="text-xs text-slate-400">Customer gives you cash → your bank pays the biller (cash in, bank down)</div>
 					</button>
 					<button type="button" x-on:click="type='getmoney'" x-bind:class="type==='getmoney' ? 'ring-2 ring-emerald-500 bg-emerald-50' : 'border border-slate-200'" class="px-3 py-2.5 rounded-lg text-left">
-						<div class="font-medium text-sm">Get money</div>
-						<div class="text-xs text-slate-400">balance ↑ · cash out</div>
+						<div class="font-medium text-sm">Give cash out</div>
+						<div class="text-xs text-slate-400">Customer funds your bank → you hand them cash (cash out, bank up)</div>
 					</button>
 				</div>
 			</div>
 			<div class="col-span-full">
-				<label class="block text-sm font-medium text-slate-600 mb-1">Bank card</label>
-				<input type="hidden" name="card_id" x-model="cardId"/>
+				<label class="block text-sm font-medium text-slate-600 mb-1">Bank</label>
+				<input type="hidden" name="bank_locker_id" x-model="bankId"/>
 				<div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
-					<template x-for="bc in cards" x-bind:key="bc.id">
-						<button type="button" x-on:click="cardId=String(bc.id)" x-bind:class="String(cardId)===String(bc.id) ? 'ring-2 ring-indigo-500 bg-indigo-50' : 'border border-slate-200'" class="px-3 py-2.5 rounded-lg text-left">
-							<div class="font-medium text-sm" x-text="bc.name"></div>
-							<div class="text-xs text-slate-400" x-text="'Bal: '+Number(bc.balance).toFixed(2)"></div>
+					<template x-for="b in banks" x-bind:key="b.id">
+						<button type="button" x-on:click="bankId=String(b.id)" x-bind:class="String(bankId)===String(b.id) ? 'ring-2 ring-indigo-500 bg-indigo-50' : 'border border-slate-200'" class="px-3 py-2.5 rounded-lg text-left">
+							<div class="font-medium text-sm" x-text="b.name"></div>
+							<div class="text-xs text-slate-400" x-text="'Bal: '+Number(b.balance).toFixed(2)"></div>
 						</button>
 					</template>
 				</div>
-				<p x-show="cards.length===0" class="text-xs text-rose-500 mt-1">No bank cards. Add one in Admin → Reload &amp; Bills.</p>
+				<p x-show="banks.length===0" class="text-xs text-rose-500 mt-1">No banks yet. Add one under Money → Cash Lockers (kind = Bank).</p>
 			</div>
 			<div>
 				<label class="block text-sm font-medium text-slate-600 mb-1">Amount</label>
 				<input type="number" name="amount" min="0" step="0.01" x-model="amount" required placeholder="0.00" class="w-full border rounded-lg px-3 py-2.5 text-right"/>
-				<p x-show="over()" class="text-xs text-rose-500 mt-1">Amount exceeds this card's balance.</p>
+				<p x-show="over()" class="text-xs text-rose-500 mt-1">Amount exceeds this bank's balance.</p>
 			</div>
 			<div>
 				<label class="block text-sm font-medium text-slate-600 mb-1">Service charge (optional)</label>
 				<input type="number" name="service_charge" min="0" step="0.01" x-model="svc" placeholder="0.00" class="w-full border rounded-lg px-3 py-2.5 text-right"/>
-				<p x-show="Number(svc)>0" class="text-xs text-slate-500 mt-1">Customer pays <span class="font-semibold tabular-nums" x-text="(Number(amount||0)+Number(svc||0)).toFixed(2)"></span> total (charge added to drawer).</p>
+				<p x-show="Number(svc)>0 && type==='billpay'" class="text-xs text-slate-500 mt-1">Customer pays <span class="font-semibold tabular-nums" x-text="(Number(amount||0)+Number(svc||0)).toFixed(2)"></span> total (charge added to drawer).</p>
+				<p x-show="Number(svc)>0 && type==='getmoney'" class="text-xs text-slate-500 mt-1">Charge kept as extra cash in the drawer.</p>
 			</div>
 			<div>
 				<label class="block text-sm font-medium text-slate-600 mb-1">Reference (optional)</label>
 				<input type="text" name="reference" placeholder="bill / txn no." class="w-full border rounded-lg px-3 py-2.5"/>
 			</div>
 			<div class="flex items-end">
-				<button type="submit" x-bind:disabled="!cardId || over()" class="w-full py-2.5 rounded-lg bg-emerald-600 text-white font-semibold hover:bg-emerald-700 disabled:opacity-40">Record &amp; print</button>
+				<button type="submit" x-bind:disabled="!bankId || over()" class="w-full py-2.5 rounded-lg bg-emerald-600 text-white font-semibold hover:bg-emerald-700 disabled:opacity-40">Record &amp; print</button>
 			</div>
 		</form>
 	</div>

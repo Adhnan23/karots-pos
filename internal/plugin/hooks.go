@@ -103,7 +103,20 @@ var (
 	quickActionTabs []QuickActionTab
 	tenderMethods   []TenderMethod
 	logoutGuards    []LogoutGuard
+	receiptTabs     []ReceiptTab
 )
+
+// ReceiptTab adds a tab to the unified Receipts page on BOTH the admin and cashier
+// shells. The core page renders a tab button (Label) plus a panel that lazy-loads
+// the plugin's own fragment endpoint for the current role: CashierHref on the
+// cashier shell, AdminHref on the admin shell. Key must be unique across plugins.
+// A plugin may register several (e.g. one per receipt kind).
+type ReceiptTab struct {
+	Key         string
+	Label       string
+	CashierHref string
+	AdminHref   string
+}
 
 // Hook registration — plugins call these from Setup.
 func (r *Registry) AddAdminNav(e AdminNavEntry)          { adminNav = append(adminNav, e) }
@@ -116,6 +129,7 @@ func (r *Registry) AddPosAction(a PosAction)             { posActions = append(p
 func (r *Registry) AddQuickActionTab(t QuickActionTab)   { quickActionTabs = append(quickActionTabs, t) }
 func (r *Registry) AddTenderMethod(t TenderMethod)       { tenderMethods = append(tenderMethods, t) }
 func (r *Registry) AddLogoutGuard(g LogoutGuard)         { logoutGuards = append(logoutGuards, g) }
+func (r *Registry) AddReceiptTab(t ReceiptTab)           { receiptTabs = append(receiptTabs, t) }
 
 // Getters for the template layer.
 func AdminNav() []AdminNavEntry           { return adminNav }
@@ -128,3 +142,4 @@ func PosActions() []PosAction             { return posActions }
 func QuickActionTabs() []QuickActionTab   { return quickActionTabs }
 func TenderMethods() []TenderMethod       { return tenderMethods }
 func LogoutGuards() []LogoutGuard         { return logoutGuards }
+func ReceiptTabs() []ReceiptTab           { return receiptTabs }

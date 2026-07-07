@@ -6,6 +6,7 @@ import (
 	"karots-pos/internal/datetime"
 	"karots-pos/internal/features/sales"
 	"karots-pos/internal/money"
+	"karots-pos/internal/plugin"
 	"karots-pos/templates/layouts"
 	"karots-pos/templates/shared"
 )
@@ -37,6 +38,9 @@ templ Receipts(d ReceiptsPageData) {
 					@receiptTab("cash", "Cash")
 					@receiptTab("credit", "Credit")
 					@receiptTab("warranty", "Warranty")
+					for _, t := range plugin.ReceiptTabs() {
+						@receiptTab(t.Key, t.Label)
+					}
 				</div>
 				<div id="receipts-sales" data-tabpanel x-show="tab === 'sales'">
 					@ReceiptsSalesTab(d.Sales)
@@ -44,6 +48,9 @@ templ Receipts(d ReceiptsPageData) {
 				<div id="receipts-cash" data-tabpanel x-show="tab === 'cash'" hx-get="/cashier/receipts/cash" hx-trigger="load once"></div>
 				<div id="receipts-credit" data-tabpanel x-show="tab === 'credit'" hx-get="/cashier/receipts/credit" hx-trigger="load once"></div>
 				<div id="receipts-warranty" data-tabpanel x-show="tab === 'warranty'" hx-get="/cashier/receipts/warranty" hx-trigger="load once"></div>
+				for _, t := range plugin.ReceiptTabs() {
+					<div id={ "receipts-" + t.Key } data-tabpanel x-show={ "tab === '" + t.Key + "'" } hx-get={ t.CashierHref } hx-trigger="load once"></div>
+				}
 			</div>
 		</div>
 	}

@@ -2,9 +2,12 @@ package recharge
 
 import "karots-pos/templates/layouts"
 import "karots-pos/templates/shared"
-import "karots-pos/internal/features/cashregister"
+import adminfragments "karots-pos/templates/fragments/admin"
+import "karots-pos/internal/datetime"
+import "karots-pos/internal/features/settings"
 import "karots-pos/internal/money"
 import "strconv"
+import "strings"
 import "github.com/shopspring/decimal"
 
 // HubPage is the Reload & Bills section landing page: it lists the section's
@@ -14,7 +17,7 @@ templ HubPage(userName string, sec layouts.AdminSection) {
 	@layouts.Admin("Reload & Bills", userName, "recharge-hub") {
 		<div class="mb-6">
 			<h1 class="text-2xl font-bold">📶 Reload & Bills</h1>
-			<p class="text-sm text-slate-500">Carriers &amp; bank cards, reload-balance refills, reports and the money-movement log.</p>
+			<p class="text-sm text-slate-500">Carriers &amp; devices, reload-balance refills, reports and the money-movement log. Banks are managed under Money → Cash Lockers.</p>
 		</div>
 		<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
 			for _, l := range sec.Links {
@@ -36,9 +39,9 @@ templ hubCard(href, label, desc string) {
 
 // CarriersPage is the recharge carrier management screen, rendered inside the
 // core admin shell so the plugin inherits the sidebar, palette and styling.
-templ CarriersPage(userName string, carriers []Carrier, devices []Device, cards []BankCard, tills []cashregister.SessionRow) {
+templ CarriersPage(userName string, carriers []Carrier, devices []Device) {
 	@layouts.Admin("Reload & Bills — Carriers", userName, "recharge-carriers") {
-		<h1 class="text-2xl font-bold mb-6">Carriers, Devices & Bank cards</h1>
+		<h1 class="text-2xl font-bold mb-6">Carriers & Devices</h1>
 		<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
 			<div class="lg:col-span-2 bg-white rounded-2xl shadow-sm p-6">
 				<h2 class="text-lg font-semibold mb-4">Carriers</h2>
@@ -102,115 +105,9 @@ templ CarriersPage(userName string, carriers []Carrier, devices []Device, cards 
 				</div>
 			</div>
 		</div>
-		<div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
-			<div class="lg:col-span-2 bg-white rounded-2xl shadow-sm p-6">
-				<h2 class="text-lg font-semibold mb-1">Bank cards</h2>
-				<p class="text-sm text-slate-500 mb-3">Your own card / bank account used to <strong>pay bills</strong> and <strong>hand out cash</strong>, with a tracked balance. Separate from reload carriers — they never appear in reloads or reconciliation.</p>
-				<table class="w-full text-sm">
-					<thead class="text-left text-slate-500 border-b">
-						<tr>
-							<th class="py-2 pr-4">Bank card</th>
-							<th class="py-2 pr-4 text-right">Balance</th>
-							<th class="py-2 text-right">Actions</th>
-						</tr>
-					</thead>
-					<tbody id="card-rows">
-						@CardRows("", cards)
-					</tbody>
-				</table>
-				<h3 class="text-sm font-semibold mt-6 mb-2">Adjust balance (no drawer)</h3>
-				<p class="text-xs text-slate-400 mb-3">Match the card to the real bank balance. A balance-only change does <strong>not</strong> touch any drawer. For a deposit you can mark that the cash came <strong>from a till</strong> — that also records the chosen till's cash withdrawal in one step.</p>
-				<form
-					x-data={ cardAdjustData(tills) }
-					hx-post="/admin/recharge/card-adjust"
-					hx-target="#card-rows"
-					hx-swap="innerHTML"
-					hx-on::after-request="if(event.detail.successful){ this.reset(); type='deposit'; source='external' }"
-					class="space-y-4"
-				>
-					<input type="hidden" name="type" x-model="type"/>
-					<input type="hidden" name="source" x-model="source"/>
-					<input type="hidden" name="till_user_id" x-model="till"/>
-					<div class="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
-						<div>
-							<label class="block text-sm font-medium text-slate-600 mb-1">Bank card</label>
-							<select name="card_id" required class="w-full border rounded-lg px-3 py-2.5">
-								for _, bc := range cards {
-									if bc.IsActive {
-										<option value={ strconv.FormatInt(bc.ID, 10) }>{ bc.Name }</option>
-									}
-								}
-							</select>
-						</div>
-						<div>
-							<span class="block text-sm font-medium text-slate-600 mb-1">Action</span>
-							<div class="grid grid-cols-2 gap-2">
-								<button type="button" x-on:click="type='deposit'" x-bind:class="type==='deposit' ? 'ring-2 ring-indigo-500 bg-indigo-50' : 'border border-slate-200'" class="px-3 py-2.5 rounded-lg text-sm font-medium">Deposit (+)</button>
-								<button type="button" x-on:click="type='withdrawal'" x-bind:class="type==='withdrawal' ? 'ring-2 ring-indigo-500 bg-indigo-50' : 'border border-slate-200'" class="px-3 py-2.5 rounded-lg text-sm font-medium">Withdraw (−)</button>
-							</div>
-						</div>
-						<div>
-							<label class="block text-sm font-medium text-slate-600 mb-1">Amount</label>
-							<input type="number" name="amount" min="0" step="0.01" required placeholder="0.00" class="w-full border rounded-lg px-3 py-2.5 text-right"/>
-						</div>
-					</div>
-					<div x-show="type==='deposit'" x-cloak>
-						<span class="block text-sm font-medium text-slate-600 mb-1">Where did the cash come from?</span>
-						<div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-							<button type="button" x-on:click="source='external'" x-bind:class="source==='external' ? 'ring-2 ring-indigo-500 bg-indigo-50' : 'border border-slate-200'" class="px-3 py-2.5 rounded-lg text-sm text-left">
-								<div class="font-medium">External</div>
-								<div class="text-xs text-slate-400">balance only — no drawer</div>
-							</button>
-							<button type="button" x-on:click="source='till'" x-bind:class="source==='till' ? 'ring-2 ring-indigo-500 bg-indigo-50' : 'border border-slate-200'" class="px-3 py-2.5 rounded-lg text-sm text-left">
-								<div class="font-medium">From a till</div>
-								<div class="text-xs text-slate-400">also records its cash withdrawal</div>
-							</button>
-						</div>
-						<div x-show="source==='till'" x-cloak class="mt-3">
-							<span class="block text-sm font-medium text-slate-600 mb-1">Which till?</span>
-							if len(tills) == 0 {
-								<p class="text-xs text-rose-500">No open tills right now — a cashier must have a drawer open to take cash from.</p>
-							} else {
-								<div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-									for _, t := range tills {
-										<button
-											type="button"
-											x-on:click={ "till='" + strconv.FormatInt(t.UserID, 10) + "'" }
-											x-bind:class={ "till==='" + strconv.FormatInt(t.UserID, 10) + "' ? 'ring-2 ring-indigo-500 bg-indigo-50' : 'border border-slate-200'" }
-											class="px-3 py-2.5 rounded-lg text-sm text-left"
-										>
-											<div class="font-medium">{ t.UserName } · #{ strconv.FormatInt(t.ID, 10) }</div>
-											<div class="text-xs text-slate-400">opened { t.OpenedAt.Format("15:04") }</div>
-										</button>
-									}
-								</div>
-							}
-						</div>
-					</div>
-					<div>
-						<label class="block text-sm font-medium text-slate-600 mb-1">Note (optional)</label>
-						<input type="text" name="note" placeholder="e.g. cash deposited at bank" class="w-full border rounded-lg px-3 py-2.5"/>
-					</div>
-					<button type="submit" class="py-2.5 px-5 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700">Apply</button>
-				</form>
-			</div>
-			<div class="bg-white rounded-2xl shadow-sm p-6">
-				<h2 class="text-lg font-semibold mb-4">Add a bank card</h2>
-				<form
-					hx-post="/admin/recharge/cards"
-					hx-target="#card-rows"
-					hx-swap="innerHTML"
-					hx-on::after-request="if(event.detail.successful) this.reset()"
-					class="space-y-3"
-				>
-					<div>
-						<label class="block text-sm font-medium text-slate-600 mb-1">Name</label>
-						<input type="text" name="name" required placeholder="Sampath Visa / BOC account" class="w-full border rounded-lg px-3 py-2.5"/>
-					</div>
-					<p class="text-xs text-slate-400">A bank card pays bills (balance down) and hands out cash (balance up) at the till. Top it up with “Adjust balance”.</p>
-					<button type="submit" class="w-full py-2.5 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700">Add bank card</button>
-				</form>
-			</div>
+		<div class="bg-white rounded-2xl shadow-sm p-6 mt-6">
+			<h2 class="text-lg font-semibold mb-1">Banks (for bill-pay &amp; cash)</h2>
+			<p class="text-sm text-slate-500">Your bank accounts are now core <strong>cash lockers</strong>. Create one under <a href="/admin/lockers" class="text-indigo-600 hover:underline">Money → Cash Lockers</a> with kind <strong>Bank</strong>; it then appears in the cashier's bill-pay / get-money picker, and every bill payment moves money through the shop's cash flow (with a printed receipt) automatically.</p>
 		</div>
 	}
 }
@@ -310,38 +207,6 @@ templ CarrierRows(carriers []Carrier) {
 	}
 }
 
-// CardRows is the HTMX-swappable bank-card table body (name · balance · remove).
-templ CardRows(symbol string, cards []BankCard) {
-	if len(cards) == 0 {
-		<tr><td colspan="3" class="py-6 text-center text-slate-400">No bank cards yet.</td></tr>
-	} else {
-		for _, bc := range cards {
-			<tr class="border-b last:border-0">
-				<td class="py-2 pr-4 font-medium">
-					{ bc.Name }
-					if !bc.IsActive {
-						<span class="ml-2 text-xs text-slate-400">(retired)</span>
-					}
-				</td>
-				<td class="py-2 pr-4 text-right tabular-nums">{ money.Format(symbol, bc.Balance) }</td>
-				<td class="py-2 text-right">
-					if bc.IsActive {
-						<button
-							hx-post={ "/admin/recharge/cards/" + strconv.FormatInt(bc.ID, 10) + "/delete" }
-							hx-target="#card-rows"
-							hx-swap="innerHTML"
-							hx-confirm={ "Retire " + bc.Name + "? Past activity is kept." }
-							class="text-rose-600 hover:text-rose-700 text-sm"
-						>Remove</button>
-					} else {
-						<span class="text-slate-300 text-sm">—</span>
-					}
-				</td>
-			</tr>
-		}
-	}
-}
-
 // ReportPage is the admin recharge report: live per-device float balances, a
 // supplier float-refill form, and a per-session reconciliation. The detailed
 // money-movement log lives on the Ledger page.
@@ -351,8 +216,6 @@ type ReportVM struct {
 	UserName, Symbol string
 	Preset, From, To string
 	Balances         []DeviceBalanceNow
-	Cards            []BankCard
-	CardLedger       []CardTxRow
 	Blocks           []SessionRecon
 	ServiceEarned    decimal.Decimal
 	FloatOnHand      decimal.Decimal
@@ -384,7 +247,6 @@ templ ReportPage(d ReportVM) {
 			<div id="balance-panel">
 				@BalancePanel(d.Symbol, d.Balances)
 			</div>
-			@CardBalancePanel(d.Symbol, d.Cards, d.CardLedger)
 			<div class="bg-white rounded-2xl shadow-sm p-6">
 				<h2 class="text-lg font-semibold mb-4">Reconciliation by session</h2>
 				if len(d.Blocks) == 0 {
@@ -459,78 +321,17 @@ templ BalancePanel(symbol string, balances []DeviceBalanceNow) {
 	</div>
 }
 
-// CardBalancePanel shows live bank-card balances and a short recent-activity log.
-templ CardBalancePanel(symbol string, cards []BankCard, ledger []CardTxRow) {
-	<div class="bg-white rounded-2xl shadow-sm p-6">
-		<h2 class="text-lg font-semibold mb-4">Bank card balances</h2>
-		<table class="w-full text-sm">
-			<thead class="text-left text-slate-500 border-b">
-				<tr>
-					<th class="py-2 pr-4">Bank card</th>
-					<th class="py-2 pr-4 text-right">Balance</th>
-				</tr>
-			</thead>
-			<tbody>
-				if len(cards) == 0 {
-					<tr><td colspan="2" class="py-6 text-center text-slate-400">No bank cards yet.</td></tr>
-				} else {
-					for _, bc := range cards {
-						<tr class="border-b last:border-0">
-							<td class="py-2 pr-4 font-medium">
-								{ bc.Name }
-								if !bc.IsActive {
-									<span class="ml-2 text-xs text-slate-400">(retired)</span>
-								}
-							</td>
-							<td class="py-2 pr-4 text-right tabular-nums font-semibold">{ money.Format(symbol, bc.Balance) }</td>
-						</tr>
-					}
-				}
-			</tbody>
-		</table>
-		if len(ledger) > 0 {
-			<h3 class="text-sm font-semibold mt-6 mb-2">Recent bank card activity</h3>
-			<table class="w-full text-sm">
-				<thead class="text-left text-slate-500 border-b">
-					<tr>
-						<th class="py-2 pr-4">When</th>
-						<th class="py-2 pr-4">Bank card</th>
-						<th class="py-2 pr-4">Type</th>
-						<th class="py-2 pr-4 text-right">Amount</th>
-						<th class="py-2 pr-4 text-right">Cash</th>
-						<th class="py-2 pr-4 text-right">Balance Δ</th>
-						<th class="py-2 pr-4">Reference</th>
-					</tr>
-				</thead>
-				<tbody>
-					for _, t := range ledger {
-						<tr class="border-b last:border-0">
-							<td class="py-1.5 pr-4 text-slate-500">{ t.CreatedAt.Format("02 Jan 15:04") }</td>
-							<td class="py-1.5 pr-4 font-medium">{ t.Card }</td>
-							<td class="py-1.5 pr-4 capitalize">{ txLabel(t.Type) }</td>
-							<td class="py-1.5 pr-4 text-right tabular-nums">{ money.Format(symbol, t.Amount) }</td>
-							<td class="py-1.5 pr-4 text-right tabular-nums">{ money.Format(symbol, t.CashDelta) }</td>
-							<td class="py-1.5 pr-4 text-right tabular-nums">{ money.Format(symbol, t.BalanceDelta) }</td>
-							<td class="py-1.5 pr-4 text-slate-500">{ refText(t.Reference) }</td>
-						</tr>
-					}
-				</tbody>
-			</table>
-		}
-	</div>
-}
-
 // refillCard is the supplier float-refill form: pick a carrier → device (dynamic,
 // shows live balance) → amount. Records a float-in + shop expense with NO cash
 // drawer movement (the admin pays the supplier directly).
-templ refillCard() {
+templ refillCard(choices []adminfragments.LocationChoice) {
 	<div
 		class="bg-white rounded-2xl shadow-sm p-6"
 		x-data="{ carriers:[], devices:[], cid:'', did:'', async load(){ try{ const r=await fetch('/cashier/recharge/carriers'); const j=await r.json(); this.carriers=j.data||[]; if(this.carriers.length){ this.cid=String(this.carriers[0].id) } await this.loadDevices(); }catch(e){} }, async loadDevices(){ this.devices=[]; this.did=''; if(!this.cid){ return } try{ const r=await fetch('/admin/recharge/devices/balances?carrier_id='+encodeURIComponent(this.cid)); const j=await r.json(); this.devices=j.data||[]; if(this.devices.length){ this.did=String(this.devices[0].id) } }catch(e){} }, dev(){ return this.devices.find(x=>String(x.id)===String(this.did)) }, bal(){ const x=this.dev(); return x?Number(x.balance):0 } }"
 		x-init="load()"
 	>
 		<h2 class="text-lg font-semibold mb-1">Refill reload balance from supplier</h2>
-		<p class="text-xs text-slate-400 mb-4">Increases the device's reload balance and books a shop expense. Does not touch the cash drawer.</p>
+		<p class="text-xs text-slate-400 mb-4">Increases the device's reload balance, books a shop expense, and pays the supplier from the cash source you pick below.</p>
 		<form
 			hx-post="/admin/recharge/refill"
 			hx-target="#balance-panel"
@@ -561,17 +362,30 @@ templ refillCard() {
 				<input type="number" name="amount" min="0" step="0.01" required placeholder="0.00" class="w-full border rounded-lg px-3 py-2.5 text-right"/>
 			</div>
 			<div>
+				<label class="block text-sm font-medium text-slate-600 mb-1">Pay from</label>
+				if len(choices) == 0 {
+					<p class="text-xs text-rose-500">No cash source available. Open a till or add a cash locker under Money → Cash Lockers.</p>
+				} else {
+					@adminfragments.LocationPicker("source", "Where does the cash come from?", choices)
+					<p class="text-xs text-slate-400 mt-1">The float you buy is paid to the supplier from this cash pile.</p>
+				}
+			</div>
+			<div>
 				<label class="block text-sm font-medium text-slate-600 mb-1">Reference (optional)</label>
 				<input type="text" name="reference" placeholder="supplier invoice / receipt" class="w-full border rounded-lg px-3 py-2.5"/>
 			</div>
-			<button type="submit" x-bind:disabled="!did" class="w-full py-2.5 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700 disabled:opacity-40">Record refill</button>
+			if len(choices) == 0 {
+				<button type="submit" disabled class="w-full py-2.5 rounded-lg bg-indigo-600 text-white font-semibold disabled:opacity-40">Record refill</button>
+			} else {
+				<button type="submit" x-bind:disabled="!did" class="w-full py-2.5 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700 disabled:opacity-40">Record refill</button>
+			}
 		</form>
 	</div>
 }
 
 // RefillsPage is the dedicated supplier float-refill screen: the refill form, the
 // live device balances (HTMX-updated after a refill), and the refill history.
-templ RefillsPage(userName, symbol string, balances []DeviceBalanceNow, refills []TxRow) {
+templ RefillsPage(userName, symbol string, balances []DeviceBalanceNow, refills []TxRow, choices []adminfragments.LocationChoice) {
 	@layouts.Admin("Reload & Bills — Reload-balance refills", userName, "recharge-refills") {
 		<h1 class="text-2xl font-bold mb-6">Reload-balance refills</h1>
 		<div class="space-y-6">
@@ -579,7 +393,7 @@ templ RefillsPage(userName, symbol string, balances []DeviceBalanceNow, refills 
 				<div id="balance-panel" class="lg:col-span-2">
 					@BalancePanel(symbol, balances)
 				</div>
-				@refillCard()
+				@refillCard(choices)
 			</div>
 			<div class="bg-white rounded-2xl shadow-sm p-6">
 				<h2 class="text-lg font-semibold mb-4">Refill history</h2>
@@ -627,52 +441,59 @@ templ slipActions(id int64) {
 	>Reprint</button>
 }
 
-// ShopInfo carries the shop header (name/address/phone) onto the HTML slip so the
-// on-screen view matches the printed receipt.
-type ShopInfo struct {
-	Name    string
-	Address string
-	Phone   string
+// The recharge slip views reuse the SAME standalone thermal-slip shell as the core
+// Cash (CR-) / Credit (DP-) receipt views (shared.ThermalReceipt + ThermalHeader),
+// so a recharge bill / reload slip looks and prints identically to every other
+// receipt. The shell is a full-page roll-sized slip (not the admin/cashier app
+// layout), so admin and cashier share one template — only the print/switch URL
+// base differs, carried in shared.ThermalData.
+
+// TxSlipPage renders one float-transaction (deposit/withdrawal/refill) slip.
+templ TxSlipPage(cfg settings.Settings, thermal shared.ThermalData, t TxRow) {
+	@shared.ThermalReceipt(thermal) {
+		@shared.ThermalHeader(cfg.ShopName, cfg.LogoSrc(), cfg.ShopNameSi, cfg.Address, cfg.Phone, strings.ToUpper(txLabel(t.Type)), floatNo(t.ID))
+		<div class="r-row r-small"><span>Date:</span><span>{ datetime.DateTime(t.CreatedAt) }</span></div>
+		<div class="r-row r-small"><span>Carrier:</span><span class="r-right">{ t.Carrier }</span></div>
+		if t.Device != "—" {
+			<div class="r-row r-small"><span>Device:</span><span class="r-right">{ t.Device }</span></div>
+		}
+		<div class="r-hr"></div>
+		<div class="r-row r-total"><span>Amount</span><span>{ money.Format(cfg.CurrencySymbol, t.Amount) }</span></div>
+		if t.ServiceCharge.IsPositive() {
+			<div class="r-row r-small"><span>Service charge</span><span>{ money.Format(cfg.CurrencySymbol, t.ServiceCharge) }</span></div>
+			<div class="r-row r-big"><span>Total</span><span>{ money.Format(cfg.CurrencySymbol, t.Amount.Add(t.ServiceCharge)) }</span></div>
+		}
+		if t.Reference != nil && *t.Reference != "" {
+			<div class="r-row r-small"><span>Reference</span><span class="r-right">{ *t.Reference }</span></div>
+		}
+		if t.Operator != "" {
+			<div class="r-row r-small"><span>Served by</span><span>{ t.Operator }</span></div>
+		}
+		<div class="r-hr"></div>
+		<div class="r-center r-small">Thank you!</div>
+	}
 }
 
-// TxSlipPage is a printable HTML view of one transaction slip, with a reprint
-// button (parity with the core sale receipt view).
-templ TxSlipPage(userName, symbol string, shop ShopInfo, t TxRow) {
-	@layouts.Admin("Reload & Bills — Slip", userName, "recharge-ledger") {
-		<div class="max-w-sm mx-auto bg-white rounded-2xl shadow-sm p-6 my-6">
-			<div class="text-center border-b pb-3 mb-3">
-				<div class="text-lg font-bold">{ shop.Name }</div>
-				if shop.Address != "" {
-					<div class="text-xs text-slate-500">{ shop.Address }</div>
-				}
-				if shop.Phone != "" {
-					<div class="text-xs text-slate-500">{ shop.Phone }</div>
-				}
-			</div>
-			<div class="text-center text-xl font-bold capitalize">{ txLabel(t.Type) }</div>
-			<div class="text-center text-slate-400 text-xs mb-5">{ t.CreatedAt.Format("2006-01-02 15:04") }</div>
-			<dl class="text-sm divide-y">
-				@slipRow("Carrier", t.Carrier)
-				if t.Device != "—" {
-					@slipRow("Device", t.Device)
-				}
-				@slipRow("Amount", money.Format(symbol, t.Amount))
-				if t.ServiceCharge.IsPositive() {
-					@slipRow("Service charge", money.Format(symbol, t.ServiceCharge))
-					@slipRow("Total", money.Format(symbol, t.Amount.Add(t.ServiceCharge)))
-				}
-				if t.Reference != nil && *t.Reference != "" {
-					@slipRow("Reference", *t.Reference)
-				}
-			</dl>
-			<div class="mt-6 flex gap-2">
-				<button
-					hx-post={ "/admin/recharge/tx/" + strconv.FormatInt(t.ID, 10) + "/print" }
-					class="flex-1 py-2.5 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700"
-				>Reprint slip</button>
-				<a href="/admin/recharge/ledger" class="py-2.5 px-4 rounded-lg border text-slate-600 hover:bg-slate-50">Back</a>
-			</div>
-		</div>
+// BillSlipPage renders one bill-payment / get-money slip (the customer copy).
+templ BillSlipPage(cfg settings.Settings, thermal shared.ThermalData, t BillTxRow) {
+	@shared.ThermalReceipt(thermal) {
+		@shared.ThermalHeader(cfg.ShopName, cfg.LogoSrc(), cfg.ShopNameSi, cfg.Address, cfg.Phone, strings.ToUpper(txLabel(t.Type)), billNo(t.ID))
+		<div class="r-row r-small"><span>Date:</span><span>{ datetime.DateTime(t.CreatedAt) }</span></div>
+		<div class="r-row r-small"><span>Bank:</span><span class="r-right">{ t.Bank }</span></div>
+		if t.Reference != nil && *t.Reference != "" {
+			<div class="r-row r-small"><span>Reference:</span><span class="r-right">{ *t.Reference }</span></div>
+		}
+		<div class="r-hr"></div>
+		<div class="r-row r-total"><span>Amount</span><span>{ money.Format(cfg.CurrencySymbol, t.Amount) }</span></div>
+		if t.ServiceCharge.IsPositive() {
+			<div class="r-row r-small"><span>Service charge</span><span>{ money.Format(cfg.CurrencySymbol, t.ServiceCharge) }</span></div>
+			<div class="r-row r-big"><span>Total</span><span>{ money.Format(cfg.CurrencySymbol, t.Amount.Add(t.ServiceCharge)) }</span></div>
+		}
+		if t.Operator != "" {
+			<div class="r-row r-small"><span>Served by</span><span>{ t.Operator }</span></div>
+		}
+		<div class="r-hr"></div>
+		<div class="r-center r-small">Thank you!</div>
 	}
 }
 
@@ -868,4 +689,102 @@ templ reportSession(symbol string, b SessionRecon) {
 		}
 		</div>
 	</details>
+}
+
+// BillReceiptsTab is the "Bills" tab body: a date-range filter (matching the core
+// receipts tabs) over bill payments / get-money, each with View + Reprint.
+templ BillReceiptsTab(vm ReceiptsTabVM, rows []BillTxRow) {
+	<div>
+		@shared.RangeForm(vm.Action, vm.Preset, vm.From, vm.To) {
+		}
+		<div class="bg-white rounded-2xl shadow-sm overflow-hidden">
+			<table class="w-full text-sm">
+				<thead class="text-left text-slate-500 border-b bg-slate-50">
+					<tr>
+						<th class="px-4 py-2">Receipt</th>
+						<th class="px-4 py-2">Date</th>
+						<th class="px-4 py-2">Type</th>
+						<th class="px-4 py-2">Bank</th>
+						<th class="px-4 py-2 text-right">Amount</th>
+						<th class="px-4 py-2 text-right">Service</th>
+						<th class="px-4 py-2">Ref</th>
+						<th class="px-4 py-2">By</th>
+						<th class="px-4 py-2 text-right">Slip</th>
+					</tr>
+				</thead>
+				<tbody>
+					for _, r := range rows {
+						<tr class="border-b last:border-0">
+							<td class="px-4 py-2 font-medium">{ billNo(r.ID) }</td>
+							<td class="px-4 py-2 text-slate-500 whitespace-nowrap">{ datetime.DateTime(r.CreatedAt) }</td>
+							<td class="px-4 py-2 capitalize">{ txLabel(r.Type) }</td>
+							<td class="px-4 py-2">{ r.Bank }</td>
+							<td class="px-4 py-2 text-right tabular-nums">{ money.Format(vm.Symbol, r.Amount) }</td>
+							<td class="px-4 py-2 text-right tabular-nums">{ money.Format(vm.Symbol, r.ServiceCharge) }</td>
+							<td class="px-4 py-2 text-slate-500">{ refText(r.Reference) }</td>
+							<td class="px-4 py-2 text-slate-500">{ r.Operator }</td>
+							<td class="px-4 py-2 text-right whitespace-nowrap">
+								<button type="button" hx-post={ vm.ReprintBase + strconv.FormatInt(r.ID, 10) + "/print" } hx-swap="none" class="px-3 py-1 rounded-lg bg-indigo-600 text-white text-xs font-medium">🧾 Reprint</button>
+								<a href={ templ.SafeURL(vm.ViewBase + strconv.FormatInt(r.ID, 10)) } class="ml-2 px-3 py-1 rounded-lg border text-slate-600 text-xs font-medium">View</a>
+							</td>
+						</tr>
+					}
+					if len(rows) == 0 {
+						<tr><td colspan="10" class="px-4 py-8 text-center text-slate-400">No bill payments in this range.</td></tr>
+					}
+				</tbody>
+			</table>
+		</div>
+	</div>
+}
+
+// FloatReceiptsTab is the "Reload" tab body: a date-range filter over reload float
+// transactions (deposit / withdrawal / top-up), each with View + Reprint.
+templ FloatReceiptsTab(vm ReceiptsTabVM, rows []TxRow) {
+	<div>
+		@shared.RangeForm(vm.Action, vm.Preset, vm.From, vm.To) {
+		}
+		<div class="bg-white rounded-2xl shadow-sm overflow-hidden">
+			<table class="w-full text-sm">
+				<thead class="text-left text-slate-500 border-b bg-slate-50">
+					<tr>
+						<th class="px-4 py-2">Receipt</th>
+						<th class="px-4 py-2">Date</th>
+						<th class="px-4 py-2">Type</th>
+						<th class="px-4 py-2">Carrier</th>
+						<th class="px-4 py-2">Device</th>
+						<th class="px-4 py-2 text-right">Amount</th>
+						<th class="px-4 py-2 text-right">Service</th>
+						<th class="px-4 py-2">By</th>
+						<th class="px-4 py-2 text-right">Slip</th>
+					</tr>
+				</thead>
+				<tbody>
+					for _, r := range rows {
+						<tr class="border-b last:border-0">
+							<td class="px-4 py-2 font-medium">{ floatNo(r.ID) }</td>
+							<td class="px-4 py-2 text-slate-500 whitespace-nowrap">{ datetime.DateTime(r.CreatedAt) }</td>
+							<td class="px-4 py-2 capitalize">{ txLabel(r.Type) }</td>
+							<td class="px-4 py-2">{ r.Carrier }</td>
+							<td class="px-4 py-2 text-slate-500">{ r.Device }</td>
+							<td class="px-4 py-2 text-right tabular-nums">{ money.Format(vm.Symbol, r.Amount) }</td>
+							<td class="px-4 py-2 text-right tabular-nums">{ money.Format(vm.Symbol, r.ServiceCharge) }</td>
+							<td class="px-4 py-2 text-slate-500">{ r.Operator }</td>
+							<td class="px-4 py-2 text-right whitespace-nowrap">
+								if r.Type == "deposit" || r.Type == "withdrawal" {
+									<button type="button" hx-post={ vm.ReprintBase + strconv.FormatInt(r.ID, 10) + "/print" } hx-swap="none" class="px-3 py-1 rounded-lg bg-indigo-600 text-white text-xs font-medium">🧾 Reprint</button>
+									<a href={ templ.SafeURL(vm.ViewBase + strconv.FormatInt(r.ID, 10)) } class="ml-2 px-3 py-1 rounded-lg border text-slate-600 text-xs font-medium">View</a>
+								} else {
+									<span class="text-slate-300">—</span>
+								}
+							</td>
+						</tr>
+					}
+					if len(rows) == 0 {
+						<tr><td colspan="9" class="px-4 py-8 text-center text-slate-400">No reload transactions in this range.</td></tr>
+					}
+				</tbody>
+			</table>
+		</div>
+	</div>
 }

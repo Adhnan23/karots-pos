@@ -7,13 +7,18 @@ import (
 	"strings"
 
 	"karots-pos/internal/apperr"
+	appdb "karots-pos/internal/db"
 	"karots-pos/internal/features/auth"
+	"karots-pos/internal/features/cashflow"
 	"karots-pos/internal/features/cashregister"
 	"karots-pos/internal/features/expenses"
+	"karots-pos/internal/features/lockers"
 	"karots-pos/internal/middleware"
 	"karots-pos/internal/money"
 	"karots-pos/internal/response"
+	"karots-pos/templates/shared"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/labstack/echo/v4"
 	"github.com/shopspring/decimal"
 )
@@ -39,7 +44,7 @@ type ReconData struct {
 	Rows          []CarrierRecon
 	Carriers      []Carrier
 	Devices       []Device
-	Cards         []BankCard
+	Banks         []lockers.Locker
 	// LogoutMode is set when the page was reached via /cashier/recharge?logout=1 —
 	// the user tried to log out with a float still open. The page then shows a
 	// banner and, once the last float is closed, routes on to /logout.
@@ -83,7 +88,7 @@ func (h *cashierUI) reconData(c echo.Context) (ReconData, error) {
 	if d.Devices, err = h.p.store.Devices(ctx); err != nil {
 		return d, err
 	}
-	if d.Cards, err = h.p.store.ListBankCards(ctx, true); err != nil {
+	if d.Banks, err = h.p.bankLockers(ctx); err != nil {
 		return d, err
 	}
 	return d, nil
@@ -284,20 +289,29 @@ func (h *cashierUI) Tx(c echo.Context) error {
 	}
 
 	// 3) Ledger.
-	if _, err := h.p.store.RecordTransaction(ctx, TxInput{
+	txID, err := h.p.store.RecordTransaction(ctx, TxInput{
 		SessionID: sess.ID, CarrierID: carrierID, DeviceID: deviceID, Type: typ,
 		Amount: amt, ExpenseID: expenseID, Reference: ref, Note: note, CreatedBy: uid,
 		Untracked: !tracksFloat, ServiceCharge: svc,
-	}); err != nil {
+	})
+	if err != nil {
 		return err
 	}
 
-	// 4) Print a slip for the cash-handling types.
-	if typ == "deposit" || typ == "withdrawal" || typ == "billpay" {
-		h.p.printSlip(ctx, typ, carrier, amt, svc, ref)
+	msg := carrier + " " + txLabel(typ) + " recorded"
+	// 4) Cash-handling types (deposit / withdrawal) print a slip under the print
+	// policy; a top-up just books the expense with no customer slip.
+	if typ == "deposit" || typ == "withdrawal" {
+		return h.printPolicy(c, "/cashier/recharge/tx/"+strconv.FormatInt(txID, 10)+"/print",
+			func(ctx context.Context) error {
+				t, err := h.p.store.TxByID(ctx, txID)
+				if err != nil {
+					return err
+				}
+				return h.p.reprintTx(ctx, t)
+			}, msg)
 	}
-
-	return h.reconFragment(c, response.Toast(carrier+" "+txLabel(typ)+" recorded", "success"))
+	return h.reconFragment(c, response.Toast(msg, "success"))
 }
 
 // Devices lists active devices with their live float balance for the dynamic
@@ -326,22 +340,121 @@ func (h *cashierUI) Devices(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{"data": rows})
 }
 
-// Cards lists active bank cards with their live balance for the cashier's
-// bill-pay / get-money picker.
-func (h *cashierUI) Cards(c echo.Context) error {
-	rows, err := h.p.store.ListBankCards(c.Request().Context(), true)
+// symbol resolves the shop currency symbol for fragment renders ("" on error).
+func (h *cashierUI) symbol(ctx context.Context) string {
+	if cfg, err := h.p.core.Settings.Get(ctx); err == nil && cfg != nil {
+		return cfg.CurrencySymbol
+	}
+	return ""
+}
+
+// TxView renders one float-transaction slip as the shared thermal receipt page
+// (the View link on the cashier "Reload" receipts tab) — identical shell to the
+// core Cash / Credit receipt views, only the print/switch URL base differs.
+func (h *cashierUI) TxView(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	ctx := c.Request().Context()
+	t, err := h.p.store.TxByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	cfg, err := h.p.core.Settings.Get(ctx)
+	if err != nil {
+		return err
+	}
+	base := "/cashier/recharge/tx/" + strconv.FormatInt(t.ID, 10)
+	thermal := shared.ThermalFrom(cfg.ReceiptWidth, c.QueryParam("size"), "Slip "+floatNo(t.ID), base, base+"/print")
+	return response.RenderPage(c, TxSlipPage(*cfg, thermal, t))
+}
+
+// BillView renders one bill-payment / get-money slip as the shared thermal receipt
+// page (the View link on the cashier "Bills" receipts tab).
+func (h *cashierUI) BillView(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	ctx := c.Request().Context()
+	t, err := h.p.store.BillTxByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	cfg, err := h.p.core.Settings.Get(ctx)
+	if err != nil {
+		return err
+	}
+	base := "/cashier/recharge/bill/" + strconv.FormatInt(t.ID, 10)
+	thermal := shared.ThermalFrom(cfg.ReceiptWidth, c.QueryParam("size"), "Slip "+billNo(t.ID), base, base+"/print")
+	return response.RenderPage(c, BillSlipPage(*cfg, thermal, t))
+}
+
+// ReceiptsBill renders the "Bills" receipts tab (bill payments / get-money) for the
+// cashier Receipts page, with cashier-scoped reprint links.
+func (h *cashierUI) ReceiptsBill(c echo.Context) error {
+	ctx := c.Request().Context()
+	f, preset, fromStr, toStr, err := receiptsRange(c)
+	if err != nil {
+		return err
+	}
+	rows, err := h.p.store.BillLedger(ctx, f)
+	if err != nil {
+		return err
+	}
+	vm := ReceiptsTabVM{
+		Symbol: h.symbol(ctx), Preset: preset, From: fromStr, To: toStr,
+		Action:      "/cashier/recharge/receipts/bill",
+		ReprintBase: "/cashier/recharge/bill/", ViewBase: "/cashier/recharge/bill/",
+	}
+	return response.RenderFragment(c, BillReceiptsTab(vm, rows))
+}
+
+// ReceiptsFloat renders the "Reload" receipts tab (float deposit/withdrawal/top-up).
+func (h *cashierUI) ReceiptsFloat(c echo.Context) error {
+	ctx := c.Request().Context()
+	f, preset, fromStr, toStr, err := receiptsRange(c)
+	if err != nil {
+		return err
+	}
+	rows, err := h.p.store.Ledger(ctx, f)
+	if err != nil {
+		return err
+	}
+	vm := ReceiptsTabVM{
+		Symbol: h.symbol(ctx), Preset: preset, From: fromStr, To: toStr,
+		Action:      "/cashier/recharge/receipts/recharge",
+		ReprintBase: "/cashier/recharge/tx/", ViewBase: "/cashier/recharge/tx/",
+	}
+	return response.RenderFragment(c, FloatReceiptsTab(vm, rows))
+}
+
+// Banks lists the active core kind="bank" lockers with their live balance for the
+// cashier's bill-pay / get-money picker. A "bank" is a plain core locker managed
+// under Money → Cash Lockers — the plugin only reads & moves them.
+func (h *cashierUI) Banks(c echo.Context) error {
+	rows, err := h.p.bankLockers(c.Request().Context())
 	if err != nil {
 		return err
 	}
 	return c.JSON(http.StatusOK, map[string]any{"data": rows})
 }
 
-// CardTx records a bank-card money movement done by the cashier: a bill payment
-// (card balance −, cash in) or a get-money (card balance +, cash out). A service
-// charge, when set, is always extra cash into the drawer. It mirrors the drawer,
-// guards a bill payment against the card balance, writes the card ledger and
-// prints a slip. Deposits/withdrawals on the balance are admin-only (see admin).
-func (h *cashierUI) CardTx(c echo.Context) error {
+// BankTx records a bill payment or a get-money done by the cashier against a core
+// bank locker, moving every leg through cashflow.Move (so each leg gets a CR-
+// receipt and shows in core Cash Flow / net position):
+//
+//	billpay  — bank locker → External(biller) for the bill (bank down, overdraw-
+//	           guarded), then External(customer) → Till for bill + service charge
+//	           (cash in). The shop keeps the service charge.
+//	getmoney — Till → External(customer) for the amount (cash out, drawer-guarded),
+//	           External → bank locker for the amount (bank up), then a service
+//	           charge is extra cash into the drawer.
+//
+// All legs commit in ONE transaction (cashflow.MoveTx over a shared tx) so a
+// drawer/bank overdraw rolls the whole thing back — never a partial money move.
+func (h *cashierUI) BankTx(c echo.Context) error {
 	ctx := c.Request().Context()
 	uid := middleware.CurrentUserID(c)
 	sess, err := h.requireSession(c)
@@ -353,13 +466,13 @@ func (h *cashierUI) CardTx(c echo.Context) error {
 	if typ != "billpay" && typ != "getmoney" {
 		return apperr.BadRequest("invalid transaction type")
 	}
-	cardID, err := strconv.ParseInt(c.FormValue("card_id"), 10, 64)
-	if err != nil || cardID == 0 {
-		return apperr.Validation("choose a bank card")
+	bankID, err := strconv.ParseInt(c.FormValue("bank_locker_id"), 10, 64)
+	if err != nil || bankID == 0 {
+		return apperr.Validation("choose a bank")
 	}
-	card := h.p.store.BankCardName(ctx, cardID)
-	if card == "" {
-		return apperr.Validation("unknown bank card")
+	bank, err := h.p.lockers.Get(ctx, bankID)
+	if err != nil || bank == nil || !bank.IsActive || bank.Kind != lockers.KindBank {
+		return apperr.Validation("choose a valid bank")
 	}
 	amt, err := money.Parse(c.FormValue("amount"))
 	if err != nil || !amt.IsPositive() {
@@ -375,58 +488,152 @@ func (h *cashierUI) CardTx(c echo.Context) error {
 	ref := strings.TrimSpace(c.FormValue("reference"))
 	note := strings.TrimSpace(c.FormValue("note"))
 
-	// Bill payment draws down the card balance — hard-block an overdraw.
-	if typ == "billpay" {
-		over, err := h.p.store.cardWouldOverdraw(ctx, cardID, amt)
-		if err != nil {
-			return err
-		}
-		if over {
-			return apperr.Conflict("not enough balance on this card")
-		}
-	}
-
-	// billpay: balance −, cash +.   getmoney: balance +, cash −.
-	balanceDelta, cashDelta := amt.Neg(), amt
-	if typ == "getmoney" {
-		balanceDelta, cashDelta = amt, amt.Neg()
-	}
-
-	reason := card + " " + txLabel(typ)
+	reason := bank.Name + " " + txLabel(typ)
 	if ref != "" {
 		reason += " #" + ref
 	}
-
-	// 1) Mirror the cash drawer (Withdraw guards get-money against the drawer balance).
-	if cashDelta.IsPositive() {
-		if _, err := h.p.core.CashRegister.PayIn(ctx, uid, cashregister.MovementInput{Amount: cashDelta.String(), Reason: reason}); err != nil {
-			return err
-		}
-	} else {
-		if _, err := h.p.core.CashRegister.Withdraw(ctx, uid, cashregister.MovementInput{Amount: cashDelta.Neg().String(), Reason: reason}); err != nil {
-			return err
-		}
-	}
-	// 1b) Service charge is extra cash into the drawer (shop earnings).
-	if svc.IsPositive() {
-		if _, err := h.p.core.CashRegister.PayIn(ctx, uid, cashregister.MovementInput{Amount: svc.String(), Reason: reason + " service charge"}); err != nil {
-			return err
-		}
+	if note != "" {
+		reason += " - " + note
 	}
 
-	// 2) Ledger.
-	if _, err := h.p.store.RecordCardTx(ctx, CardTxInput{
-		CardID: cardID, SessionID: &sess.ID, Type: typ, Amount: amt,
-		BalanceDelta: balanceDelta, CashDelta: cashDelta, ServiceCharge: svc,
-		Reference: ref, Note: note, CreatedBy: uid,
+	// The External counterparty is labelled per leg on the (background) CR- receipts:
+	// the bank↔biller leg names the biller, the till↔customer legs name the customer.
+	biller := "Bill payment"
+	if ref != "" {
+		biller = "Bill " + ref
+	}
+	till := cashflow.Till(uid)
+	bankLoc := cashflow.Locker(bankID)
+	ext := cashflow.External()
+	type leg struct {
+		from, to cashflow.Location
+		amount   decimal.Decimal
+		party    string
+	}
+	var legs []leg
+	switch typ {
+	case "billpay":
+		// bank down (guarded) first, then cash in (bill + service charge).
+		legs = append(legs, leg{bankLoc, ext, amt, biller})
+		legs = append(legs, leg{ext, till, amt.Add(svc), "Customer"})
+	case "getmoney":
+		// cash out (guarded) first, then bank up, then the service-charge cash-in.
+		legs = append(legs, leg{till, ext, amt, "Customer"})
+		legs = append(legs, leg{ext, bankLoc, amt, "Customer"})
+		if svc.IsPositive() {
+			legs = append(legs, leg{ext, till, svc, "Customer"})
+		}
+	}
+
+	// All legs in ONE transaction so a drawer/bank overdraw rolls everything back.
+	if err := appdb.WithTx(ctx, h.p.core.DB, func(tx *sqlx.Tx) error {
+		for _, l := range legs {
+			if _, err := h.p.cashflow.MoveTx(ctx, tx, cashflow.MoveInput{
+				From: l.from, To: l.to, Amount: l.amount, Reason: reason,
+				ReceiptKind: typ, Party: l.party, ActorID: uid,
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
 	}); err != nil {
 		return err
 	}
 
-	// 3) Slip.
-	h.p.printSlip(ctx, typ, card, amt, svc, ref)
+	// Log the customer-facing detail (balance-free) so the slip can be reprinted and
+	// the movement lists in the "Bill" receipts tab. The money/receipts live in core.
+	billID, err := h.p.store.RecordBillTx(ctx, BillTxInput{
+		SessionID: &sess.ID, BankLockerID: bankID, BankName: bank.Name, Type: typ,
+		Amount: amt, ServiceCharge: svc, Reference: ref, Note: note, CreatedBy: uid,
+	})
+	if err != nil {
+		return err
+	}
 
-	return h.reconFragment(c, response.Toast(card+" "+txLabel(typ)+" recorded", "success"))
+	msg := bank.Name + " " + txLabel(typ) + " recorded"
+	return h.printPolicy(c, "/cashier/recharge/bill/"+strconv.FormatInt(billID, 10)+"/print",
+		func(ctx context.Context) error {
+			t, err := h.p.store.BillTxByID(ctx, billID)
+			if err != nil {
+				return err
+			}
+			return h.p.reprintBill(ctx, t)
+		}, msg)
+}
+
+// printPolicy applies the shop's "ask before printing" policy to a recharge slip,
+// mirroring the core money flows: ON → fire the shared Print / Skip prompt pointing
+// at reprintURL (the client POSTs it to reprint on demand); OFF → print the slip
+// now, server-side, best-effort. Either way it re-renders the recon body so live
+// balances refresh. The printed artifact is the recharge slip (clean money-receipt
+// format, no signature) — never the background CR- receipt.
+func (h *cashierUI) printPolicy(c echo.Context, reprintURL string, printNow func(context.Context) error, msg string) error {
+	ctx := c.Request().Context()
+	cfg, err := h.p.core.Settings.Get(ctx)
+	if err == nil && cfg != nil && cfg.AskToPrint {
+		return h.reconFragment(c, response.PrintPrompt(msg, reprintURL, false))
+	}
+	if printNow != nil {
+		_ = printNow(ctx) // best-effort: a printer hiccup never fails the transaction
+	}
+	return h.reconFragment(c, response.Toast(msg, "success"))
+}
+
+// TxPrint reprints a deposit / withdrawal slip (the shared Print/Skip prompt or a
+// manual reprint from the Recharge receipts tab). Best-effort like BillPrint.
+func (h *cashierUI) TxPrint(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	ctx := c.Request().Context()
+	t, err := h.p.store.TxByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if err := h.p.reprintTx(ctx, t); err != nil {
+		c.Response().Header().Set("HX-Trigger", response.Toast("Could not reach the printer", "error"))
+		return response.NoContent(c)
+	}
+	c.Response().Header().Set("HX-Trigger", response.Toast("Slip sent to printer", "success"))
+	return response.NoContent(c)
+}
+
+// BillPrint reprints a bill-payment / get-money slip (the shared Print/Skip prompt
+// or a manual reprint from the Bill receipts tab). Best-effort: a printer problem
+// is a warning toast, not a 500.
+func (h *cashierUI) BillPrint(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	ctx := c.Request().Context()
+	t, err := h.p.store.BillTxByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if err := h.p.reprintBill(ctx, t); err != nil {
+		c.Response().Header().Set("HX-Trigger", response.Toast("Could not reach the printer", "error"))
+		return response.NoContent(c)
+	}
+	c.Response().Header().Set("HX-Trigger", response.Toast("Slip sent to printer", "success"))
+	return response.NoContent(c)
+}
+
+// bankLockers returns the active core kind="bank" lockers (the shop's bank
+// accounts) with live balances, for the cashier bill-pay / get-money picker.
+func (p *Plugin) bankLockers(ctx context.Context) ([]lockers.Locker, error) {
+	all, err := p.lockers.List(ctx, true)
+	if err != nil {
+		return nil, err
+	}
+	banks := make([]lockers.Locker, 0, len(all))
+	for _, l := range all {
+		if l.Kind == lockers.KindBank {
+			banks = append(banks, l)
+		}
+	}
+	return banks, nil
 }
 
 // Reload records the float decrease for an airtime sale, attributed to a specific

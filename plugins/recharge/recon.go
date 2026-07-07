@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	appdb "karots-pos/internal/db"
 	"karots-pos/internal/money"
 
 	"github.com/shopspring/decimal"
@@ -60,12 +61,18 @@ type TxInput struct {
 // For an untracked device (bank card) the float delta is forced to zero — the
 // cash side still posts, but there is no float to move.
 func (s *Store) RecordTransaction(ctx context.Context, in TxInput) (int64, error) {
+	return s.RecordTransactionTx(ctx, s.db, in)
+}
+
+// RecordTransactionTx inserts a transaction over a caller-supplied queryer (a tx),
+// so a refill's expense, cash-out and float increase can commit atomically.
+func (s *Store) RecordTransactionTx(ctx context.Context, q appdb.Queryer, in TxInput) (int64, error) {
 	cashDelta, floatDelta := Deltas(in.Type, in.Amount)
 	if in.Untracked {
 		floatDelta = decimal.Zero
 	}
 	var id int64
-	err := s.db.GetContext(ctx, &id, `
+	err := q.GetContext(ctx, &id, `
 		INSERT INTO recharge_transactions
 		  (session_id, carrier_id, device_id, type, amount, cash_delta, float_delta,
 		   sale_id, expense_id, reference, note, created_by, service_charge)
@@ -474,6 +481,7 @@ type TxRow struct {
 	CashDelta     decimal.Decimal `db:"cash_delta"`
 	FloatDelta    decimal.Decimal `db:"float_delta"`
 	Reference     *string         `db:"reference"`
+	Operator      string          `db:"operator"`
 }
 
 // LedgerFilter narrows the admin ledger query (zero values = no filter).
@@ -492,10 +500,12 @@ func (s *Store) TxByID(ctx context.Context, id int64) (TxRow, error) {
 	var t TxRow
 	err := s.db.GetContext(ctx, &t, `
 		SELECT t.id, t.created_at, c.name AS carrier, COALESCE(d.label,'—') AS device, t.type,
-		       t.amount, t.service_charge, t.cash_delta, t.float_delta, t.reference
+		       t.amount, t.service_charge, t.cash_delta, t.float_delta, t.reference,
+		       COALESCE(u.name,'') AS operator
 		FROM recharge_transactions t
 		JOIN recharge_carriers c ON c.id = t.carrier_id
 		LEFT JOIN recharge_devices d ON d.id = t.device_id
+		LEFT JOIN users u ON u.id = t.created_by
 		WHERE t.id = $1`, id)
 	return t, err
 }
@@ -504,10 +514,12 @@ func (s *Store) TxByID(ctx context.Context, id int64) (TxRow, error) {
 func (s *Store) Ledger(ctx context.Context, f LedgerFilter) ([]TxRow, error) {
 	q := `
 		SELECT t.id, t.created_at, c.name AS carrier, COALESCE(d.label,'—') AS device, t.type,
-		       t.amount, t.service_charge, t.cash_delta, t.float_delta, t.reference
+		       t.amount, t.service_charge, t.cash_delta, t.float_delta, t.reference,
+		       COALESCE(u.name,'') AS operator
 		FROM recharge_transactions t
 		JOIN recharge_carriers c ON c.id = t.carrier_id
 		LEFT JOIN recharge_devices d ON d.id = t.device_id
+		LEFT JOIN users u ON u.id = t.created_by
 		WHERE 1=1`
 	var args []any
 	add := func(cond string, v any) { args = append(args, v); q += " AND " + cond + " $" + strconv.Itoa(len(args)) }
@@ -543,130 +555,100 @@ func nullStr(s string) *string {
 	return &s
 }
 
-// ============================ Bank cards ============================
-// A bank card is a carrier-independent money source (the shop's own card/account)
-// with a real running balance = Σ balance_delta. Unlike device floats, it is not
-// reconciled per session — the balance persists across shifts.
-
-// BankCard is a shop bank card/account with its live balance.
-type BankCard struct {
-	ID       int64           `db:"id"        json:"id"`
-	Name     string          `db:"name"      json:"name"`
-	Balance  decimal.Decimal `db:"balance"   json:"balance"`
-	IsActive bool            `db:"is_active" json:"is_active"`
+// ReceiptsTabVM carries the date-range state + role-scoped URLs a receipts tab
+// fragment needs (so the same template serves the admin and cashier shells).
+type ReceiptsTabVM struct {
+	Symbol      string
+	Preset      string
+	From, To    string
+	Action      string // the tab's own fragment endpoint (RangeForm posts here)
+	ReprintBase string // e.g. /cashier/recharge/bill/  (id + /print appended)
+	ViewBase    string // e.g. /cashier/recharge/bill/  (id appended)
 }
 
-// ListBankCards returns bank cards with their live balance. activeOnly limits to
-// active cards (the cashier/admin pickers); false includes retired ones (history).
-func (s *Store) ListBankCards(ctx context.Context, activeOnly bool) ([]BankCard, error) {
-	var rows []BankCard
-	err := s.db.SelectContext(ctx, &rows, `
-		SELECT b.id, b.name, b.is_active, COALESCE(t.bal,0) AS balance
-		FROM recharge_bank_cards b
-		LEFT JOIN LATERAL (
-		  SELECT SUM(balance_delta) AS bal FROM recharge_card_tx WHERE card_id=b.id) t ON true
-		WHERE ($1 = false OR b.is_active = true)
-		ORDER BY b.name`, activeOnly)
-	return rows, err
-}
+// ============================ Bill payments ============================
+// A bill payment / get-money is a balance-free record of a till transaction
+// against a core kind="bank" locker. The cash movement + bank balance live in
+// core (cashflow.Move → CR- receipts + locker ledger); this row only carries the
+// customer-facing detail for the slip reprint and the "Bill" receipts tab.
 
-// CardBalance returns one card's live balance.
-func (s *Store) CardBalance(ctx context.Context, cardID int64) (decimal.Decimal, error) {
-	var v decimal.Decimal
-	err := s.db.GetContext(ctx, &v,
-		`SELECT COALESCE(SUM(balance_delta),0) FROM recharge_card_tx WHERE card_id=$1`, cardID)
-	return v, err
-}
-
-// CreateBankCard inserts a bank card.
-func (s *Store) CreateBankCard(ctx context.Context, name string) (int64, error) {
-	var id int64
-	err := s.db.GetContext(ctx, &id,
-		`INSERT INTO recharge_bank_cards (name) VALUES ($1) RETURNING id`, name)
-	return id, err
-}
-
-// BankCardExists reports whether an active card already uses this name.
-func (s *Store) BankCardExists(ctx context.Context, name string) (bool, error) {
-	var ok bool
-	err := s.db.GetContext(ctx, &ok,
-		`SELECT EXISTS (SELECT 1 FROM recharge_bank_cards WHERE lower(name)=lower($1) AND is_active=true)`, name)
-	return ok, err
-}
-
-// DeactivateBankCard retires a card (its history is preserved).
-func (s *Store) DeactivateBankCard(ctx context.Context, id int64) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE recharge_bank_cards SET is_active=false WHERE id=$1`, id)
-	return err
-}
-
-// BankCardName returns a card's display name ("" when unknown).
-func (s *Store) BankCardName(ctx context.Context, id int64) string {
-	var n string
-	_ = s.db.GetContext(ctx, &n, `SELECT name FROM recharge_bank_cards WHERE id=$1`, id)
-	return n
-}
-
-// cardWouldOverdraw reports whether decreasing a card's balance by amt would push
-// it below zero (the hard-block on bill-pay and admin withdrawal).
-func (s *Store) cardWouldOverdraw(ctx context.Context, cardID int64, amt decimal.Decimal) (bool, error) {
-	bal, err := s.CardBalance(ctx, cardID)
-	if err != nil {
-		return false, err
-	}
-	return amt.GreaterThan(bal), nil
-}
-
-// CardTxInput is one bank-card movement to record. The matching cash-drawer
-// movement (PayIn/Withdraw) is handled by the caller; deltas are precomputed.
-type CardTxInput struct {
-	CardID        int64
-	SessionID     *int64 // core cash session (nil for admin balance adjustments)
-	Type          string // billpay | getmoney | deposit | withdrawal
+// BillTxInput is one bill-payment / get-money to record.
+type BillTxInput struct {
+	SessionID     *int64
+	BankLockerID  int64
+	BankName      string
+	Type          string // billpay | getmoney
 	Amount        decimal.Decimal
-	BalanceDelta  decimal.Decimal
-	CashDelta     decimal.Decimal
 	ServiceCharge decimal.Decimal
 	Reference     string
 	Note          string
 	CreatedBy     int64
 }
 
-// RecordCardTx inserts a bank-card ledger row.
-func (s *Store) RecordCardTx(ctx context.Context, in CardTxInput) (int64, error) {
+// RecordBillTx inserts a bill-payment log row and returns its id.
+func (s *Store) RecordBillTx(ctx context.Context, in BillTxInput) (int64, error) {
 	var id int64
 	err := s.db.GetContext(ctx, &id, `
-		INSERT INTO recharge_card_tx
-		  (card_id, session_id, type, amount, balance_delta, cash_delta,
-		   service_charge, reference, note, created_by)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
-		in.CardID, in.SessionID, in.Type, in.Amount, in.BalanceDelta, in.CashDelta,
-		in.ServiceCharge, nullStr(in.Reference), nullStr(in.Note), in.CreatedBy)
+		INSERT INTO recharge_bill_tx
+		  (session_id, bank_locker_id, bank_name, type, amount, service_charge,
+		   reference, note, created_by)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+		in.SessionID, in.BankLockerID, in.BankName, in.Type, in.Amount, in.ServiceCharge,
+		nullStr(in.Reference), nullStr(in.Note), in.CreatedBy)
 	return id, err
 }
 
-// CardTxRow is one bank-card ledger entry for the admin report.
-type CardTxRow struct {
+// BillTxRow is one bill-payment ledger entry (operator name joined) for the slip
+// reprint and the "Bill" receipts tab.
+type BillTxRow struct {
 	ID            int64           `db:"id"`
 	CreatedAt     time.Time       `db:"created_at"`
-	Card          string          `db:"card"`
+	Bank          string          `db:"bank_name"`
 	Type          string          `db:"type"`
 	Amount        decimal.Decimal `db:"amount"`
 	ServiceCharge decimal.Decimal `db:"service_charge"`
-	CashDelta     decimal.Decimal `db:"cash_delta"`
-	BalanceDelta  decimal.Decimal `db:"balance_delta"`
 	Reference     *string         `db:"reference"`
+	Operator      string          `db:"operator"`
 }
 
-// CardLedger lists recent bank-card movements, newest first.
-func (s *Store) CardLedger(ctx context.Context, limit int) ([]CardTxRow, error) {
-	var rows []CardTxRow
-	err := s.db.SelectContext(ctx, &rows, `
-		SELECT t.id, t.created_at, b.name AS card, t.type, t.amount, t.service_charge,
-		       t.cash_delta, t.balance_delta, t.reference
-		FROM recharge_card_tx t
-		JOIN recharge_bank_cards b ON b.id = t.card_id
-		ORDER BY t.created_at DESC
-		LIMIT $1`, limit)
+// BillTxByID loads one bill-payment row (operator joined) for the slip reprint.
+func (s *Store) BillTxByID(ctx context.Context, id int64) (BillTxRow, error) {
+	var t BillTxRow
+	err := s.db.GetContext(ctx, &t, `
+		SELECT t.id, t.created_at, t.bank_name, t.type, t.amount, t.service_charge,
+		       t.reference, COALESCE(u.name,'') AS operator
+		FROM recharge_bill_tx t
+		LEFT JOIN users u ON u.id = t.created_by
+		WHERE t.id = $1`, id)
+	return t, err
+}
+
+// BillLedger lists bill payments in a range, newest first, for the receipts tab.
+func (s *Store) BillLedger(ctx context.Context, f LedgerFilter) ([]BillTxRow, error) {
+	q := `
+		SELECT t.id, t.created_at, t.bank_name, t.type, t.amount, t.service_charge,
+		       t.reference, COALESCE(u.name,'') AS operator
+		FROM recharge_bill_tx t
+		LEFT JOIN users u ON u.id = t.created_by
+		WHERE 1=1`
+	var args []any
+	add := func(cond string, v any) { args = append(args, v); q += " AND " + cond + " $" + strconv.Itoa(len(args)) }
+	if f.From != nil {
+		add("t.created_at >=", *f.From)
+	}
+	if f.To != nil {
+		add("t.created_at <", *f.To)
+	}
+	if f.Type != "" {
+		add("t.type =", f.Type)
+	}
+	q += " ORDER BY t.created_at DESC, t.id DESC"
+	if f.Limit > 0 {
+		args = append(args, f.Limit)
+		q += " LIMIT $" + strconv.Itoa(len(args))
+	}
+	var rows []BillTxRow
+	err := s.db.SelectContext(ctx, &rows, q, args...)
 	return rows, err
 }
+

@@ -9,6 +9,8 @@ import (
 	"context"
 	"io/fs"
 
+	"karots-pos/internal/features/cashflow"
+	"karots-pos/internal/features/lockers"
 	"karots-pos/internal/plugin"
 	"karots-pos/plugins/recharge/migrations"
 )
@@ -19,6 +21,12 @@ func init() { plugin.Register(&Plugin{}) }
 type Plugin struct {
 	core  plugin.Core
 	store *Store
+	// cashflow & lockers are core services the plugin builds over the shared
+	// Core.DB pool (plugin → core only — core never learns about the plugin). A
+	// "bank" is a core kind="bank" locker; bill-pay / get-money move money through
+	// cashflow.Move so every leg gets a CR- receipt and shows in core Cash Flow.
+	cashflow *cashflow.Service
+	lockers  *lockers.Service
 }
 
 func (p *Plugin) Name() string { return "Reload & Bills" }
@@ -30,6 +38,10 @@ func (p *Plugin) Migrations() (fs.FS, string) { return migrations.FS, "recharge"
 func (p *Plugin) Setup(reg *plugin.Registry) {
 	p.core = reg.Core
 	p.store = NewStore(reg.Core.DB)
+	// Build our own cashflow/lockers services over the shared pool. cashflow reuses
+	// the same sales service the core UI uses (Core.Sales) for its overdraw guard.
+	p.cashflow = cashflow.NewService(reg.Core.DB, reg.Core.Sales)
+	p.lockers = lockers.NewService(reg.Core.DB)
 
 	a := &adminUI{p: p}
 	reg.Admin().GET("/recharge", a.Hub)
@@ -45,21 +57,28 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 	reg.Admin().GET("/recharge/refills", a.Refills)
 	reg.Admin().GET("/recharge/tx/:id", a.TxView)
 	reg.Admin().POST("/recharge/tx/:id/print", a.TxPrint)
+	reg.Admin().GET("/recharge/bill/:id", a.BillView)
+	reg.Admin().POST("/recharge/bill/:id/print", a.BillPrint)
+	reg.Admin().GET("/recharge/receipts/bill", a.ReceiptsBill)
+	reg.Admin().GET("/recharge/receipts/recharge", a.ReceiptsFloat)
 	reg.Admin().GET("/recharge/devices/balances", a.Devices)
 	reg.Admin().POST("/recharge/refill", a.Refill)
-	reg.Admin().POST("/recharge/cards", a.CardCreate)
-	reg.Admin().POST("/recharge/cards/:id/delete", a.CardDelete)
-	reg.Admin().POST("/recharge/card-adjust", a.CardAdjust)
 
 	ch := &cashierUI{p: p}
 	reg.Cashier().GET("/recharge/carriers", ch.Carriers)
 	reg.Cashier().GET("/recharge/devices", ch.Devices)
-	reg.Cashier().GET("/recharge/cards", ch.Cards)
+	reg.Cashier().GET("/recharge/banks", ch.Banks)
 	reg.Cashier().GET("/recharge", ch.Recon)
 	reg.Cashier().POST("/recharge/open", ch.SaveOpening)
 	reg.Cashier().POST("/recharge/close", ch.SaveClosing)
 	reg.Cashier().POST("/recharge/tx", ch.Tx)
-	reg.Cashier().POST("/recharge/card-tx", ch.CardTx)
+	reg.Cashier().GET("/recharge/tx/:id", ch.TxView)
+	reg.Cashier().POST("/recharge/tx/:id/print", ch.TxPrint)
+	reg.Cashier().POST("/recharge/bank-tx", ch.BankTx)
+	reg.Cashier().GET("/recharge/bill/:id", ch.BillView)
+	reg.Cashier().POST("/recharge/bill/:id/print", ch.BillPrint)
+	reg.Cashier().GET("/recharge/receipts/bill", ch.ReceiptsBill)
+	reg.Cashier().GET("/recharge/receipts/recharge", ch.ReceiptsFloat)
 	reg.Cashier().POST("/recharge/reload", ch.Reload)
 	reg.Cashier().POST("/recharge/wallet", ch.Wallet)
 	// Block logout while a reload float is still open under the user's till
@@ -75,6 +94,17 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 			return false, "", ""
 		}
 		return true, "/cashier/recharge", "Close your reload float before logging out"
+	})
+
+	// Two receipt tabs on the unified Receipts page (admin + cashier): bill payments
+	// and float (reload) transactions, each reprintable.
+	reg.AddReceiptTab(plugin.ReceiptTab{
+		Key: "recharge-bill", Label: "Bills",
+		CashierHref: "/cashier/recharge/receipts/bill", AdminHref: "/admin/recharge/receipts/bill",
+	})
+	reg.AddReceiptTab(plugin.ReceiptTab{
+		Key: "recharge-float", Label: "Reload",
+		CashierHref: "/cashier/recharge/receipts/recharge", AdminHref: "/admin/recharge/receipts/recharge",
 	})
 
 	reg.AddQuickActionTab(plugin.QuickActionTab{Key: "reload", Label: "📶 Reload", Component: ReloadPanel()})
@@ -102,9 +132,9 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 		SectionLabel: "Reload & Bills",
 		Icon:         "📶",
 		Href:         "/admin/recharge/carriers",
-		Label:        "Carriers, devices & cards",
+		Label:        "Carriers & devices",
 		Key:          "recharge-carriers",
-		Desc:         "Carriers, devices, bank cards & reconciliation setup",
+		Desc:         "Carriers & devices; manage banks under Money → Cash Lockers",
 	})
 	reg.AddAdminNav(plugin.AdminNavEntry{
 		SectionLabel: "Reload & Bills",
