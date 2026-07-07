@@ -465,6 +465,7 @@ function pos(symbol, defaultType, askToPrint, pluginRoots) {
       this.inGroups = true;
       const top = this.groupStack[this.groupStack.length - 1];
       if (!top) return this.loadGroupsTop();
+      if (top.url) return this.fetchNodes(top.url);
       return this.openGroup(top.id, true);
     },
     async loadGroupsTop() {
@@ -509,7 +510,12 @@ function pos(symbol, defaultType, askToPrint, pluginRoots) {
       // Map nodes onto the existing card grids: folders -> groupChildren, leaves kept on the node.
       this.groupChildren = nodes
         .filter((n) => n.kind === "folder")
-        .map((n) => ({ name: n.name, emoji: n.emoji, _node: n }));
+        .map((n) => ({
+          name: n.name,
+          emoji: n.emoji,
+          _node: n,
+          _key: "p" + (n.children_url || n.name),
+        }));
       this.products = []; // plugin folders have no product leaves
       this._leaves = nodes.filter((n) => n.kind === "leaf");
       this.pluginLeaves = this._leaves; // rendered as cards
@@ -536,7 +542,12 @@ function pos(symbol, defaultType, askToPrint, pluginRoots) {
       const res = await fetch(url, { credentials: "same-origin" });
       this.detailHtml = await res.text();
       this.menuMode = "detail";
-      this.$nextTick(() => window.Alpine && window.Alpine.initTree && window.Alpine.initTree(this.$el));
+      this.$nextTick(() =>
+        window.Alpine &&
+        window.Alpine.initTree &&
+        this.$refs.detailBox &&
+        window.Alpine.initTree(this.$refs.detailBox)
+      );
     },
     async confirmAmount() {
       if (this.busy) return;

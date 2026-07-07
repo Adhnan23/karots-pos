@@ -120,7 +120,7 @@ templ POS(d POSData) {
 								</div>
 							</template>
 							<div x-show="menuMode==='cards' && inGroups && groupChildren.length" class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3 mb-3">
-								<template x-for="g in groupChildren" x-bind:key="'g'+g.id">
+								<template x-for="g in groupChildren" x-bind:key="g._key || ('g'+g.id)">
 									<button type="button" x-on:click="g._node ? openNode(g._node) : openGroup(g.id)" class="text-left p-3 rounded-xl bg-white shadow-sm hover:ring-2 hover:ring-indigo-400">
 										<div class="text-2xl leading-none" x-text="g.emoji || '📁'"></div>
 										<div class="font-medium text-sm mt-1" x-text="g.name"></div>
@@ -131,7 +131,7 @@ templ POS(d POSData) {
 							<!-- Plugin leaf cards (amount / detail / product actions returned by a folder) -->
 							<template x-if="menuMode==='cards' && pluginLeaves.length">
 								<div class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3 mb-3">
-									<template x-for="n in pluginLeaves" x-bind:key="'ln'+n.name">
+									<template x-for="n in pluginLeaves" x-bind:key="'ln'+(n.add_url||n.detail_url||n.name)">
 										<button type="button" x-on:click="openNode(n)" class="text-left p-3 rounded-xl bg-white shadow-sm hover:ring-2 hover:ring-indigo-400">
 											<div class="text-2xl leading-none" x-text="n.emoji || '▸'"></div>
 											<div class="font-medium text-sm mt-1" x-text="n.name"></div>
@@ -178,7 +178,7 @@ templ POS(d POSData) {
 						<template x-if="menuMode==='detail'">
 							<div class="p-2">
 								<button type="button" x-on:click="cancelStep()" class="px-3 py-1.5 rounded-lg border text-sm hover:bg-slate-50 mb-3">← Back</button>
-								<div x-html="detailHtml"></div>
+								<div x-ref="detailBox" x-html="detailHtml"></div>
 							</div>
 						</template>
 					</div>
