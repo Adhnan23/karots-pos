@@ -85,6 +85,19 @@ type CashierMenuRoot struct {
 	ChildrenURL string
 }
 
+// DrawerSection contributes an extra panel to the till OPEN and CLOSE dialogs
+// (e.g. a plugin's per-session sub-ledger the cashier counts alongside the
+// drawer). Core renders an empty slot; client-side it loads each section's form
+// fragment and posts it to the section's save URL around the drawer call. The
+// fragment is plain inputs (no hx-*); core never references the plugin's domain.
+type DrawerSection struct {
+	Key          string // stable id, e.g. "recharge"
+	OpenFormURL  string // GET → HTML input rows for the Open-till dialog
+	CloseFormURL string // GET → HTML input rows for the Close-register dialog
+	SaveOpenURL  string // POST (form-encoded) target, after the till opens
+	SaveCloseURL string // POST (form-encoded) target, before the till closes
+}
+
 // LogoutGuard reports whether a user has unfinished plugin work that must be
 // resolved before they may log out — e.g. an open recharge float session. When
 // Block is true the web layer refuses to log the user out and instead sends them
@@ -102,6 +115,7 @@ var (
 	reportCards      []ReportCard
 	posActions       []PosAction
 	cashierMenuRoots []CashierMenuRoot
+	drawerSections   []DrawerSection
 	tenderMethods    []TenderMethod
 	logoutGuards     []LogoutGuard
 	receiptTabs      []ReceiptTab
@@ -130,6 +144,7 @@ func (r *Registry) AddPosAction(a PosAction)             { posActions = append(p
 func (r *Registry) AddCashierMenuRoot(m CashierMenuRoot) {
 	cashierMenuRoots = append(cashierMenuRoots, m)
 }
+func (r *Registry) AddDrawerSection(s DrawerSection) { drawerSections = append(drawerSections, s) }
 func (r *Registry) AddTenderMethod(t TenderMethod) { tenderMethods = append(tenderMethods, t) }
 func (r *Registry) AddLogoutGuard(g LogoutGuard)   { logoutGuards = append(logoutGuards, g) }
 func (r *Registry) AddReceiptTab(t ReceiptTab)     { receiptTabs = append(receiptTabs, t) }
@@ -143,6 +158,7 @@ func PaletteEntries() []PaletteEntry      { return paletteEntries }
 func ReportCards() []ReportCard           { return reportCards }
 func PosActions() []PosAction             { return posActions }
 func CashierMenuRoots() []CashierMenuRoot { return cashierMenuRoots }
+func DrawerSections() []DrawerSection      { return drawerSections }
 
 // CashierMenuRootsJSON renders the menu roots as a JSON array for the cashier
 // Alpine scope: [{"emoji":"📶","label":"Reload & Bills","url":"/cashier/recharge/menu"}].
@@ -157,6 +173,24 @@ func CashierMenuRootsJSON() string {
 	out := make([]r, 0, len(cashierMenuRoots))
 	for _, m := range cashierMenuRoots {
 		out = append(out, r{m.Emoji, m.Label, m.ChildrenURL})
+	}
+	b, _ := json.Marshal(out)
+	return string(b)
+}
+
+// DrawerSectionsJSON renders the drawer sections for the cashier Alpine scope:
+// [{"key":"recharge","openFormUrl":"…","closeFormUrl":"…","saveOpenUrl":"…","saveCloseUrl":"…"}].
+func DrawerSectionsJSON() string {
+	type s struct {
+		Key          string `json:"key"`
+		OpenFormURL  string `json:"openFormUrl"`
+		CloseFormURL string `json:"closeFormUrl"`
+		SaveOpenURL  string `json:"saveOpenUrl"`
+		SaveCloseURL string `json:"saveCloseUrl"`
+	}
+	out := make([]s, 0, len(drawerSections))
+	for _, d := range drawerSections {
+		out = append(out, s{d.Key, d.OpenFormURL, d.CloseFormURL, d.SaveOpenURL, d.SaveCloseURL})
 	}
 	b, _ := json.Marshal(out)
 	return string(b)
