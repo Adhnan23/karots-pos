@@ -375,10 +375,6 @@ func (s *Store) Reconciliation(ctx context.Context, sessionID int64) ([]CarrierR
 	return out, nil
 }
 
-// openingValue is the prefill for a device's opening input — always the carried
-// base, so the cashier sees the running balance and only adjusts on drift.
-func openingValue(d DeviceRecon) string { return d.Opening.StringFixed(2) }
-
 // closingValue is the prefill for a device's closing input ("" when not counted).
 func closingValue(d DeviceRecon) string {
 	if d.Closing == nil {

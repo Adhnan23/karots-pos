@@ -40,33 +40,12 @@ templ ReconBody(d ReconData) {
 					No carriers set up. Add carriers and devices in Admin → Reload & Bills.
 				</div>
 			} else {
-				<form id="recon-floats" class="space-y-5">
-					for _, cr := range d.Rows {
-						@carrierBlock(d.Symbol, cr)
-					}
-				</form>
-				<div class="flex flex-wrap gap-3">
-					<button
-						type="button"
-						hx-post="/cashier/recharge/open"
-						hx-include="#recon-floats"
-						hx-target="#recon-body"
-						hx-swap="outerHTML"
-						class="px-4 py-2.5 rounded-lg border border-indigo-300 text-indigo-700 font-medium hover:bg-indigo-50"
-					>Save opening balances</button>
-					<button
-						type="button"
-						hx-post="/cashier/recharge/close"
-						hx-include="#recon-floats"
-						hx-target="#recon-body"
-						hx-swap="outerHTML"
-						if d.LogoutMode {
-							hx-vals={ `{"logout":"1"}` }
-						}
-						hx-confirm="Save the counted closing balances? This finalises each device for this session."
-						class="px-4 py-2.5 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700"
-					>Save closing & show bonus/loss</button>
+				<div class="text-sm text-slate-500">
+					Float opening &amp; closing are now counted in the till Open / Close dialog. This is the current reconciliation.
 				</div>
+				for _, cr := range d.Rows {
+					@carrierSummary(d.Symbol, cr)
+				}
 			}
 		}
 	</div>
@@ -226,9 +205,10 @@ templ bankTxForm(d ReconData) {
 	</div>
 }
 
-// carrierBlock shows one carrier's devices with opening/closing inputs and its
-// computed expected float and bonus/loss.
-templ carrierBlock(symbol string, cr CarrierRecon) {
+// carrierSummary is the read-only reconciliation view for one carrier on the
+// slimmed Reload & Bills tab (opening/closing are now counted in the till
+// dialog). It shows the computed stats without editable inputs.
+templ carrierSummary(symbol string, cr CarrierRecon) {
 	<div class="bg-white rounded-2xl shadow-sm p-6">
 		<div class="flex items-center justify-between mb-3">
 			<h3 class="text-base font-semibold">{ cr.Carrier }</h3>
@@ -236,59 +216,16 @@ templ carrierBlock(symbol string, cr CarrierRecon) {
 				<span class="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">closed</span>
 			}
 		</div>
-		if len(cr.Devices) == 0 {
-			<p class="text-sm text-slate-400">No devices. Add one in Admin → Reload & Bills.</p>
-		} else {
-			<table class="w-full text-sm">
-				<thead class="text-left text-slate-500 border-b">
-					<tr>
-						<th class="py-2 pr-4">Device</th>
-						<th class="py-2 pr-4 text-right">Opening</th>
-						<th class="py-2 text-right">Closing</th>
-					</tr>
-				</thead>
-				<tbody>
-					for _, dev := range cr.Devices {
-						<tr class="border-b last:border-0">
-							<td class="py-2 pr-4">
-								{ dev.Label }
-								if dev.Number != "" {
-									<span class="text-slate-400">· { dev.Number }</span>
-								}
-							</td>
-							<td class="py-2 pr-4 text-right">
-								<input
-									type="number" min="0" step="0.01"
-									name={ "opening_" + strconv.FormatInt(dev.DeviceID, 10) }
-									value={ openingValue(dev) }
-									placeholder="0.00"
-									class="w-28 border rounded-lg px-2 py-1.5 text-right"
-								/>
-							</td>
-							<td class="py-2 text-right">
-								<input
-									type="number" min="0" step="0.01"
-									name={ "closing_" + strconv.FormatInt(dev.DeviceID, 10) }
-									value={ closingValue(dev) }
-									placeholder="0.00"
-									class="w-28 border rounded-lg px-2 py-1.5 text-right"
-								/>
-							</td>
-						</tr>
-					}
-				</tbody>
-			</table>
-			<dl class="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-1 text-sm mt-4">
-				@stat("Opening", money.Format(symbol, cr.Opening))
-				@stat("Reload in", money.Format(symbol, cr.FloatIn))
-				@stat("Reload out", money.Format(symbol, cr.FloatOut))
-				@stat("Expected close", money.Format(symbol, cr.Expected))
-				if cr.AllClosed {
-					@stat("Counted close", money.Format(symbol, cr.Closing))
-					@bonusStat(symbol, cr.BonusLoss)
-				}
-			</dl>
-		}
+		<dl class="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-1 text-sm">
+			@stat("Opening", money.Format(symbol, cr.Opening))
+			@stat("Reload in", money.Format(symbol, cr.FloatIn))
+			@stat("Reload out", money.Format(symbol, cr.FloatOut))
+			@stat("Expected", money.Format(symbol, cr.Expected))
+			if cr.AllClosed {
+				@stat("Counted close", money.Format(symbol, cr.Closing))
+				@bonusStat(symbol, cr.BonusLoss)
+			}
+		</dl>
 	</div>
 }
 
