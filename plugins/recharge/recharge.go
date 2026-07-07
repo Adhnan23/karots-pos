@@ -81,6 +81,12 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 	reg.Cashier().GET("/recharge/receipts/recharge", ch.ReceiptsFloat)
 	reg.Cashier().POST("/recharge/reload", ch.Reload)
 	reg.Cashier().POST("/recharge/wallet", ch.Wallet)
+	reg.Cashier().GET("/recharge/menu", ch.MenuRoot)
+	reg.Cashier().GET("/recharge/menu/reload/carriers", ch.MenuReloadCarriers)
+	reg.Cashier().GET("/recharge/menu/reload/devices", ch.MenuReloadDevices)
+	reg.Cashier().POST("/recharge/menu/reload", ch.MenuReloadAdd)
+	reg.Cashier().GET("/recharge/menu/bill", ch.MenuBill)
+	reg.Cashier().GET("/recharge/menu/float", ch.MenuFloat)
 	// Block logout while a reload float is still open under the user's till
 	// session, so it is counted/closed before the till it belongs to. Fails open
 	// (any error → don't block) so a plugin hiccup can never trap a user signed in.
@@ -108,6 +114,11 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 	})
 
 	reg.AddCashierTab(plugin.CashierTab{Href: "/cashier/recharge", Label: "Reload & Bills", Key: "recharge"})
+	// Reload / Bills / Float transactions live at the root of the cashier POS
+	// menu, alongside the product-group cards (see internal/plugin/hooks.go).
+	reg.AddCashierMenuRoot(plugin.CashierMenuRoot{
+		Key: "recharge", Emoji: "📶", Label: "Reload & Bills", ChildrenURL: "/cashier/recharge/menu",
+	})
 	reg.AddTenderMethod(plugin.TenderMethod{Value: "wallet", Label: "Wallet (eZ Cash / mCash)"})
 
 	// Surface the Reload & Bills report in the core Reports hub too.

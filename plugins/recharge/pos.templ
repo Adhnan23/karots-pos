@@ -1,66 +1,25 @@
 package recharge
 
-// ReloadPanel is the cashier POS recharge menu panel (via the CashierMenuRoot hook).
-// It is an inline card-based panel: pick carrier → device (cards with live float) →
-// amount (quick chips or type) and tap "Add to cart", which dispatches the generic
-// "pos-add-service" window event the core POS listens for — adding a recharge service
-// line to the existing cart so it sells through the normal checkout, receipt and cash
-// drawer. All state is self-contained inline Alpine; it never reaches into the pos()
-// component directly.
-templ ReloadPanel() {
-	<div
-		class="bg-white rounded-2xl border border-slate-200 p-4"
-		x-data="{ carriers:[], devices:[], cid:'', did:'', amount:'', async load(){ try{ const r=await fetch('/cashier/recharge/carriers'); const j=await r.json(); this.carriers=j.data||[]; if(this.carriers.length && !this.cid){ this.cid=String(this.carriers[0].id) } await this.loadDevices(); }catch(e){} }, async loadDevices(){ this.devices=[]; this.did=''; if(!this.cid){ return } try{ const r=await fetch('/cashier/recharge/devices?for=recharge&carrier_id='+encodeURIComponent(this.cid)); const j=await r.json(); this.devices=j.data||[]; if(this.devices.length){ this.did=String(this.devices[0].id) } }catch(e){} }, dev(){ return this.devices.find(x=>String(x.id)===String(this.did)) }, bal(){ const d=this.dev(); return d?Number(d.balance):0 }, over(){ return Number(this.amount)>this.bal() }, add(){ const c=this.carriers.find(x=>String(x.id)===String(this.cid)); const d=this.dev(); const amt=Number(this.amount); if(!c || !d || !(amt>0) || this.over()){ return } window.dispatchEvent(new CustomEvent('pos-add-service',{detail:{id:c.product_id, name:c.name+' Recharge', price:amt, deviceId:Number(d.id)}})); this.amount=''; } }"
-		x-init="load()"
-		x-on:register-opened.window="load()"
-	>
-		<template x-if="carriers.length===0">
-			<p class="text-sm text-slate-400">No carriers set up. Add one in Admin → Reload & Bills.</p>
-		</template>
-		<div x-show="carriers.length>0" class="space-y-3">
-			<div>
-				<label class="block text-xs font-medium text-slate-500 mb-1">Carrier</label>
-				<div class="grid grid-cols-3 sm:grid-cols-4 gap-2">
-					<template x-for="c in carriers" x-bind:key="c.id">
-						<button
-							type="button"
-							x-on:click="cid=String(c.id); loadDevices()"
-							x-bind:class="String(cid)===String(c.id) ? 'ring-2 ring-emerald-500 bg-emerald-50' : 'border border-slate-200'"
-							class="px-3 py-2.5 rounded-lg text-sm font-medium text-left"
-							x-text="c.name"
-						></button>
-					</template>
-				</div>
-			</div>
-			<div>
-				<label class="block text-xs font-medium text-slate-500 mb-1">Device</label>
-				<div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
-					<template x-for="d in devices" x-bind:key="d.id">
-						<button
-							type="button"
-							x-on:click="did=String(d.id)"
-							x-bind:class="String(did)===String(d.id) ? 'ring-2 ring-emerald-500 bg-emerald-50' : 'border border-slate-200'"
-							class="px-3 py-2.5 rounded-lg text-left"
-						>
-							<div class="font-medium text-sm" x-text="d.label"></div>
-							<div class="text-xs text-slate-400" x-text="'Bal: '+Number(d.balance).toFixed(2)"></div>
-						</button>
-					</template>
-				</div>
-				<p x-show="cid && devices.length===0" class="text-xs text-rose-500 mt-1">No devices for this carrier. Add one in Admin → Reload & Bills.</p>
-			</div>
-			<div>
-				<label class="block text-xs font-medium text-slate-500 mb-1">Amount</label>
-				<div class="flex flex-wrap items-center gap-2">
-					<template x-for="q in [50,100,200,500,1000]" x-bind:key="q">
-						<button type="button" x-on:click="amount=String(q)" class="px-3 py-2 rounded-lg border border-slate-200 text-sm font-medium hover:bg-slate-50" x-text="q"></button>
-					</template>
-					<input type="number" min="0" step="0.01" x-model="amount" x-on:keydown.enter.prevent="add()" placeholder="0.00" class="w-28 border rounded-lg px-3 py-2.5 text-right"/>
-					<button type="button" x-on:click="add()" x-bind:disabled="!(Number(amount)>0 && did && !over())" class="px-4 py-2.5 rounded-lg bg-emerald-600 text-white font-semibold disabled:opacity-40">Add to cart</button>
-				</div>
-				<p x-show="dev()" class="text-xs text-slate-500 mt-1">Reload balance: <span class="font-semibold tabular-nums" x-text="bal().toFixed(2)"></span></p>
-				<p x-show="over()" class="text-xs text-rose-500 mt-1">Amount exceeds this device's reload balance.</p>
-			</div>
-		</div>
+// FloatMenuForm and BillMenuForm host the existing recon money-move forms
+// (txForm / bankTxForm from recon.templ) as standalone cashier-menu detail
+// fragments (via the CashierMenuRoot hook's Bills / Float transactions
+// leaves). Both forms already fetch their own carrier/device/bank options
+// client-side and hard-code hx-target="#recon-body" hx-swap="outerHTML"; the
+// wrapping div here gives that target something to swap inside wherever the
+// fragment is mounted, so a successful post lands back on the full recon body
+// (which still carries id="recon-body") without any changes to the forms or
+// their handlers. These replace the old ReloadPanel: recharge's cashier menu
+// entry (Reload / Bills / Float transactions) is now driven entirely by the
+// generic menu-node protocol in cashier.go.
+
+templ FloatMenuForm(d ReconData) {
+	<div id="recon-body" class="space-y-4">
+		@txForm(d)
+	</div>
+}
+
+templ BillMenuForm(d ReconData) {
+	<div id="recon-body" class="space-y-4">
+		@bankTxForm(d)
 	</div>
 }
