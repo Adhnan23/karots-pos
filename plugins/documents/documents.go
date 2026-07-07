@@ -43,6 +43,12 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 	reg.Cashier().GET("/documents/prices", ch.PriceRows)
 	reg.Cashier().GET("/documents/quote", ch.Quote)
 	reg.Cashier().POST("/documents/record", ch.Record)
+	reg.Cashier().GET("/documents/menu", ch.MenuRoot)
+	reg.Cashier().GET("/documents/job", ch.JobFragment)
+
+	reg.AddCashierMenuRoot(plugin.CashierMenuRoot{
+		Key: "documents", Emoji: "🖨", Label: "Documents", ChildrenURL: "/cashier/documents/menu",
+	})
 
 	reg.AddReportCard(plugin.ReportCard{
 		Href:  "/admin/documents/report",
