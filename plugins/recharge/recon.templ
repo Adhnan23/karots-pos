@@ -323,3 +323,65 @@ templ bonusStat(symbol string, v decimal.Decimal) {
 		}
 	</div>
 }
+
+// openFloatFields renders per-device opening float inputs for the till Open
+// dialog (DrawerSection.OpenFormURL). Left blank the server carries the last
+// close forward, so these are an override; not prefilled, to avoid implying a
+// counted balance.
+templ openFloatFields(d ReconData) {
+	if len(d.Carriers) > 0 {
+		<div class="border-t pt-3 space-y-3">
+			<div class="text-sm font-semibold text-slate-600">Reload float — opening</div>
+			<p class="text-xs text-slate-400">Leave a device blank to carry its last closing balance forward.</p>
+			for _, cr := range d.Carriers {
+				<div>
+					<div class="text-xs font-medium text-slate-500 mb-1">{ cr.Name }</div>
+					for _, dev := range d.Devices {
+						if dev.CarrierID == cr.ID && dev.ForRecharge {
+							<div class="flex items-center gap-2 mb-1">
+								<span class="flex-1 text-sm">{ dev.Label }</span>
+								<input
+									type="number" min="0" step="0.01"
+									name={ "opening_" + strconv.FormatInt(dev.ID, 10) }
+									placeholder="0.00"
+									class="w-28 border rounded-lg px-2 py-1.5 text-right"
+								/>
+							</div>
+						}
+					}
+				</div>
+			}
+		</div>
+	}
+}
+
+// closeFloatFields renders per-device closing float count inputs for the till
+// Close dialog (DrawerSection.CloseFormURL), showing each device's expected
+// (live) balance to count against.
+templ closeFloatFields(d ReconData) {
+	if len(d.Rows) > 0 {
+		<div class="border-t pt-3 space-y-3">
+			<div class="text-sm font-semibold text-slate-600">Reload float — count closing</div>
+			for _, cr := range d.Rows {
+				<div>
+					<div class="text-xs font-medium text-slate-500 mb-1">{ cr.Carrier }</div>
+					for _, dev := range cr.Devices {
+						<div class="flex items-center gap-2 mb-1">
+							<span class="flex-1 text-sm">
+								{ dev.Label }
+								<span class="text-slate-400 text-xs">· expected { money.Format(d.Symbol, dev.Expected) }</span>
+							</span>
+							<input
+								type="number" min="0" step="0.01"
+								name={ "closing_" + strconv.FormatInt(dev.DeviceID, 10) }
+								value={ closingValue(dev) }
+								placeholder="0.00"
+								class="w-28 border rounded-lg px-2 py-1.5 text-right"
+							/>
+						</div>
+					}
+				</div>
+			}
+		</div>
+	}
+}

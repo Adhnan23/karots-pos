@@ -6,7 +6,6 @@
 package recharge
 
 import (
-	"context"
 	"io/fs"
 
 	"karots-pos/internal/features/cashflow"
@@ -87,20 +86,9 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 	reg.Cashier().POST("/recharge/menu/reload", ch.MenuReloadAdd)
 	reg.Cashier().GET("/recharge/menu/bill", ch.MenuBill)
 	reg.Cashier().GET("/recharge/menu/float", ch.MenuFloat)
-	// Block logout while a reload float is still open under the user's till
-	// session, so it is counted/closed before the till it belongs to. Fails open
-	// (any error → don't block) so a plugin hiccup can never trap a user signed in.
-	reg.AddLogoutGuard(func(ctx context.Context, userID int64) (bool, string, string) {
-		sess, err := p.core.CashRegister.Current(ctx, userID)
-		if err != nil || sess == nil {
-			return false, "", ""
-		}
-		open, err := p.store.HasOpenFloat(ctx, sess.ID)
-		if err != nil || !open {
-			return false, "", ""
-		}
-		return true, "/cashier/recharge", "Close your reload float before logging out"
-	})
+	// Opening/closing float inputs shown inside the core till Open/Close dialogs.
+	reg.Cashier().GET("/recharge/drawer/open", ch.DrawerOpenFields)
+	reg.Cashier().GET("/recharge/drawer/close", ch.DrawerCloseFields)
 
 	// Two receipt tabs on the unified Receipts page (admin + cashier): bill payments
 	// and float (reload) transactions, each reprintable.
@@ -120,6 +108,17 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 	// forms are server-rendered and HTMX-wired on page load.
 	reg.AddCashierMenuRoot(plugin.CashierMenuRoot{
 		Key: "recharge", Emoji: "📲", Label: "Reload", ChildrenURL: "/cashier/recharge/menu",
+	})
+	// Float opening/closing rides the core till Open/Close dialogs via this section;
+	// the save URLs are the existing recon endpoints (open = SaveOpening, close =
+	// SaveClosing). No separate float open/close step or logout guard is needed —
+	// closing the till counts and closes the float in the same dialog.
+	reg.AddDrawerSection(plugin.DrawerSection{
+		Key:          "recharge",
+		OpenFormURL:  "/cashier/recharge/drawer/open",
+		CloseFormURL: "/cashier/recharge/drawer/close",
+		SaveOpenURL:  "/cashier/recharge/open",
+		SaveCloseURL: "/cashier/recharge/close",
 	})
 	reg.AddTenderMethod(plugin.TenderMethod{Value: "wallet", Label: "Wallet (eZ Cash / mCash)"})
 

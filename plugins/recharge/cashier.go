@@ -922,3 +922,25 @@ func (h *cashierUI) MenuFloat(c echo.Context) error {
 	}
 	return response.RenderFragment(c, FloatMenuForm(d))
 }
+
+// DrawerOpenFields renders the opening-float inputs for the core till Open dialog
+// (registered as a DrawerSection.OpenFormURL). No session exists yet, so it lists
+// devices with blank opening overrides (the server carries the last close forward).
+func (h *cashierUI) DrawerOpenFields(c echo.Context) error {
+	d, err := h.reconData(c)
+	if err != nil {
+		return err
+	}
+	return response.RenderFragment(c, openFloatFields(d))
+}
+
+// DrawerCloseFields renders the closing-float count inputs for the core till Close
+// dialog (registered as a DrawerSection.CloseFormURL), showing each open device's
+// expected balance. Requires the still-open till session.
+func (h *cashierUI) DrawerCloseFields(c echo.Context) error {
+	d, err := h.reconData(c)
+	if err != nil {
+		return err
+	}
+	return response.RenderFragment(c, closeFloatFields(d))
+}
