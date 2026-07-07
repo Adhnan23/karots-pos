@@ -1,0 +1,64 @@
+package authpages
+
+import "karots-pos/templates/layouts"
+
+// LockPage is the screen shown while a session is locked. It is NOT a logout: the
+// shift and any open till/float stay open, but the user (or an admin) must enter a
+// phone number + PIN to resume. Plain form POST so errors re-render the page.
+templ LockPage(name, errMsg string) {
+	@layouts.Base("Locked") {
+		<div class="min-h-full flex items-center justify-center p-6">
+			<div class="w-full max-w-md bg-white rounded-2xl shadow-sm p-8">
+				<div class="flex justify-center text-4xl mb-2">🔒</div>
+				<h1 class="text-2xl font-bold text-center text-slate-800">Screen locked</h1>
+				if name != "" {
+					<p class="text-center text-slate-500 mt-1">Locked by <span class="font-semibold">{ name }</span> — enter phone &amp; PIN to resume</p>
+				} else {
+					<p class="text-center text-slate-500 mt-1">Enter phone &amp; PIN to resume</p>
+				}
+				if errMsg != "" {
+					<div class="mt-4 rounded-lg bg-red-50 text-red-700 px-4 py-3 text-sm text-center">
+						{ errMsg }
+					</div>
+				}
+				<form method="post" action="/unlock" class="mt-6 space-y-4" autocomplete="off">
+					<div>
+						<label class="block text-sm font-medium text-slate-600 mb-1">Phone number</label>
+						<input
+							type="tel"
+							name="phone"
+							inputmode="numeric"
+							autocomplete="off"
+							autofocus
+							required
+							placeholder="07XXXXXXXX"
+							class="w-full border rounded-lg px-3 py-2.5 text-lg tracking-wide"
+						/>
+					</div>
+					<div>
+						<label class="block text-sm font-medium text-slate-600 mb-1">PIN</label>
+						<input
+							type="password"
+							name="pin"
+							inputmode="numeric"
+							pattern="[0-9]*"
+							autocomplete="off"
+							minlength="4"
+							maxlength="6"
+							required
+							placeholder="••••"
+							class="w-full border rounded-lg px-3 py-2.5 text-lg tracking-wide"
+						/>
+					</div>
+					<button
+						type="submit"
+						class="w-full py-3 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700"
+					>Unlock</button>
+				</form>
+				<div class="mt-4 text-center">
+					<a href="/logout" class="text-sm text-slate-400 hover:text-slate-600">Not you? Log out</a>
+				</div>
+			</div>
+		</div>
+	}
+}

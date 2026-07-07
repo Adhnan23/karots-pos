@@ -32,6 +32,17 @@ func (s *Service) issueAccess(u *User, now time.Time) (string, time.Time, error)
 	return signed, exp, err
 }
 
+// ReissueLocked re-signs the caller's existing claims with the screen-lock flag
+// set to locked, PRESERVING the original expiry and issued-at so a lock/unlock
+// never extends the session. Identity, role and pin-change state carry over
+// unchanged — it is a screen lock, not a new sign-in.
+func (s *Service) ReissueLocked(claims *middleware.Claims, locked bool) (string, error) {
+	next := *claims
+	next.Locked = locked
+	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, next)
+	return tok.SignedString(s.secret)
+}
+
 // newRefreshToken returns a high-entropy raw token (given to the client) and
 // its SHA-256 hash (stored in the DB).
 func newRefreshToken() (raw, hash string, err error) {

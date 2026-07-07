@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"net/http"
 	"strings"
 
 	"karots-pos/internal/apperr"
@@ -30,6 +31,7 @@ const (
 	ctxRole          = "role"
 	ctxName          = "user_name"
 	ctxMustChangePin = "must_change_pin"
+	ctxLocked        = "locked"
 
 	// CookieName is the httpOnly cookie that carries the access token for the
 	// server-rendered UI.
@@ -43,6 +45,7 @@ type Claims struct {
 	Role          string `json:"role"`
 	Name          string `json:"name"`
 	MustChangePin bool   `json:"mcp,omitempty"`
+	Locked        bool   `json:"lck,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -78,6 +81,7 @@ func JWTAuth(secret string) echo.MiddlewareFunc {
 			c.Set(ctxRole, claims.Role)
 			c.Set(ctxName, claims.Name)
 			c.Set(ctxMustChangePin, claims.MustChangePin)
+			c.Set(ctxLocked, claims.Locked)
 			return next(c)
 		}
 	}
@@ -168,6 +172,35 @@ func RequirePinChosen() echo.MiddlewareFunc {
 				p := c.Request().URL.Path
 				if !strings.HasPrefix(p, "/account/pin") && p != "/logout" {
 					return c.Redirect(303, "/account/pin")
+				}
+			}
+			return next(c)
+		}
+	}
+}
+
+// IsLocked reports whether the current session is locked (screen lock, NOT a
+// logout — the identity and any open till/float are intact).
+func IsLocked(c echo.Context) bool {
+	b, _ := c.Get(ctxLocked).(bool)
+	return b
+}
+
+// RequireUnlocked redirects a locked session to the /lock screen. The lock/unlock
+// routes and logout stay reachable so the user can always resume or sign out. Must
+// run after JWTAuth. A GET is redirected; a non-GET (e.g. an HTMX POST fired just
+// as the lock kicked in) gets a 401 the client turns into a full redirect.
+func RequireUnlocked() echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			if IsLocked(c) {
+				p := c.Request().URL.Path
+				if p != "/lock" && p != "/unlock" && p != "/logout" {
+					if c.Request().Method == http.MethodGet {
+						return c.Redirect(303, "/lock")
+					}
+					c.Response().Header().Set("HX-Redirect", "/lock")
+					return apperr.Unauthorized("session locked")
 				}
 			}
 			return next(c)

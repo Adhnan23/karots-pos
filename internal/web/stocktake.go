@@ -47,12 +47,18 @@ func stockTakeImportConfig() adminfragments.ImportConfig {
 
 // StockTakeImportModal returns the CSV upload dialog for stock-take.
 func (a *adminUI) StockTakeImportModal(c echo.Context) error {
+	if err := a.requireStockTake(c); err != nil {
+		return err
+	}
 	return response.RenderFragment(c, adminfragments.ImportModal(stockTakeImportConfig()))
 }
 
 // StockTakeSheet streams a count sheet: every active product with its current
 // on-hand quantity and cost, and a blank counted_qty column to fill in.
 func (a *adminUI) StockTakeSheet(c echo.Context) error {
+	if err := a.requireStockTake(c); err != nil {
+		return err
+	}
 	ctx := c.Request().Context()
 	rows, _, err := a.s.products.List(ctx, products.ListQuery{Limit: 100000, Page: 1})
 	if err != nil {
@@ -76,6 +82,9 @@ func (a *adminUI) StockTakeSheet(c echo.Context) error {
 // optionally updates the cost, then sets the on-hand quantity to counted_qty via
 // the audited stock.Adjust path. Blank counts and unchanged rows are left alone.
 func (a *adminUI) StockTakeImport(c echo.Context) error {
+	if err := a.requireStockTake(c); err != nil {
+		return err
+	}
 	ctx := c.Request().Context()
 	uid := middleware.CurrentUserID(c)
 	col, recs, err := readImportCSV(c, stockTakeSynonyms)

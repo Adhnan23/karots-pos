@@ -123,11 +123,15 @@ templ Admin(title, userName, active string) {
 					</button>
 					<a href="/cashier" class="block px-3 py-2 rounded-lg hover:bg-slate-800">Open Cashier →</a>
 					<a href="/account/pin" class="block px-3 py-2 rounded-lg hover:bg-slate-800">Change PIN</a>
+					<form method="post" action="/lock">
+						<button type="submit" title="Lock screen (stays signed in)" class="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-800">🔒 Lock screen</button>
+					</form>
 					<form method="post" action="/logout">
 						<button type="submit" class="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-800 text-red-300">Log out</button>
 					</form>
 				</div>
 			</aside>
+			@AutoLockTimer()
 			<main class="flex-1 min-w-0 p-8 overflow-auto">
 				{ children... }
 			</main>

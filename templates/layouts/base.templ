@@ -80,6 +80,23 @@ templ ConfirmHost() {
 	</div>
 }
 
+// AutoLockTimer arms the inactivity screen-lock. It reads the shop's timeout from
+// /lock/config (0 = off); after that many idle minutes it POSTs /lock and sends
+// the user to the lock screen. Included once by the admin & cashier chrome (not by
+// the login/lock pages). Any pointer/keyboard/touch/scroll activity resets it.
+templ AutoLockTimer() {
+	@templ.Raw(`<script>(function(){
+	fetch('/lock/config',{credentials:'same-origin'}).then(function(r){return r.ok?r.json():{minutes:0};}).then(function(cfg){
+		var m=(cfg&&cfg.minutes)|0; if(m<=0){return;}
+		var ms=m*60000,t;
+		function lock(){fetch('/lock',{method:'POST',credentials:'same-origin'}).then(function(){location.href='/lock';}).catch(function(){location.href='/lock';});}
+		function reset(){clearTimeout(t);t=setTimeout(lock,ms);}
+		['mousemove','mousedown','keydown','touchstart','scroll','click'].forEach(function(e){window.addEventListener(e,reset,{passive:true});});
+		reset();
+	}).catch(function(){});
+	})();</script>`)
+}
+
 // PrintPromptHost is the shared "Print receipt?" prompt shown after a money move
 // when "ask before printing" is on. Any flow (cashier drawer JS, or an admin /
 // cashier HTMX handler via the "money-print" HX-Trigger) opens it through the

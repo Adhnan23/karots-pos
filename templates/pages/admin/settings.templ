@@ -102,6 +102,22 @@ templ SettingsPage(d SettingsData) {
 						</label>
 					</div>
 				</div>
+				<!-- Screen lock & features -->
+				<div class="border-t pt-5 mt-2">
+					<h2 class="text-lg font-semibold mb-1">Screen lock &amp; features</h2>
+					<p class="text-sm text-slate-500 mb-4">Lock the screen without ending the shift — the till stays open, but a PIN is needed to resume. Anyone can lock from the top bar; here you set the auto-lock timer.</p>
+					<div class="space-y-3">
+						<div class="flex items-center gap-2 text-sm flex-wrap">
+							<span>Auto-lock after</span>
+							<input type="number" name="lock_timeout_minutes" min="0" max="1440" value={ strconv.Itoa(d.S.LockTimeoutMinutes) } class="w-20 border rounded-lg px-2 py-1.5 text-right"/>
+							<span>minutes of inactivity <span class="text-slate-400">(0 = off)</span></span>
+						</div>
+						<label class="flex items-center gap-2">
+							<input type="checkbox" name="stock_take_enabled" value="true" checked?={ d.S.StockTakeEnabled }/>
+							<span class="text-sm">Enable stock-take <span class="text-slate-400">— when off, the Stock-take page is hidden and its links stop working (it can rewrite quantities &amp; prices)</span></span>
+						</label>
+					</div>
+				</div>
 				<!-- Printers & labels -->
 				<div class="border-t pt-5 mt-2">
 					<h2 class="text-lg font-semibold mb-1">Printers &amp; Labels</h2>

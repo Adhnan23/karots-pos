@@ -67,11 +67,15 @@ templ Cashier(title, userName, role, active string, showChangePin bool) {
 					if showChangePin {
 						<a href="/account/pin" class="text-slate-300 hover:text-white">Change PIN</a>
 					}
+					<form method="post" action="/lock">
+						<button type="submit" title="Lock screen (stays signed in)" class="text-slate-300 hover:text-white">🔒 Lock</button>
+					</form>
 					<form method="post" action="/logout">
 						<button type="submit" class="text-red-300 hover:text-red-200">Log out</button>
 					</form>
 				</div>
 			</header>
+			@AutoLockTimer()
 			<div class="flex-1 min-h-0">
 				{ children... }
 			</div>

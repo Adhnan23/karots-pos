@@ -8,6 +8,7 @@ import (
 	"karots-pos/internal/apperr"
 	"karots-pos/internal/features/auth"
 	"karots-pos/internal/features/cashregister"
+	"karots-pos/internal/features/settings"
 	"karots-pos/internal/middleware"
 	"karots-pos/internal/plugin"
 	"karots-pos/internal/response"
@@ -29,6 +30,7 @@ type authUI struct {
 	svc          *auth.Service
 	cookie       CookieConfig
 	cashRegister *cashregister.Service
+	settings     *settings.Service
 	jwtSecret    string
 }
 
@@ -90,6 +92,86 @@ func (h *authUI) Logout(c echo.Context) error {
 
 	h.clearCookie(c)
 	return c.Redirect(http.StatusSeeOther, "/login")
+}
+
+// Lock re-issues the current session's token with the screen-lock flag set and
+// sends the user to the lock screen. The identity and any open till/float are
+// untouched — only a PIN can resume. Serves both a plain form POST and an
+// HTMX/fetch caller (the inactivity timer).
+func (h *authUI) Lock(c echo.Context) error {
+	claims, ok := middleware.ParseClaims(c, h.jwtSecret)
+	if !ok || claims.UserID == 0 {
+		return c.Redirect(http.StatusSeeOther, "/login")
+	}
+	token, err := h.svc.ReissueLocked(claims, true)
+	if err != nil {
+		return err
+	}
+	h.setCookie(c, token)
+	if c.Request().Header.Get("HX-Request") == "true" {
+		c.Response().Header().Set("HX-Redirect", "/lock")
+		return c.NoContent(http.StatusOK)
+	}
+	return c.Redirect(http.StatusSeeOther, "/lock")
+}
+
+// ShowLock renders the lock screen. If the session isn't actually locked, it
+// bounces home so a user can never get stranded here.
+func (h *authUI) ShowLock(c echo.Context) error {
+	claims, ok := middleware.ParseClaims(c, h.jwtSecret)
+	if !ok || claims.UserID == 0 {
+		return c.Redirect(http.StatusSeeOther, "/login")
+	}
+	if !claims.Locked {
+		return c.Redirect(http.StatusSeeOther, auth.HomePath(claims.Role))
+	}
+	return response.RenderPage(c, authpages.LockPage(claims.Name, ""))
+}
+
+// Unlock verifies a phone + PIN and, when it belongs to the locked-in user OR any
+// admin, clears the lock flag on the EXISTING session token (identity unchanged —
+// an admin unlocking a cashier's terminal leaves the cashier's shift intact).
+func (h *authUI) Unlock(c echo.Context) error {
+	claims, ok := middleware.ParseClaims(c, h.jwtSecret)
+	if !ok || claims.UserID == 0 {
+		return c.Redirect(http.StatusSeeOther, "/login")
+	}
+	var in auth.LoginInput
+	if err := c.Bind(&in); err != nil {
+		return h.lockError(c, claims.Name, "Enter your phone number and PIN")
+	}
+	if err := c.Validate(&in); err != nil {
+		return h.lockError(c, claims.Name, "Enter a valid phone number and PIN")
+	}
+	u, err := h.svc.VerifyCredentials(c.Request().Context(), in)
+	if err != nil {
+		return h.lockError(c, claims.Name, "Wrong phone number or PIN")
+	}
+	if u.ID != claims.UserID && u.Role != auth.RoleAdmin {
+		return h.lockError(c, claims.Name, "Only "+claims.Name+" or an admin can unlock this terminal")
+	}
+	token, err := h.svc.ReissueLocked(claims, false)
+	if err != nil {
+		return err
+	}
+	h.setCookie(c, token)
+	return c.Redirect(http.StatusSeeOther, auth.HomePath(claims.Role))
+}
+
+// LockConfig returns the shop's auto-lock timeout (minutes; 0 = off) so the app
+// chrome's inactivity timer knows when to lock. Cheap JSON, polled once per page.
+func (h *authUI) LockConfig(c echo.Context) error {
+	minutes := 0
+	if cfg, err := h.settings.Get(c.Request().Context()); err == nil && cfg != nil {
+		minutes = cfg.LockTimeoutMinutes
+	}
+	return c.JSON(http.StatusOK, map[string]int{"minutes": minutes})
+}
+
+func (h *authUI) lockError(c echo.Context, name, msg string) error {
+	c.Response().Header().Set(echo.HeaderContentType, echo.MIMETextHTMLCharsetUTF8)
+	c.Response().WriteHeader(http.StatusUnauthorized)
+	return authpages.LockPage(name, msg).Render(c.Request().Context(), c.Response().Writer)
 }
 
 // withLogoutFlag adds ?logout=1 to a close-screen path so it knows to auto-open

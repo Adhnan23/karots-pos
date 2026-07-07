@@ -49,6 +49,17 @@ func (a *adminUI) sectionHub(key string) echo.HandlerFunc {
 		if !ok {
 			return apperr.NotFound("section")
 		}
+		// Hide the Stock-take card when the feature is turned off in Settings (the
+		// route itself is separately gated with a 403).
+		if cfg, err := a.s.settings.Get(c.Request().Context()); err == nil && cfg != nil && !cfg.StockTakeEnabled {
+			links := make([]layouts.AdminLink, 0, len(sec.Links))
+			for _, l := range sec.Links {
+				if l.Href != "/admin/stock/take" {
+					links = append(links, l)
+				}
+			}
+			sec.Links = links
+		}
 		return response.RenderPage(c, adminpages.SectionHub(adminpages.SectionHubData{
 			UserName: middleware.CurrentUserName(c),
 			Section:  sec,
@@ -432,7 +443,22 @@ func (a *adminUI) StockAdjust(c echo.Context) error {
 // list of products, each with a counted-quantity box and an optional cost box.
 // It's how a shop already running enters the stock it owned before this system —
 // no fake supplier/purchase needed.
+// requireStockTake blocks every stock-take route when the feature is switched off
+// in Settings — it can rewrite on-hand quantities AND prices, so a shop may want
+// it disabled. Returns a 403 "feature disabled" page; nil when enabled. Fails open
+// (enabled) if settings can't be read, so a glitch never hides a core feature.
+func (a *adminUI) requireStockTake(c echo.Context) error {
+	cfg, err := a.s.settings.Get(c.Request().Context())
+	if err == nil && cfg != nil && !cfg.StockTakeEnabled {
+		return apperr.Forbidden("Stock-take is turned off in Settings")
+	}
+	return nil
+}
+
 func (a *adminUI) StockTake(c echo.Context) error {
+	if err := a.requireStockTake(c); err != nil {
+		return err
+	}
 	d, err := a.stockTakeData(c, -1)
 	if err != nil {
 		return err
@@ -470,6 +496,9 @@ const stockTakePageSize = 50
 // the cost first means the opening batch is valued correctly. Rows left blank are
 // skipped, so the admin can save a section at a time.
 func (a *adminUI) StockTakeApply(c echo.Context) error {
+	if err := a.requireStockTake(c); err != nil {
+		return err
+	}
 	ctx := c.Request().Context()
 	uid := middleware.CurrentUserID(c)
 	form, err := c.FormParams()

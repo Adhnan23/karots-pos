@@ -39,6 +39,8 @@ type Settings struct {
 	LabelWidthMM          int       `db:"label_width_mm"    json:"label_width_mm"`
 	LabelHeightMM         int       `db:"label_height_mm"   json:"label_height_mm"`
 	LabelGapMM            int       `db:"label_gap_mm"      json:"label_gap_mm"`
+	LockTimeoutMinutes    int       `db:"lock_timeout_minutes" json:"lock_timeout_minutes"`
+	StockTakeEnabled      bool      `db:"stock_take_enabled"   json:"stock_take_enabled"`
 	UpdatedAt             time.Time `db:"updated_at"        json:"updated_at"`
 }
 
@@ -69,6 +71,8 @@ type UpdateInput struct {
 	LabelWidthMM      int    `json:"label_width_mm"    form:"label_width_mm"     validate:"omitempty,min=10,max=200"`
 	LabelHeightMM     int    `json:"label_height_mm"   form:"label_height_mm"    validate:"omitempty,min=10,max=200"`
 	LabelGapMM        int    `json:"label_gap_mm"      form:"label_gap_mm"       validate:"omitempty,min=0,max=20"`
+	LockTimeoutMinutes int   `json:"lock_timeout_minutes" form:"lock_timeout_minutes" validate:"omitempty,min=0,max=1440"`
+	StockTakeEnabled  bool   `json:"stock_take_enabled"   form:"stock_take_enabled"`
 }
 
 // LogoSrc returns the logo to use: the uploaded, self-contained image (works
@@ -126,7 +130,8 @@ func (r *Repository) Update(ctx context.Context, in UpdateInput) error {
 			receipt_printer=$14, label_printer=$15,
 			label_width_mm=$16, label_height_mm=$17, label_gap_mm=$18,
 			ask_to_print=$19,
-			force_pin_change=$20, allow_cashier_pin_change=$21
+			force_pin_change=$20, allow_cashier_pin_change=$21,
+			lock_timeout_minutes=$22, stock_take_enabled=$23
 		WHERE id = 1`,
 		in.ShopName, in.ShopNameSi, in.Address, in.Phone,
 		in.CurrencyCode, in.CurrencySymbol, in.ReceiptFooter,
@@ -134,7 +139,8 @@ func (r *Repository) Update(ctx context.Context, in UpdateInput) error {
 		nilIfEmptyStr(in.LogoURL), in.ReceiptWidth,
 		in.ReceiptPrinter, in.LabelPrinter, w, h, gap,
 		in.AskToPrint,
-		in.ForcePinChange, in.AllowCashierPinChange)
+		in.ForcePinChange, in.AllowCashierPinChange,
+		in.LockTimeoutMinutes, in.StockTakeEnabled)
 	return err
 }
 

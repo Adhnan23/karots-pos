@@ -105,6 +105,7 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 		svc:          authSvc,
 		cookie:       CookieConfig{Secure: cfg.CookieSecure, MaxAge: cfg.JWTAccessTTL},
 		cashRegister: s.cashRegister,
+		settings:     s.settings,
 		jwtSecret:    cfg.JWTSecret,
 	}
 	admin := &adminUI{s: s, db: db}
@@ -127,6 +128,10 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	// pinGuard forces users carrying a server-assigned PIN to change it before
 	// using the app. The /account/pin routes themselves stay ungated.
 	pinGuard := middleware.RequirePinChosen()
+	// lockGuard bounces a locked session to /lock (screen lock, not a logout).
+	// It self-whitelists /lock, /unlock and /logout so the user can always resume
+	// or sign out.
+	lockGuard := middleware.RequireUnlocked()
 
 	// Public
 	e.GET("/login", a.ShowLogin)
@@ -137,10 +142,18 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	// own cookie and redirects, so it is safe over GET.
 	e.GET("/logout", a.Logout)
 
+	// Screen lock (all authenticated roles; NOT lock-gated so they stay reachable
+	// while locked). Unlock is rate-limited like login.
+	e.GET("/lock", a.ShowLock, jwt)
+	e.POST("/lock", a.Lock, jwt)
+	e.GET("/lock/config", a.LockConfig, jwt)
+	e.POST("/unlock", a.Unlock, jwt, limiter)
+
 	// Self-service / forced PIN change (all authenticated roles; NOT pin-gated,
-	// so a user forced to change can always reach it).
-	e.GET("/account/pin", a.ChangePINForm, jwt)
-	e.POST("/account/pin", a.ChangePIN, jwt)
+	// so a user forced to change can always reach it; lock-gated so a locked
+	// terminal can't change a PIN without unlocking first).
+	e.GET("/account/pin", a.ChangePINForm, jwt, lockGuard)
+	e.POST("/account/pin", a.ChangePIN, jwt, lockGuard)
 
 	// Root: send the user to their home by role.
 	e.GET("/", func(c echo.Context) error {
@@ -148,7 +161,7 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	}, jwt)
 
 	// Cashier (all authenticated roles)
-	cg := e.Group("/cashier", jwt, pinGuard)
+	cg := e.Group("/cashier", jwt, lockGuard, pinGuard)
 	cg.GET("", cashier.POS)
 	cg.POST("/quick-item", cashier.QuickItem)
 	cg.GET("/receipt/:id", cashier.Receipt)
@@ -192,7 +205,7 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	cg.POST("/warranty/replace", cashier.WarrantyReplace)
 
 	// Admin (manager/admin)
-	ag := e.Group("/admin", jwt, pinGuard, middleware.RequireRole(auth.RoleAdmin, auth.RoleManager))
+	ag := e.Group("/admin", jwt, lockGuard, pinGuard, middleware.RequireRole(auth.RoleAdmin, auth.RoleManager))
 	ag.GET("", admin.Dashboard)
 	ag.GET("/products", admin.Products)
 	ag.GET("/products/table", admin.ProductsTable)

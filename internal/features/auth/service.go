@@ -70,6 +70,24 @@ func (s *Service) Login(ctx context.Context, in LoginInput) (*TokenPair, error) 
 	return s.issuePair(ctx, u)
 }
 
+// VerifyCredentials checks a phone + PIN and returns the matching user's public
+// identity WITHOUT issuing any token — used by the screen-unlock flow, which must
+// not rotate the session (the existing token is only re-signed with the lock flag
+// cleared). Returns an Unauthorized apperr on a bad phone or PIN.
+func (s *Service) VerifyCredentials(ctx context.Context, in LoginInput) (*UserPublic, error) {
+	u, err := s.repo.FindByPhone(ctx, in.Phone)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, apperr.Unauthorized("invalid credentials")
+		}
+		return nil, apperr.Internal("unlock failed", err)
+	}
+	if bcrypt.CompareHashAndPassword([]byte(u.PinHash), []byte(in.PIN)) != nil {
+		return nil, apperr.Unauthorized("invalid credentials")
+	}
+	return &UserPublic{ID: u.ID, Name: u.Name, Role: u.Role}, nil
+}
+
 // Refresh rotates a refresh token: the presented token is consumed and a new
 // pair is issued. A reused or unknown token is rejected.
 func (s *Service) Refresh(ctx context.Context, raw string) (*TokenPair, error) {
