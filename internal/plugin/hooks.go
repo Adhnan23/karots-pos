@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/a-h/templ"
 )
@@ -140,6 +141,24 @@ func PaletteEntries() []PaletteEntry      { return paletteEntries }
 func ReportCards() []ReportCard           { return reportCards }
 func PosActions() []PosAction             { return posActions }
 func CashierMenuRoots() []CashierMenuRoot { return cashierMenuRoots }
+
+// CashierMenuRootsJSON renders the menu roots as a JSON array for the cashier
+// Alpine scope: [{"emoji":"📶","label":"Reload & Bills","url":"/cashier/recharge/menu"}].
+// Field names are explicit json tags (lower-case) since the cashier JS reads
+// r.emoji / r.label / r.url.
+func CashierMenuRootsJSON() string {
+	type r struct {
+		Emoji string `json:"emoji"`
+		Label string `json:"label"`
+		URL   string `json:"url"`
+	}
+	out := make([]r, 0, len(cashierMenuRoots))
+	for _, m := range cashierMenuRoots {
+		out = append(out, r{m.Emoji, m.Label, m.ChildrenURL})
+	}
+	b, _ := json.Marshal(out)
+	return string(b)
+}
 func TenderMethods() []TenderMethod       { return tenderMethods }
 func LogoutGuards() []LogoutGuard         { return logoutGuards }
 func ReceiptTabs() []ReceiptTab           { return receiptTabs }

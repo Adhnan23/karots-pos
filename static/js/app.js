@@ -262,7 +262,7 @@ function printPromptHost() {
 
 // pos: the cashier terminal. Cart math here is a live preview only — the server
 // recomputes every amount authoritatively when the sale is posted.
-function pos(symbol, defaultType, askToPrint) {
+function pos(symbol, defaultType, askToPrint, pluginRoots) {
   return {
     sym: symbol,
     // When false, completing a sale auto-prints the receipt and resets straight
@@ -270,10 +270,26 @@ function pos(symbol, defaultType, askToPrint) {
     askToPrint: askToPrint !== false,
     products: [],
     // Cashier menu: top-level + drill-down group cards (replaces the old default
-    // grid). groupStack is the breadcrumb of {id,name,emoji} from root to here.
+    // grid). groupStack is the breadcrumb of {id,name,emoji[,id|url]} from root
+    // to here — core groups carry `.id`, plugin folders carry `.url` instead.
     groupChildren: [],
     groupStack: [],
     inGroups: true,
+    // Plugin menu roots (e.g. "Reload & Bills"), injected server-side from
+    // plugin.CashierMenuRoots(). Rendered as cards alongside product groups at
+    // the top of the menu; tapping one drills into the menu-node protocol.
+    pluginRoots: pluginRoots || [],
+    // menuMode drives which of the 3 card/step views is shown inside the same
+    // drill-down region: the group/plugin card grids, an inline amount-entry
+    // step (plugin 'amount' leaves), or an inline HTML detail fragment
+    // (plugin 'detail' leaves).
+    menuMode: "cards", // "cards" | "amount" | "detail"
+    amountNode: null,
+    amountValue: "",
+    amountError: "",
+    detailHtml: "",
+    pluginLeaves: [], // leaf nodes of the current plugin folder, rendered as cards
+    _leaves: [],
     customers: [],
     cart: [],
     search: "",
@@ -453,6 +469,8 @@ function pos(symbol, defaultType, askToPrint) {
     },
     async loadGroupsTop() {
       this.groupStack = [];
+      this.menuMode = "cards";
+      this.pluginLeaves = [];
       const json = await apiFetch("GET", "/api/groups");
       this.groupChildren = (json.data && json.data.groups) || [];
       this.products = [];
@@ -461,6 +479,8 @@ function pos(symbol, defaultType, askToPrint) {
       const json = await apiFetch("GET", `/api/groups/${id}`);
       const d = json.data || {};
       this.inGroups = true;
+      this.menuMode = "cards";
+      this.pluginLeaves = [];
       if (!reload) {
         this.groupStack = (d.breadcrumb || []).map((g) => ({
           id: g.id, name: g.name, emoji: g.emoji,
@@ -469,9 +489,87 @@ function pos(symbol, defaultType, askToPrint) {
       this.groupChildren = d.children || [];
       this.products = d.products || [];
     },
+    // --- Plugin menu-node protocol -----------------------------------------
+    // A plugin root's ChildrenURL (and every folder/leaf it returns) speaks a
+    // small JSON protocol: {"nodes":[{kind:"folder",...}|{kind:"leaf",...}]}.
+    // Folders behave like core product groups (pushed onto groupStack, drilled
+    // into via fetchNodes) but carry `.url` instead of `.id` so backGroup knows
+    // to re-fetch rather than call the core /api/groups/:id endpoint. Leaves
+    // render as cards that open one of two inline steps (amount entry, or an
+    // HTML detail fragment) or add straight to the cart (kind "product").
+    openPluginRoot(r) {
+      this.inGroups = true;
+      this.groupStack = [{ name: r.label, emoji: r.emoji, url: r.url }];
+      return this.fetchNodes(r.url);
+    },
+    async fetchNodes(url) {
+      this.menuMode = "cards";
+      const json = await apiFetch("GET", url);
+      const nodes = (json && json.nodes) || (json.data && json.data.nodes) || [];
+      // Map nodes onto the existing card grids: folders -> groupChildren, leaves kept on the node.
+      this.groupChildren = nodes
+        .filter((n) => n.kind === "folder")
+        .map((n) => ({ name: n.name, emoji: n.emoji, _node: n }));
+      this.products = []; // plugin folders have no product leaves
+      this._leaves = nodes.filter((n) => n.kind === "leaf");
+      this.pluginLeaves = this._leaves; // rendered as cards
+    },
+    openNode(node) {
+      if (node.kind === "folder") {
+        this.groupStack.push({ name: node.name, emoji: node.emoji, url: node.children_url });
+        return this.fetchNodes(node.children_url);
+      }
+      if (node.action === "amount") {
+        this.amountNode = node;
+        this.amountValue = "";
+        this.amountError = "";
+        this.menuMode = "amount";
+        this.$nextTick(() => this.$refs.amtInput && this.$refs.amtInput.focus());
+        return;
+      }
+      if (node.action === "detail") {
+        return this.openDetail(node.detail_url);
+      }
+      if (node.action === "product") return this.addToCart(node.product);
+    },
+    async openDetail(url) {
+      const res = await fetch(url, { credentials: "same-origin" });
+      this.detailHtml = await res.text();
+      this.menuMode = "detail";
+      this.$nextTick(() => window.Alpine && window.Alpine.initTree && window.Alpine.initTree(this.$el));
+    },
+    async confirmAmount() {
+      if (this.busy) return;
+      this.busy = true;
+      this.amountError = "";
+      try {
+        const res = await fetch(this.amountNode.add_url, {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ amount: this.amountValue, meta: this.amountNode.meta || {} }),
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          this.amountError = (json.error && json.error.message) || json.message || "Could not add";
+          return;
+        }
+        this.addServiceLine(json.line || json.data);
+        this.cancelStep();
+      } finally {
+        this.busy = false;
+      }
+    },
+    cancelStep() {
+      this.menuMode = "cards";
+      this.amountNode = null;
+      this.detailHtml = "";
+    },
     backGroup() {
+      this.menuMode = "cards";
       this.groupStack.pop();
       const top = this.groupStack[this.groupStack.length - 1];
+      if (top && top.url) return this.fetchNodes(top.url);
       if (top) return this.openGroup(top.id, true);
       return this.loadGroupsTop();
     },
