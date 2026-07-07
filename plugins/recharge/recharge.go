@@ -114,10 +114,12 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 	})
 
 	reg.AddCashierTab(plugin.CashierTab{Href: "/cashier/recharge", Label: "Reload & Bills", Key: "recharge"})
-	// Reload / Bills / Float transactions live at the root of the cashier POS
-	// menu, alongside the product-group cards (see internal/plugin/hooks.go).
+	// A "Reload" card at the root of the cashier POS menu (alongside the product-
+	// group cards) drills straight into carrier → device → amount. Bill payments
+	// and float transactions stay on the dedicated Reload & Bills tab above, whose
+	// forms are server-rendered and HTMX-wired on page load.
 	reg.AddCashierMenuRoot(plugin.CashierMenuRoot{
-		Key: "recharge", Emoji: "📶", Label: "Reload & Bills", ChildrenURL: "/cashier/recharge/menu",
+		Key: "recharge", Emoji: "📲", Label: "Reload", ChildrenURL: "/cashier/recharge/menu",
 	})
 	reg.AddTenderMethod(plugin.TenderMethod{Value: "wallet", Label: "Wallet (eZ Cash / mCash)"})
 

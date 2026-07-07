@@ -784,12 +784,13 @@ func (h *cashierUI) carrierName(ctx context.Context, id int64) string {
 // the client walks it.
 
 // MenuRoot returns the three recharge branches for the cashier menu.
+// MenuRoot is the cashier-menu entry for reloads: it lists carriers directly, so
+// tapping the menu card drills straight into carrier → device → amount. Bill
+// payments and float open/close/transactions deliberately stay on the dedicated
+// "Reload & Bills" page (recharge nav tab), where their forms are server-rendered
+// and HTMX-processed on page load — no fragile fragment injection in the menu.
 func (h *cashierUI) MenuRoot(c echo.Context) error {
-	return c.JSON(http.StatusOK, map[string]any{"nodes": []menuNode{
-		{Kind: "folder", Name: "Reload", Emoji: "📲", ChildrenURL: "/cashier/recharge/menu/reload/carriers"},
-		{Kind: "leaf", Name: "Bills", Emoji: "🧾", Action: "detail", DetailURL: "/cashier/recharge/menu/bill"},
-		{Kind: "leaf", Name: "Float transactions", Emoji: "💱", Action: "detail", DetailURL: "/cashier/recharge/menu/float"},
-	}})
+	return h.MenuReloadCarriers(c)
 }
 
 // MenuReloadCarriers lists every carrier as a folder into its devices.
