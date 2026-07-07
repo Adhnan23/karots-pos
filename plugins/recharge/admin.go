@@ -204,6 +204,12 @@ func (a *adminUI) Report(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	// Bill payments live in a separate table (banks are core lockers), so their
+	// service charge must be added in for the true "service charge earned" figure.
+	bills, err := a.p.store.BillLedger(ctx, LedgerFilter{From: &from, To: &to, Limit: 100000})
+	if err != nil {
+		return err
+	}
 	symbol := a.symbol(ctx)
 	vm := ReportVM{
 		UserName:      middleware.CurrentUserName(c),
@@ -213,7 +219,7 @@ func (a *adminUI) Report(c echo.Context) error {
 		To:            toStr,
 		Balances:      balances,
 		Blocks:        blocks,
-		ServiceEarned: sumServiceCharge(led),
+		ServiceEarned: sumServiceCharge(led).Add(sumBillServiceCharge(bills)),
 		FloatOnHand:   sumBalances(balances),
 		TypeBars:      typeValueBars(led, symbol),
 	}

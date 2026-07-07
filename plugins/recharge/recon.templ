@@ -218,6 +218,9 @@ templ carrierSummary(symbol string, cr CarrierRecon) {
 		</div>
 		<dl class="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-1 text-sm">
 			@stat("Opening", money.Format(symbol, cr.Opening))
+			if !cr.Handover.IsZero() {
+				@bonusStatLabel("Handover +/−", symbol, cr.Handover)
+			}
 			@stat("Reload in", money.Format(symbol, cr.FloatIn))
 			@stat("Reload out", money.Format(symbol, cr.FloatOut))
 			@stat("Expected", money.Format(symbol, cr.Expected))
@@ -251,8 +254,13 @@ templ stat(label, value string) {
 }
 
 templ bonusStat(symbol string, v decimal.Decimal) {
+	@bonusStatLabel("Bonus / loss", symbol, v)
+}
+
+// bonusStatLabel is bonusStat with a caller-supplied label (e.g. "Handover +/−").
+templ bonusStatLabel(label, symbol string, v decimal.Decimal) {
 	<div class="flex justify-between sm:block">
-		<dt class="text-slate-500">Bonus / loss</dt>
+		<dt class="text-slate-500">{ label }</dt>
 		if v.IsNegative() {
 			<dd class="font-semibold tabular-nums text-rose-600">{ money.Format(symbol, v) }</dd>
 		} else {
