@@ -107,7 +107,6 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 		CashierHref: "/cashier/recharge/receipts/recharge", AdminHref: "/admin/recharge/receipts/recharge",
 	})
 
-	reg.AddQuickActionTab(plugin.QuickActionTab{Key: "reload", Label: "📶 Reload", Component: ReloadPanel()})
 	reg.AddCashierTab(plugin.CashierTab{Href: "/cashier/recharge", Label: "Reload & Bills", Key: "recharge"})
 	reg.AddTenderMethod(plugin.TenderMethod{Value: "wallet", Label: "Wallet (eZ Cash / mCash)"})
 

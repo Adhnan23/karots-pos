@@ -73,15 +73,15 @@ type PosAction struct {
 	Component templ.Component
 }
 
-// QuickActionTab adds a tab to the cashier POS quick-action strip rendered below
-// the product grid. Each plugin contributes one tab (Key unique, Label shown on
-// the tab button); its Component is the tab panel — typically a grid of cards that
-// dispatch the "pos-add-service" window event to add a line to the cart. The strip
-// is hidden entirely when no plugin registers a tab.
-type QuickActionTab struct {
-	Key       string
-	Label     string
-	Component templ.Component
+// CashierMenuRoot adds a card at the ROOT of the cashier menu (alongside the
+// product-group cards). Tapping it navigates into ChildrenURL, a GET that returns
+// the menu-node JSON protocol ({"nodes":[…]}). This replaces the old quick-action
+// strip: a plugin's actions live in the same drill-down menu as products.
+type CashierMenuRoot struct {
+	Key         string
+	Emoji       string
+	Label       string
+	ChildrenURL string
 }
 
 // LogoutGuard reports whether a user has unfinished plugin work that must be
@@ -93,17 +93,17 @@ type QuickActionTab struct {
 type LogoutGuard func(ctx context.Context, userID int64) (block bool, redirect, reason string)
 
 var (
-	adminNav        []AdminNavEntry
-	cashierTabs     []CashierTab
-	settingsSecs    []SettingsSection
-	dashboardCards  []DashboardCard
-	paletteEntries  []PaletteEntry
-	reportCards     []ReportCard
-	posActions      []PosAction
-	quickActionTabs []QuickActionTab
-	tenderMethods   []TenderMethod
-	logoutGuards    []LogoutGuard
-	receiptTabs     []ReceiptTab
+	adminNav         []AdminNavEntry
+	cashierTabs      []CashierTab
+	settingsSecs     []SettingsSection
+	dashboardCards   []DashboardCard
+	paletteEntries   []PaletteEntry
+	reportCards      []ReportCard
+	posActions       []PosAction
+	cashierMenuRoots []CashierMenuRoot
+	tenderMethods    []TenderMethod
+	logoutGuards     []LogoutGuard
+	receiptTabs      []ReceiptTab
 )
 
 // ReceiptTab adds a tab to the unified Receipts page on BOTH the admin and cashier
@@ -119,17 +119,17 @@ type ReceiptTab struct {
 }
 
 // Hook registration — plugins call these from Setup.
-func (r *Registry) AddAdminNav(e AdminNavEntry)          { adminNav = append(adminNav, e) }
-func (r *Registry) AddCashierTab(t CashierTab)           { cashierTabs = append(cashierTabs, t) }
-func (r *Registry) AddSettingsSection(s SettingsSection) { settingsSecs = append(settingsSecs, s) }
-func (r *Registry) AddDashboardCard(c DashboardCard)     { dashboardCards = append(dashboardCards, c) }
-func (r *Registry) AddPaletteEntry(p PaletteEntry)       { paletteEntries = append(paletteEntries, p) }
-func (r *Registry) AddReportCard(rc ReportCard)          { reportCards = append(reportCards, rc) }
-func (r *Registry) AddPosAction(a PosAction)             { posActions = append(posActions, a) }
-func (r *Registry) AddQuickActionTab(t QuickActionTab)   { quickActionTabs = append(quickActionTabs, t) }
-func (r *Registry) AddTenderMethod(t TenderMethod)       { tenderMethods = append(tenderMethods, t) }
-func (r *Registry) AddLogoutGuard(g LogoutGuard)         { logoutGuards = append(logoutGuards, g) }
-func (r *Registry) AddReceiptTab(t ReceiptTab)           { receiptTabs = append(receiptTabs, t) }
+func (r *Registry) AddAdminNav(e AdminNavEntry)           { adminNav = append(adminNav, e) }
+func (r *Registry) AddCashierTab(t CashierTab)            { cashierTabs = append(cashierTabs, t) }
+func (r *Registry) AddSettingsSection(s SettingsSection)  { settingsSecs = append(settingsSecs, s) }
+func (r *Registry) AddDashboardCard(c DashboardCard)      { dashboardCards = append(dashboardCards, c) }
+func (r *Registry) AddPaletteEntry(p PaletteEntry)        { paletteEntries = append(paletteEntries, p) }
+func (r *Registry) AddReportCard(rc ReportCard)           { reportCards = append(reportCards, rc) }
+func (r *Registry) AddPosAction(a PosAction)              { posActions = append(posActions, a) }
+func (r *Registry) AddCashierMenuRoot(m CashierMenuRoot)  { cashierMenuRoots = append(cashierMenuRoots, m) }
+func (r *Registry) AddTenderMethod(t TenderMethod)        { tenderMethods = append(tenderMethods, t) }
+func (r *Registry) AddLogoutGuard(g LogoutGuard)          { logoutGuards = append(logoutGuards, g) }
+func (r *Registry) AddReceiptTab(t ReceiptTab)            { receiptTabs = append(receiptTabs, t) }
 
 // Getters for the template layer.
 func AdminNav() []AdminNavEntry           { return adminNav }
@@ -139,7 +139,7 @@ func DashboardCards() []DashboardCard     { return dashboardCards }
 func PaletteEntries() []PaletteEntry      { return paletteEntries }
 func ReportCards() []ReportCard           { return reportCards }
 func PosActions() []PosAction             { return posActions }
-func QuickActionTabs() []QuickActionTab   { return quickActionTabs }
+func CashierMenuRoots() []CashierMenuRoot { return cashierMenuRoots }
 func TenderMethods() []TenderMethod       { return tenderMethods }
 func LogoutGuards() []LogoutGuard         { return logoutGuards }
 func ReceiptTabs() []ReceiptTab           { return receiptTabs }

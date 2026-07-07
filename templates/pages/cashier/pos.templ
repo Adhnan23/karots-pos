@@ -140,25 +140,6 @@ templ POS(d POSData) {
 							</template>
 						</div>
 					</div>
-					if len(plugin.QuickActionTabs()) > 0 {
-						<div class="shrink-0 mt-3 border-t pt-3 max-h-80 overflow-auto" x-data={ "{ qtab: '" + plugin.QuickActionTabs()[0].Key + "' }" }>
-							<div class="flex gap-2 mb-3 flex-wrap">
-								for _, t := range plugin.QuickActionTabs() {
-									<button
-										type="button"
-										x-on:click={ "qtab='" + t.Key + "'" }
-										x-bind:class={ "qtab==='" + t.Key + "' ? 'bg-indigo-600 text-white' : 'border border-slate-200 text-slate-600 hover:bg-slate-50'" }
-										class="px-4 py-2 rounded-lg text-sm font-medium"
-									>{ t.Label }</button>
-								}
-							</div>
-							for _, t := range plugin.QuickActionTabs() {
-								<div x-show={ "qtab==='" + t.Key + "'" } x-cloak>
-									@t.Component
-								</div>
-							}
-						</div>
-					}
 				</section>
 
 				<!-- Cart -->

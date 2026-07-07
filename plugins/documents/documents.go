@@ -44,7 +44,6 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 	reg.Cashier().GET("/documents/quote", ch.Quote)
 	reg.Cashier().POST("/documents/record", ch.Record)
 
-	reg.AddQuickActionTab(plugin.QuickActionTab{Key: "photocopy", Label: "🖨 Photocopy", Component: JobPanel()})
 	reg.AddReportCard(plugin.ReportCard{
 		Href:  "/admin/documents/report",
 		Label: "🖨 Documents",

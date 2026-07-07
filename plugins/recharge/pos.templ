@@ -1,12 +1,12 @@
 package recharge
 
-// ReloadPanel is the "Reload" tab in the cashier POS quick-action strip (via the
-// QuickActionTab hook). It is an inline card-based panel: pick carrier → device
-// (cards with live float) → amount (quick chips or type) and tap "Add to cart",
-// which dispatches the generic "pos-add-service" window event the core POS listens
-// for — adding a recharge service line to the existing cart so it sells through the
-// normal checkout, receipt and cash drawer. All state is self-contained inline
-// Alpine; it never reaches into the pos() component directly.
+// ReloadPanel is the cashier POS recharge menu panel (via the CashierMenuRoot hook).
+// It is an inline card-based panel: pick carrier → device (cards with live float) →
+// amount (quick chips or type) and tap "Add to cart", which dispatches the generic
+// "pos-add-service" window event the core POS listens for — adding a recharge service
+// line to the existing cart so it sells through the normal checkout, receipt and cash
+// drawer. All state is self-contained inline Alpine; it never reaches into the pos()
+// component directly.
 templ ReloadPanel() {
 	<div
 		class="bg-white rounded-2xl border border-slate-200 p-4"
