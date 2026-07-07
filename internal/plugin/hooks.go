@@ -120,17 +120,19 @@ type ReceiptTab struct {
 }
 
 // Hook registration — plugins call these from Setup.
-func (r *Registry) AddAdminNav(e AdminNavEntry)           { adminNav = append(adminNav, e) }
-func (r *Registry) AddCashierTab(t CashierTab)            { cashierTabs = append(cashierTabs, t) }
-func (r *Registry) AddSettingsSection(s SettingsSection)  { settingsSecs = append(settingsSecs, s) }
-func (r *Registry) AddDashboardCard(c DashboardCard)      { dashboardCards = append(dashboardCards, c) }
-func (r *Registry) AddPaletteEntry(p PaletteEntry)        { paletteEntries = append(paletteEntries, p) }
-func (r *Registry) AddReportCard(rc ReportCard)           { reportCards = append(reportCards, rc) }
-func (r *Registry) AddPosAction(a PosAction)              { posActions = append(posActions, a) }
-func (r *Registry) AddCashierMenuRoot(m CashierMenuRoot)  { cashierMenuRoots = append(cashierMenuRoots, m) }
-func (r *Registry) AddTenderMethod(t TenderMethod)        { tenderMethods = append(tenderMethods, t) }
-func (r *Registry) AddLogoutGuard(g LogoutGuard)          { logoutGuards = append(logoutGuards, g) }
-func (r *Registry) AddReceiptTab(t ReceiptTab)            { receiptTabs = append(receiptTabs, t) }
+func (r *Registry) AddAdminNav(e AdminNavEntry)          { adminNav = append(adminNav, e) }
+func (r *Registry) AddCashierTab(t CashierTab)           { cashierTabs = append(cashierTabs, t) }
+func (r *Registry) AddSettingsSection(s SettingsSection) { settingsSecs = append(settingsSecs, s) }
+func (r *Registry) AddDashboardCard(c DashboardCard)     { dashboardCards = append(dashboardCards, c) }
+func (r *Registry) AddPaletteEntry(p PaletteEntry)       { paletteEntries = append(paletteEntries, p) }
+func (r *Registry) AddReportCard(rc ReportCard)          { reportCards = append(reportCards, rc) }
+func (r *Registry) AddPosAction(a PosAction)             { posActions = append(posActions, a) }
+func (r *Registry) AddCashierMenuRoot(m CashierMenuRoot) {
+	cashierMenuRoots = append(cashierMenuRoots, m)
+}
+func (r *Registry) AddTenderMethod(t TenderMethod) { tenderMethods = append(tenderMethods, t) }
+func (r *Registry) AddLogoutGuard(g LogoutGuard)   { logoutGuards = append(logoutGuards, g) }
+func (r *Registry) AddReceiptTab(t ReceiptTab)     { receiptTabs = append(receiptTabs, t) }
 
 // Getters for the template layer.
 func AdminNav() []AdminNavEntry           { return adminNav }
@@ -159,6 +161,6 @@ func CashierMenuRootsJSON() string {
 	b, _ := json.Marshal(out)
 	return string(b)
 }
-func TenderMethods() []TenderMethod       { return tenderMethods }
-func LogoutGuards() []LogoutGuard         { return logoutGuards }
-func ReceiptTabs() []ReceiptTab           { return receiptTabs }
+func TenderMethods() []TenderMethod { return tenderMethods }
+func LogoutGuards() []LogoutGuard   { return logoutGuards }
+func ReceiptTabs() []ReceiptTab     { return receiptTabs }

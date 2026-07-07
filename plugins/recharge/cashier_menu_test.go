@@ -14,7 +14,7 @@ func TestReloadDeviceNodeShape(t *testing.T) {
 		ID: 9, CarrierID: 3, Carrier: "Dialog", Label: "SIM 077",
 		Number: "0771234567", Balance: decimal.RequireFromString("500"),
 	}
-	n := reloadDeviceNode(3, d)
+	n := reloadDeviceNode(3, d, "Rs")
 	if n.Kind != "leaf" || n.Action != "amount" {
 		t.Fatalf("kind/action: %+v", n)
 	}
@@ -27,13 +27,16 @@ func TestReloadDeviceNodeShape(t *testing.T) {
 	if n.Name != "Reload — SIM 077 · 0771234567" {
 		t.Fatalf("name: %s", n.Name)
 	}
+	if n.Hint != "Float Rs 500.00" {
+		t.Fatalf("hint: %q", n.Hint)
+	}
 }
 
 // TestReloadDeviceNodeShapeNoNumber verifies the label omits the "· number"
 // suffix when the device has none (e.g. a fixed terminal).
 func TestReloadDeviceNodeShapeNoNumber(t *testing.T) {
 	d := DeviceBalanceRow{ID: 5, Label: "Terminal A"}
-	n := reloadDeviceNode(1, d)
+	n := reloadDeviceNode(1, d, "Rs")
 	if n.Name != "Reload — Terminal A" {
 		t.Fatalf("name: %s", n.Name)
 	}

@@ -557,7 +557,7 @@ function pos(symbol, defaultType, askToPrint, pluginRoots) {
         const res = await fetch(this.amountNode.add_url, {
           method: "POST",
           credentials: "same-origin",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", "Accept": "application/json" },
           body: JSON.stringify({ amount: this.amountValue, meta: this.amountNode.meta || {} }),
         });
         const json = await res.json().catch(() => ({}));

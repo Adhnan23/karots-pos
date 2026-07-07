@@ -135,6 +135,7 @@ templ POS(d POSData) {
 										<button type="button" x-on:click="openNode(n)" class="text-left p-3 rounded-xl bg-white shadow-sm hover:ring-2 hover:ring-indigo-400">
 											<div class="text-2xl leading-none" x-text="n.emoji || '▸'"></div>
 											<div class="font-medium text-sm mt-1" x-text="n.name"></div>
+											<div class="text-xs text-emerald-600 font-medium mt-0.5" x-show="n.hint" x-text="n.hint"></div>
 										</button>
 									</template>
 								</div>
@@ -167,11 +168,14 @@ templ POS(d POSData) {
 								<button type="button" x-on:click="cancelStep()" class="px-3 py-1.5 rounded-lg border text-sm hover:bg-slate-50 mb-3">← Back</button>
 								<div class="text-sm text-slate-500 mb-1" x-text="amountNode && amountNode.name"></div>
 								<div class="text-lg font-semibold mb-2">Enter amount</div>
-								<input type="number" min="0" step="0.01" x-model="amountValue" x-ref="amtInput"
-									class="w-full max-w-xs border rounded-lg px-3 py-3 text-right text-2xl" placeholder="0.00"/>
-								<div x-show="amountError" x-text="amountError" class="text-rose-600 text-sm mt-1"></div>
-								<button type="button" x-on:click="confirmAmount()" x-bind:disabled="busy || !(Number(amountValue)>0)"
-									class="mt-3 px-6 py-2.5 rounded-lg bg-indigo-600 text-white font-semibold disabled:opacity-40">Add</button>
+								<div class="flex items-stretch gap-3">
+									<input type="number" min="0" step="0.01" x-model="amountValue" x-ref="amtInput"
+										x-on:keydown.enter.prevent="confirmAmount()"
+										class="w-44 border rounded-lg px-3 py-3 text-right text-2xl" placeholder="0.00"/>
+									<button type="button" x-on:click="confirmAmount()" x-bind:disabled="busy || !(Number(amountValue)>0)"
+										class="px-8 rounded-lg bg-indigo-600 text-white font-semibold text-lg hover:bg-indigo-700 disabled:opacity-40">Add</button>
+								</div>
+								<div x-show="amountError" x-text="amountError" class="text-rose-600 text-sm mt-2"></div>
 							</div>
 						</template>
 						<!-- Inline detail fragment (plugin 'detail' leaves) -->

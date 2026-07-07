@@ -31,20 +31,21 @@ type cashierUI struct{ p *Plugin }
 // DetailURL. See internal/plugin/hooks.go (CashierMenuRoot) for the root hook
 // this subtree hangs off.
 type menuNode struct {
-	Kind        string         `json:"kind"`                   // "folder" | "leaf"
+	Kind        string         `json:"kind"` // "folder" | "leaf"
 	Name        string         `json:"name"`
 	Emoji       string         `json:"emoji,omitempty"`
 	ChildrenURL string         `json:"children_url,omitempty"` // folder
 	Action      string         `json:"action,omitempty"`       // leaf: "amount" | "detail"
 	AddURL      string         `json:"add_url,omitempty"`      // amount leaf
 	DetailURL   string         `json:"detail_url,omitempty"`   // detail leaf
+	Hint        string         `json:"hint,omitempty"`         // small muted sub-line on the card (e.g. live balance)
 	Meta        map[string]any `json:"meta,omitempty"`
 }
 
 // reloadDeviceNode builds the amount leaf for one device's reload balance row.
 // Meta carries the carrier/device ids the client echoes back to MenuReloadAdd
 // unchanged.
-func reloadDeviceNode(carrierID int64, d DeviceBalanceRow) menuNode {
+func reloadDeviceNode(carrierID int64, d DeviceBalanceRow, symbol string) menuNode {
 	label := d.Label
 	if d.Number != "" {
 		label += " · " + d.Number
@@ -52,6 +53,7 @@ func reloadDeviceNode(carrierID int64, d DeviceBalanceRow) menuNode {
 	return menuNode{
 		Kind: "leaf", Name: "Reload — " + label, Action: "amount",
 		AddURL: "/cashier/recharge/menu/reload",
+		Hint:   "Float " + money.Format(symbol, d.Balance),
 		Meta:   map[string]any{"carrier_id": carrierID, "device_id": d.ID},
 	}
 }
@@ -824,9 +826,10 @@ func (h *cashierUI) MenuReloadDevices(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	sym := h.symbol(ctx)
 	nodes := make([]menuNode, 0, len(rows))
 	for _, r := range rows {
-		nodes = append(nodes, reloadDeviceNode(carrierID, r))
+		nodes = append(nodes, reloadDeviceNode(carrierID, r, sym))
 	}
 	return c.JSON(http.StatusOK, map[string]any{"nodes": nodes})
 }
