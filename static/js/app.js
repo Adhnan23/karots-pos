@@ -779,6 +779,10 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections) {
       this.closeLockerId = "";
       await this.loadSummary();
       await this.loadLockers();
+      // The drawer is closed again: repopulate the Open dialog's plugin sections
+      // (e.g. reload-float opening) so reopening a session on this same page still
+      // prompts for them — init() only ran on first load.
+      await this.loadDrawerSections("open");
       this.afterDrawerMove(json.data);
     },
     async withdraw() {
