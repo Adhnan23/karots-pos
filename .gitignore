@@ -1,6 +1,7 @@
 /bin/
 /tmp/
 /karots-pos
+/server
 .env
 /backups/
 *_templ.go
