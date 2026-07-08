@@ -248,15 +248,27 @@ templ ReportPage(d ReportVM) {
 				@BalancePanel(d.Symbol, d.Balances)
 			</div>
 			<div class="bg-white rounded-2xl shadow-sm p-6">
-				<h2 class="text-lg font-semibold mb-4">Reconciliation by session</h2>
+				<h2 class="text-lg font-semibold mb-1">Reconciliation by session</h2>
+				<p class="text-sm text-slate-500 mb-4">Handover = counted opening vs last close (overnight gain/loss). Session = counted close vs expected (in-day gain/loss). Click a row for the per-device breakdown.</p>
 				if len(d.Blocks) == 0 {
 					<p class="text-slate-400 text-sm">No cash sessions yet.</p>
 				} else {
-					<div class="space-y-5">
+					<table class="w-full text-sm">
+						<thead class="text-left text-slate-500 border-b">
+							<tr>
+								<th class="py-2 px-3">Session</th>
+								<th class="py-2 px-3">Cashier</th>
+								<th class="py-2 px-3">Opened</th>
+								<th class="py-2 px-3">Closed</th>
+								<th class="py-2 px-3 text-right">Handover</th>
+								<th class="py-2 px-3 text-right">Session +/−</th>
+								<th class="py-2 px-3"></th>
+							</tr>
+						</thead>
 						for _, b := range d.Blocks {
-							@reportSession(d.Symbol, b)
+							@reportSessionRow(d.Symbol, b)
 						}
-					</div>
+					</table>
 				}
 			</div>
 		</div>
@@ -617,78 +629,95 @@ templ typeOption(value, label, current string) {
 	}
 }
 
-// reportSession shows one cash session's per-carrier reconciliation (carriers
-// with no activity are hidden).
-templ reportSession(symbol string, b SessionRecon) {
-	<details class="border rounded-xl group" open?={ b.Session.ClosedAt == nil }>
-		<summary class="flex items-center justify-between p-4 cursor-pointer select-none list-none">
-			<div class="font-medium">
-				<span class="text-slate-400 mr-1 group-open:rotate-90 inline-block transition-transform">▸</span>
-				Session #{ strconv.FormatInt(b.Session.ID, 10) }
-				<span class="text-slate-400 font-normal">· { b.Session.UserName } · { b.Session.OpenedAt.Format("02 Jan, 15:04") }</span>
-			</div>
-			<div class="flex items-center gap-3 text-sm">
-				if !anyActivity(b.Rows) {
-					<span class="text-slate-400">no activity</span>
-				} else {
-					<span class="text-slate-500">Bonus/Loss <span class="tabular-nums font-medium">{ money.Format(symbol, sessionBonus(b)) }</span></span>
-				}
+// reportSessionRow is one session's summary row in the reconciliation table, with
+// a click-to-expand row holding the per-device breakdown. Each session gets its
+// own <tbody> so it can carry its own Alpine open/close state.
+templ reportSessionRow(symbol string, b SessionRecon) {
+	<tbody x-data="{ open: false }" class="border-b last:border-0 align-top">
+		<tr class="cursor-pointer hover:bg-slate-50" x-on:click="open = !open">
+			<td class="py-2 px-3 font-medium">
+				#{ strconv.FormatInt(b.Session.ID, 10) }
 				if b.Session.ClosedAt == nil {
-					<span class="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">open</span>
+					<span class="ml-1 text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">open</span>
 				}
-			</div>
-		</summary>
-		<div class="px-4 pb-4">
-		if !anyActivity(b.Rows) {
-			<p class="text-sm text-slate-400">No recharge activity.</p>
-		} else {
-			<table class="w-full text-sm">
-				<thead class="text-left text-slate-500 border-b">
-					<tr>
-						<th class="py-1.5 pr-4">Carrier</th>
-						<th class="py-1.5 pr-4">Device</th>
-						<th class="py-1.5 pr-4 text-right">Opening</th>
-						<th class="py-1.5 pr-4 text-right">In</th>
-						<th class="py-1.5 pr-4 text-right">Out</th>
-						<th class="py-1.5 pr-4 text-right">Expected</th>
-						<th class="py-1.5 pr-4 text-right">Counted</th>
-						<th class="py-1.5 text-right">Bonus/Loss</th>
-					</tr>
-				</thead>
-				<tbody>
-					for _, cr := range b.Rows {
-						if hasActivity(cr) {
-							for di, dv := range cr.Devices {
-								<tr class="border-b last:border-0">
-									if di == 0 {
-										<td class="py-1.5 pr-4 font-medium align-top" rowspan={ strconv.Itoa(len(cr.Devices)) }>{ cr.Carrier }</td>
+			</td>
+			<td class="py-2 px-3">{ b.Session.UserName }</td>
+			<td class="py-2 px-3 text-slate-500">{ b.Session.OpenedAt.Format("2006-01-02 15:04") }</td>
+			<td class="py-2 px-3 text-slate-500">
+				if b.Session.ClosedAt != nil {
+					{ b.Session.ClosedAt.Format("2006-01-02 15:04") }
+				} else {
+					—
+				}
+			</td>
+			if anyActivity(b.Rows) {
+				<td class={ "py-2 px-3 text-right tabular-nums font-medium " + varianceClass(sessionHandover(b)) }>{ money.Format(symbol, sessionHandover(b)) }</td>
+				<td class={ "py-2 px-3 text-right tabular-nums font-medium " + varianceClass(sessionBonus(b)) }>{ money.Format(symbol, sessionBonus(b)) }</td>
+			} else {
+				<td class="py-2 px-3 text-right text-slate-300">—</td>
+				<td class="py-2 px-3 text-right text-slate-300">—</td>
+			}
+			<td class="py-2 px-3 text-right text-indigo-600">
+				<span x-text="open ? 'Hide' : 'View'"></span>
+			</td>
+		</tr>
+		<tr x-show="open" x-cloak>
+			<td colspan="7" class="px-3 pb-4 pt-0">
+				if !anyActivity(b.Rows) {
+					<p class="text-sm text-slate-400">No recharge activity.</p>
+				} else {
+					<table class="w-full text-sm border rounded-lg">
+						<thead class="text-left text-slate-500 border-b bg-slate-50">
+							<tr>
+								<th class="py-1.5 px-3">Carrier</th>
+								<th class="py-1.5 px-3">Device</th>
+								<th class="py-1.5 px-3 text-right">Last close</th>
+								<th class="py-1.5 px-3 text-right">Opening</th>
+								<th class="py-1.5 px-3 text-right">Handover</th>
+								<th class="py-1.5 px-3 text-right">In</th>
+								<th class="py-1.5 px-3 text-right">Out</th>
+								<th class="py-1.5 px-3 text-right">Expected</th>
+								<th class="py-1.5 px-3 text-right">Counted</th>
+								<th class="py-1.5 px-3 text-right">Session +/−</th>
+							</tr>
+						</thead>
+						<tbody>
+							for _, cr := range b.Rows {
+								if hasActivity(cr) {
+									for di, dv := range cr.Devices {
+										<tr class="border-b last:border-0">
+											if di == 0 {
+												<td class="py-1.5 px-3 font-medium align-top" rowspan={ strconv.Itoa(len(cr.Devices)) }>{ cr.Carrier }</td>
+											}
+											<td class="py-1.5 px-3">
+												{ dv.Label }
+												if dv.Number != "" {
+													<span class="text-slate-400">· { dv.Number }</span>
+												}
+											</td>
+											<td class="py-1.5 px-3 text-right tabular-nums text-slate-500">{ money.Format(symbol, dv.OpeningExp) }</td>
+											<td class="py-1.5 px-3 text-right tabular-nums">{ money.Format(symbol, dv.Opening) }</td>
+											<td class="py-1.5 px-3 text-right tabular-nums">{ bonusText(symbol, dv.Handover) }</td>
+											<td class="py-1.5 px-3 text-right tabular-nums">{ money.Format(symbol, dv.FloatIn) }</td>
+											<td class="py-1.5 px-3 text-right tabular-nums">{ money.Format(symbol, dv.FloatOut) }</td>
+											<td class="py-1.5 px-3 text-right tabular-nums">{ money.Format(symbol, dv.Expected) }</td>
+											if dv.Closed && dv.Closing != nil {
+												<td class="py-1.5 px-3 text-right tabular-nums">{ money.Format(symbol, *dv.Closing) }</td>
+												<td class="py-1.5 px-3 text-right tabular-nums">{ bonusText(symbol, dv.BonusLoss) }</td>
+											} else {
+												<td class="py-1.5 px-3 text-right text-slate-300">—</td>
+												<td class="py-1.5 px-3 text-right text-slate-300">—</td>
+											}
+										</tr>
 									}
-									<td class="py-1.5 pr-4">
-										{ dv.Label }
-										if dv.Number != "" {
-											<span class="text-slate-400">· { dv.Number }</span>
-										}
-									</td>
-									<td class="py-1.5 pr-4 text-right tabular-nums">{ money.Format(symbol, dv.Opening) }</td>
-									<td class="py-1.5 pr-4 text-right tabular-nums">{ money.Format(symbol, dv.FloatIn) }</td>
-									<td class="py-1.5 pr-4 text-right tabular-nums">{ money.Format(symbol, dv.FloatOut) }</td>
-									<td class="py-1.5 pr-4 text-right tabular-nums">{ money.Format(symbol, dv.Expected) }</td>
-									if dv.Closed && dv.Closing != nil {
-										<td class="py-1.5 pr-4 text-right tabular-nums">{ money.Format(symbol, *dv.Closing) }</td>
-										<td class="py-1.5 text-right tabular-nums">{ bonusText(symbol, dv.BonusLoss) }</td>
-									} else {
-										<td class="py-1.5 pr-4 text-right text-slate-300">—</td>
-										<td class="py-1.5 text-right text-slate-300">—</td>
-									}
-								</tr>
+								}
 							}
-						}
-					}
-				</tbody>
-			</table>
-		}
-		</div>
-	</details>
+						</tbody>
+					</table>
+				}
+			</td>
+		</tr>
+	</tbody>
 }
 
 // BillReceiptsTab is the "Bills" tab body: a date-range filter (matching the core
@@ -771,11 +800,13 @@ templ FloatReceiptsTab(vm ReceiptsTabVM, rows []TxRow) {
 							<td class="px-4 py-2 text-right tabular-nums">{ money.Format(vm.Symbol, r.ServiceCharge) }</td>
 							<td class="px-4 py-2 text-slate-500">{ r.Operator }</td>
 							<td class="px-4 py-2 text-right whitespace-nowrap">
-								if r.Type == "deposit" || r.Type == "withdrawal" {
+								if r.Type == "reload" || r.Type == "wallet_in" {
+									// Sold through the till — its receipt is the sale (S-) receipt, so
+									// there's no separate reload slip to view or reprint here.
+									<span class="text-slate-400 text-xs">on sale receipt</span>
+								} else {
 									<button type="button" hx-post={ vm.ReprintBase + strconv.FormatInt(r.ID, 10) + "/print" } hx-swap="none" class="px-3 py-1 rounded-lg bg-indigo-600 text-white text-xs font-medium">🧾 Reprint</button>
 									<a href={ templ.SafeURL(vm.ViewBase + strconv.FormatInt(r.ID, 10)) } class="ml-2 px-3 py-1 rounded-lg border text-slate-600 text-xs font-medium">View</a>
-								} else {
-									<span class="text-slate-300">—</span>
 								}
 							</td>
 						</tr>

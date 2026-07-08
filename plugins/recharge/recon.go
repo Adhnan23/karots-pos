@@ -258,17 +258,19 @@ func (s *Store) HasOpenFloat(ctx context.Context, sessionID int64) (bool, error)
 
 // DeviceRecon is one device's reconciliation line within a carrier.
 type DeviceRecon struct {
-	DeviceID  int64            `json:"device_id"`
-	Label     string           `json:"label"`
-	Number    string           `json:"number"`
-	Opening   decimal.Decimal  `json:"opening"`   // openingBase (saved this session, else carried)
-	FloatIn   decimal.Decimal  `json:"float_in"`  // withdrawals + topups + wallet-ins
-	FloatOut  decimal.Decimal  `json:"float_out"` // deposits + bill payments + reloads
-	Expected  decimal.Decimal  `json:"expected"`  // opening + in − out  (== live balance)
-	Closing   *decimal.Decimal `json:"closing"`
-	BonusLoss *decimal.Decimal `json:"bonus_loss"` // closing − expected (when closed)
-	Started   bool             `json:"started"`    // opening saved for this session
-	Closed    bool             `json:"closed"`
+	DeviceID   int64            `json:"device_id"`
+	Label      string           `json:"label"`
+	Number     string           `json:"number"`
+	Opening    decimal.Decimal  `json:"opening"`          // openingBase (counted this session, else carried)
+	OpeningExp decimal.Decimal  `json:"opening_expected"` // carried baseline (last close + refills since)
+	Handover   *decimal.Decimal `json:"handover"`         // counted opening − carried baseline (when counted & prior close exists)
+	FloatIn    decimal.Decimal  `json:"float_in"`         // withdrawals + topups + wallet-ins
+	FloatOut   decimal.Decimal  `json:"float_out"`        // deposits + bill payments + reloads
+	Expected   decimal.Decimal  `json:"expected"`         // opening + in − out  (== live balance)
+	Closing    *decimal.Decimal `json:"closing"`
+	BonusLoss  *decimal.Decimal `json:"bonus_loss"` // closing − expected (session variance, when closed)
+	Started    bool             `json:"started"`    // opening counted for this session
+	Closed     bool             `json:"closed"`
 }
 
 // CarrierRecon aggregates a carrier's devices and float movements for a session.
@@ -281,23 +283,26 @@ type CarrierRecon struct {
 	FloatOut   decimal.Decimal `json:"float_out"`
 	Expected   decimal.Decimal `json:"expected"`
 	Closing    decimal.Decimal `json:"closing"`    // Σ closings of closed devices
-	BonusLoss  decimal.Decimal `json:"bonus_loss"` // Σ bonus of closed devices
+	BonusLoss  decimal.Decimal `json:"bonus_loss"` // Σ session variance of closed devices
+	Handover   decimal.Decimal `json:"handover"`   // Σ handover variance of counted devices
 	AnyStarted bool            `json:"any_started"`
 	AllClosed  bool            `json:"all_closed"`
 }
 
 type reconRow struct {
-	DeviceID    int64            `db:"device_id"`
-	CarrierID   int64            `db:"carrier_id"`
-	Carrier     string           `db:"carrier"`
-	Label       string           `db:"label"`
-	Number      string           `db:"number"`
-	Started     bool             `db:"started"`
-	OpeningBase decimal.Decimal  `db:"opening_base"`
-	Closing     *decimal.Decimal `db:"closing"`
-	Closed      bool             `db:"closed"`
-	FloatIn     decimal.Decimal  `db:"float_in"`
-	FloatOut    decimal.Decimal  `db:"float_out"`
+	DeviceID      int64            `db:"device_id"`
+	CarrierID     int64            `db:"carrier_id"`
+	Carrier       string           `db:"carrier"`
+	Label         string           `db:"label"`
+	Number        string           `db:"number"`
+	Started       bool             `db:"started"`
+	OpeningBase   decimal.Decimal  `db:"opening_base"`
+	OpeningExp    decimal.Decimal  `db:"opening_expected"` // carried baseline (last close + refills since)
+	HasPriorClose bool             `db:"has_prior_close"`
+	Closing       *decimal.Decimal `db:"closing"`
+	Closed        bool             `db:"closed"`
+	FloatIn       decimal.Decimal  `db:"float_in"`
+	FloatOut      decimal.Decimal  `db:"float_out"`
 }
 
 // Reconciliation builds the per-carrier reconciliation (each with its devices)
@@ -310,6 +315,8 @@ func (s *Store) Reconciliation(ctx context.Context, sessionID int64) ([]CarrierR
 		       (os.device_id IS NOT NULL) AS started,
 		       (CASE WHEN os.opening IS NOT NULL THEN os.opening
 		             ELSE COALESCE(lc.closing,0) + COALESCE(carry.v,0) END) AS opening_base,
+		       (COALESCE(lc.closing,0) + COALESCE(carry.v,0)) AS opening_expected,
+		       (lc.closing IS NOT NULL) AS has_prior_close,
 		       os.closing, (os.closed_at IS NOT NULL) AS closed,
 		       COALESCE(tin.v, 0)  AS float_in,
 		       COALESCE(tout.v, 0) AS float_out
@@ -347,8 +354,17 @@ func (s *Store) Reconciliation(ctx context.Context, sessionID int64) ([]CarrierR
 		expected := r.OpeningBase.Add(r.FloatIn).Sub(r.FloatOut)
 		dr := DeviceRecon{
 			DeviceID: r.DeviceID, Label: r.Label, Number: r.Number,
-			Opening: r.OpeningBase, FloatIn: r.FloatIn, FloatOut: r.FloatOut,
+			Opening: r.OpeningBase, OpeningExp: r.OpeningExp,
+			FloatIn: r.FloatIn, FloatOut: r.FloatOut,
 			Expected: expected, Closing: r.Closing, Started: r.Started, Closed: r.Closed,
+		}
+		// Handover variance: what was counted at open vs the carried baseline (last
+		// close + refills since). Only meaningful when the cashier actually counted
+		// an opening this session AND there is a prior close to compare against.
+		if r.Started && r.HasPriorClose {
+			h := r.OpeningBase.Sub(r.OpeningExp)
+			dr.Handover = &h
+			cr.Handover = cr.Handover.Add(h)
 		}
 		if r.Closed && r.Closing != nil {
 			b := r.Closing.Sub(expected)
@@ -375,10 +391,6 @@ func (s *Store) Reconciliation(ctx context.Context, sessionID int64) ([]CarrierR
 	return out, nil
 }
 
-// openingValue is the prefill for a device's opening input — always the carried
-// base, so the cashier sees the running balance and only adjusts on drift.
-func openingValue(d DeviceRecon) string { return d.Opening.StringFixed(2) }
-
 // closingValue is the prefill for a device's closing input ("" when not counted).
 func closingValue(d DeviceRecon) string {
 	if d.Closing == nil {
@@ -389,7 +401,7 @@ func closingValue(d DeviceRecon) string {
 
 // hasActivity reports whether a carrier saw any recharge movement in a session.
 func hasActivity(cr CarrierRecon) bool {
-	return cr.AnyStarted || cr.FloatIn.IsPositive() || cr.FloatOut.IsPositive() || cr.Closing.IsPositive()
+	return cr.AnyStarted || cr.FloatIn.IsPositive() || cr.FloatOut.IsPositive() || cr.Closing.IsPositive() || !cr.Handover.IsZero()
 }
 
 // anyActivity reports whether any carrier in the set saw activity.
@@ -410,12 +422,32 @@ func bonusText(symbol string, v *decimal.Decimal) string {
 	return money.Format(symbol, *v)
 }
 
-// sessionBonus sums the per-carrier bonus/loss across a session (for the
-// collapsed session summary line on the report).
+// varianceClass colours a variance figure: green for a gain, red for a shortfall.
+func varianceClass(v decimal.Decimal) string {
+	switch {
+	case v.IsNegative():
+		return "text-rose-600"
+	case v.IsPositive():
+		return "text-emerald-600"
+	default:
+		return "text-slate-400"
+	}
+}
+
+// sessionBonus sums the per-carrier session (close) variance across a session.
 func sessionBonus(b SessionRecon) decimal.Decimal {
 	sum := decimal.Zero
 	for _, cr := range b.Rows {
 		sum = sum.Add(cr.BonusLoss)
+	}
+	return sum
+}
+
+// sessionHandover sums the per-carrier handover (open) variance across a session.
+func sessionHandover(b SessionRecon) decimal.Decimal {
+	sum := decimal.Zero
+	for _, cr := range b.Rows {
+		sum = sum.Add(cr.Handover)
 	}
 	return sum
 }
@@ -454,6 +486,16 @@ func serviceText(symbol string, v decimal.Decimal) string {
 
 // sumServiceCharge totals the service charge across ledger rows (filtered total).
 func sumServiceCharge(rows []TxRow) decimal.Decimal {
+	t := decimal.Zero
+	for _, r := range rows {
+		t = t.Add(r.ServiceCharge)
+	}
+	return t
+}
+
+// sumBillServiceCharge totals the service charge across bill-payment rows (bills
+// live in their own table now that banks are core lockers).
+func sumBillServiceCharge(rows []BillTxRow) decimal.Decimal {
 	t := decimal.Zero
 	for _, r := range rows {
 		t = t.Add(r.ServiceCharge)
@@ -651,4 +693,3 @@ func (s *Store) BillLedger(ctx context.Context, f LedgerFilter) ([]BillTxRow, er
 	err := s.db.SelectContext(ctx, &rows, q, args...)
 	return rows, err
 }
-

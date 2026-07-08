@@ -1,44 +1,41 @@
 package documents
 
-// JobPanel is the "🖨 Photocopy" tab in the cashier POS quick-action strip. It
-// builds a document job (metered: size/colour/side/qty priced server-side and
-// consuming paper; custom: typed price only) and dispatches the generic
-// "pos-add-service" event the core POS listens for, carrying the job's components
-// (for the consume-on-sale seam) and a receipt description (recorded after
-// checkout via /cashier/documents/record). Labour is settled later in admin.
-templ JobPanel() {
+import "encoding/json"
+
+// JobFragment is the inline cashier-menu detail fragment for one document
+// service (photocopy/print/laminate/bind, or a custom labour job), reached by
+// tapping that service's leaf under the "🖨 Documents" root card (see
+// MenuRoot/JobFragment in cashier.go). It replaces the old JobPanel, which
+// listed every service and let the cashier pick one first: here the service
+// is already chosen server-side, so the fragment is seeded with it directly
+// and skips straight to the metered options (size/colour/double/qty, priced
+// server-side via /cashier/documents/quote) or the custom price field.
+// Both builders dispatch the SAME "pos-add-service" event (with the SAME
+// docJob payload) the old JobPanel did, so cart handling and the post-checkout
+// /cashier/documents/record write are unchanged. Labour is settled later in
+// admin.
+templ JobFragment(svc Service) {
 	<div
+		data-svc={ svcJSON(svc) }
 		class="bg-white rounded-2xl border border-slate-200 p-4"
 		x-data="{
-			services:[], svc:null, prices:[],
+			svc: JSON.parse($el.dataset.svc), prices:[],
 			size:'', color:false, double:false, qty:1,
 			price:'', quote:null,
-			async load(){ try{ const r=await fetch('/cashier/documents/services'); const j=await r.json(); this.services=j.data||[]; }catch(e){} },
-			async pick(s){ this.svc=s; this.quote=null; this.prices=[]; this.size=''; this.color=false; this.double=false; this.qty=1; this.price=''; if(s.kind==='metered'){ try{ const r=await fetch('/cashier/documents/prices?service='+s.id); this.prices=(await r.json()).data||[]; const sz=this.sizes(); if(sz.length){ this.size=sz[0] } this.seedOptions() }catch(e){} this.refresh() } },
 			seedOptions(){ const d=this.prices.find(p=>(p.size||'')===this.size)||this.prices[0]; if(d){ this.color=!!d.color; this.double=!!d.double_side } },
 			sizes(){ return [...new Set(this.prices.filter(p=>p.size).map(p=>p.size))] },
 			hasColor(){ return this.prices.some(p=>p.color) },
 			hasDouble(){ return this.prices.some(p=>p.double_side) },
+			async initPrices(){ if(this.svc.kind!=='metered'){ return } try{ const r=await fetch('/cashier/documents/prices?service='+this.svc.id); this.prices=(await r.json()).data||[]; const sz=this.sizes(); if(sz.length){ this.size=sz[0] } this.seedOptions() }catch(e){} this.refresh() },
 			async refresh(){ if(!this.svc||this.svc.kind!=='metered'||!(Number(this.qty)>0)){ this.quote=null; return } const u='/cashier/documents/quote?service='+this.svc.id+'&size='+encodeURIComponent(this.size)+'&color='+(this.color?1:0)+'&double='+(this.double?1:0)+'&qty='+Number(this.qty); try{ const r=await apiFetch('GET',u,undefined,{silent:true}); this.quote=r.data }catch(e){ this.quote=null } },
 			addMetered(){ if(!this.quote){ return } window.dispatchEvent(new CustomEvent('pos-add-service',{detail:{ id:this.quote.product_id, name:this.quote.description, description:this.quote.description, price:Number(this.quote.line_total), components:this.quote.components, docJob:{ service_id:this.svc.id, description:this.quote.description, qty:String(this.qty), unit_price:this.quote.unit_price, line_total:this.quote.line_total, consumable_cost:this.quote.consumable_cost } }})); this.quote=null },
 			addCustom(){ const amt=Number(this.price); if(!this.svc||!(amt>0)){ return } const desc=this.svc.name; window.dispatchEvent(new CustomEvent('pos-add-service',{detail:{ id:this.svc.product_id, name:desc, description:desc, price:amt, components:[], docJob:{ service_id:this.svc.id, description:desc, qty:'1', unit_price:String(amt), line_total:String(amt), consumable_cost:'0' } }})); this.price='' }
 		}"
-		x-init="load()"
+		x-init="initPrices()"
 	>
-		<template x-if="services.length===0">
-			<p class="text-sm text-slate-400">No services set up. Add them in Admin → Communication Store.</p>
-		</template>
-		<div x-show="services.length>0" class="space-y-3">
-			<div>
-				<label class="block text-xs font-medium text-slate-500 mb-1">Service</label>
-				<div class="grid grid-cols-3 sm:grid-cols-4 gap-2">
-					<template x-for="s in services" x-bind:key="s.id">
-						<button type="button" x-on:click="pick(s)" x-bind:class="svc && svc.id===s.id ? 'ring-2 ring-emerald-500 bg-emerald-50' : 'border border-slate-200'" class="px-3 py-2.5 rounded-lg text-sm font-medium text-left" x-text="s.name"></button>
-					</template>
-				</div>
-			</div>
+		<div class="space-y-3">
 			<!-- Metered builder -->
-			<div x-show="svc && svc.kind==='metered'" class="space-y-3">
+			<div x-show="svc.kind==='metered'" class="space-y-3">
 				<div x-show="sizes().length>0">
 					<label class="block text-xs font-medium text-slate-500 mb-1">Size</label>
 					<div class="flex flex-wrap gap-2">
@@ -64,7 +61,7 @@ templ JobPanel() {
 				</div>
 			</div>
 			<!-- Custom builder: price only (labour is settled later in admin) -->
-			<div x-show="svc && svc.kind==='custom'" class="space-y-3">
+			<div x-show="svc.kind==='custom'" class="space-y-3">
 				<div>
 					<label class="block text-xs font-medium text-slate-500 mb-1">Price</label>
 					<input type="number" min="0" step="0.01" x-model="price" placeholder="0.00" class="w-full border rounded-lg px-3 py-2.5 text-right"/>
@@ -75,4 +72,18 @@ templ JobPanel() {
 			</div>
 		</div>
 	</div>
+}
+
+// svcJSON marshals the fields the JobFragment Alpine scope needs (id, kind,
+// name, product_id — the same shape the old JobPanel's /cashier/documents/services
+// list item carried) into the fragment's data-svc attribute, read back via
+// JSON.parse($el.dataset.svc) in x-data.
+func svcJSON(s Service) string {
+	b, _ := json.Marshal(struct {
+		ID        int64  `json:"id"`
+		Name      string `json:"name"`
+		Kind      string `json:"kind"`
+		ProductID int64  `json:"product_id"`
+	}{s.ID, s.Name, s.Kind, s.ProductID})
+	return string(b)
 }

@@ -75,8 +75,10 @@ func (h *authUI) Logout(c echo.Context) error {
 	}
 	ctx := c.Request().Context()
 
-	// Plugin guards first (e.g. recharge float, which is scoped to the open till
-	// session) so the float is closed before the till it belongs to.
+	// Generic plugin logout guards run first (currently none register one — the
+	// recharge float is now counted inside the core till Close dialog, so closing
+	// the till closes the float). Kept as a seam for any future plugin work that
+	// must be resolved before sign-out.
 	for _, guard := range plugin.LogoutGuards() {
 		if block, redirect, _ := guard(ctx, claims.UserID); block && redirect != "" {
 			return c.Redirect(http.StatusSeeOther, withLogoutFlag(redirect))

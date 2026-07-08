@@ -1,6 +1,7 @@
 package documents
 
 import (
+	"net/http"
 	"strconv"
 	"strings"
 
@@ -12,6 +13,59 @@ import (
 )
 
 type cashierUI struct{ p *Plugin }
+
+// menuNode is one entry in the cashier menu-node protocol: a folder drills
+// further in via ChildrenURL, an "amount" leaf opens an inline amount step
+// that POSTs AddURL, and a "detail" leaf opens an inline HTML fragment at
+// DetailURL. Mirrors plugins/recharge/cashier.go's menuNode — packages are
+// separate so each plugin defines its own copy. See internal/plugin/hooks.go
+// (CashierMenuRoot) for the root hook this subtree hangs off.
+type menuNode struct {
+	Kind        string         `json:"kind"`                   // "folder" | "leaf"
+	Name        string         `json:"name"`
+	Emoji       string         `json:"emoji,omitempty"`
+	ChildrenURL string         `json:"children_url,omitempty"` // folder
+	Action      string         `json:"action,omitempty"`       // leaf: "amount" | "detail"
+	AddURL      string         `json:"add_url,omitempty"`      // amount leaf
+	DetailURL   string         `json:"detail_url,omitempty"`   // detail leaf
+	Meta        map[string]any `json:"meta,omitempty"`
+}
+
+// MenuRoot returns one detail leaf per active service for the cashier menu's
+// "🖨 Documents" root card. Tapping a leaf opens JobFragment inline.
+func (h *cashierUI) MenuRoot(c echo.Context) error {
+	svcs, err := h.p.store.Services(c.Request().Context(), true)
+	if err != nil {
+		return err
+	}
+	nodes := make([]menuNode, 0, len(svcs))
+	for _, s := range svcs {
+		nodes = append(nodes, menuNode{
+			Kind: "leaf", Name: s.Name, Emoji: "🖨", Action: "detail",
+			DetailURL: "/cashier/documents/job?service=" + strconv.FormatInt(s.ID, 10),
+		})
+	}
+	return c.JSON(http.StatusOK, map[string]any{"nodes": nodes})
+}
+
+// JobFragment renders one service's job form (the old JobPanel's metered/custom
+// builder, minus the service-list/pick step) as an inline cashier-menu detail
+// fragment for GET /cashier/documents/job?service=ID.
+func (h *cashierUI) JobFragment(c echo.Context) error {
+	ctx := c.Request().Context()
+	sid, err := strconv.ParseInt(c.QueryParam("service"), 10, 64)
+	if err != nil || sid <= 0 {
+		return apperr.BadRequest("invalid service id")
+	}
+	sv, err := h.p.store.ServiceByID(ctx, sid)
+	if err != nil {
+		return err
+	}
+	if sv == nil || !sv.IsActive {
+		return apperr.NotFound("service")
+	}
+	return response.RenderFragment(c, JobFragment(*sv))
+}
 
 // Services lists active services for the quick-action panel.
 func (h *cashierUI) Services(c echo.Context) error {

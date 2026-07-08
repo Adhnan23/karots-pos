@@ -377,7 +377,7 @@ func (s *Service) Open(ctx context.Context, userID int64, in OpenInput) (*Sessio
 		if ierr != nil {
 			return ierr
 		}
-		if ierr = repo.AddMovement(ctx, sess.ID, userID, MoveOpening, opening, "opening float", raw); ierr != nil {
+		if ierr = repo.AddMovement(ctx, sess.ID, userID, MoveOpening, opening, "opening cash", raw); ierr != nil {
 			return ierr
 		}
 		// Book the money side + receipt. With a source locker chosen, the opening
@@ -386,7 +386,7 @@ func (s *Service) Open(ctx context.Context, userID int64, in OpenInput) (*Sessio
 		if s.lockerLeg != nil && opening.IsPositive() {
 			rid, lerr := s.lockerLeg(ctx, tx, TillCashEvent{
 				Kind: "open", UserID: userID, SessionID: sess.ID,
-				LockerID: in.SourceLockerID, Amount: opening, Reason: "opening float",
+				LockerID: in.SourceLockerID, Amount: opening, Reason: "opening cash",
 			})
 			receiptID = rid
 			return lerr

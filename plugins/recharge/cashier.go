@@ -25,6 +25,49 @@ import (
 
 type cashierUI struct{ p *Plugin }
 
+// menuNode is one entry in the cashier menu-node protocol: a folder drills
+// further in via ChildrenURL, an "amount" leaf opens an inline amount step
+// that POSTs AddURL, and a "detail" leaf opens an inline HTML fragment at
+// DetailURL. See internal/plugin/hooks.go (CashierMenuRoot) for the root hook
+// this subtree hangs off.
+type menuNode struct {
+	Kind        string         `json:"kind"` // "folder" | "leaf"
+	Name        string         `json:"name"`
+	Emoji       string         `json:"emoji,omitempty"`
+	ChildrenURL string         `json:"children_url,omitempty"` // folder
+	Action      string         `json:"action,omitempty"`       // leaf: "amount" | "detail"
+	AddURL      string         `json:"add_url,omitempty"`      // amount leaf
+	DetailURL   string         `json:"detail_url,omitempty"`   // detail leaf
+	Hint        string         `json:"hint,omitempty"`         // small muted sub-line on the card (e.g. live balance)
+	Meta        map[string]any `json:"meta,omitempty"`
+}
+
+// reloadDeviceNode builds the amount leaf for one device's reload balance row.
+// Meta carries the carrier/device ids the client echoes back to MenuReloadAdd
+// unchanged.
+func reloadDeviceNode(carrierID int64, d DeviceBalanceRow, symbol string) menuNode {
+	label := d.Label
+	if d.Number != "" {
+		label += " · " + d.Number
+	}
+	return menuNode{
+		Kind: "leaf", Name: "Reload — " + label, Action: "amount",
+		AddURL: "/cashier/recharge/menu/reload",
+		Hint:   "Float " + money.Format(symbol, d.Balance),
+		Meta:   map[string]any{"carrier_id": carrierID, "device_id": d.ID},
+	}
+}
+
+// parseAmount validates an amount-step string, shared by every menu "amount"
+// leaf handler.
+func parseAmount(s string) (decimal.Decimal, error) {
+	v, err := money.Parse(s)
+	if err != nil || !v.IsPositive() {
+		return decimal.Zero, apperr.Validation("enter an amount greater than zero")
+	}
+	return v, nil
+}
+
 // Carriers returns the active carriers as JSON for the POS Reload popup.
 func (h *cashierUI) Carriers(c echo.Context) error {
 	cs, err := h.p.store.Carriers(c.Request().Context())
@@ -730,4 +773,174 @@ func (h *cashierUI) carrierName(ctx context.Context, id int64) string {
 	var n string
 	_ = h.p.store.db.GetContext(ctx, &n, `SELECT name FROM recharge_carriers WHERE id = $1`, id)
 	return n
+}
+
+// --- Cashier menu-node protocol (plugin.CashierMenuRoot "Reload & Bills") ---
+//
+// The root card drills into 3 branches: Reload (carrier → device → amount),
+// Bills and Float transactions (both plain HTML detail fragments hosting the
+// existing recon forms). See internal/plugin/hooks.go for the node JSON shape
+// and static/js/app.js's fetchNodes/openNode/confirmAmount/openDetail for how
+// the client walks it.
+
+// MenuRoot returns the three recharge branches for the cashier menu.
+// MenuRoot is the cashier-menu entry for reloads: it lists carriers directly, so
+// tapping the menu card drills straight into carrier → device → amount. Bill
+// payments and float open/close/transactions deliberately stay on the dedicated
+// "Reload & Bills" page (recharge nav tab), where their forms are server-rendered
+// and HTMX-processed on page load — no fragile fragment injection in the menu.
+func (h *cashierUI) MenuRoot(c echo.Context) error {
+	return h.MenuReloadCarriers(c)
+}
+
+// MenuReloadCarriers lists every carrier as a folder into its devices.
+func (h *cashierUI) MenuReloadCarriers(c echo.Context) error {
+	cs, err := h.p.store.Carriers(c.Request().Context())
+	if err != nil {
+		return err
+	}
+	nodes := make([]menuNode, 0, len(cs))
+	for _, cr := range cs {
+		nodes = append(nodes, menuNode{
+			Kind: "folder", Name: cr.Name, Emoji: "📶",
+			ChildrenURL: "/cashier/recharge/menu/reload/devices?carrier=" + strconv.FormatInt(cr.ID, 10),
+		})
+	}
+	return c.JSON(http.StatusOK, map[string]any{"nodes": nodes})
+}
+
+// MenuReloadDevices lists a carrier's reload-purpose devices with their live
+// balance as amount leaves. Balances are session-scoped: with no open drawer
+// there is nothing meaningful to show, so it returns an empty list rather
+// than erroring (mirrors the existing Devices handler).
+func (h *cashierUI) MenuReloadDevices(c echo.Context) error {
+	ctx := c.Request().Context()
+	carrierID, _ := strconv.ParseInt(c.QueryParam("carrier"), 10, 64)
+	sess, err := h.p.core.CashRegister.Current(ctx, middleware.CurrentUserID(c))
+	if err != nil {
+		return err
+	}
+	if sess == nil {
+		return c.JSON(http.StatusOK, map[string]any{"nodes": []menuNode{}})
+	}
+	rows, err := h.p.store.DevicesWithBalance(ctx, sess.ID, carrierID, "recharge")
+	if err != nil {
+		return err
+	}
+	sym := h.symbol(ctx)
+	nodes := make([]menuNode, 0, len(rows))
+	for _, r := range rows {
+		nodes = append(nodes, reloadDeviceNode(carrierID, r, sym))
+	}
+	return c.JSON(http.StatusOK, map[string]any{"nodes": nodes})
+}
+
+// MenuReloadAdd validates the amount against the device's live reload balance
+// (the server-side overdraw guard, replacing the old client-side check in the
+// removed ReloadPanel) and returns the cart line for the carrier's hidden
+// service product. It does NOT record any float transaction — that still
+// happens at checkout: the returned line carries deviceId, addServiceLine
+// (app.js) stores it as recharge_device_id on the cart line, and the sale's
+// completion posts /cashier/recharge/reload once the sale commits.
+func (h *cashierUI) MenuReloadAdd(c echo.Context) error {
+	ctx := c.Request().Context()
+	var in struct {
+		Amount string `json:"amount"`
+		Meta   struct {
+			CarrierID int64 `json:"carrier_id"`
+			DeviceID  int64 `json:"device_id"`
+		} `json:"meta"`
+	}
+	if err := c.Bind(&in); err != nil {
+		return apperr.BadRequest("invalid request")
+	}
+	amt, err := parseAmount(in.Amount)
+	if err != nil {
+		return err
+	}
+	sess, err := h.requireSession(c)
+	if err != nil {
+		return err
+	}
+	rows, err := h.p.store.DevicesWithBalance(ctx, sess.ID, in.Meta.CarrierID, "recharge")
+	if err != nil {
+		return err
+	}
+	var row *DeviceBalanceRow
+	for i := range rows {
+		if rows[i].ID == in.Meta.DeviceID {
+			row = &rows[i]
+			break
+		}
+	}
+	if row == nil {
+		return apperr.Validation("unknown device")
+	}
+	if amt.GreaterThan(row.Balance) {
+		return apperr.Validation("amount exceeds this device's reload balance")
+	}
+	cs, err := h.p.store.Carriers(ctx)
+	if err != nil {
+		return err
+	}
+	var carrier *Carrier
+	for i := range cs {
+		if cs[i].ID == in.Meta.CarrierID {
+			carrier = &cs[i]
+			break
+		}
+	}
+	if carrier == nil {
+		return apperr.Validation("unknown carrier")
+	}
+	return c.JSON(http.StatusOK, map[string]any{"line": map[string]any{
+		"id":       carrier.ProductID,
+		"name":     carrier.Name + " Recharge",
+		"price":    amt,
+		"deviceId": in.Meta.DeviceID,
+	}})
+}
+
+// MenuBill renders the existing bill-payment / get-money form (bankTxForm) as
+// an inline cashier-menu detail fragment. It is a money move that posts
+// directly to /cashier/recharge/bank-tx and toasts — not a cart line.
+func (h *cashierUI) MenuBill(c echo.Context) error {
+	d, err := h.reconData(c)
+	if err != nil {
+		return err
+	}
+	return response.RenderFragment(c, BillMenuForm(d))
+}
+
+// MenuFloat renders the existing deposit/withdrawal/top-up form (txForm) as an
+// inline cashier-menu detail fragment. Like MenuBill, it posts directly to
+// /cashier/recharge/tx and toasts — not a cart line.
+func (h *cashierUI) MenuFloat(c echo.Context) error {
+	d, err := h.reconData(c)
+	if err != nil {
+		return err
+	}
+	return response.RenderFragment(c, FloatMenuForm(d))
+}
+
+// DrawerOpenFields renders the opening-float inputs for the core till Open dialog
+// (registered as a DrawerSection.OpenFormURL). No session exists yet, so it lists
+// devices with blank opening overrides (the server carries the last close forward).
+func (h *cashierUI) DrawerOpenFields(c echo.Context) error {
+	d, err := h.reconData(c)
+	if err != nil {
+		return err
+	}
+	return response.RenderFragment(c, openFloatFields(d))
+}
+
+// DrawerCloseFields renders the closing-float count inputs for the core till Close
+// dialog (registered as a DrawerSection.CloseFormURL), showing each open device's
+// expected balance. Requires the still-open till session.
+func (h *cashierUI) DrawerCloseFields(c echo.Context) error {
+	d, err := h.reconData(c)
+	if err != nil {
+		return err
+	}
+	return response.RenderFragment(c, closeFloatFields(d))
 }

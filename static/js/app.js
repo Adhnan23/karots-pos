@@ -262,7 +262,7 @@ function printPromptHost() {
 
 // pos: the cashier terminal. Cart math here is a live preview only — the server
 // recomputes every amount authoritatively when the sale is posted.
-function pos(symbol, defaultType, askToPrint) {
+function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections) {
   return {
     sym: symbol,
     // When false, completing a sale auto-prints the receipt and resets straight
@@ -270,10 +270,29 @@ function pos(symbol, defaultType, askToPrint) {
     askToPrint: askToPrint !== false,
     products: [],
     // Cashier menu: top-level + drill-down group cards (replaces the old default
-    // grid). groupStack is the breadcrumb of {id,name,emoji} from root to here.
+    // grid). groupStack is the breadcrumb of {id,name,emoji[,id|url]} from root
+    // to here — core groups carry `.id`, plugin folders carry `.url` instead.
     groupChildren: [],
     groupStack: [],
     inGroups: true,
+    // Plugin menu roots (e.g. "Reload & Bills"), injected server-side from
+    // plugin.CashierMenuRoots(). Rendered as cards alongside product groups at
+    // the top of the menu; tapping one drills into the menu-node protocol.
+    pluginRoots: pluginRoots || [],
+    // Plugin drawer sections (e.g. recharge float): input fragments loaded into the
+    // till Open/Close dialogs, saved to each section's endpoint around the drawer call.
+    drawerSections: drawerSections || [],
+    // menuMode drives which of the 3 card/step views is shown inside the same
+    // drill-down region: the group/plugin card grids, an inline amount-entry
+    // step (plugin 'amount' leaves), or an inline HTML detail fragment
+    // (plugin 'detail' leaves).
+    menuMode: "cards", // "cards" | "amount" | "detail"
+    amountNode: null,
+    amountValue: "",
+    amountError: "",
+    detailHtml: "",
+    pluginLeaves: [], // leaf nodes of the current plugin folder, rendered as cards
+    _leaves: [],
     customers: [],
     cart: [],
     search: "",
@@ -333,6 +352,7 @@ function pos(symbol, defaultType, askToPrint) {
       await this.loadUnits();
       await this.loadHolds();
       await this.loadLockers();
+      if (!this.session) await this.loadDrawerSections("open");
       // Logout was blocked because the till is still open: jump straight to the
       // count/close dialog. If the session somehow closed already, just finish
       // logging out so the user isn't stranded.
@@ -355,6 +375,68 @@ function pos(symbol, defaultType, askToPrint) {
       }
     },
 
+    // Load each plugin drawer section's input fragment into the Open ('open') or
+    // Close ('close') dialog slot. Fragments are plain inputs (no hx-*), so no
+    // Alpine/HTMX init is needed — saveDrawerSections reads their values directly.
+    async loadDrawerSections(which) {
+      const box = which === "open" ? this.$refs.openSections : this.$refs.closeSections;
+      if (!box) return;
+      // Build into a detached fragment and swap it in atomically at the END, not
+      // by clearing up front — two concurrent calls (Alpine re-init, logout +
+      // manual close) would otherwise both pass an early clear and each append,
+      // rendering every device twice. Building fresh and replacing last-wins.
+      const frag = document.createDocumentFragment();
+      for (const s of this.drawerSections) {
+        const url = which === "open" ? s.openFormUrl : s.closeFormUrl;
+        if (!url) continue;
+        try {
+          const res = await fetch(url, { credentials: "same-origin" });
+          if (!res.ok) continue;
+          const wrap = document.createElement("div");
+          wrap.setAttribute("data-drawer-save", which === "open" ? s.saveOpenUrl : s.saveCloseUrl);
+          wrap.innerHTML = await res.text();
+          frag.appendChild(wrap);
+        } catch (_) {
+          /* a missing section just doesn't render */
+        }
+      }
+      box.replaceChildren(frag);
+    },
+    // POST each loaded section's inputs (form-encoded) to its save URL. Returns
+    // false if any 'close' save failed (caller aborts the till close). 'open'
+    // saves are best-effort (reconciliation auto-carries the last close).
+    async saveDrawerSections(which) {
+      const box = which === "open" ? this.$refs.openSections : this.$refs.closeSections;
+      if (!box) return true;
+      const wraps = box.querySelectorAll("[data-drawer-save]");
+      for (const w of wraps) {
+        const url = w.getAttribute("data-drawer-save");
+        if (!url) continue;
+        const params = new URLSearchParams();
+        w.querySelectorAll("input[name], select[name], textarea[name]").forEach((el) => {
+          if (String(el.value).trim() !== "") params.append(el.name, el.value);
+        });
+        try {
+          const res = await fetch(url, {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: params.toString(),
+          });
+          if (!res.ok && which === "close") {
+            const j = await res.json().catch(() => ({}));
+            toast((j.error && j.error.message) || "Could not save float counts", "error");
+            return false;
+          }
+        } catch (_) {
+          if (which === "close") {
+            toast("Could not save float counts", "error");
+            return false;
+          }
+        }
+      }
+      return true;
+    },
     money(v) {
       const n = Number(v) || 0;
       return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -449,10 +531,13 @@ function pos(symbol, defaultType, askToPrint) {
       this.inGroups = true;
       const top = this.groupStack[this.groupStack.length - 1];
       if (!top) return this.loadGroupsTop();
+      if (top.url) return this.fetchNodes(top.url);
       return this.openGroup(top.id, true);
     },
     async loadGroupsTop() {
       this.groupStack = [];
+      this.menuMode = "cards";
+      this.pluginLeaves = [];
       const json = await apiFetch("GET", "/api/groups");
       this.groupChildren = (json.data && json.data.groups) || [];
       this.products = [];
@@ -461,6 +546,8 @@ function pos(symbol, defaultType, askToPrint) {
       const json = await apiFetch("GET", `/api/groups/${id}`);
       const d = json.data || {};
       this.inGroups = true;
+      this.menuMode = "cards";
+      this.pluginLeaves = [];
       if (!reload) {
         this.groupStack = (d.breadcrumb || []).map((g) => ({
           id: g.id, name: g.name, emoji: g.emoji,
@@ -469,9 +556,97 @@ function pos(symbol, defaultType, askToPrint) {
       this.groupChildren = d.children || [];
       this.products = d.products || [];
     },
+    // --- Plugin menu-node protocol -----------------------------------------
+    // A plugin root's ChildrenURL (and every folder/leaf it returns) speaks a
+    // small JSON protocol: {"nodes":[{kind:"folder",...}|{kind:"leaf",...}]}.
+    // Folders behave like core product groups (pushed onto groupStack, drilled
+    // into via fetchNodes) but carry `.url` instead of `.id` so backGroup knows
+    // to re-fetch rather than call the core /api/groups/:id endpoint. Leaves
+    // render as cards that open one of two inline steps (amount entry, or an
+    // HTML detail fragment) or add straight to the cart (kind "product").
+    openPluginRoot(r) {
+      this.inGroups = true;
+      this.groupStack = [{ name: r.label, emoji: r.emoji, url: r.url }];
+      return this.fetchNodes(r.url);
+    },
+    async fetchNodes(url) {
+      this.menuMode = "cards";
+      const json = await apiFetch("GET", url);
+      const nodes = (json && json.nodes) || (json.data && json.data.nodes) || [];
+      // Map nodes onto the existing card grids: folders -> groupChildren, leaves kept on the node.
+      this.groupChildren = nodes
+        .filter((n) => n.kind === "folder")
+        .map((n) => ({
+          name: n.name,
+          emoji: n.emoji,
+          _node: n,
+          _key: "p" + (n.children_url || n.name),
+        }));
+      this.products = []; // plugin folders have no product leaves
+      this._leaves = nodes.filter((n) => n.kind === "leaf");
+      this.pluginLeaves = this._leaves; // rendered as cards
+    },
+    openNode(node) {
+      if (node.kind === "folder") {
+        this.groupStack.push({ name: node.name, emoji: node.emoji, url: node.children_url });
+        return this.fetchNodes(node.children_url);
+      }
+      if (node.action === "amount") {
+        this.amountNode = node;
+        this.amountValue = "";
+        this.amountError = "";
+        this.menuMode = "amount";
+        this.$nextTick(() => this.$refs.amtInput && this.$refs.amtInput.focus());
+        return;
+      }
+      if (node.action === "detail") {
+        return this.openDetail(node.detail_url);
+      }
+      if (node.action === "product") return this.addToCart(node.product);
+    },
+    async openDetail(url) {
+      const res = await fetch(url, { credentials: "same-origin" });
+      this.detailHtml = await res.text();
+      this.menuMode = "detail";
+      this.$nextTick(() =>
+        window.Alpine &&
+        window.Alpine.initTree &&
+        this.$refs.detailBox &&
+        window.Alpine.initTree(this.$refs.detailBox)
+      );
+    },
+    async confirmAmount() {
+      if (this.busy) return;
+      this.busy = true;
+      this.amountError = "";
+      try {
+        const res = await fetch(this.amountNode.add_url, {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json", "Accept": "application/json" },
+          body: JSON.stringify({ amount: this.amountValue, meta: this.amountNode.meta || {} }),
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          this.amountError = (json.error && json.error.message) || json.message || "Could not add";
+          return;
+        }
+        this.addServiceLine(json.line || json.data);
+        this.cancelStep();
+      } finally {
+        this.busy = false;
+      }
+    },
+    cancelStep() {
+      this.menuMode = "cards";
+      this.amountNode = null;
+      this.detailHtml = "";
+    },
     backGroup() {
+      this.menuMode = "cards";
       this.groupStack.pop();
       const top = this.groupStack[this.groupStack.length - 1];
+      if (top && top.url) return this.fetchNodes(top.url);
       if (top) return this.openGroup(top.id, true);
       return this.loadGroupsTop();
     },
@@ -585,6 +760,7 @@ function pos(symbol, defaultType, askToPrint) {
       this.openLockerId = "";
       await this.loadSummary();
       await this.loadLockers();
+      await this.saveDrawerSections("open");
       // Let plugin quick-action panels (e.g. Reload) that need an open drawer
       // load their session-scoped data now, in case they initialised first.
       window.dispatchEvent(new CustomEvent("register-opened"));
@@ -595,8 +771,10 @@ function pos(symbol, defaultType, askToPrint) {
       this.closeCounts = {};
       this.closeResult = null;
       this.showClose = true;
+      this.loadDrawerSections("close");
     },
     async submitClose() {
+      if (!(await this.saveDrawerSections("close"))) return;
       const json = await apiFetch("POST", "/api/cash-register/close", {
         breakdown: this.buildBreakdown(this.closeCounts),
         dest_locker_id: Number(this.closeLockerId) || 0,
@@ -606,6 +784,10 @@ function pos(symbol, defaultType, askToPrint) {
       this.closeLockerId = "";
       await this.loadSummary();
       await this.loadLockers();
+      // The drawer is closed again: repopulate the Open dialog's plugin sections
+      // (e.g. reload-float opening) so reopening a session on this same page still
+      // prompts for them — init() only ran on first load.
+      await this.loadDrawerSections("open");
       this.afterDrawerMove(json.data);
     },
     async withdraw() {
