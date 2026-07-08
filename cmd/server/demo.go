@@ -111,7 +111,7 @@ func demo(db *sqlx.DB) error {
 	if sess, err := regSvc.Open(ctx, cashierID, cashregister.OpenInput{OpeningCash: "10000"}); err != nil {
 		return fmt.Errorf("demo open register A: %w", err)
 	} else {
-		if _, err := regSvc.PayIn(ctx, cashierID, cashregister.MovementInput{Amount: "2000", Reason: "extra float"}); err != nil {
+		if _, err := regSvc.PayIn(ctx, cashierID, cashregister.MovementInput{Amount: "2000", Reason: "extra cash"}); err != nil {
 			return fmt.Errorf("demo pay-in: %w", err)
 		}
 		if _, err := regSvc.Close(ctx, cashierID, cashregister.CloseInput{ClosingCash: "12000"}); err != nil {
