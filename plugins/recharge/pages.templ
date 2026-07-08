@@ -800,11 +800,13 @@ templ FloatReceiptsTab(vm ReceiptsTabVM, rows []TxRow) {
 							<td class="px-4 py-2 text-right tabular-nums">{ money.Format(vm.Symbol, r.ServiceCharge) }</td>
 							<td class="px-4 py-2 text-slate-500">{ r.Operator }</td>
 							<td class="px-4 py-2 text-right whitespace-nowrap">
-								if r.Type == "deposit" || r.Type == "withdrawal" {
+								if r.Type == "reload" || r.Type == "wallet_in" {
+									// Sold through the till — its receipt is the sale (S-) receipt, so
+									// there's no separate reload slip to view or reprint here.
+									<span class="text-slate-400 text-xs">on sale receipt</span>
+								} else {
 									<button type="button" hx-post={ vm.ReprintBase + strconv.FormatInt(r.ID, 10) + "/print" } hx-swap="none" class="px-3 py-1 rounded-lg bg-indigo-600 text-white text-xs font-medium">🧾 Reprint</button>
 									<a href={ templ.SafeURL(vm.ViewBase + strconv.FormatInt(r.ID, 10)) } class="ml-2 px-3 py-1 rounded-lg border text-slate-600 text-xs font-medium">View</a>
-								} else {
-									<span class="text-slate-300">—</span>
 								}
 							</td>
 						</tr>

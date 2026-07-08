@@ -22,7 +22,7 @@ templ CashSessionsPage(d CashSessionsData) {
 	@layouts.Admin("Cash Register", d.UserName, "cash-register") {
 		<div class="mb-6">
 			<h1 class="text-2xl font-bold">Cash Register Sessions</h1>
-			<p class="text-sm text-slate-500">Every drawer session with its opening float, expected vs counted cash, and over/short.</p>
+			<p class="text-sm text-slate-500">Every drawer session with its opening cash, expected vs counted cash, and over/short.</p>
 		</div>
 		<div class="bg-white rounded-2xl shadow-sm p-6">
 			<table class="w-full text-sm">
@@ -97,7 +97,7 @@ templ CashSessionDetailPage(d CashSessionDetailData) {
 		</div>
 
 		<div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-			@statCard("Opening float", money.Format(d.Symbol, d.Session.OpeningCash), "slate")
+			@statCard("Opening cash", money.Format(d.Symbol, d.Session.OpeningCash), "slate")
 			@statCard("Expected", optMoney(d.Symbol, d.Session.ExpectedCash), "slate")
 			@statCard("Counted", optMoney(d.Symbol, d.Session.ClosingCash), "indigo")
 			@statCard("Over / Short", optMoney(d.Symbol, d.Session.Difference), diffColor(d.Session.Difference))

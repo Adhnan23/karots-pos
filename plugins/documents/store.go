@@ -127,10 +127,15 @@ func (s *Store) AddPrice(ctx context.Context, p Price) error {
 
 func (s *Store) Prices(ctx context.Context, serviceID int64) ([]Price, error) {
 	var rows []Price
+	// Order: flat (NULL size) first, then A4 — the common default so the cashier
+	// panel pre-selects it — then the rest alphabetically. This drives both the
+	// admin price matrix and the cashier size buttons (which pick the first size).
 	err := s.db.SelectContext(ctx, &rows, `
 		SELECT id,service_id,size,color,double_side,min_qty,unit_price
 		FROM doc_price WHERE service_id=$1
-		ORDER BY size NULLS FIRST, color, double_side, min_qty`, serviceID)
+		ORDER BY (size IS NOT NULL),
+		         CASE WHEN upper(size) = 'A4' THEN 0 ELSE 1 END,
+		         size, color, double_side, min_qty`, serviceID)
 	return rows, err
 }
 

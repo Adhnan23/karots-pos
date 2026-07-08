@@ -381,7 +381,11 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections) {
     async loadDrawerSections(which) {
       const box = which === "open" ? this.$refs.openSections : this.$refs.closeSections;
       if (!box) return;
-      box.innerHTML = "";
+      // Build into a detached fragment and swap it in atomically at the END, not
+      // by clearing up front — two concurrent calls (Alpine re-init, logout +
+      // manual close) would otherwise both pass an early clear and each append,
+      // rendering every device twice. Building fresh and replacing last-wins.
+      const frag = document.createDocumentFragment();
       for (const s of this.drawerSections) {
         const url = which === "open" ? s.openFormUrl : s.closeFormUrl;
         if (!url) continue;
@@ -391,11 +395,12 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections) {
           const wrap = document.createElement("div");
           wrap.setAttribute("data-drawer-save", which === "open" ? s.saveOpenUrl : s.saveCloseUrl);
           wrap.innerHTML = await res.text();
-          box.appendChild(wrap);
+          frag.appendChild(wrap);
         } catch (_) {
           /* a missing section just doesn't render */
         }
       }
+      box.replaceChildren(frag);
     },
     // POST each loaded section's inputs (form-encoded) to its save URL. Returns
     // false if any 'close' save failed (caller aborts the till close). 'open'

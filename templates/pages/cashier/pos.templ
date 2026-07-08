@@ -54,14 +54,12 @@ templ POS(d POSData) {
 					</div>
 
 					<div class="flex justify-between items-center border-t mt-3 pt-3">
-						<span class="font-medium">Opening float</span>
+						<span class="font-medium">Opening cash</span>
 						<span class="text-xl font-bold" x-text="sym + ' ' + money(countTotal(openCounts))"></span>
 					</div>
-					<!-- Plugin drawer sections (e.g. recharge float opening) -->
-					<div x-ref="openSections" class="space-y-3 mt-3"></div>
 					<template x-if="lockers.length">
 						<div class="mt-3">
-							<label class="block text-sm text-slate-600 mb-1">Take float from</label>
+							<label class="block text-sm text-slate-600 mb-1">Take cash from</label>
 							<select x-model="openLockerId" class="w-full border rounded-lg px-3 py-2">
 								<option value="">— don't draw from a locker —</option>
 								<template x-for="lk in lockers" :key="lk.id">
@@ -70,6 +68,9 @@ templ POS(d POSData) {
 							</select>
 						</div>
 					</template>
+					<!-- Plugin drawer sections (e.g. recharge float opening) — a separate
+					     concern from the cash float above, so rendered as its own block. -->
+					<div x-ref="openSections" class="space-y-3 mt-4"></div>
 					<button x-on:click="openRegister()" class="w-full mt-3 py-2.5 rounded-lg bg-indigo-600 text-white font-medium">Open Register</button>
 				</div>
 			</div>
@@ -409,11 +410,11 @@ templ POS(d POSData) {
 			<div x-show="showDeposit" x-cloak class="fixed inset-0 bg-black/40 z-40 flex items-center justify-center p-4">
 				<div class="bg-white rounded-2xl shadow-xl w-80 p-6">
 					<h3 class="text-lg font-semibold mb-1">Deposit Cash</h3>
-					<p class="text-sm text-slate-500 mb-4">Add cash to the drawer (owner top-up, extra float, etc.).</p>
+					<p class="text-sm text-slate-500 mb-4">Add cash to the drawer (owner top-up, extra cash, etc.).</p>
 					<label class="block text-sm font-medium mb-1">Amount</label>
 					<input type="number" step="0.01" min="0" x-model.number="depositAmount" class="w-full border rounded-lg px-3 py-2 mb-3"/>
 					<label class="block text-sm font-medium mb-1">Reason</label>
-					<input x-model="depositReason" class="w-full border rounded-lg px-3 py-2 mb-4" placeholder="owner top-up, extra float…"/>
+					<input x-model="depositReason" class="w-full border rounded-lg px-3 py-2 mb-4" placeholder="owner top-up, extra cash…"/>
 					<template x-if="lockers.length">
 						<div class="mb-4">
 							<label class="block text-sm font-medium mb-1">From locker</label>
@@ -539,8 +540,6 @@ templ POS(d POSData) {
 								<span class="font-medium">Counted</span>
 								<span class="text-xl font-bold" x-text="sym + ' ' + money(countTotal(closeCounts))"></span>
 							</div>
-							<!-- Plugin drawer sections (e.g. recharge float closing) -->
-							<div x-ref="closeSections" class="space-y-3 mt-3"></div>
 							<template x-if="lockers.length">
 								<div class="mt-3">
 									<label class="block text-sm text-slate-600 mb-1">Bank cash into</label>
@@ -552,6 +551,9 @@ templ POS(d POSData) {
 									</select>
 								</div>
 							</template>
+							<!-- Plugin drawer sections (e.g. recharge float closing) — separate
+							     from the cash count above, so rendered as its own block. -->
+							<div x-ref="closeSections" class="space-y-3 mt-4"></div>
 							<div class="flex gap-2 mt-3">
 								<button x-on:click="showClose = false" class="flex-1 py-2 rounded-lg border">Cancel</button>
 								<button x-on:click="submitClose()" class="flex-1 py-2 rounded-lg bg-slate-800 text-white font-medium">Close &amp; Reconcile</button>

@@ -79,7 +79,7 @@ func (s *Service) TillLockerLeg(ctx context.Context, tx *sqlx.Tx, ev cashregiste
 func tillCashLabel(kind string) string {
 	switch kind {
 	case "open":
-		return "Opening float"
+		return "Opening cash"
 	case "payin":
 		return "Cash in"
 	case "close":

@@ -62,7 +62,7 @@ templ ZReport(d ZReportData) {
 		<h3 class="font-semibold mb-2">Cash reconciliation</h3>
 		<table class="w-full text-sm mb-5">
 			<tbody>
-				@zMoney(d.Symbol, "Opening float", d.Session.OpeningCash)
+				@zMoney(d.Symbol, "Opening cash", d.Session.OpeningCash)
 				@zMoneyOpt(d.Symbol, "Expected in drawer", d.Session.ExpectedCash)
 				@zMoneyOpt(d.Symbol, "Counted at close", d.Session.ClosingCash)
 				if d.Session.Difference != nil {

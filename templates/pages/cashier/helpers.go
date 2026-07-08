@@ -16,7 +16,7 @@ func jsBool(b bool) string { return strconv.FormatBool(b) }
 func zMoveLabel(t string) string {
 	switch t {
 	case "opening":
-		return "Opening float"
+		return "Opening cash"
 	case "sale":
 		return "Sale"
 	case "credit_payment":
