@@ -27,8 +27,15 @@ import (
 // FormatVersion is bumped if the on-disk shape ever changes incompatibly.
 const FormatVersion = 1
 
-// skipTables are never dumped or touched on restore (migration bookkeeping).
-var skipTables = map[string]bool{"goose_db_version": true}
+// skipTable reports tables never dumped or touched on restore. All goose
+// migration bookkeeping — core (goose_db_version) AND per-plugin
+// (goose_db_version_<name>) — is owned by the embedded migrations that run at
+// startup. Restoring an older snapshot must NOT rewind that record, or the next
+// boot would try to re-run already-applied migrations. Matching the whole
+// goose_db_version* family keeps plugin bookkeeping safe too.
+func skipTable(name string) bool {
+	return strings.HasPrefix(name, "goose_db_version")
+}
 
 type Table struct {
 	Name    string      `json:"name"`
@@ -108,7 +115,7 @@ func Restore(ctx context.Context, db *sqlx.DB, r io.Reader) error {
 	// Clear the tables we're about to reload.
 	var toClear []string
 	for _, t := range arc.Tables {
-		if exists[t.Name] && !skipTables[t.Name] {
+		if exists[t.Name] && !skipTable(t.Name) {
 			toClear = append(toClear, quoteIdent(t.Name))
 		}
 	}
@@ -119,7 +126,7 @@ func Restore(ctx context.Context, db *sqlx.DB, r io.Reader) error {
 	}
 
 	for _, t := range arc.Tables {
-		if !exists[t.Name] || skipTables[t.Name] {
+		if !exists[t.Name] || skipTable(t.Name) {
 			continue
 		}
 		if err := insertRows(ctx, tx, t); err != nil {
@@ -152,7 +159,7 @@ func publicTables(ctx context.Context, db *sqlx.DB) ([]string, error) {
 	}
 	out := all[:0]
 	for _, t := range all {
-		if !skipTables[t] {
+		if !skipTable(t) {
 			out = append(out, t)
 		}
 	}
