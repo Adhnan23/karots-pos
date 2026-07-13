@@ -40,6 +40,16 @@ func (s *Service) List(ctx context.Context, q ListQuery) ([]Product, int, error)
 }
 
 
+// ListAll returns the entire active catalog unpaginated, for CSV/spreadsheet
+// export (List clamps Limit to 100 and would export only the first page).
+func (s *Service) ListAll(ctx context.Context) ([]Product, error) {
+	rows, err := s.repo.ListAll(ctx)
+	if err != nil {
+		return nil, apperr.Internal("failed to list products", err)
+	}
+	return rows, nil
+}
+
 func (s *Service) Get(ctx context.Context, id int64) (*Product, error) {
 	p, err := s.repo.FindByID(ctx, id)
 	if err != nil {

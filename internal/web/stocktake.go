@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"karots-pos/internal/features/audit"
-	"karots-pos/internal/features/products"
 	"karots-pos/internal/features/stock"
 	"karots-pos/internal/middleware"
 	"karots-pos/internal/money"
@@ -60,7 +59,7 @@ func (a *adminUI) StockTakeSheet(c echo.Context) error {
 		return err
 	}
 	ctx := c.Request().Context()
-	rows, _, err := a.s.products.List(ctx, products.ListQuery{Limit: 100000, Page: 1})
+	rows, err := a.s.products.ListAll(ctx)
 	if err != nil {
 		return err
 	}

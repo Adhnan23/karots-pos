@@ -174,14 +174,42 @@ const odsManifest = `<?xml version="1.0" encoding="UTF-8"?>
 </manifest:manifest>`
 
 func writeODSContent(w io.Writer, header []string, rows [][]string) error {
+	// ODF's schema requires a table to declare its columns before any rows;
+	// LibreOffice rejects a column-less table as corrupt. The column must also
+	// carry a width style — a styleless column renders at zero width in some
+	// readers (OnlyOffice), so the data is present but invisible. So we emit an
+	// automatic column style with an explicit width and reference it, matching
+	// what LibreOffice itself writes.
+	ncols := len(header)
+	for _, r := range rows {
+		if len(r) > ncols {
+			ncols = len(r)
+		}
+	}
+
 	var b bytes.Buffer
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n")
 	b.WriteString(`<office:document-content ` +
 		`xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" ` +
+		`xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" ` +
+		`xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" ` +
 		`xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" ` +
 		`xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" office:version="1.2">`)
+	b.WriteString(`<office:automatic-styles>` +
+		`<style:style style:name="co1" style:family="table-column">` +
+		`<style:table-column-properties fo:break-before="auto" style:column-width="2.5cm"/>` +
+		`</style:style>` +
+		`</office:automatic-styles>`)
 	b.WriteString(`<office:body><office:spreadsheet>`)
 	b.WriteString(`<table:table table:name="Sheet1">`)
+
+	if ncols > 0 {
+		b.WriteString(`<table:table-column table:style-name="co1"`)
+		if ncols > 1 {
+			b.WriteString(` table:number-columns-repeated="` + strconv.Itoa(ncols) + `"`)
+		}
+		b.WriteString(`/>`)
+	}
 
 	writeRow := func(cells []string) {
 		b.WriteString(`<table:table-row>`)

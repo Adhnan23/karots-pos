@@ -78,8 +78,7 @@ func (a *adminUI) ProductImportTemplate(c echo.Context) error {
 // so an owner can export, edit in a spreadsheet, and re-upload (round-trip).
 func (a *adminUI) ProductExportCSV(c echo.Context) error {
 	ctx := c.Request().Context()
-	q := products.ListQuery{Limit: 100000, Page: 1}
-	rows, _, err := a.s.products.List(ctx, q)
+	rows, err := a.s.products.ListAll(ctx)
 	if err != nil {
 		return err
 	}
