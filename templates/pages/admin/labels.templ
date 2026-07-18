@@ -29,10 +29,14 @@ templ LabelsPage(d LabelsData) {
 						<label class="block text-sm font-medium mb-1">Product</label>
 						@adminfragments.ProductPicker("product_id", 0, "", "Search product…")
 					</div>
+					<div x-show="pId && !pHasBarcode" x-cloak class="border rounded-lg px-4 py-3 text-sm">
+						<p class="text-slate-500 mb-2">This product has no barcode yet — generate one so the printed label scans at the till.</p>
+						<button type="button" x-on:click="generateProductBarcode()" x-bind:disabled="pGenBusy" class="px-4 py-2 rounded-lg bg-indigo-600 text-white font-semibold disabled:opacity-40">Generate &amp; save barcode</button>
+					</div>
 					<div class="grid grid-cols-2 gap-4">
 						<div>
 							<label class="block text-sm font-medium mb-1">Number of labels</label>
-							<input name="qty" type="number" min="1" max="200" value="12" class="w-full border rounded-lg px-3 py-2"/>
+							<input name="qty" type="number" min="1" max="200" value="12" x-ref="pQty" class="w-full border rounded-lg px-3 py-2"/>
 						</div>
 						<div class="flex items-end">
 							<label class="inline-flex items-center gap-2 text-sm">

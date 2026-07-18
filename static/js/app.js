@@ -2062,10 +2062,13 @@ function labels(sym) {
   return {
     sym: sym,
     // product form
+    pId: 0,
     pName: "",
     pCode: "",
     pPrice: "",
     pShowPrice: true,
+    pHasBarcode: false,
+    pGenBusy: false,
     // custom form
     cCode: "",
     cText: "",
@@ -2082,16 +2085,23 @@ function labels(sym) {
     },
     // onProductPick is the searchable ProductPicker's equivalent of onProduct:
     // it takes the chosen product object (from the "picked" event) and rebuilds
-    // the live preview. barcode falls back to SKU<id> (mirrors barcodeValue).
+    // the live preview. A product with no barcode leaves pCode empty (print
+    // stays disabled) and reveals the "Generate barcode" action instead of
+    // silently printing an unscannable SKU. The label-count field auto-fills
+    // with the on-hand stock quantity (editable).
     onProductPick(item) {
       if (!item) {
+        this.pId = 0;
         this.pName = "";
         this.pCode = "";
         this.pPrice = "";
+        this.pHasBarcode = false;
         return;
       }
+      this.pId = item.id || 0;
       this.pName = item.name || "";
-      this.pCode = item.barcode || "SKU" + item.id;
+      this.pHasBarcode = !!item.barcode;
+      this.pCode = item.barcode || "";
       this.pPrice =
         this.sym +
         " " +
@@ -2099,7 +2109,47 @@ function labels(sym) {
           minimumFractionDigits: 2,
           maximumFractionDigits: 2,
         });
+      if (this.$refs.pQty) {
+        this.$refs.pQty.value = String(
+          Math.max(1, Math.floor(Number(item.stock_qty) || 0)),
+        );
+      }
       this.$nextTick(() => this.draw("preview-product", this.pCode, "CODE128"));
+    },
+    // generateProductBarcode mints a fresh EAN-13 and saves it onto the picked
+    // product (which had none), so the printed label actually scans at the till.
+    async generateProductBarcode() {
+      if (!this.pId || this.pGenBusy) return;
+      this.pGenBusy = true;
+      try {
+        const gen = await fetch("/api/products/barcode/generate", {
+          credentials: "same-origin",
+        });
+        const genJson = await gen.json();
+        if (!gen.ok || !genJson.success) {
+          throw new Error(genJson?.error?.message || "Could not generate a barcode");
+        }
+        const code = genJson.data.barcode;
+        const body = new URLSearchParams({ barcode: code });
+        const save = await fetch("/api/products/" + this.pId + "/barcode", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: body,
+        });
+        const saveJson = await save.json();
+        if (!save.ok || !saveJson.success) {
+          throw new Error(saveJson?.error?.message || "Could not save the barcode");
+        }
+        this.pCode = code;
+        this.pHasBarcode = true;
+        this.$nextTick(() => this.draw("preview-product", this.pCode, "CODE128"));
+        toast("Barcode " + code + " saved to " + this.pName, "success");
+      } catch (e) {
+        toast(e.message || "Could not generate a barcode", "error");
+      } finally {
+        this.pGenBusy = false;
+      }
     },
     renderCustom() {
       this.$nextTick(() => this.draw("preview-custom", this.cCode, this.cFormat));

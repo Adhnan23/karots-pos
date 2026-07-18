@@ -59,6 +59,21 @@ func (h *APIHandler) GenerateBarcode(c echo.Context) error {
 	return response.OK(c, map[string]string{"barcode": code})
 }
 
+// AssignBarcode saves a barcode onto a product that currently has none, powering
+// the label pages' "Generate barcode" action. It is available to any signed-in
+// user (no manage role) because AssignBarcode only fills an *empty* barcode with
+// a generated, unused code — it can never overwrite an existing one.
+func (h *APIHandler) AssignBarcode(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	if err := h.svc.AssignBarcode(c.Request().Context(), id, c.FormValue("barcode")); err != nil {
+		return err
+	}
+	return response.OK(c, map[string]string{"barcode": c.FormValue("barcode")})
+}
+
 func (h *APIHandler) Create(c echo.Context) error {
 	var in CreateInput
 	if err := c.Bind(&in); err != nil {
@@ -114,6 +129,7 @@ func RegisterAPI(e *echo.Echo, db *sqlx.DB, cfg *config.Config) {
 	g.GET("/:id", api.Get)
 	g.GET("/barcode/generate", api.GenerateBarcode)
 	g.GET("/barcode/:code", api.GetByBarcode)
+	g.POST("/:id/barcode", api.AssignBarcode)
 	g.POST("", api.Create, manage)
 	g.PUT("/:id", api.Update, manage)
 	g.DELETE("/:id", api.Delete, manage)

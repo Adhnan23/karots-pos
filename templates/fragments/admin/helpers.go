@@ -102,11 +102,17 @@ func unitOptions(us []units.Unit) []PickerOption {
 	return out
 }
 
-// unitSelectedID is the product's unit when editing, else the first unit so a
-// new product defaults to a valid unit (matching the old <select>'s behaviour).
+// unitSelectedID is the product's unit when editing, else "pcs" (the most common
+// unit) when it exists, else the first available unit — so a new product always
+// defaults to a sensible, valid unit rather than whatever happens to sort first.
 func unitSelectedID(p *products.Product, us []units.Unit) int64 {
 	if p != nil {
 		return p.UnitID
+	}
+	for _, u := range us {
+		if strings.EqualFold(u.Abbreviation, "pcs") {
+			return u.ID
+		}
 	}
 	if len(us) > 0 {
 		return us[0].ID
