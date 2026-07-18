@@ -49,12 +49,13 @@ func (a *adminUI) sectionHub(key string) echo.HandlerFunc {
 		if !ok {
 			return apperr.NotFound("section")
 		}
-		// Hide the Stock-take card when the feature is turned off in Settings (the
-		// route itself is separately gated with a 403).
+		// Hide the stock-take-gated cards (Stock-take, Stock Intake) when the
+		// feature is turned off in Settings (the routes are separately 403-gated).
 		if cfg, err := a.s.settings.Get(c.Request().Context()); err == nil && cfg != nil && !cfg.StockTakeEnabled {
+			gated := map[string]bool{"/admin/stock/take": true, "/admin/inventory/intake": true}
 			links := make([]layouts.AdminLink, 0, len(sec.Links))
 			for _, l := range sec.Links {
-				if l.Href != "/admin/stock/take" {
+				if !gated[l.Href] {
 					links = append(links, l)
 				}
 			}

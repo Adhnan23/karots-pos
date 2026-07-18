@@ -1,0 +1,174 @@
+package adminpages
+
+import (
+	"karots-pos/internal/features/categories"
+	adminfragments "karots-pos/templates/fragments/admin"
+	"karots-pos/templates/layouts"
+)
+
+type IntakeData struct {
+	UserName     string
+	Symbol       string
+	Categories   []categories.TreeNode
+	UnitOptions  []adminfragments.PickerOption
+	UnitSelected int64
+}
+
+// IntakePage fuses add/restock + set-quantity + print-labels into one repeatable
+// workflow. A single search box drives two modes: pick an existing product to
+// restock/reprint, or type a new name to create it.
+templ IntakePage(d IntakeData) {
+	@layouts.Admin("Stock Intake", d.UserName, "intake") {
+		<div class="mb-6">
+			<h1 class="text-2xl font-bold">Stock Intake</h1>
+			<p class="text-sm text-slate-500">Add or restock an item, set its quantity, and print labels — one item at a time.</p>
+		</div>
+		<div class="grid grid-cols-1 lg:grid-cols-3 gap-6" x-data={ "intake('" + d.Symbol + "')" }>
+			<div class="lg:col-span-2 space-y-6">
+				<!-- Find or add -->
+				<div class="bg-white rounded-2xl shadow-sm p-6">
+					<label class="block text-sm font-medium mb-1">Find or add an item</label>
+					<div class="relative">
+						<input
+							x-ref="searchInput"
+							x-model="q"
+							x-on:input.debounce.200ms="search()"
+							x-on:focus="open = true"
+							x-on:click.away="open = false"
+							placeholder="Search an existing product, or type a new name…"
+							autocomplete="off"
+							class="w-full border rounded-lg px-3 py-2"
+						/>
+						<ul x-show="open && (results.length || q.trim())" x-cloak class="absolute z-20 mt-1 w-full bg-white border rounded-lg shadow-lg max-h-64 overflow-auto">
+							<template x-for="r in results" x-bind:key="r.id">
+								<li>
+									<button type="button" x-on:click="pickExisting(r)" class="w-full flex items-center justify-between gap-2 text-left px-3 py-2 text-sm hover:bg-slate-100">
+										<span x-text="r.name"></span>
+										<span class="text-xs text-slate-400" x-text="'on hand ' + (Number(r.stock_qty)||0) + ' ' + (r.unit_abbr||'')"></span>
+									</button>
+								</li>
+							</template>
+							<li x-show="q.trim()" class="border-t">
+								<button type="button" x-on:click="createNew()" class="w-full text-left px-3 py-2 text-sm text-indigo-600 hover:bg-slate-100">
+									＋ Create new “<span x-text="q.trim()"></span>”
+								</button>
+							</li>
+						</ul>
+					</div>
+				</div>
+
+				<!-- Create new -->
+				<form x-show="mode==='new'" x-cloak x-on:submit.prevent="createItem($event.target)" class="bg-white rounded-2xl shadow-sm p-6 space-y-4">
+					<h2 class="text-lg font-semibold">New item</h2>
+					<div>
+						<label class="block text-sm font-medium mb-1">Name</label>
+						<input name="name" required x-model="newName" class="w-full border rounded-lg px-3 py-2"/>
+					</div>
+					<div class="grid grid-cols-2 gap-4">
+						<div>
+							<label class="block text-sm font-medium mb-1">Category</label>
+							@adminfragments.CategoryPicker(d.Categories, "category_id", "", false, "", false)
+						</div>
+						<div>
+							<label class="block text-sm font-medium mb-1">Unit</label>
+							@adminfragments.OptionPicker("unit_id", d.UnitOptions, d.UnitSelected, "Select unit…")
+						</div>
+					</div>
+					<div class="grid grid-cols-2 gap-4">
+						<div>
+							<label class="block text-sm font-medium mb-1">Cost <span class="text-slate-400 font-normal">(optional)</span></label>
+							<input name="cost_price" type="number" step="0.01" min="0" class="w-full border rounded-lg px-3 py-2"/>
+						</div>
+						<div>
+							<label class="block text-sm font-medium mb-1">Selling price</label>
+							<input name="selling_price" type="number" step="0.01" min="0" class="w-full border rounded-lg px-3 py-2"/>
+						</div>
+					</div>
+					<div>
+						<label class="block text-sm font-medium mb-1">Barcode</label>
+						<div class="bc-field flex gap-2">
+							<input name="barcode" x-model="cBarcode" class="flex-1 border rounded-lg px-3 py-2"/>
+							<button type="button" onclick="generateBarcode(this)" class="px-3 py-2 rounded-lg border text-slate-700 whitespace-nowrap">Generate</button>
+						</div>
+					</div>
+					<div>
+						<label class="block text-sm font-medium mb-1">Opening quantity</label>
+						<input name="quantity" type="number" step="0.001" min="0" x-model="qty" x-on:input="labelQty = qty" class="w-full border rounded-lg px-3 py-2"/>
+					</div>
+					@intakeLabelControls()
+					<div class="flex gap-2 pt-2">
+						<button type="submit" x-bind:disabled="busy" class="px-5 py-2.5 rounded-lg bg-indigo-600 text-white font-semibold disabled:opacity-40">Create, stock &amp; print labels</button>
+						<button type="button" x-on:click="reset()" class="px-5 py-2.5 rounded-lg border text-slate-700 font-semibold">Cancel</button>
+					</div>
+				</form>
+
+				<!-- Restock existing -->
+				<form x-show="mode==='restock'" x-cloak x-on:submit.prevent="restockItem($event.target)" class="bg-white rounded-2xl shadow-sm p-6 space-y-4">
+					<input type="hidden" name="product_id" x-bind:value="pId"/>
+					<div class="flex items-baseline justify-between">
+						<h2 class="text-lg font-semibold" x-text="pName"></h2>
+						<span class="text-sm text-slate-500">on hand <span x-text="pStock"></span></span>
+					</div>
+					<div x-show="!pHasBarcode" x-cloak class="border rounded-lg px-4 py-3 text-sm">
+						<p class="text-slate-500 mb-2">This item has no barcode — generate one so the printed label scans at the till.</p>
+						<button type="button" x-on:click="genBarcode()" x-bind:disabled="pGenBusy" class="px-4 py-2 rounded-lg bg-indigo-600 text-white font-semibold disabled:opacity-40">Generate &amp; save barcode</button>
+					</div>
+					<div>
+						<label class="block text-sm font-medium mb-1">Quantity to add</label>
+						<input name="quantity" type="number" step="0.001" min="0" x-model="qty" x-on:input="labelQty = qty" class="w-full border rounded-lg px-3 py-2"/>
+					</div>
+					@intakeLabelControls()
+					<div class="flex gap-2 pt-2">
+						<button type="submit" x-bind:disabled="busy" class="px-5 py-2.5 rounded-lg bg-indigo-600 text-white font-semibold disabled:opacity-40">Add stock &amp; print labels</button>
+						<button type="button" x-on:click="reset()" class="px-5 py-2.5 rounded-lg border text-slate-700 font-semibold">Cancel</button>
+					</div>
+				</form>
+			</div>
+
+			<!-- Added this session -->
+			<div class="bg-white rounded-2xl shadow-sm p-6 self-start">
+				<h2 class="text-lg font-semibold mb-1">Added this session</h2>
+				<p class="text-sm text-slate-500 mb-4" x-show="!items.length">Items you add or restock will appear here.</p>
+				<ul class="divide-y">
+					<template x-for="it in items" x-bind:key="it.key">
+						<li class="py-3 flex items-center justify-between gap-2">
+							<div class="min-w-0">
+								<div class="text-sm font-medium truncate" x-text="it.name"></div>
+								<div class="text-xs text-slate-400">
+									<span x-text="'+' + it.qty"></span>
+									· <span x-text="it.barcode || 'no barcode'"></span>
+								</div>
+							</div>
+							<button type="button" x-show="it.barcode" x-on:click="reprint(it)" class="text-sm text-indigo-600 whitespace-nowrap">Reprint</button>
+						</li>
+					</template>
+				</ul>
+			</div>
+		</div>
+	}
+}
+
+// intakeLabelControls is the shared print block for both intake forms: a
+// print-on-save toggle, show-price, label count (defaults to the quantity), and
+// the sticker-size picker reused from the labels page.
+templ intakeLabelControls() {
+	<div class="border-t pt-4 space-y-3">
+		<label class="inline-flex items-center gap-2 text-sm">
+			<input type="checkbox" name="print_labels" value="1" x-model="printLabels"/> Print labels on save
+		</label>
+		<div x-show="printLabels" x-cloak class="space-y-3">
+			<div class="grid grid-cols-2 gap-4">
+				<div>
+					<label class="block text-sm font-medium mb-1">Number of labels</label>
+					<input name="label_qty" type="number" min="1" max="200" x-model="labelQty" class="w-full border rounded-lg px-3 py-2"/>
+				</div>
+				<div class="flex items-end">
+					<label class="inline-flex items-center gap-2 text-sm">
+						<input type="checkbox" name="show_price" value="1" x-model="showPrice"/> Show price
+					</label>
+				</div>
+			</div>
+			@labelSizePicker()
+		</div>
+	</div>
+}

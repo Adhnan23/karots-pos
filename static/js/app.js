@@ -2178,6 +2178,215 @@ function labels(sym) {
   };
 }
 
+// intake powers the Stock Intake page: one search box drives two modes — pick an
+// existing product to restock/reprint, or type a new name to create it — then set
+// quantity and (optionally) print labels, accumulating an "added this session"
+// list. Saves post form-encoded so the Go handlers can read form values; printing
+// reuses the existing /admin/labels/send endpoint.
+function intake(sym) {
+  return {
+    sym: sym,
+    mode: "", // "" | "new" | "restock"
+    q: "",
+    results: [],
+    open: false,
+    // restock target
+    pId: 0,
+    pName: "",
+    pBarcode: "",
+    pHasBarcode: false,
+    pStock: 0,
+    pGenBusy: false,
+    // create
+    newName: "",
+    cBarcode: "",
+    // shared form state
+    qty: "",
+    labelQty: "1",
+    printLabels: true,
+    showPrice: false,
+    // session list
+    items: [],
+    seq: 0,
+    busy: false,
+
+    async search() {
+      const s = (this.q || "").trim();
+      if (!s) {
+        this.results = [];
+        return;
+      }
+      try {
+        const json = await apiFetch(
+          "GET",
+          "/api/products?search=" + encodeURIComponent(s) + "&limit=20",
+        );
+        this.results = json.data || [];
+        this.open = true;
+      } catch (_) {
+        this.results = [];
+      }
+    },
+    pickExisting(r) {
+      this.mode = "restock";
+      this.pId = r.id;
+      this.pName = r.name;
+      this.pBarcode = r.barcode || "";
+      this.pHasBarcode = !!r.barcode;
+      this.pStock = Number(r.stock_qty) || 0;
+      this.q = r.name;
+      this.qty = "";
+      this.labelQty = "1";
+      this.open = false;
+    },
+    createNew() {
+      this.mode = "new";
+      this.newName = (this.q || "").trim();
+      this.cBarcode = "";
+      this.qty = "";
+      this.labelQty = "1";
+      this.open = false;
+    },
+    reset() {
+      this.mode = "";
+      this.q = "";
+      this.results = [];
+      this.open = false;
+      this.pId = 0;
+      this.pName = "";
+      this.pBarcode = "";
+      this.pHasBarcode = false;
+      this.pStock = 0;
+      this.newName = "";
+      this.cBarcode = "";
+      this.qty = "";
+      this.labelQty = "1";
+      this.$nextTick(() => this.$refs.searchInput && this.$refs.searchInput.focus());
+    },
+    // genBarcode mints + saves an EAN-13 onto the picked barcode-less product.
+    async genBarcode() {
+      if (!this.pId || this.pGenBusy) return;
+      this.pGenBusy = true;
+      try {
+        const gen = await fetch("/api/products/barcode/generate", {
+          credentials: "same-origin",
+        });
+        const gj = await gen.json();
+        if (!gen.ok || !gj.success) {
+          throw new Error(gj?.error?.message || "Could not generate a barcode");
+        }
+        const code = gj.data.barcode;
+        const save = await fetch("/api/products/" + this.pId + "/barcode", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ barcode: code }),
+        });
+        const sj = await save.json();
+        if (!save.ok || !sj.success) {
+          throw new Error(sj?.error?.message || "Could not save the barcode");
+        }
+        this.pBarcode = code;
+        this.pHasBarcode = true;
+        toast("Barcode " + code + " saved", "success");
+      } catch (e) {
+        toast(e.message || "Could not generate a barcode", "error");
+      } finally {
+        this.pGenBusy = false;
+      }
+    },
+    async postForm(url, form) {
+      const res = await fetch(url, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams(new FormData(form)),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json?.error?.message || "Request failed");
+      }
+      return json.data;
+    },
+    async createItem(form) {
+      if (this.busy) return;
+      this.busy = true;
+      try {
+        const item = await this.postForm("/admin/inventory/intake/create", form);
+        await this.afterSave(item, form);
+      } catch (e) {
+        toast(e.message || "Could not save the item", "error");
+      } finally {
+        this.busy = false;
+      }
+    },
+    async restockItem(form) {
+      if (this.busy) return;
+      this.busy = true;
+      try {
+        const item = await this.postForm("/admin/inventory/intake/restock", form);
+        await this.afterSave(item, form);
+      } catch (e) {
+        toast(e.message || "Could not add stock", "error");
+      } finally {
+        this.busy = false;
+      }
+    },
+    async afterSave(item, form) {
+      if (this.printLabels && item.barcode) {
+        try {
+          await this.sendLabels(item.id, new FormData(form));
+        } catch (_) {
+          toast("Saved, but printing failed — use Reprint", "error");
+        }
+      } else if (this.printLabels && !item.barcode) {
+        toast("Saved. Add a barcode to print a label.", "info");
+      } else {
+        toast("Saved", "success");
+      }
+      item.key = ++this.seq;
+      this.items.unshift(item);
+      this.reset();
+    },
+    async sendLabels(productId, fd) {
+      const p = new URLSearchParams();
+      p.set("product_id", String(productId));
+      p.set("qty", fd.get("label_qty") || "1");
+      if (fd.get("show_price")) p.set("show_price", "1");
+      p.set("label_size", fd.get("label_size") || "default");
+      if (fd.get("label_w")) p.set("label_w", fd.get("label_w"));
+      if (fd.get("label_h")) p.set("label_h", fd.get("label_h"));
+      if (fd.get("label_gap")) p.set("label_gap", fd.get("label_gap"));
+      const res = await fetch("/admin/labels/send", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: p,
+      });
+      if (!res.ok) throw new Error("print failed");
+    },
+    async reprint(it) {
+      try {
+        const p = new URLSearchParams({
+          product_id: String(it.id),
+          qty: String(Math.max(1, Math.floor(Number(it.qty)) || 1)),
+          label_size: "default",
+        });
+        const res = await fetch("/admin/labels/send", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: p,
+        });
+        if (!res.ok) throw new Error("print failed");
+        toast("Reprinted " + it.name, "success");
+      } catch (_) {
+        toast("Could not reprint", "error");
+      }
+    },
+  };
+}
+
 // themeToggle: light ⇄ dark switch. The class lives on <html> (set pre-paint by
 // the inline script in Base); we just flip it and remember the choice.
 function themeToggle() {
