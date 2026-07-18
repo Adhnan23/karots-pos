@@ -470,23 +470,36 @@ func (a *adminUI) StockTake(c echo.Context) error {
 func (a *adminUI) stockTakeData(c echo.Context, saved int) (adminpages.StockTakeData, error) {
 	ctx := c.Request().Context()
 	search := strings.TrimSpace(c.FormValue("search"))
+	catParam := strings.TrimSpace(c.FormValue("category_id"))
 	page := 1
 	if v, err := strconv.Atoi(c.FormValue("page")); err == nil && v > 1 {
 		page = v
 	}
-	prods, total, err := a.s.products.List(ctx, products.ListQuery{Search: search, Page: page, Limit: stockTakePageSize})
+	q := products.ListQuery{Search: search, Page: page, Limit: stockTakePageSize}
+	if catParam != "" {
+		if id, perr := strconv.ParseInt(catParam, 10, 64); perr == nil {
+			q.CategoryID = &id
+		}
+	}
+	prods, total, err := a.s.products.List(ctx, q)
+	if err != nil {
+		return adminpages.StockTakeData{}, err
+	}
+	cats, err := a.s.categories.Tree(ctx)
 	if err != nil {
 		return adminpages.StockTakeData{}, err
 	}
 	hasNext := page*stockTakePageSize < total
 	return adminpages.StockTakeData{
-		UserName: middleware.CurrentUserName(c),
-		Symbol:   a.symbol(ctx),
-		Rows:     prods,
-		Search:   search,
-		Page:     page,
-		HasNext:  hasNext,
-		Saved:    saved,
+		UserName:   middleware.CurrentUserName(c),
+		Symbol:     a.symbol(ctx),
+		Rows:       prods,
+		Categories: cats,
+		Search:     search,
+		CategoryID: catParam,
+		Page:       page,
+		HasNext:    hasNext,
+		Saved:      saved,
 	}, nil
 }
 

@@ -19,6 +19,8 @@ type IntakeData struct {
 // restock/reprint, or type a new name to create it.
 templ IntakePage(d IntakeData) {
 	@layouts.Admin("Stock Intake", d.UserName, "intake") {
+		<!-- JsBarcode powers the live label preview (same as the labels page). -->
+		<script src="/static/vendor/jsbarcode.min.js"></script>
 		<div class="mb-6">
 			<h1 class="text-2xl font-bold">Stock Intake</h1>
 			<p class="text-sm text-slate-500">Add or restock an item, set its quantity, and print labels — one item at a time.</p>
@@ -87,7 +89,7 @@ templ IntakePage(d IntakeData) {
 					<div>
 						<label class="block text-sm font-medium mb-1">Barcode</label>
 						<div class="bc-field flex gap-2">
-							<input name="barcode" x-model="cBarcode" class="flex-1 border rounded-lg px-3 py-2"/>
+							<input name="barcode" x-model="cBarcode" x-on:input="drawNew()" class="flex-1 border rounded-lg px-3 py-2"/>
 							<button type="button" onclick="generateBarcode(this)" class="px-3 py-2 rounded-lg border text-slate-700 whitespace-nowrap">Generate</button>
 						</div>
 					</div>
@@ -95,9 +97,13 @@ templ IntakePage(d IntakeData) {
 						<label class="block text-sm font-medium mb-1">Opening quantity</label>
 						<input name="quantity" type="number" step="0.001" min="0" x-model="qty" x-on:input="labelQty = qty" class="w-full border rounded-lg px-3 py-2"/>
 					</div>
+					@intakeBarcodePreview("intake-preview-new", "newName", "cBarcode")
 					@intakeLabelControls()
 					<div class="flex gap-2 pt-2">
-						<button type="submit" x-bind:disabled="busy" class="px-5 py-2.5 rounded-lg bg-indigo-600 text-white font-semibold disabled:opacity-40">Create, stock &amp; print labels</button>
+						<button type="submit" x-bind:disabled="busy" class="px-5 py-2.5 rounded-lg bg-indigo-600 text-white font-semibold disabled:opacity-40">
+							<span x-show="printLabels">Create, stock &amp; print labels</span>
+							<span x-show="!printLabels" x-cloak>Create &amp; stock</span>
+						</button>
 						<button type="button" x-on:click="reset()" class="px-5 py-2.5 rounded-lg border text-slate-700 font-semibold">Cancel</button>
 					</div>
 				</form>
@@ -113,13 +119,31 @@ templ IntakePage(d IntakeData) {
 						<p class="text-slate-500 mb-2">This item has no barcode — generate one so the printed label scans at the till.</p>
 						<button type="button" x-on:click="genBarcode()" x-bind:disabled="pGenBusy" class="px-4 py-2 rounded-lg bg-indigo-600 text-white font-semibold disabled:opacity-40">Generate &amp; save barcode</button>
 					</div>
+					<div class="grid grid-cols-3 gap-4">
+						<div>
+							<label class="block text-sm font-medium mb-1">Cost</label>
+							<input name="cost_price" type="number" step="0.01" min="0" x-model="pCost" class="w-full border rounded-lg px-3 py-2"/>
+						</div>
+						<div>
+							<label class="block text-sm font-medium mb-1">Selling</label>
+							<input name="selling_price" type="number" step="0.01" min="0" x-model="pSelling" class="w-full border rounded-lg px-3 py-2"/>
+						</div>
+						<div>
+							<label class="block text-sm font-medium mb-1">Wholesale</label>
+							<input name="wholesale_price" type="number" step="0.01" min="0" x-model="pWholesale" class="w-full border rounded-lg px-3 py-2"/>
+						</div>
+					</div>
 					<div>
 						<label class="block text-sm font-medium mb-1">Quantity to add</label>
 						<input name="quantity" type="number" step="0.001" min="0" x-model="qty" x-on:input="labelQty = qty" class="w-full border rounded-lg px-3 py-2"/>
 					</div>
+					@intakeBarcodePreview("intake-preview-restock", "pName", "pBarcode")
 					@intakeLabelControls()
 					<div class="flex gap-2 pt-2">
-						<button type="submit" x-bind:disabled="busy" class="px-5 py-2.5 rounded-lg bg-indigo-600 text-white font-semibold disabled:opacity-40">Add stock &amp; print labels</button>
+						<button type="submit" x-bind:disabled="busy" class="px-5 py-2.5 rounded-lg bg-indigo-600 text-white font-semibold disabled:opacity-40">
+							<span x-show="printLabels">Add stock &amp; print labels</span>
+							<span x-show="!printLabels" x-cloak>Add stock</span>
+						</button>
 						<button type="button" x-on:click="reset()" class="px-5 py-2.5 rounded-lg border text-slate-700 font-semibold">Cancel</button>
 					</div>
 				</form>
@@ -146,6 +170,18 @@ templ IntakePage(d IntakeData) {
 			</div>
 		</div>
 	}
+}
+
+// intakeBarcodePreview renders a live JsBarcode preview of the item's label,
+// drawn into svgID by the intake() component whenever the code changes.
+templ intakeBarcodePreview(svgID, nameVar, codeVar string) {
+	<div class="border-t pt-4" x-show={ codeVar } x-cloak>
+		<div class="text-xs text-slate-400 mb-2">Label preview</div>
+		<div class="inline-flex flex-col items-center gap-1 border rounded-lg px-4 py-3 min-w-[180px]">
+			<div class="text-sm font-medium" x-text={ nameVar }></div>
+			<svg id={ svgID }></svg>
+		</div>
+	</div>
 }
 
 // intakeLabelControls is the shared print block for both intake forms: a

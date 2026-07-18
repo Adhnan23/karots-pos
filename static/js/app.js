@@ -2196,6 +2196,9 @@ function intake(sym) {
     pBarcode: "",
     pHasBarcode: false,
     pStock: 0,
+    pCost: "",
+    pSelling: "",
+    pWholesale: "",
     pGenBusy: false,
     // create
     newName: "",
@@ -2204,7 +2207,7 @@ function intake(sym) {
     qty: "",
     labelQty: "1",
     printLabels: true,
-    showPrice: false,
+    showPrice: true,
     // session list
     items: [],
     seq: 0,
@@ -2234,10 +2237,14 @@ function intake(sym) {
       this.pBarcode = r.barcode || "";
       this.pHasBarcode = !!r.barcode;
       this.pStock = Number(r.stock_qty) || 0;
+      this.pCost = r.cost_price != null ? String(r.cost_price) : "";
+      this.pSelling = r.selling_price != null ? String(r.selling_price) : "";
+      this.pWholesale = r.wholesale_price != null ? String(r.wholesale_price) : "";
       this.q = r.name;
       this.qty = "";
       this.labelQty = "1";
       this.open = false;
+      this.drawRestock();
     },
     createNew() {
       this.mode = "new";
@@ -2246,6 +2253,7 @@ function intake(sym) {
       this.qty = "";
       this.labelQty = "1";
       this.open = false;
+      this.drawNew();
     },
     reset() {
       this.mode = "";
@@ -2257,11 +2265,41 @@ function intake(sym) {
       this.pBarcode = "";
       this.pHasBarcode = false;
       this.pStock = 0;
+      this.pCost = "";
+      this.pSelling = "";
+      this.pWholesale = "";
       this.newName = "";
       this.cBarcode = "";
       this.qty = "";
       this.labelQty = "1";
       this.$nextTick(() => this.$refs.searchInput && this.$refs.searchInput.focus());
+    },
+    // --- live barcode preview (JsBarcode) ---
+    drawInto(id, code) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      if (!code) {
+        el.innerHTML = "";
+        return;
+      }
+      try {
+        JsBarcode(el, code, {
+          format: "CODE128",
+          displayValue: true,
+          fontSize: 12,
+          height: 38,
+          margin: 2,
+          width: 1.4,
+        });
+      } catch (_) {
+        el.innerHTML = "";
+      }
+    },
+    drawNew() {
+      this.$nextTick(() => this.drawInto("intake-preview-new", this.cBarcode));
+    },
+    drawRestock() {
+      this.$nextTick(() => this.drawInto("intake-preview-restock", this.pBarcode));
     },
     // genBarcode mints + saves an EAN-13 onto the picked barcode-less product.
     async genBarcode() {
@@ -2288,6 +2326,7 @@ function intake(sym) {
         }
         this.pBarcode = code;
         this.pHasBarcode = true;
+        this.drawRestock();
         toast("Barcode " + code + " saved", "success");
       } catch (e) {
         toast(e.message || "Could not generate a barcode", "error");

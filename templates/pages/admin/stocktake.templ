@@ -4,6 +4,7 @@ import (
 	"net/url"
 	"strconv"
 
+	"karots-pos/internal/features/categories"
 	"karots-pos/internal/features/products"
 	"karots-pos/internal/money"
 	adminfragments "karots-pos/templates/fragments/admin"
@@ -11,13 +12,15 @@ import (
 )
 
 type StockTakeData struct {
-	UserName string
-	Symbol   string
-	Rows     []products.Product
-	Search   string
-	Page     int
-	HasNext  bool
-	Saved    int // -1 = page just opened; >=0 = number of counts applied on the last save
+	UserName   string
+	Symbol     string
+	Rows       []products.Product
+	Categories []categories.TreeNode
+	Search     string
+	CategoryID string
+	Page       int
+	HasNext    bool
+	Saved      int // -1 = page just opened; >=0 = number of counts applied on the last save
 }
 
 // StockTakePage is the bulk opening-stock / stock-take screen. Enter a counted
@@ -59,13 +62,17 @@ templ StockTakePage(d StockTakeData) {
 			</div>
 		}
 
-		<form method="get" action="/admin/stock/take" class="flex gap-3 mb-4">
-			<input type="search" name="search" value={ d.Search } placeholder="Search by name or barcode…" class="flex-1 max-w-sm border rounded-lg px-3 py-2"/>
+		<form method="get" action="/admin/stock/take" class="flex flex-wrap gap-3 mb-4" x-on:category-changed="$el.submit()">
+			<input type="search" name="search" value={ d.Search } placeholder="Search by name or barcode…" class="flex-1 min-w-[14rem] max-w-sm border rounded-lg px-3 py-2"/>
+			<div class="w-56">
+				@adminfragments.CategoryPicker(d.Categories, "category_id", d.CategoryID, true, "All categories", true)
+			</div>
 			<button class="px-4 py-2 rounded-lg border font-medium">Search</button>
 		</form>
 
 		<form method="post" action="/admin/stock/take" class="bg-white rounded-2xl shadow-sm p-6">
 			<input type="hidden" name="search" value={ d.Search }/>
+			<input type="hidden" name="category_id" value={ d.CategoryID }/>
 			<input type="hidden" name="page" value={ strconv.Itoa(d.Page) }/>
 			<table class="w-full text-sm">
 				<thead class="text-left text-slate-500 border-b">
@@ -110,13 +117,13 @@ templ StockTakePage(d StockTakeData) {
 				<div class="flex items-center justify-between mt-4">
 					<div class="flex items-center gap-2 text-sm">
 						if d.Page > 1 {
-							<a href={ templ.SafeURL(stockTakeURL(d.Search, d.Page-1)) } class="px-3 py-1.5 rounded-lg border hover:bg-slate-50">← Prev</a>
+							<a href={ templ.SafeURL(stockTakeURL(d.Search, d.CategoryID, d.Page-1)) } class="px-3 py-1.5 rounded-lg border hover:bg-slate-50">← Prev</a>
 						}
 						if d.Page > 1 || d.HasNext {
 							<span class="text-slate-500">Page { strconv.Itoa(d.Page) }</span>
 						}
 						if d.HasNext {
-							<a href={ templ.SafeURL(stockTakeURL(d.Search, d.Page+1)) } class="px-3 py-1.5 rounded-lg border hover:bg-slate-50">Next →</a>
+							<a href={ templ.SafeURL(stockTakeURL(d.Search, d.CategoryID, d.Page+1)) } class="px-3 py-1.5 rounded-lg border hover:bg-slate-50">Next →</a>
 						}
 					</div>
 					<button class="px-5 py-2.5 rounded-lg bg-indigo-600 text-white font-medium">Save counts</button>
@@ -127,11 +134,14 @@ templ StockTakePage(d StockTakeData) {
 	}
 }
 
-// stockTakeURL builds a stock-take page link preserving the search filter.
-func stockTakeURL(search string, page int) string {
+// stockTakeURL builds a stock-take page link preserving the search + category filters.
+func stockTakeURL(search, categoryID string, page int) string {
 	v := url.Values{}
 	if search != "" {
 		v.Set("search", search)
+	}
+	if categoryID != "" {
+		v.Set("category_id", categoryID)
 	}
 	v.Set("page", strconv.Itoa(page))
 	return "/admin/stock/take?" + v.Encode()

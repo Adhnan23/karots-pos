@@ -112,6 +112,34 @@ func (a *adminUI) IntakeRestock(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+
+	// Optional price edits (stock-take style): apply cost first so the
+	// adjustment batch below is valued at the new cost, then selling/wholesale.
+	// A blank field leaves that price unchanged.
+	if costStr := strings.TrimSpace(c.FormValue("cost_price")); costStr != "" {
+		if cost, cerr := money.Parse(costStr); cerr == nil && !p.CostPrice.Equal(cost) {
+			if serr := a.s.products.SetCost(ctx, id, cost); serr != nil {
+				return serr
+			}
+		}
+	}
+	sellStr := strings.TrimSpace(c.FormValue("selling_price"))
+	wholeStr := strings.TrimSpace(c.FormValue("wholesale_price"))
+	if sellStr != "" || wholeStr != "" {
+		sell, whole := p.SellingPrice, p.WholesalePrice
+		if v, verr := money.Parse(sellStr); sellStr != "" && verr == nil {
+			sell = v
+		}
+		if v, verr := money.Parse(wholeStr); wholeStr != "" && verr == nil {
+			whole = v
+		}
+		if !sell.Equal(p.SellingPrice) || !whole.Equal(p.WholesalePrice) {
+			if serr := a.s.products.SetPrices(ctx, id, sell, whole); serr != nil {
+				return serr
+			}
+		}
+	}
+
 	newQty := p.StockQty.Add(add)
 	if aerr := a.s.stock.Adjust(ctx, stock.AdjustInput{
 		ProductID:   id,
