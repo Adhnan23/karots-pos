@@ -991,6 +991,11 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections) {
     async scanBarcode() {
       const code = this.scan.trim();
       if (!code) return;
+      // Quick-Sell rush handoff from the phone app: a "KQ<barcode>X<qty>" code
+      // carries one product AND its quantity. Detect it before a normal lookup.
+      if (/^KQ\d+X\d+$/i.test(code)) {
+        return this.scanQuickSale(code);
+      }
       try {
         const json = await apiFetch("GET", `/api/products/barcode/${encodeURIComponent(code)}`, undefined, { silent: true });
         this.addToCart(json.data);
@@ -1001,6 +1006,47 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections) {
         // instead of a dead-end. Other errors still surface a toast.
         if (e && e.status === 404) {
           this.openQuickItem(code);
+        } else {
+          toast((e && e.message) || "Lookup failed", "error");
+        }
+      }
+    },
+    // scanQuickSale handles a phone Quick-Sell barcode "KQ<barcode>X<qty>":
+    // resolve the product by its real (numeric) barcode and SET that cart line's
+    // quantity to <qty>. Idempotent by design — re-scanning the same code re-sets
+    // the qty rather than adding again, so an accidental double-scan can't double
+    // the sale.
+    async scanQuickSale(code) {
+      this.scan = "";
+      const m = /^KQ(\d+)X(\d+)$/i.exec(code);
+      if (!m) {
+        toast("Unreadable quick-sale code", "error");
+        return;
+      }
+      const barcode = m[1];
+      const qty = Number(m[2]) || 0;
+      if (qty <= 0) {
+        toast("Quick-sale code has no quantity", "error");
+        return;
+      }
+      try {
+        const json = await apiFetch("GET", `/api/products/barcode/${encodeURIComponent(barcode)}`, undefined, { silent: true });
+        const p = json.data;
+        let line = this.cart.find((x) => x.id === p.id);
+        if (!line) {
+          this.addToCart(p);
+          line = this.cart.find((x) => x.id === p.id);
+        }
+        if (line) {
+          line.qty = line.allowDecimal ? qty : Math.round(qty);
+          this.syncSerials(line);
+        }
+        toast(`${p.name} × ${qty}`, "success");
+      } catch (e) {
+        // No such product: the phone item isn't in this POS catalog — tell the
+        // cashier to key it in rather than silently dropping it.
+        if (e && e.status === 404) {
+          toast(`No item with barcode ${barcode} — add it manually`, "error");
         } else {
           toast((e && e.message) || "Lookup failed", "error");
         }
