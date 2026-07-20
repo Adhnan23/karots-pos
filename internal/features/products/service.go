@@ -28,6 +28,21 @@ func NewService(db *sqlx.DB) *Service {
 
 func (s *Service) List(ctx context.Context, q ListQuery) ([]Product, int, error) {
 	q.Normalize()
+	rows, total, err := s.listOnce(ctx, q)
+	if err != nil {
+		return nil, 0, err
+	}
+	// Typo rescue: only when an exact-word search found nothing does it fall
+	// back to fuzzy matching. Running fuzzy first would pad searches that
+	// already work with near-misses the user did not ask for.
+	if total == 0 && !q.Fuzzy && len(searchTokens(q.Search)) > 0 {
+		q.Fuzzy = true
+		return s.listOnce(ctx, q)
+	}
+	return rows, total, nil
+}
+
+func (s *Service) listOnce(ctx context.Context, q ListQuery) ([]Product, int, error) {
 	rows, err := s.repo.List(ctx, q)
 	if err != nil {
 		return nil, 0, apperr.Internal("failed to list products", err)

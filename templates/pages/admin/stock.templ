@@ -102,17 +102,6 @@ func movFilterID(s string) int64 {
 	return id
 }
 
-// movFilterName resolves the filtered product's name for seeding the picker box.
-func movFilterName(prods []products.Product, s string) string {
-	id, _ := strconv.ParseInt(s, 10, 64)
-	for _, p := range prods {
-		if p.ID == id {
-			return p.Name
-		}
-	}
-	return ""
-}
-
 templ StockLevelRows(prods []products.Product) {
 	if len(prods) == 0 {
 		<tr><td colspan="4" class="py-6 text-center text-slate-500">No products yet.</td></tr>
@@ -155,24 +144,36 @@ templ MovementRows(rows []stock.Movement) {
 
 type StockMovementsData struct {
 	UserName  string
-	Products  []products.Product
 	Movements []stock.Movement
 	MoveType  string
 	ProductID string
+	// FilterName is the selected product's name, resolved by ID rather than by
+	// scanning a page of products (which silently blanked out beyond page 1).
+	FilterName     string
+	Preset         string
+	From, To       string
+	// Total is every movement matching the filter; Movements is one page of it.
+	// The page used to show the most recent 300 with no hint that older rows
+	// existed — an audit trail you cannot fully audit.
+	Total, Page, PageSize int
 }
 
 // StockMovementsPage is the full audit trail of stock in/out: who, when, why.
 templ StockMovementsPage(d StockMovementsData) {
 	@layouts.Admin("Stock Movements", d.UserName, "stock") {
 		<div class="flex items-center justify-between mb-6">
-			<h1 class="text-2xl font-bold">Stock Movement History</h1>
+			<div>
+				<h1 class="text-2xl font-bold">Stock Movement History</h1>
+				<p class="text-sm text-slate-500">{ strconv.Itoa(d.Total) } movements match this filter</p>
+			</div>
 			<a href="/admin/stock" class="text-slate-500 hover:underline">← Back to Inventory</a>
 		</div>
 		<div class="bg-white rounded-2xl shadow-sm p-6">
+			@filterPresetRow(movQuery(d), d.Preset)
 			<form class="flex flex-wrap items-end gap-3 mb-4" method="get" action="/admin/stock/movements">
 				<div class="w-56">
 					<label class="block text-xs text-slate-500 mb-1">Product</label>
-					@adminfragments.ProductPicker("product_id", movFilterID(d.ProductID), movFilterName(d.Products, d.ProductID), "All products")
+					@adminfragments.ProductPicker("product_id", movFilterID(d.ProductID), d.FilterName, "All products")
 				</div>
 				<div>
 					<label class="block text-xs text-slate-500 mb-1">Type</label>
@@ -183,9 +184,22 @@ templ StockMovementsPage(d StockMovementsData) {
 						@moveTypeOption("adjust", "Adjustment", d.MoveType)
 						@moveTypeOption("return", "Return", d.MoveType)
 						@moveTypeOption("damage", "Damage", d.MoveType)
+						@moveTypeOption("conversion", "Conversion", d.MoveType)
+						@moveTypeOption("purchase_return", "Purchase return", d.MoveType)
+						@moveTypeOption("warranty_replacement", "Warranty", d.MoveType)
+						@moveTypeOption("recovery", "Recovery", d.MoveType)
 					</select>
 				</div>
+				<div>
+					<label class="block text-xs text-slate-500 mb-1">From</label>
+					<input type="date" name="from" value={ d.From } class="border rounded-lg px-2 py-1.5 text-sm"/>
+				</div>
+				<div>
+					<label class="block text-xs text-slate-500 mb-1">To</label>
+					<input type="date" name="to" value={ d.To } class="border rounded-lg px-2 py-1.5 text-sm"/>
+				</div>
 				<button type="submit" class="px-4 py-1.5 rounded-lg bg-indigo-600 text-white text-sm font-medium">Filter</button>
+				<a class="px-4 py-1.5 rounded-lg border text-sm" href={ templ.SafeURL(pgHref(movQuery(d), 1) + "&format=csv") }>Download CSV</a>
 			</form>
 			<table class="w-full text-sm">
 				<thead class="text-left text-slate-500 border-b">
@@ -215,6 +229,7 @@ templ StockMovementsPage(d StockMovementsData) {
 					}
 				</tbody>
 			</table>
+			@rptPager(movQuery(d), d.Page, d.PageSize, d.Total)
 		</div>
 	}
 }
@@ -278,7 +293,7 @@ templ moveTypeOption(value, label, selected string) {
 	}
 }
 
-templ DamageForm(prods []products.Product) {
+templ DamageForm() {
 	@modalShell("Record Damage / Write-off") {
 		<form class="p-6 space-y-4" hx-post="/admin/stock/damage" hx-swap="none">
 			<div>

@@ -102,9 +102,17 @@ func (r *Repository) InsertMovement(ctx context.Context, m MovementInput) error 
 	return err
 }
 
+// MaxMovementLimit is the largest page ListMovements will serve.
+const MaxMovementLimit = 500
+
 func (r *Repository) ListMovements(ctx context.Context, productID *int64, mtype string, limit int) ([]Movement, error) {
-	if limit <= 0 || limit > 500 {
+	// Clamp DOWN TO the maximum, never below it. The old "> 500 → 100" rule
+	// meant over-asking returned fewer rows than a modest request.
+	switch {
+	case limit <= 0:
 		limit = 100
+	case limit > MaxMovementLimit:
+		limit = MaxMovementLimit
 	}
 	var t *string
 	if mtype != "" {
@@ -121,4 +129,48 @@ func (r *Repository) ListMovements(ctx context.Context, productID *int64, mtype 
 		ORDER BY m.created_at DESC
 		LIMIT $3`, productID, t, limit)
 	return rows, err
+}
+
+// MovementFilter drives the paged audit-trail view: the movement history is
+// append-only and grows with every sale, so it must be filtered and paged
+// rather than read as "the most recent N".
+type MovementFilter struct {
+	ProductID *int64
+	Type      string
+	From, To  *time.Time
+	Limit     int
+	Offset    int
+}
+
+// movementWhere is shared by the list and the count so a page can never be
+// filtered differently from the total shown beside it.
+const movementWhere = `
+	WHERE ($1::bigint      IS NULL OR m.product_id = $1)
+	  AND ($2::text        IS NULL OR m.type = $2::stock_movement_type)
+	  AND ($3::timestamptz IS NULL OR m.created_at >= $3)
+	  AND ($4::timestamptz IS NULL OR m.created_at <  $4)`
+
+// FindMovements returns one page of the audit trail, newest first. The id is a
+// tiebreaker so two movements written in the same instant can't swap places
+// between pages and hide a row.
+func (r *Repository) FindMovements(ctx context.Context, f MovementFilter) ([]Movement, error) {
+	var rows []Movement
+	err := r.q.SelectContext(ctx, &rows, `
+		SELECT m.*, p.name AS product_name, u.name AS user_name
+		FROM stock_movements m
+		JOIN products p ON p.id = m.product_id
+		JOIN users u    ON u.id = m.user_id`+movementWhere+`
+		ORDER BY m.created_at DESC, m.id DESC
+		LIMIT NULLIF($5, 0) OFFSET $6`,
+		f.ProductID, nilIfEmpty(f.Type), f.From, f.To, f.Limit, f.Offset)
+	return rows, err
+}
+
+// CountMovements is how many movements match the filter, ignoring paging.
+func (r *Repository) CountMovements(ctx context.Context, f MovementFilter) (int, error) {
+	var n int
+	err := r.q.GetContext(ctx, &n, `
+		SELECT count(*) FROM stock_movements m`+movementWhere,
+		f.ProductID, nilIfEmpty(f.Type), f.From, f.To)
+	return n, err
 }

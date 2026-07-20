@@ -366,15 +366,10 @@ func (a *adminUI) PurchaseReturnEntry(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	prods, _, err := a.s.products.List(ctx, products.ListQuery{Limit: 500})
-	if err != nil {
-		return err
-	}
 	return response.RenderPage(c, adminpages.PurchaseReturnEntryPage(adminpages.PurchaseReturnEntryData{
 		UserName:  middleware.CurrentUserName(c),
 		Symbol:    a.symbol(ctx),
 		Suppliers: sups,
-		Products:  prods,
 	}))
 }
 
@@ -673,14 +668,11 @@ func normalizeParent(p *int64) *int64 {
 
 func (a *adminUI) Labels(c echo.Context) error {
 	ctx := c.Request().Context()
-	prods, _, err := a.s.products.List(ctx, products.ListQuery{Limit: 500})
-	if err != nil {
-		return err
-	}
+	// The page picks products through the searchable ProductPicker, so no
+	// product list is loaded here.
 	return response.RenderPage(c, adminpages.LabelsPage(adminpages.LabelsData{
 		UserName: middleware.CurrentUserName(c),
 		Symbol:   a.symbol(ctx),
-		Products: prods,
 	}))
 }
 
@@ -843,30 +835,127 @@ func (a *adminUI) LabelsSend(c echo.Context) error { return a.s.sendLabel(c) }
 
 func (a *adminUI) Conversions(c echo.Context) error {
 	ctx := c.Request().Context()
-	rows, err := a.s.conversions.List(ctx)
+	search := c.QueryParam("search")
+	rows, err := a.s.conversions.List(ctx, search)
 	if err != nil {
 		return err
 	}
 	return response.RenderPage(c, adminpages.ConversionsPage(adminpages.ConversionsData{
 		UserName: middleware.CurrentUserName(c),
 		Rows:     rows,
+		Search:   search,
 	}))
 }
 
 func (a *adminUI) ConversionsTable(c echo.Context) error {
-	rows, err := a.s.conversions.List(c.Request().Context())
+	rows, err := a.s.conversions.List(c.Request().Context(), c.QueryParam("search"))
 	if err != nil {
 		return err
 	}
 	return response.RenderFragment(c, adminpages.ConversionRows(rows))
 }
 
-func (a *adminUI) ConversionForm(c echo.Context) error {
-	prods, _, err := a.s.products.List(c.Request().Context(), products.ListQuery{Limit: 500})
+// ConversionEditForm opens the recipe editor. Only the ratio and note are
+// editable: changing which products a conversion joins would silently rewrite
+// the meaning of every past run that points at it.
+func (a *adminUI) ConversionEditForm(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	cv, err := a.s.conversions.Get(c.Request().Context(), id)
 	if err != nil {
 		return err
 	}
-	return response.RenderFragment(c, adminpages.ConversionForm(prods))
+	return response.RenderFragment(c, adminpages.ConversionEditForm(*cv))
+}
+
+func (a *adminUI) ConversionUpdate(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	var in conversions.UpdateInput
+	if err := c.Bind(&in); err != nil {
+		return apperr.BadRequest("invalid form")
+	}
+	if _, err := a.s.conversions.Update(c.Request().Context(), id, in); err != nil {
+		return err
+	}
+	a.s.logAudit(c, audit.ActionUpdate, "conversion", strconv.FormatInt(id, 10), "ratio "+in.Ratio)
+	return htmxDone(c, "Conversion updated", "reload-conversions")
+}
+
+// ConversionRuns is the history of every conversion actually performed — the
+// audit trail for a stock change that no other screen explains.
+func (a *adminUI) ConversionRuns(c echo.Context) error {
+	ctx := c.Request().Context()
+	var f conversions.RunFilter
+	if v := c.QueryParam("conversion_id"); v != "" {
+		if id, perr := strconv.ParseInt(v, 10, 64); perr == nil && id > 0 {
+			f.ConversionID = &id
+		}
+	}
+	preset := c.QueryParam("preset")
+	fromStr, toStr := c.QueryParam("from"), c.QueryParam("to")
+	if preset != "" {
+		var rerr error
+		if _, _, fromStr, toStr, rerr = reports.ResolveRange(preset, "", ""); rerr != nil {
+			return rerr
+		}
+	}
+	if t, ok := parseDate(fromStr); ok {
+		f.From = &t
+	}
+	if t, ok := parseDate(toStr); ok {
+		end := t.AddDate(0, 0, 1)
+		f.To = &end
+	}
+
+	if wantsCSV(c) {
+		rows, _, err := a.s.conversions.ListRuns(ctx, f) // Limit 0 = every match
+		if err != nil {
+			return err
+		}
+		out := make([][]string, 0, len(rows))
+		for _, r := range rows {
+			out = append(out, []string{
+				r.CreatedAt.Format("2006-01-02 15:04"), r.FromName, r.FromQty.String(), r.FromUnitAbbr,
+				r.ToName, r.ToQty.String(), r.ToUnitAbbr, r.UserName,
+			})
+		}
+		return writeCSV(c, "conversion_runs_"+time.Now().Format("2006-01-02"),
+			[]string{"When", "From", "Qty out", "Unit", "To", "Qty in", "Unit", "By"}, out)
+	}
+
+	page := pageParam(c)
+	f.Limit, f.Offset = reportPageSize, (page-1)*reportPageSize
+	rows, total, err := a.s.conversions.ListRuns(ctx, f)
+	if err != nil {
+		return err
+	}
+	defs, err := a.s.conversions.List(ctx, "")
+	if err != nil {
+		return err
+	}
+	return response.RenderPage(c, adminpages.ConversionRunsPage(adminpages.ConversionRunsData{
+		UserName:     middleware.CurrentUserName(c),
+		Rows:         rows,
+		Definitions:  defs,
+		ConversionID: c.QueryParam("conversion_id"),
+		Preset:       preset,
+		From:         fromStr,
+		To:           toStr,
+		Total:        total,
+		Page:         page,
+		PageSize:     reportPageSize,
+	}))
+}
+
+func (a *adminUI) ConversionForm(c echo.Context) error {
+	// No product list is loaded: the form uses the searchable ProductPicker,
+	// which queries the server as you type.
+	return response.RenderFragment(c, adminpages.ConversionForm())
 }
 
 func (a *adminUI) ConversionRunForm(c echo.Context) error {
@@ -1046,7 +1135,13 @@ func (a *adminUI) ExpiringReport(c echo.Context) error {
 
 func (a *adminUI) LowStockReport(c echo.Context) error {
 	ctx := c.Request().Context()
-	rows, _, err := a.s.products.List(ctx, products.ListQuery{LowStock: true, Limit: 200})
+	// Limit 200 used to clamp to 50, quietly hiding low-stock items from the
+	// reorder worklist. Page through at the real maximum instead, and keep the
+	// total so the page can say how many there are.
+	page := pageParam(c)
+	rows, total, err := a.s.products.List(ctx, products.ListQuery{
+		LowStock: true, Limit: reportPageSize, Page: page,
+	})
 	if err != nil {
 		return err
 	}
@@ -1060,6 +1155,9 @@ func (a *adminUI) LowStockReport(c echo.Context) error {
 		Rows:      rows,
 		Suppliers: sups,
 		Demand:    a.reorderDemand(ctx, rows),
+		Total:     total,
+		Page:      page,
+		PageSize:  reportPageSize,
 	}))
 }
 
@@ -1208,11 +1306,7 @@ func (a *adminUI) UserReactivate(c echo.Context) error {
 // ============================ Damage write-off ============================
 
 func (a *adminUI) DamageForm(c echo.Context) error {
-	prods, _, err := a.s.products.List(c.Request().Context(), products.ListQuery{Limit: 200})
-	if err != nil {
-		return err
-	}
-	return response.RenderFragment(c, adminpages.DamageForm(prods))
+	return response.RenderFragment(c, adminpages.DamageForm())
 }
 
 func (a *adminUI) DamageRecord(c echo.Context) error {

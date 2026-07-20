@@ -4,7 +4,7 @@ import (
 	"strconv"
 
 	"karots-pos/internal/features/conversions"
-	"karots-pos/internal/features/products"
+	"karots-pos/internal/money"
 	adminfragments "karots-pos/templates/fragments/admin"
 	"karots-pos/templates/layouts"
 )
@@ -12,6 +12,7 @@ import (
 type ConversionsData struct {
 	UserName string
 	Rows     []conversions.Conversion
+	Search   string
 }
 
 templ ConversionsPage(d ConversionsData) {
@@ -21,13 +22,33 @@ templ ConversionsPage(d ConversionsData) {
 				<h1 class="text-2xl font-bold">Product Conversions</h1>
 				<p class="text-sm text-slate-500">Break one product into another (e.g. a bag of rice → loose kg).</p>
 			</div>
-			<button class="px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium"
-				hx-get="/admin/conversions/form" hx-target="#modal-container" hx-swap="innerHTML">+ New Conversion</button>
+			<div class="flex gap-2">
+				<a class="px-4 py-2 rounded-lg border font-medium" href="/admin/conversions/runs">Run History</a>
+				<button class="px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium"
+					hx-get="/admin/conversions/form" hx-target="#modal-container" hx-swap="innerHTML">+ New Conversion</button>
+			</div>
 		</div>
 		<div class="bg-white rounded-2xl shadow-sm p-6">
+			<form method="get" action="/admin/conversions" class="flex items-end gap-3 mb-4">
+				<div class="w-72">
+					<label class="block text-xs text-slate-500 mb-1">Search</label>
+					<input name="search" value={ d.Search } placeholder="Either product's name…" class="w-full border rounded-lg px-3 py-1.5 text-sm"/>
+				</div>
+				<button class="px-4 py-1.5 rounded-lg bg-slate-800 text-white text-sm">Search</button>
+				if d.Search != "" {
+					<a class="px-4 py-1.5 rounded-lg border text-sm" href="/admin/conversions">Clear</a>
+				}
+			</form>
 			<table class="w-full text-sm">
 				<thead class="text-left text-slate-500 border-b">
-					<tr><th class="py-2 px-3">From</th><th class="py-2 px-3">To</th><th class="py-2 px-3 text-center">Ratio</th><th class="py-2 px-3"></th></tr>
+					<tr>
+						<th class="py-2 px-3">From</th>
+						<th class="py-2 px-3 text-right">On hand</th>
+						<th class="py-2 px-3">To</th>
+						<th class="py-2 px-3 text-right">On hand</th>
+						<th class="py-2 px-3 text-center">Ratio</th>
+						<th class="py-2 px-3"></th>
+					</tr>
 				</thead>
 				<tbody id="conversion-tbody" hx-get="/admin/conversions/table" hx-trigger="reload-conversions from:body" hx-target="#conversion-tbody" hx-swap="innerHTML">
 					@ConversionRows(d.Rows)
@@ -39,15 +60,28 @@ templ ConversionsPage(d ConversionsData) {
 
 templ ConversionRows(rows []conversions.Conversion) {
 	if len(rows) == 0 {
-		<tr><td colspan="4" class="py-6 text-center text-slate-500">No conversions defined yet.</td></tr>
+		<tr><td colspan="6" class="py-6 text-center text-slate-500">No conversions match.</td></tr>
 	} else {
 		for _, cv := range rows {
 			<tr class="border-b last:border-0">
 				<td class="py-2 px-3 font-medium">{ cv.FromName } <span class="text-slate-400">({ cv.FromUnitAbbr })</span></td>
+				<td class="py-2 px-3 text-right">
+					if cv.Runnable() {
+						{ money.Display(cv.FromStock) }
+					} else {
+						<span class="text-rose-600">{ money.Display(cv.FromStock) }</span>
+					}
+				</td>
 				<td class="py-2 px-3 font-medium">{ cv.ToName } <span class="text-slate-400">({ cv.ToUnitAbbr })</span></td>
+				<td class="py-2 px-3 text-right text-slate-500">{ money.Display(cv.ToStock) }</td>
 				<td class="py-2 px-3 text-center">1 → { cv.Ratio.String() }</td>
 				<td class="py-2 px-3 text-right whitespace-nowrap">
-					<button class="text-emerald-600 hover:underline" hx-get={ "/admin/conversions/run/" + strconv.FormatInt(cv.ID, 10) } hx-target="#modal-container" hx-swap="innerHTML">Run</button>
+					if cv.Runnable() {
+						<button class="text-emerald-600 hover:underline" hx-get={ "/admin/conversions/run/" + strconv.FormatInt(cv.ID, 10) } hx-target="#modal-container" hx-swap="innerHTML">Run</button>
+					} else {
+						<span class="text-slate-300" title="No stock of the source product">Run</span>
+					}
+					<button class="text-indigo-600 hover:underline ml-3" hx-get={ "/admin/conversions/" + strconv.FormatInt(cv.ID, 10) + "/edit" } hx-target="#modal-container" hx-swap="innerHTML">Edit</button>
 					<button class="text-red-600 hover:underline ml-3" hx-delete={ "/admin/conversions/" + strconv.FormatInt(cv.ID, 10) } hx-swap="none" hx-confirm="Remove this conversion?">Delete</button>
 				</td>
 			</tr>
@@ -55,7 +89,29 @@ templ ConversionRows(rows []conversions.Conversion) {
 	}
 }
 
-templ ConversionForm(prods []products.Product) {
+// ConversionEditForm edits an existing recipe. The two products are shown but
+// not editable — repointing a conversion would rewrite what its past runs mean.
+templ ConversionEditForm(cv conversions.Conversion) {
+	@modalShell("Edit Conversion") {
+		<form class="p-6 space-y-4" hx-put={ "/admin/conversions/" + strconv.FormatInt(cv.ID, 10) } hx-swap="none">
+			<p class="text-sm text-slate-600">
+				<span class="font-semibold">{ cv.FromName }</span> → <span class="font-semibold">{ cv.ToName }</span>
+			</p>
+			<div>
+				<label class="block text-sm font-medium mb-1">Ratio (1 { cv.FromUnitAbbr } yields N { cv.ToUnitAbbr })</label>
+				<input name="ratio" type="number" step="0.001" min="0" required value={ cv.Ratio.String() } class="w-full border rounded-lg px-3 py-2"/>
+			</div>
+			<div>
+				<label class="block text-sm font-medium mb-1">Note</label>
+				<input name="note" value={ strOrEmpty(cv.Note) } class="w-full border rounded-lg px-3 py-2"/>
+			</div>
+			<p class="text-xs text-slate-500">Changing the ratio affects future runs only. Past runs keep the quantities they actually moved.</p>
+			@modalButtons()
+		</form>
+	}
+}
+
+templ ConversionForm() {
 	@modalShell("New Conversion") {
 		<form class="p-6 space-y-4" hx-post="/admin/conversions" hx-swap="none">
 			<div>
@@ -86,11 +142,114 @@ templ ConversionRunForm(cv conversions.Conversion) {
 				Converting <span class="font-semibold">{ cv.FromName }</span> →
 				<span class="font-semibold">{ cv.ToName }</span> at 1 : { cv.Ratio.String() }.
 			</p>
-			<div>
+			<div class="rounded-lg bg-slate-50 border px-4 py-3 text-sm">
+				<div class="flex justify-between"><span class="text-slate-500">Available to convert</span><span class="font-semibold">{ money.Display(cv.FromStock) } { cv.FromUnitAbbr }</span></div>
+				<div class="flex justify-between mt-1"><span class="text-slate-500">{ cv.ToName } on hand now</span><span>{ money.Display(cv.ToStock) } { cv.ToUnitAbbr }</span></div>
+			</div>
+			<div x-data={ "{qty:0, ratio:" + cv.Ratio.String() + ", max:" + cv.FromStock.String() + "}" }>
 				<label class="block text-sm font-medium mb-1">Quantity of { cv.FromName } to convert</label>
-				<input name="quantity" type="number" step="0.001" min="0" required class="w-full border rounded-lg px-3 py-2"/>
+				<input
+					name="quantity" type="number" step="0.001" min="0" required
+					x-model.number="qty"
+					x-bind:max="max"
+					class="w-full border rounded-lg px-3 py-2"
+				/>
+				<!-- Live preview so the result is visible before committing, and an
+				     over-draw is caught here rather than by a 409 after the fact. -->
+				<p class="text-xs mt-1" x-show="qty > 0" x-cloak>
+					<span x-show="qty <= max" class="text-slate-500">
+						Produces <span class="font-semibold" x-text="(qty * ratio).toFixed(3)"></span> { cv.ToUnitAbbr } of { cv.ToName }.
+					</span>
+					<span x-show="qty > max" class="text-rose-600">
+						Only { money.Display(cv.FromStock) } { cv.FromUnitAbbr } available.
+					</span>
+				</p>
 			</div>
 			@modalButtons()
 		</form>
+	}
+}
+
+// ============================ Run history ============================
+
+// ConversionRunsData is the audit trail of conversions actually performed.
+// conversion_runs was written from day one but never displayed; a conversion
+// silently moved stock between two products with no screen that explained it.
+type ConversionRunsData struct {
+	UserName     string
+	Rows         []conversions.Run
+	Definitions  []conversions.Conversion
+	ConversionID string
+	Preset       string
+	From, To     string
+
+	Total, Page, PageSize int
+}
+
+templ ConversionRunsPage(d ConversionRunsData) {
+	@layouts.Admin("Conversion Runs", d.UserName, "conversions") {
+		<div class="flex items-center justify-between mb-6">
+			<div>
+				<h1 class="text-2xl font-bold">Conversion Run History</h1>
+				<p class="text-sm text-slate-500">{ strconv.Itoa(d.Total) } runs match this filter</p>
+			</div>
+			<a href="/admin/conversions" class="text-slate-500 hover:underline">← Back to Conversions</a>
+		</div>
+		<div class="bg-white rounded-2xl shadow-sm p-6">
+			@filterPresetRow(runsQuery(d), d.Preset)
+			<form method="get" action="/admin/conversions/runs" class="flex flex-wrap items-end gap-3 mb-4">
+				<div>
+					<label class="block text-xs text-slate-500 mb-1">Conversion</label>
+					<select name="conversion_id" class="border rounded-lg px-2 py-1.5 text-sm">
+						<option value="">All conversions</option>
+						for _, cv := range d.Definitions {
+							<option
+								value={ strconv.FormatInt(cv.ID, 10) }
+								selected?={ d.ConversionID == strconv.FormatInt(cv.ID, 10) }
+							>{ cv.FromName } → { cv.ToName }</option>
+						}
+					</select>
+				</div>
+				<div>
+					<label class="block text-xs text-slate-500 mb-1">From</label>
+					<input type="date" name="from" value={ d.From } class="border rounded-lg px-2 py-1.5 text-sm"/>
+				</div>
+				<div>
+					<label class="block text-xs text-slate-500 mb-1">To</label>
+					<input type="date" name="to" value={ d.To } class="border rounded-lg px-2 py-1.5 text-sm"/>
+				</div>
+				<button class="px-4 py-1.5 rounded-lg bg-indigo-600 text-white text-sm font-medium">Filter</button>
+				<a class="px-4 py-1.5 rounded-lg border text-sm" href={ templ.SafeURL(pgHref(runsQuery(d), 1) + "&format=csv") }>Download CSV</a>
+			</form>
+			<table class="w-full text-sm">
+				<thead class="text-left text-slate-500 border-b">
+					<tr>
+						<th class="py-2 px-3">When</th>
+						<th class="py-2 px-3">Converted</th>
+						<th class="py-2 px-3 text-right">Out</th>
+						<th class="py-2 px-3">Into</th>
+						<th class="py-2 px-3 text-right">In</th>
+						<th class="py-2 px-3">By</th>
+					</tr>
+				</thead>
+				<tbody>
+					if len(d.Rows) == 0 {
+						<tr><td colspan="6" class="py-6 text-center text-slate-500">No conversions have been run yet.</td></tr>
+					} else {
+						for _, r := range d.Rows {
+							<tr class="border-b last:border-0">
+								<td class="py-2 px-3 text-slate-500 whitespace-nowrap">{ r.CreatedAt.Format("2006-01-02 15:04") }</td>
+								<td class="py-2 px-3">{ r.FromName }</td>
+								<td class="py-2 px-3 text-right text-rose-600">−{ money.Display(r.FromQty) } { r.FromUnitAbbr }</td>
+								<td class="py-2 px-3">{ r.ToName }</td>
+								<td class="py-2 px-3 text-right text-emerald-600">+{ money.Display(r.ToQty) } { r.ToUnitAbbr }</td>
+								<td class="py-2 px-3 text-slate-500">{ r.UserName }</td>
+							</tr>
+						}
+					}
+				</tbody>
+			</table>
+			@rptPager(runsQuery(d), d.Page, d.PageSize, d.Total)
+		</div>
 	}
 }

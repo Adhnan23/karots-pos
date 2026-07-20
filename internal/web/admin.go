@@ -12,6 +12,7 @@ import (
 	"karots-pos/internal/features/audit"
 	"karots-pos/internal/features/customers"
 	"karots-pos/internal/features/products"
+	"karots-pos/internal/features/reports"
 	"karots-pos/internal/features/sales"
 	"karots-pos/internal/features/settings"
 	"karots-pos/internal/features/stock"
@@ -401,20 +402,72 @@ func (a *adminUI) StockMovements(c echo.Context) error {
 		}
 	}
 	mtype := c.QueryParam("type")
-	moves, err := a.s.stock.Movements(ctx, pid, mtype, 300)
+	f := stock.MovementFilter{ProductID: pid, Type: mtype}
+
+	// Optional date window. The trail is append-only and grows with every sale,
+	// so "everything since the beginning" stops being a useful default fast.
+	// A quick-pick preset just fills from/to; no preset means no date filter,
+	// so the default view is still the whole history.
+	preset := c.QueryParam("preset")
+	fromStr, toStr := c.QueryParam("from"), c.QueryParam("to")
+	if preset != "" {
+		var rerr error
+		if _, _, fromStr, toStr, rerr = reports.ResolveRange(preset, "", ""); rerr != nil {
+			return rerr
+		}
+	}
+	if t, ok := parseDate(fromStr); ok {
+		f.From = &t
+	}
+	if t, ok := parseDate(toStr); ok {
+		end := t.AddDate(0, 0, 1) // `to` is inclusive of the whole day
+		f.To = &end
+	}
+
+	if wantsCSV(c) {
+		rows, _, err := a.s.stock.FindMovements(ctx, f) // Limit 0 = every match
+		if err != nil {
+			return err
+		}
+		out := make([][]string, 0, len(rows))
+		for _, m := range rows {
+			out = append(out, []string{
+				m.CreatedAt.Format("2006-01-02 15:04"), m.ProductName, m.Type,
+				m.Quantity.String(), csvMoney(m.Cost), m.UserName, ptrStr(m.Note),
+			})
+		}
+		return writeCSV(c, "stock_movements_"+time.Now().Format("2006-01-02"),
+			[]string{"When", "Product", "Type", "Qty", "Cost", "By", "Note"}, out)
+	}
+
+	page := pageParam(c)
+	f.Limit, f.Offset = reportPageSize, (page-1)*reportPageSize
+	moves, total, err := a.s.stock.FindMovements(ctx, f)
 	if err != nil {
 		return err
 	}
-	prods, _, err := a.s.products.List(ctx, products.ListQuery{Limit: 1000})
-	if err != nil {
-		return err
+
+	// Resolve the filtered product's name directly. This used to load a product
+	// list and scan it, which meant the filter label came up blank whenever the
+	// selected product fell outside the first page.
+	var filterName string
+	if pid != nil {
+		if p, perr := a.s.products.Get(ctx, *pid); perr == nil && p != nil {
+			filterName = p.Name
+		}
 	}
 	return response.RenderPage(c, adminpages.StockMovementsPage(adminpages.StockMovementsData{
-		UserName:  middleware.CurrentUserName(c),
-		Products:  prods,
-		Movements: moves,
-		MoveType:  mtype,
-		ProductID: pidStr,
+		UserName:   middleware.CurrentUserName(c),
+		Movements:  moves,
+		MoveType:   mtype,
+		ProductID:  pidStr,
+		FilterName: filterName,
+		Preset:     preset,
+		From:       fromStr,
+		To:         toStr,
+		Total:      total,
+		Page:       page,
+		PageSize:   reportPageSize,
 	}))
 }
 

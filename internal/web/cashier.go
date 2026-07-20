@@ -21,6 +21,7 @@ import (
 	"karots-pos/internal/features/settings"
 	"karots-pos/internal/features/stock"
 	"karots-pos/internal/middleware"
+	"karots-pos/internal/money"
 	"karots-pos/internal/receiptimg"
 	"karots-pos/internal/response"
 	poststatic "karots-pos/static"
@@ -290,16 +291,12 @@ func (h *cashierUI) salesReceiptData(c echo.Context) (cashierpages.ReceiptsData,
 // sending directly to the configured label printer.
 func (h *cashierUI) Labels(c echo.Context) error {
 	ctx := c.Request().Context()
-	prods, _, err := h.s.products.List(ctx, products.ListQuery{Limit: 500})
-	if err != nil {
-		return err
-	}
+	// Products are chosen via the searchable picker, not a preloaded list.
 	return response.RenderPage(c, cashierpages.Labels(cashierpages.LabelsData{
 		CashierName:   middleware.CurrentUserName(c),
 		Role:          middleware.CurrentRole(c),
 		ShowChangePin: h.showChangePin(c),
 		Symbol:        h.cashierSymbol(ctx),
-		Products:      prods,
 	}))
 }
 
@@ -434,15 +431,10 @@ func (h *cashierUI) CashierLockers(c echo.Context) error {
 // ============================ Damage ============================
 
 func (h *cashierUI) Damage(c echo.Context) error {
-	prods, _, err := h.s.products.List(c.Request().Context(), products.ListQuery{Limit: 200})
-	if err != nil {
-		return err
-	}
 	return response.RenderPage(c, cashierpages.Damage(cashierpages.DamageData{
 		CashierName:   middleware.CurrentUserName(c),
 		Role:          middleware.CurrentRole(c),
 		ShowChangePin: h.showChangePin(c),
-		Products:      prods,
 	}))
 }
 
@@ -710,4 +702,61 @@ func (h *cashierUI) WarrantyReplace(c echo.Context) error {
 	reprintURL := "/cashier/warranty/" + strconv.FormatInt(claimID, 10) + "/print"
 	trig := h.s.warrantyReplaceTrigger(ctx, cfg, h.receiptQueue(c, cfg), reprintURL, oldSerial, newUnit)
 	return response.RenderFragment(c, cashierpages.WarrantyResult(detail, newUnit.SerialNo, "/cashier"), trig)
+}
+
+// ============================ Conversions ============================
+
+// Conversions is the till-side view of product conversions: RUN ONLY.
+//
+// The cashier is the person who discovers the need — a customer wants loose
+// rice and the shelf has bags — so making them fetch an admin is friction at
+// exactly the wrong moment. This mirrors the Damage write-off they already have,
+// which is a strictly more destructive operation.
+//
+// Defining a conversion stays admin-only on purpose: a definition sets the
+// ratio, and a wrong ratio silently corrupts stock on every future run. Running
+// a pre-approved recipe is safe and fully attributed — every run records
+// conversion_runs.created_by, visible in the admin Run History.
+func (h *cashierUI) Conversions(c echo.Context) error {
+	ctx := c.Request().Context()
+	rows, err := h.s.conversions.List(ctx, c.QueryParam("search"))
+	if err != nil {
+		return err
+	}
+	return response.RenderPage(c, cashierpages.Conversions(cashierpages.ConversionsData{
+		CashierName:   middleware.CurrentUserName(c),
+		Role:          middleware.CurrentRole(c),
+		ShowChangePin: h.showChangePin(c),
+		Rows:          rows,
+		Search:        c.QueryParam("search"),
+	}))
+}
+
+func (h *cashierUI) ConversionRunForm(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	cv, err := h.s.conversions.Get(c.Request().Context(), id)
+	if err != nil {
+		return err
+	}
+	return response.RenderFragment(c, cashierpages.ConversionRunForm(*cv))
+}
+
+func (h *cashierUI) ConversionRun(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	qty, err := money.Parse(c.FormValue("quantity"))
+	if err != nil {
+		return apperr.Validation("quantity is invalid")
+	}
+	if err := h.s.conversions.Run(c.Request().Context(), id, qty, middleware.CurrentUserID(c)); err != nil {
+		return err
+	}
+	h.s.logAudit(c, audit.ActionUpdate, "conversion", strconv.FormatInt(id, 10),
+		"ran conversion ("+money.Display(qty)+")")
+	return htmxDone(c, "Conversion done", "reload-conversions")
 }

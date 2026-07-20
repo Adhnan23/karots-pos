@@ -2,6 +2,7 @@ package adminpages
 
 import (
 	"encoding/json"
+	"net/url"
 	"sort"
 	"strconv"
 	"time"
@@ -144,6 +145,121 @@ func strOrEmpty(s *string) string {
 	return *s
 }
 
+// --- inventory valuation helpers ---
+
+func pgFirst(page, size, total int) int {
+	if total == 0 {
+		return 0
+	}
+	return (page-1)*size + 1
+}
+
+func pgLast(page, size, total int) int { return min(page*size, total) }
+
+// pgOutOfRange reports whether the requested page starts beyond the last row.
+func pgOutOfRange(page, size, total int) bool { return (page-1)*size >= total }
+
+// pgLastPage is the highest page number that still holds rows.
+func pgLastPage(size, total int) int {
+	if total <= 0 || size <= 0 {
+		return 1
+	}
+	return (total + size - 1) / size
+}
+
+// pgHref appends ?page=N to a report's existing filter query string. baseQuery
+// carries no leading "?" and no page key of its own.
+func pgHref(baseQuery string, page int) string {
+	if baseQuery == "" {
+		return "?page=" + strconv.Itoa(page)
+	}
+	return "?" + baseQuery + "&page=" + strconv.Itoa(page)
+}
+
+// invQuery is the Inventory report's filter state as a query string, so the
+// pager and the CSV link both keep the active filters.
+func invQuery(d InventoryReportData) string {
+	q := url.Values{}
+	if d.CategoryID != nil {
+		q.Set("category_id", strconv.FormatInt(*d.CategoryID, 10))
+	}
+	if d.IncludeZero {
+		q.Set("include_zero", "1")
+	}
+	return q.Encode()
+}
+
+// rangeQuery is the filter state of a plain date-range report, so its pager
+// keeps the period the user is looking at.
+func rangeQuery(preset, from, to string) string {
+	q := url.Values{}
+	setNonEmpty(q, "preset", preset)
+	setNonEmpty(q, "from", from)
+	setNonEmpty(q, "to", to)
+	return q.Encode()
+}
+
+// salesQuery / batchQuery mirror invQuery for their reports.
+func salesQuery(d SalesReportData) string {
+	q := url.Values{}
+	setNonEmpty(q, "preset", d.Preset)
+	setNonEmpty(q, "from", d.From)
+	setNonEmpty(q, "to", d.To)
+	setNonEmpty(q, "status", d.Status)
+	setNonEmpty(q, "method", d.Method)
+	return q.Encode()
+}
+
+// movQuery is the Stock Movements filter state, so paging and the CSV link both
+// stay inside the product/type/date window the user is looking at.
+func movQuery(d StockMovementsData) string {
+	q := url.Values{}
+	setNonEmpty(q, "product_id", d.ProductID)
+	setNonEmpty(q, "type", d.MoveType)
+	if d.Preset != "" {
+		q.Set("preset", d.Preset)
+	} else {
+		setNonEmpty(q, "from", d.From)
+		setNonEmpty(q, "to", d.To)
+	}
+	return q.Encode()
+}
+
+// presetHref builds a quick-pick range link that KEEPS the page's other filters
+// (product, type). The report pages' own preset buttons drop theirs, which is
+// why this one takes the current query instead of rebuilding from scratch.
+// An empty key clears the date window ("All time").
+func presetHref(baseQuery, key string) string {
+	q, err := url.ParseQuery(baseQuery)
+	if err != nil {
+		q = url.Values{}
+	}
+	q.Del("from")
+	q.Del("to")
+	q.Del("page") // a new range invalidates the page number
+	if key == "" {
+		q.Del("preset")
+	} else {
+		q.Set("preset", key)
+	}
+	if len(q) == 0 {
+		return "?"
+	}
+	return "?" + q.Encode()
+}
+
+func batchQuery(d BatchReportData) string {
+	q := url.Values{}
+	setNonEmpty(q, "days", d.Days)
+	return q.Encode()
+}
+
+func setNonEmpty(q url.Values, key, val string) {
+	if val != "" {
+		q.Set(key, val)
+	}
+}
+
 func ternary(cond bool, a, b string) string {
 	if cond {
 		return a
@@ -173,4 +289,18 @@ func supVal(s *suppliers.Supplier, field string) string {
 	default:
 		return ""
 	}
+}
+
+// runsQuery is the Conversion Run History filter state, so paging, the preset
+// bar and the CSV link all stay inside the same window.
+func runsQuery(d ConversionRunsData) string {
+	q := url.Values{}
+	setNonEmpty(q, "conversion_id", d.ConversionID)
+	if d.Preset != "" {
+		q.Set("preset", d.Preset)
+	} else {
+		setNonEmpty(q, "from", d.From)
+		setNonEmpty(q, "to", d.To)
+	}
+	return q.Encode()
 }

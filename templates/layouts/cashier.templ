@@ -9,6 +9,7 @@ func cashierPalette(role string) []paletteEntry {
 		{"/cashier", "Sell", "Terminal"},
 		{"/cashier/returns", "Returns", "Terminal"},
 		{"/cashier/damage", "Damage", "Terminal"},
+		{"/cashier/conversions", "Convert Stock", "Terminal"},
 		{"/cashier/credit", "Credit", "Terminal"},
 		{"/cashier/receipts", "Receipts", "Terminal"},
 		{"/cashier/labels", "Print Labels", "Terminal"},
@@ -37,6 +38,7 @@ templ Cashier(title, userName, role, active string, showChangePin bool) {
 						@cashierTab("/cashier", "Sell", active == "pos")
 						@cashierTab("/cashier/returns", "Returns", active == "returns")
 						@cashierTab("/cashier/damage", "Damage", active == "damage")
+						@cashierTab("/cashier/conversions", "Convert", active == "conversions")
 						@cashierTab("/cashier/credit", "Credit", active == "credit")
 						@cashierTab("/cashier/receipts", "Receipts", active == "receipts")
 						@cashierTab("/cashier/labels", "Labels", active == "labels")

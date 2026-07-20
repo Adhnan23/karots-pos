@@ -87,11 +87,13 @@ templ daysLeftBadge(expiry *time.Time) {
 // ---------------- Low stock / reorder ----------------
 
 type LowStockData struct {
-	UserName  string
-	Symbol    string
-	Rows      []products.Product
-	Suppliers []suppliers.Supplier
-	Demand    map[int64]ReorderInfo
+	UserName       string
+	Symbol         string
+	Rows           []products.Product
+	Suppliers      []suppliers.Supplier
+	Demand         map[int64]ReorderInfo
+	Total          int
+	Page, PageSize int
 }
 
 templ LowStockPage(d LowStockData) {
@@ -150,6 +152,12 @@ templ LowStockPage(d LowStockData) {
 					<div class="text-sm text-slate-500"><span x-text="selectedCount()"></span> selected</div>
 					<button type="button" x-on:click="build()" x-bind:disabled="busy || selectedCount() === 0" class="px-5 py-2.5 rounded-lg bg-indigo-600 text-white font-semibold disabled:opacity-40">Build Purchase Order(s)</button>
 				</div>
+				if d.Total > d.PageSize {
+					<p class="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 mt-4">
+						{ strconv.Itoa(d.Total) } products are below their reorder level — this page shows { strconv.Itoa(len(d.Rows)) }. Build an order from these, then move to the next page.
+					</p>
+				}
+				@rptPager("", d.Page, d.PageSize, d.Total)
 			}
 		</div>
 	}

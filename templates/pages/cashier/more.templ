@@ -4,7 +4,6 @@ import (
 	"strconv"
 
 	"karots-pos/internal/features/customers"
-	"karots-pos/internal/features/products"
 	"karots-pos/internal/features/sales"
 	"karots-pos/internal/money"
 	adminfragments "karots-pos/templates/fragments/admin"
@@ -159,7 +158,6 @@ type DamageData struct {
 	CashierName   string
 	Role          string
 	ShowChangePin bool
-	Products      []products.Product
 }
 
 templ Damage(d DamageData) {

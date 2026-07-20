@@ -797,6 +797,15 @@ func (s *Service) List(ctx context.Context, f ListFilter) ([]Sale, error) {
 	return rows, nil
 }
 
+// Summarize returns the totals for every sale matching f, regardless of paging.
+func (s *Service) Summarize(ctx context.Context, f ListFilter) (*ListSummary, error) {
+	sum, err := s.repo.Summarize(ctx, f)
+	if err != nil {
+		return nil, apperr.Internal("failed to summarise sales", err)
+	}
+	return sum, nil
+}
+
 // MethodTotal is the money taken via one payment method in a period.
 type MethodTotal struct {
 	Method string          `db:"method" json:"method"`

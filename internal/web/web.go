@@ -189,6 +189,9 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	cg.POST("/sales/:id/partial-return", cashier.ReturnSubmit)
 
 	// Damage / write-off
+	cg.GET("/conversions", cashier.Conversions)
+	cg.GET("/conversions/run/:id", cashier.ConversionRunForm)
+	cg.POST("/conversions/:id/run", cashier.ConversionRun)
 	cg.GET("/damage", cashier.Damage)
 	cg.POST("/damage", cashier.DamageRecord)
 
@@ -431,8 +434,11 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	ag.GET("/conversions/table", admin.ConversionsTable)
 	ag.GET("/conversions/form", admin.ConversionForm)
 	ag.GET("/conversions/run/:id", admin.ConversionRunForm)
+	ag.GET("/conversions/runs", admin.ConversionRuns)
+	ag.GET("/conversions/:id/edit", admin.ConversionEditForm)
 	ag.POST("/conversions", admin.ConversionCreate)
 	ag.POST("/conversions/:id/run", admin.ConversionRun)
+	ag.PUT("/conversions/:id", admin.ConversionUpdate)
 	ag.DELETE("/conversions/:id", admin.ConversionDelete)
 
 	// Staff users (admin only)

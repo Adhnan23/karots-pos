@@ -163,6 +163,20 @@ func (s *Service) Movements(ctx context.Context, productID *int64, mtype string,
 	return rows, nil
 }
 
+// FindMovements returns one page of the filtered audit trail plus the total
+// number of matching movements. Pass Limit 0 for every match (CSV export).
+func (s *Service) FindMovements(ctx context.Context, f MovementFilter) ([]Movement, int, error) {
+	total, err := s.repo.CountMovements(ctx, f)
+	if err != nil {
+		return nil, 0, apperr.Internal("failed to count movements", err)
+	}
+	rows, err := s.repo.FindMovements(ctx, f)
+	if err != nil {
+		return nil, 0, apperr.Internal("failed to load movements", err)
+	}
+	return rows, total, nil
+}
+
 func nilIfEmpty(s string) *string {
 	if s == "" {
 		return nil

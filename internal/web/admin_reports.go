@@ -23,6 +23,32 @@ func (a *adminUI) shopName(ctx context.Context) string {
 	return "Shop"
 }
 
+// reportPageSize is how many detail rows a report shows on screen at once.
+// Reports are read as a summary plus a sample; the CSV is the full artifact.
+// 50 keeps a page short enough to scan (100 ran to roughly four screens).
+const reportPageSize = 50
+
+// pageParam reads ?page=, defaulting to the first page. Never returns < 1 — a
+// zero page makes the "showing X–Y" line render nonsense like "-99–0".
+func pageParam(c echo.Context) int {
+	n, _ := strconv.Atoi(c.QueryParam("page"))
+	if n < 1 {
+		return 1
+	}
+	return n
+}
+
+// paginate returns the slice of rows for the given 1-based page. Used by the
+// reports whose data source has no LIMIT of its own (batch lists, dues, and
+// other whole-table reads) so a 600-row report still renders one screen.
+func paginate[T any](rows []T, page, size int) []T {
+	start := (page - 1) * size
+	if start >= len(rows) {
+		return nil
+	}
+	return rows[start:min(start+size, len(rows))]
+}
+
 // rangeStrings resolves the quick-pick preset (or from/to query params) into the
 // period (with `to` exclusive of the end day) plus the user-facing date strings
 // and the active preset key (for highlighting the range-bar button).
@@ -46,31 +72,53 @@ func (a *adminUI) SalesReport(c echo.Context) error {
 	}
 	status := c.QueryParam("status")
 	method := c.QueryParam("method")
-	rows, err := a.s.sales.List(ctx, sales.ListFilter{From: &from, To: &to, Status: status, Method: method, Limit: 10000})
+	filter := sales.ListFilter{From: &from, To: &to, Status: status, Method: method}
+
+	// Totals come from an aggregate over the whole range — never from the rows
+	// below, which are one page.
+	sum, err := a.s.sales.Summarize(ctx, filter)
 	if err != nil {
 		return err
 	}
-	d := adminpages.SalesReportData{
-		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx),
-		From: fromStr, To: toStr, Preset: preset, Status: status, Method: method, Rows: rows, Count: len(rows),
-	}
-	for _, s := range rows {
-		d.Gross = d.Gross.Add(s.Subtotal)
-		d.Discount = d.Discount.Add(s.Discount)
-		d.Net = d.Net.Add(s.Total)
-	}
+
 	if wantsCSV(c) {
-		out := make([][]string, 0, len(rows))
-		for _, s := range rows {
-			out = append(out, []string{
-				s.ReceiptNo, s.CreatedAt.Format("2006-01-02 15:04"), s.SaleType, s.Status,
-				csvMoney(s.Discount), csvMoney(s.Total),
-			})
+		// The CSV is the "every line" artifact, so it walks the full range in
+		// pages rather than relying on a single oversized limit.
+		out := make([][]string, 0, sum.Count)
+		for offset := 0; offset < sum.Count; offset += sales.MaxListLimit {
+			page := filter
+			page.Limit, page.Offset = sales.MaxListLimit, offset
+			rows, lerr := a.s.sales.List(ctx, page)
+			if lerr != nil {
+				return lerr
+			}
+			if len(rows) == 0 {
+				break
+			}
+			for _, s := range rows {
+				out = append(out, []string{
+					s.ReceiptNo, s.CreatedAt.Format("2006-01-02 15:04"), s.SaleType, s.Status,
+					csvMoney(s.Subtotal), csvMoney(s.Discount), csvMoney(s.Total),
+				})
+			}
 		}
 		return writeCSV(c, "sales_"+fromStr+"_"+toStr,
-			[]string{"Receipt", "Date", "Type", "Status", "Discount", "Total"}, out)
+			[]string{"Receipt", "Date", "Type", "Status", "Gross", "Discount", "Total"}, out)
 	}
-	return response.RenderPage(c, adminpages.SalesReport(d))
+
+	page := pageParam(c)
+	filter.Limit, filter.Offset = reportPageSize, (page-1)*reportPageSize
+	rows, err := a.s.sales.List(ctx, filter)
+	if err != nil {
+		return err
+	}
+	return response.RenderPage(c, adminpages.SalesReport(adminpages.SalesReportData{
+		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx),
+		From: fromStr, To: toStr, Preset: preset, Status: status, Method: method,
+		Rows:  rows,
+		Count: sum.Count, Gross: sum.Gross, Discount: sum.Discount, Net: sum.Net,
+		Page: page, PageSize: reportPageSize,
+	}))
 }
 
 func (a *adminUI) FinanceReport(c echo.Context) error {
@@ -116,12 +164,15 @@ func (a *adminUI) ReturnsReport(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	// Total covers every return in the range; Rows is one page of them.
 	d := adminpages.ReturnsReportData{
-		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx), From: fromStr, To: toStr, Preset: preset, Rows: rows,
+		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx), From: fromStr, To: toStr, Preset: preset,
+		Total: len(rows), Page: pageParam(c), PageSize: reportPageSize,
 	}
 	for _, r := range rows {
 		d.TotalRefund = d.TotalRefund.Add(r.RefundValue)
 	}
+	d.Rows = paginate(rows, d.Page, reportPageSize)
 	return response.RenderPage(c, adminpages.ReturnsReport(d))
 }
 
@@ -246,7 +297,8 @@ func (a *adminUI) CashRegisterReport(c echo.Context) error {
 		return err
 	}
 	d := adminpages.CashReportData{
-		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx), From: fromStr, To: toStr, Preset: preset, Rows: rows,
+		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx), From: fromStr, To: toStr, Preset: preset,
+		Total: len(rows), Page: pageParam(c), PageSize: reportPageSize,
 	}
 	for _, s := range rows {
 		d.Opening = d.Opening.Add(s.OpeningCash)
@@ -260,6 +312,7 @@ func (a *adminUI) CashRegisterReport(c echo.Context) error {
 			d.OverShort = d.OverShort.Add(*s.Difference)
 		}
 	}
+	d.Rows = paginate(rows, d.Page, reportPageSize)
 	return response.RenderPage(c, adminpages.CashRegisterReport(d))
 }
 
@@ -275,16 +328,20 @@ func (a *adminUI) PurchasesReport(c echo.Context) error {
 	}
 	d := adminpages.PurchasesReportData{
 		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx), From: fromStr, To: toStr, Preset: preset,
+		Page: pageParam(c), PageSize: reportPageSize,
 	}
+	inRange := all[:0:0]
 	for _, p := range all {
 		if p.CreatedAt.Before(from) || !p.CreatedAt.Before(to) {
 			continue
 		}
-		d.Rows = append(d.Rows, p)
+		inRange = append(inRange, p)
 		d.Total = d.Total.Add(p.Total)
 		d.Paid = d.Paid.Add(p.PaidAmount)
 		d.Due = d.Due.Add(p.Total.Sub(p.PaidAmount))
 	}
+	d.Count = len(inRange)
+	d.Rows = paginate(inRange, d.Page, reportPageSize)
 	return response.RenderPage(c, adminpages.PurchasesReport(d))
 }
 
@@ -388,18 +445,61 @@ func (a *adminUI) TaxReport(c echo.Context) error {
 	}))
 }
 
+// InventoryReport values the stock on hand. The headline numbers and the
+// per-category breakdown are aggregated in SQL over the whole catalog — never
+// summed from the rendered rows, which are only ever one page.
 func (a *adminUI) InventoryReport(c echo.Context) error {
 	ctx := c.Request().Context()
-	rows, _, err := a.s.products.List(ctx, products.ListQuery{Limit: 10000})
+
+	var q products.ValuationQuery
+	if idStr := c.QueryParam("category_id"); idStr != "" {
+		if id, perr := strconv.ParseInt(idStr, 10, 64); perr == nil && id > 0 {
+			q.CategoryID = &id
+		}
+	}
+	q.IncludeZero = c.QueryParam("include_zero") == "1"
+	q.Page, _ = strconv.Atoi(c.QueryParam("page"))
+	// Normalize here too: the template renders the pager off q.Page, and an
+	// un-normalized 0 would read "Showing -99–0 of 598".
+	q.Normalize()
+
+	if wantsCSV(c) {
+		rows, err := a.s.products.ValuationAll(ctx, q)
+		if err != nil {
+			return err
+		}
+		out := make([][]string, 0, len(rows))
+		for _, p := range rows {
+			out = append(out, []string{
+				p.Name, ptrStr(p.Barcode), p.CategoryName, p.UnitAbbr,
+				p.StockQty.String(), csvMoney(p.CostPrice), csvMoney(p.SellingPrice),
+				csvMoney(p.StockQty.Mul(p.CostPrice)), csvMoney(p.StockQty.Mul(p.SellingPrice)),
+			})
+		}
+		return writeCSV(c, "inventory_valuation_"+time.Now().Format("2006-01-02"),
+			[]string{"Product", "Barcode", "Category", "Unit", "On hand",
+				"Cost", "Retail", "Cost value", "Retail value"}, out)
+	}
+
+	val, err := a.s.products.Valuation(ctx)
 	if err != nil {
 		return err
 	}
-	d := adminpages.InventoryReportData{ShopName: a.shopName(ctx), Symbol: a.symbol(ctx), Rows: rows}
-	for _, p := range rows {
-		d.CostValue = d.CostValue.Add(p.StockQty.Mul(p.CostPrice))
-		d.RetailValue = d.RetailValue.Add(p.StockQty.Mul(p.SellingPrice))
+	rows, total, err := a.s.products.ValuationDetail(ctx, q, reportPageSize)
+	if err != nil {
+		return err
 	}
-	return response.RenderPage(c, adminpages.InventoryReport(d))
+	return response.RenderPage(c, adminpages.InventoryReport(adminpages.InventoryReportData{
+		ShopName:    a.shopName(ctx),
+		Symbol:      a.symbol(ctx),
+		Val:         *val,
+		Rows:        rows,
+		Total:       total,
+		Page:        q.Page,
+		PageSize:    reportPageSize,
+		CategoryID:  q.CategoryID,
+		IncludeZero: q.IncludeZero,
+	}))
 }
 
 func (a *adminUI) BatchReport(c echo.Context) error {
@@ -422,9 +522,44 @@ func (a *adminUI) BatchReport(c echo.Context) error {
 			rows = filtered
 		}
 	}
-	d := adminpages.BatchReportData{ShopName: a.shopName(ctx), Symbol: a.symbol(ctx), Days: daysStr, Rows: rows}
+	// Totals cover every matching batch; the table below shows one page of them.
+	d := adminpages.BatchReportData{
+		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx), Days: daysStr,
+		Total: len(rows), PageSize: reportPageSize,
+	}
+	now := time.Now()
+	soon := now.AddDate(0, 0, 30)
 	for _, b := range rows {
 		d.TotalValue = d.TotalValue.Add(b.QtyRemaining.Mul(b.CostPrice))
+		switch {
+		case b.ExpiryDate == nil:
+			d.NoExpiry++
+		case b.ExpiryDate.Before(now):
+			d.Expired++
+			d.ExpiredValue = d.ExpiredValue.Add(b.QtyRemaining.Mul(b.CostPrice))
+		case b.ExpiryDate.Before(soon):
+			d.ExpiringSoon++
+			d.ExpiringValue = d.ExpiringValue.Add(b.QtyRemaining.Mul(b.CostPrice))
+		}
 	}
+
+	if wantsCSV(c) {
+		out := make([][]string, 0, len(rows))
+		for _, b := range rows {
+			expiry := ""
+			if b.ExpiryDate != nil {
+				expiry = b.ExpiryDate.Format("2006-01-02")
+			}
+			out = append(out, []string{
+				b.ProductName, ptrStr(b.BatchNo), expiry, b.QtyRemaining.String(), b.UnitAbbr,
+				csvMoney(b.CostPrice), csvMoney(b.QtyRemaining.Mul(b.CostPrice)),
+			})
+		}
+		return writeCSV(c, "batches_"+time.Now().Format("2006-01-02"),
+			[]string{"Product", "Batch", "Expiry", "Remaining", "Unit", "Cost", "Value"}, out)
+	}
+
+	d.Page = pageParam(c)
+	d.Rows = paginate(rows, d.Page, reportPageSize)
 	return response.RenderPage(c, adminpages.BatchReport(d))
 }

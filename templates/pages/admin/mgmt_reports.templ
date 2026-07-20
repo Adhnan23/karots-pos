@@ -89,11 +89,15 @@ templ rptPeriodLine(from, to string) {
 
 // ============================ Sales report ============================
 
+// SalesReportData carries range-wide totals (Count/Gross/Discount/Net, from a
+// SQL aggregate) plus one page of receipts. Never re-derive the totals from
+// Rows — that is exactly the bug this shape exists to prevent.
 type SalesReportData struct {
 	ShopName, Symbol, From, To, Status, Method, Preset string
-	Rows                               []sales.Sale
-	Count                              int
-	Gross, Discount, Net               decimal.Decimal
+	Rows                                              []sales.Sale
+	Count                                             int
+	Gross, Discount, Net                              decimal.Decimal
+	Page, PageSize                                    int
 }
 
 templ SalesReport(d SalesReportData) {
@@ -152,6 +156,8 @@ templ SalesReport(d SalesReportData) {
 				</tr>
 			</tfoot>
 		</table>
+		@rptTruncNote(len(d.Rows), d.Count)
+		@rptPager(salesQuery(d), d.Page, d.PageSize, d.Count)
 	}
 }
 
@@ -241,9 +247,10 @@ templ plMoney(symbol, label string, v decimal.Decimal, negate bool) {
 // ============================ Cash register report ============================
 
 type CashReportData struct {
-	ShopName, Symbol, From, To, Preset      string
-	Rows                                    []cashregister.SessionRow
-	Opening, Expected, Counted, OverShort   decimal.Decimal
+	ShopName, Symbol, From, To, Preset    string
+	Rows                                  []cashregister.SessionRow
+	Opening, Expected, Counted, OverShort decimal.Decimal
+	Total, Page, PageSize                 int
 }
 
 templ CashRegisterReport(d CashReportData) {
@@ -287,6 +294,8 @@ templ CashRegisterReport(d CashReportData) {
 				</tr>
 			</tfoot>
 		</table>
+		@rptTruncNote(len(d.Rows), d.Total)
+		@rptPager(rangeQuery(d.Preset, d.From, d.To), d.Page, d.PageSize, d.Total)
 	}
 }
 
@@ -294,8 +303,10 @@ templ CashRegisterReport(d CashReportData) {
 
 type PurchasesReportData struct {
 	ShopName, Symbol, From, To, Preset string
-	Rows                       []purchases.Purchase
-	Total, Paid, Due           decimal.Decimal
+	Rows                               []purchases.Purchase
+	Total, Paid, Due                   decimal.Decimal
+	// Count is how many purchases fall in the range; Rows is one page of them.
+	Count, Page, PageSize int
 }
 
 templ PurchasesReport(d PurchasesReportData) {
@@ -332,6 +343,8 @@ templ PurchasesReport(d PurchasesReportData) {
 				</tr>
 			</tfoot>
 		</table>
+		@rptTruncNote(len(d.Rows), d.Count)
+		@rptPager(rangeQuery(d.Preset, d.From, d.To), d.Page, d.PageSize, d.Count)
 	}
 }
 
@@ -457,63 +470,232 @@ templ SupplierDuesReport(d SupplierDuesData) {
 	}
 }
 
+// ============================ Shared report pager ============================
+
+// rptPager renders "Showing X–Y of N" with prev/next links, hidden when
+// printing. Reports show a summary plus one page of detail; the CSV export is
+// the artifact for every single line.
+//
+// baseQuery is the report's current filter query string WITHOUT a page key and
+// WITHOUT a leading "?" (may be empty).
+templ rptPager(baseQuery string, page, pageSize, total int) {
+	if total > pageSize {
+		<div class="no-print flex items-center justify-between mt-4 text-sm text-slate-500">
+			if pgOutOfRange(page, pageSize, total) {
+				// A ?page= past the end has no rows; don't print a range like
+				// "Showing 49901–666 of 666".
+				<div>This page is past the end of { strconv.Itoa(total) } rows.</div>
+			} else {
+				<div>Showing { strconv.Itoa(pgFirst(page, pageSize, total)) }–{ strconv.Itoa(pgLast(page, pageSize, total)) } of { strconv.Itoa(total) }</div>
+			}
+			<div class="flex gap-2">
+				if page > 1 {
+					<a class="px-3 py-1 rounded-lg border" href={ templ.SafeURL(pgHref(baseQuery, 1)) }>« First</a>
+					<a class="px-3 py-1 rounded-lg border" href={ templ.SafeURL(pgHref(baseQuery, page-1)) }>← Prev</a>
+				}
+				if pgLast(page, pageSize, total) < total {
+					<a class="px-3 py-1 rounded-lg border" href={ templ.SafeURL(pgHref(baseQuery, page+1)) }>Next →</a>
+					<a class="px-3 py-1 rounded-lg border" href={ templ.SafeURL(pgHref(baseQuery, pgLastPage(pageSize, total))) }>Last »</a>
+				}
+			</div>
+		</div>
+	}
+}
+
+// filterPresetRow is the quick-pick range bar for filterable list pages. Unlike
+// rptRangeForm's buttons it preserves the page's other filters, so picking
+// "This month" doesn't silently drop the product or type you selected.
+templ filterPresetRow(baseQuery, active string) {
+	<div class="flex flex-wrap gap-2 mb-3">
+		@filterPresetBtn(baseQuery, "", "All time", active)
+		@filterPresetBtn(baseQuery, "today", "Today", active)
+		@filterPresetBtn(baseQuery, "this-week", "This week", active)
+		@filterPresetBtn(baseQuery, "this-month", "This month", active)
+		@filterPresetBtn(baseQuery, "last-week", "Last week", active)
+		@filterPresetBtn(baseQuery, "last-month", "Last month", active)
+		@filterPresetBtn(baseQuery, "this-year", "This year", active)
+	</div>
+}
+
+templ filterPresetBtn(baseQuery, key, label, active string) {
+	<a
+		href={ templ.SafeURL(presetHref(baseQuery, key)) }
+		if active == key {
+			class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-sm font-medium"
+		} else {
+			class="px-3 py-1.5 rounded-lg bg-white border text-slate-600 text-sm hover:bg-slate-50"
+		}
+	>{ label }</a>
+}
+
+// rptTruncNote tells the reader, on paper, that the printed table is a sample —
+// so a printed report can never be mistaken for the complete record.
+templ rptTruncNote(shown, total int) {
+	if total > shown {
+		<p class="text-xs text-slate-500 mt-3">
+			Showing { strconv.Itoa(shown) } of { strconv.Itoa(total) } rows. Use Download CSV for the complete list.
+		</p>
+	}
+}
+
 // ============================ Inventory valuation ============================
 
+// InventoryReportData carries a whole-catalog valuation (Val, always complete)
+// plus one screen-only page of the products behind it. The printed sheet is the
+// summary + category breakdown only — one page, not a book.
 type InventoryReportData struct {
-	ShopName, Symbol       string
-	Rows                   []products.Product
-	CostValue, RetailValue decimal.Decimal
+	ShopName, Symbol string
+	Val              products.Valuation
+	Rows             []products.Product
+	Total            int
+	Page, PageSize   int
+	CategoryID       *int64
+	IncludeZero      bool
 }
 
 templ InventoryReport(d InventoryReportData) {
 	@layouts.Report("Inventory Valuation", d.ShopName) {
-		<table class="w-full text-sm">
+		<div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+			@invStat("Stock value at cost", money.Format(d.Symbol, d.Val.CostValue), "text-slate-900")
+			@invStat("Value at retail", money.Format(d.Symbol, d.Val.RetailValue), "text-slate-900")
+			@invStat("Potential margin", money.Format(d.Symbol, d.Val.Margin())+" ("+d.Val.MarginPct().String()+"%)", "text-emerald-600")
+			@invStat("Products in stock", strconv.Itoa(d.Val.InStock)+" of "+strconv.Itoa(d.Val.SKUs), "text-slate-900")
+		</div>
+		if d.Val.MissingCost > 0 || d.Val.NegativeQty > 0 {
+			<div class="mb-5 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2.5 text-sm text-amber-800">
+				if d.Val.MissingCost > 0 {
+					<div>{ strconv.Itoa(d.Val.MissingCost) } products hold stock but have no cost price — their cost value counts as zero, so the figure above is understated.</div>
+				}
+				if d.Val.NegativeQty > 0 {
+					<div>{ strconv.Itoa(d.Val.NegativeQty) } products show negative stock.</div>
+				}
+			</div>
+		}
+		<h2 class="font-semibold mb-2">By category</h2>
+		<table class="w-full text-sm mb-6">
 			<thead class="text-left text-slate-500 border-b">
-				<tr><th class="py-1.5">Product</th><th class="py-1.5">Category</th><th class="py-1.5 text-right">On hand</th><th class="py-1.5 text-right">Cost</th><th class="py-1.5 text-right">Cost value</th><th class="py-1.5 text-right">Retail value</th></tr>
+				<tr><th class="py-1.5">Category</th><th class="py-1.5 text-right">In stock</th><th class="py-1.5 text-right">Cost value</th><th class="py-1.5 text-right">Retail value</th><th class="py-1.5 text-right">Share</th></tr>
 			</thead>
 			<tbody>
-				for _, p := range d.Rows {
+				for _, r := range d.Val.Categories {
 					<tr class="border-b last:border-0">
-						<td class="py-1.5 font-medium">{ p.Name }</td>
-						<td class="py-1.5 text-slate-500">{ p.CategoryName }</td>
-						<td class="py-1.5 text-right">{ money.Display(p.StockQty) } { p.UnitAbbr }</td>
-						<td class="py-1.5 text-right">{ money.Display(p.CostPrice) }</td>
-						<td class="py-1.5 text-right">{ money.Format(d.Symbol, p.StockQty.Mul(p.CostPrice)) }</td>
-						<td class="py-1.5 text-right">{ money.Format(d.Symbol, p.StockQty.Mul(p.SellingPrice)) }</td>
+						<td class="py-1.5 font-medium">{ r.Category }</td>
+						<td class="py-1.5 text-right">{ strconv.Itoa(r.InStock) } / { strconv.Itoa(r.SKUs) }</td>
+						<td class="py-1.5 text-right">{ money.Format(d.Symbol, r.CostValue) }</td>
+						<td class="py-1.5 text-right">{ money.Format(d.Symbol, r.RetailValue) }</td>
+						<td class="py-1.5 text-right text-slate-500">{ pctOf(r.CostValue, d.Val.CostValue) }%</td>
 					</tr>
 				}
-				if len(d.Rows) == 0 {
-					<tr><td colspan="6" class="py-6 text-center text-slate-400">No products.</td></tr>
+				if len(d.Val.Categories) == 0 {
+					<tr><td colspan="5" class="py-6 text-center text-slate-400">No products.</td></tr>
 				}
 			</tbody>
 			<tfoot class="border-t-2 font-semibold">
 				<tr>
-					<td class="py-2" colspan="4">Totals</td>
-					<td class="py-2 text-right">{ money.Format(d.Symbol, d.CostValue) }</td>
-					<td class="py-2 text-right">{ money.Format(d.Symbol, d.RetailValue) }</td>
+					<td class="py-2">Total</td>
+					<td class="py-2 text-right">{ strconv.Itoa(d.Val.InStock) } / { strconv.Itoa(d.Val.SKUs) }</td>
+					<td class="py-2 text-right">{ money.Format(d.Symbol, d.Val.CostValue) }</td>
+					<td class="py-2 text-right">{ money.Format(d.Symbol, d.Val.RetailValue) }</td>
+					<td class="py-2 text-right">100%</td>
 				</tr>
 			</tfoot>
 		</table>
+		<!-- Item detail: screen only. Printing 600 rows is a book, not a report;
+		     the CSV is the right tool when every line is genuinely needed. -->
+		<div class="no-print border-t pt-5">
+			<div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+				<h2 class="font-semibold">Item detail</h2>
+				<a class="px-4 py-1.5 rounded-lg border text-sm" href={ templ.SafeURL(pgHref(invQuery(d), d.Page) + "&format=csv") }>Download CSV (all items)</a>
+			</div>
+			<form method="get" action="/admin/reports/inventory" class="flex flex-wrap items-end gap-3 mb-4">
+				<div>
+					<label class="block text-xs text-slate-500 mb-1">Category</label>
+					<select name="category_id" class="border rounded-lg px-3 py-1.5">
+						<option value="">All categories</option>
+						for _, r := range d.Val.Categories {
+							<option value={ strconv.FormatInt(r.CategoryID, 10) } selected?={ d.CategoryID != nil && *d.CategoryID == r.CategoryID }>{ r.Category }</option>
+						}
+					</select>
+				</div>
+				<label class="flex items-center gap-2 text-sm pb-1.5">
+					<input type="checkbox" name="include_zero" value="1" checked?={ d.IncludeZero } class="rounded"/>
+					Show items with no stock
+				</label>
+				<button class="px-4 py-1.5 rounded-lg bg-slate-800 text-white text-sm">Apply</button>
+			</form>
+			<table class="w-full text-sm">
+				<thead class="text-left text-slate-500 border-b">
+					<tr><th class="py-1.5">Product</th><th class="py-1.5">Category</th><th class="py-1.5 text-right">On hand</th><th class="py-1.5 text-right">Cost</th><th class="py-1.5 text-right">Cost value</th><th class="py-1.5 text-right">Retail value</th></tr>
+				</thead>
+				<tbody>
+					for _, p := range d.Rows {
+						<tr class="border-b last:border-0">
+							<td class="py-1.5 font-medium">{ p.Name }</td>
+							<td class="py-1.5 text-slate-500">{ p.CategoryName }</td>
+							<td class="py-1.5 text-right">{ money.Display(p.StockQty) } { p.UnitAbbr }</td>
+							<td class="py-1.5 text-right">{ money.Display(p.CostPrice) }</td>
+							<td class="py-1.5 text-right">{ money.Format(d.Symbol, p.StockQty.Mul(p.CostPrice)) }</td>
+							<td class="py-1.5 text-right">{ money.Format(d.Symbol, p.StockQty.Mul(p.SellingPrice)) }</td>
+						</tr>
+					}
+					if len(d.Rows) == 0 {
+						<tr><td colspan="6" class="py-6 text-center text-slate-400">No products match.</td></tr>
+					}
+				</tbody>
+			</table>
+			@rptPager(invQuery(d), d.Page, d.PageSize, d.Total)
+		</div>
 	}
+}
+
+templ invStat(label, value, color string) {
+	<div class="rounded-xl border bg-slate-50 px-4 py-3">
+		<div class="text-xs text-slate-500">{ label }</div>
+		<div class={ "text-lg font-bold mt-0.5 " + color }>{ value }</div>
+	</div>
 }
 
 // ============================ Batch report ============================
 
+// BatchReportData carries totals over EVERY matching batch plus one page of
+// them. A shop with 600+ live batches must not print 600 rows.
 type BatchReportData struct {
 	ShopName, Symbol, Days string
 	Rows                   []stock.Batch
 	TotalValue             decimal.Decimal
+	Total, Page, PageSize  int
+	Expired, ExpiringSoon  int
+	NoExpiry               int
+	ExpiredValue           decimal.Decimal
+	ExpiringValue          decimal.Decimal
 }
 
 templ BatchReport(d BatchReportData) {
 	@layouts.Report("Batches & Expiry", d.ShopName) {
-		<form method="get" action="/admin/reports/batches" class="no-print flex items-end gap-3 mb-5">
-			<div>
-				<label class="block text-xs text-slate-500 mb-1">Expiring within (days, blank = all)</label>
-				<input type="number" min="0" name="days" value={ d.Days } class="border rounded-lg px-3 py-1.5 w-44"/>
+		<div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+			@invStat("Batch value", money.Format(d.Symbol, d.TotalValue), "text-slate-900")
+			@invStat("Live batches", strconv.Itoa(d.Total), "text-slate-900")
+			@invStat("Expired", strconv.Itoa(d.Expired)+" · "+money.Format(d.Symbol, d.ExpiredValue), ternary(d.Expired > 0, "text-rose-600", "text-slate-900"))
+			@invStat("Expiring in 30 days", strconv.Itoa(d.ExpiringSoon)+" · "+money.Format(d.Symbol, d.ExpiringValue), ternary(d.ExpiringSoon > 0, "text-amber-600", "text-slate-900"))
+		</div>
+		if d.NoExpiry == d.Total && d.Total > 0 {
+			<div class="mb-5 rounded-lg border bg-slate-50 px-4 py-2.5 text-sm text-slate-600">
+				None of these batches carry an expiry date, so the expiry columns are empty. That is normal for non-perishable stock.
 			</div>
-			<button class="px-4 py-1.5 rounded-lg bg-slate-800 text-white text-sm">Apply</button>
-		</form>
+		}
+		<div class="no-print flex flex-wrap items-end justify-between gap-3 mb-5">
+			<form method="get" action="/admin/reports/batches" class="flex items-end gap-3">
+				<div>
+					<label class="block text-xs text-slate-500 mb-1">Expiring within (days, blank = all)</label>
+					<input type="number" min="0" name="days" value={ d.Days } class="border rounded-lg px-3 py-1.5 w-44"/>
+				</div>
+				<button class="px-4 py-1.5 rounded-lg bg-slate-800 text-white text-sm">Apply</button>
+			</form>
+			<a class="px-4 py-1.5 rounded-lg border text-sm" href={ templ.SafeURL(pgHref(batchQuery(d), 1) + "&format=csv") }>Download CSV (all batches)</a>
+		</div>
+		<!-- Batch detail is screen-only: 638 live batches is a book, not a report.
+		     The printed sheet is the summary above; the CSV is every line. -->
+		<div class="no-print">
 		<table class="w-full text-sm">
 			<thead class="text-left text-slate-500 border-b">
 				<tr><th class="py-1.5">Product</th><th class="py-1.5">Batch</th><th class="py-1.5">Expiry</th><th class="py-1.5 text-right">Remaining</th><th class="py-1.5 text-right">Cost</th><th class="py-1.5 text-right">Value</th></tr>
@@ -540,8 +722,11 @@ templ BatchReport(d BatchReportData) {
 				}
 			</tbody>
 			<tfoot class="border-t-2 font-semibold">
-				<tr><td class="py-2" colspan="5">Total batch value</td><td class="py-2 text-right">{ money.Format(d.Symbol, d.TotalValue) }</td></tr>
+				<tr><td class="py-2" colspan="5">Total batch value (all { strconv.Itoa(d.Total) })</td><td class="py-2 text-right">{ money.Format(d.Symbol, d.TotalValue) }</td></tr>
 			</tfoot>
 		</table>
+		@rptTruncNote(len(d.Rows), d.Total)
+		@rptPager(batchQuery(d), d.Page, d.PageSize, d.Total)
+		</div>
 	}
 }

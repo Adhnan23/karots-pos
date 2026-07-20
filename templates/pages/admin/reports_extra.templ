@@ -117,8 +117,10 @@ func periodLabel(t time.Time, gran string) string {
 
 type ReturnsReportData struct {
 	ShopName, Symbol, From, To, Preset string
-	Rows                       []reports.ReturnRow
-	TotalRefund                decimal.Decimal
+	Rows                               []reports.ReturnRow
+	TotalRefund                        decimal.Decimal
+	// TotalRefund covers the whole range; Rows is page Page of Total rows.
+	Total, Page, PageSize int
 }
 
 templ ReturnsReport(d ReturnsReportData) {
@@ -146,9 +148,11 @@ templ ReturnsReport(d ReturnsReportData) {
 				}
 			</tbody>
 			<tfoot class="border-t-2 font-semibold">
-				<tr><td class="py-2" colspan="5">Total refunded</td><td class="py-2 text-right">{ money.Format(d.Symbol, d.TotalRefund) }</td></tr>
+				<tr><td class="py-2" colspan="5">Total refunded (all { strconv.Itoa(d.Total) })</td><td class="py-2 text-right">{ money.Format(d.Symbol, d.TotalRefund) }</td></tr>
 			</tfoot>
 		</table>
+		@rptTruncNote(len(d.Rows), d.Total)
+		@rptPager(rangeQuery(d.Preset, d.From, d.To), d.Page, d.PageSize, d.Total)
 	}
 }
 

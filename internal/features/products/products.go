@@ -10,23 +10,25 @@ import (
 
 	"karots-pos/internal/db"
 
+	"github.com/lib/pq"
+
 	"github.com/shopspring/decimal"
 )
 
 type Product struct {
-	ID             int64           `db:"id"              json:"id"`
-	Name           string          `db:"name"            json:"name"`
-	NameLocal      *string         `db:"name_local"      json:"name_local,omitempty"`
-	Barcode        *string         `db:"barcode"         json:"barcode,omitempty"`
-	CategoryID     int64           `db:"category_id"     json:"category_id"`
-	UnitID         int64           `db:"unit_id"         json:"unit_id"`
-	CostPrice      decimal.Decimal `db:"cost_price"      json:"cost_price"`
-	SellingPrice   decimal.Decimal `db:"selling_price"   json:"selling_price"`
-	WholesalePrice decimal.Decimal `db:"wholesale_price" json:"wholesale_price"`
-	TaxRate        decimal.Decimal `db:"tax_rate"        json:"tax_rate"`
-	ReorderLevel   int             `db:"reorder_level"   json:"reorder_level"`
-	HasExpiry      bool            `db:"has_expiry"      json:"has_expiry"`
-	TrackSerial    bool            `db:"track_serial"    json:"track_serial"`
+	ID                  int64           `db:"id"              json:"id"`
+	Name                string          `db:"name"            json:"name"`
+	NameLocal           *string         `db:"name_local"      json:"name_local,omitempty"`
+	Barcode             *string         `db:"barcode"         json:"barcode,omitempty"`
+	CategoryID          int64           `db:"category_id"     json:"category_id"`
+	UnitID              int64           `db:"unit_id"         json:"unit_id"`
+	CostPrice           decimal.Decimal `db:"cost_price"      json:"cost_price"`
+	SellingPrice        decimal.Decimal `db:"selling_price"   json:"selling_price"`
+	WholesalePrice      decimal.Decimal `db:"wholesale_price" json:"wholesale_price"`
+	TaxRate             decimal.Decimal `db:"tax_rate"        json:"tax_rate"`
+	ReorderLevel        int             `db:"reorder_level"   json:"reorder_level"`
+	HasExpiry           bool            `db:"has_expiry"      json:"has_expiry"`
+	TrackSerial         bool            `db:"track_serial"    json:"track_serial"`
 	WarrantyMonths      int             `db:"warranty_months"       json:"warranty_months"`
 	IsActive            bool            `db:"is_active"             json:"is_active"`
 	IsService           bool            `db:"is_service"            json:"is_service"`
@@ -77,15 +79,31 @@ type ListQuery struct {
 	CategoryID *int64 `query:"category_id" form:"category_id"`
 	Search     string `query:"search"      form:"search"`
 	LowStock   bool   `query:"low_stock"   form:"low_stock"`
+	// Fuzzy enables typo-tolerant matching. Not a query param: the service sets
+	// it only for the rescue pass after a strict search came back empty.
+	Fuzzy bool `query:"-" form:"-"`
 }
 
+// MaxListLimit is the largest page List will serve. Callers that need the whole
+// catalog must use ListAll — List is for paging, not for bulk reads.
+const MaxListLimit = 100
+
 // Normalize applies sane pagination defaults/bounds.
+//
+// Over-asking clamps DOWN TO THE MAXIMUM, never to something smaller. The old
+// rule was "> 100 → 50", so a caller asking for 10000 silently got 50 — fewer
+// than the cap it exceeded. That turned every bulk read into a quiet 50-row
+// truncation, and any total summed from those rows was wrong (the Inventory
+// Valuation report reported 14% of real stock value this way).
 func (q *ListQuery) Normalize() {
 	if q.Page < 1 {
 		q.Page = 1
 	}
-	if q.Limit < 1 || q.Limit > 100 {
+	switch {
+	case q.Limit < 1:
 		q.Limit = 50
+	case q.Limit > MaxListLimit:
+		q.Limit = MaxListLimit
 	}
 }
 
@@ -110,25 +128,48 @@ func NewRepository(q db.Queryer) *Repository { return &Repository{db: q} }
 
 // subcatsCTE expands a selected category to itself + all descendants so that
 // filtering by a parent category also returns products in its sub-categories.
+// $4 is the category id; the search placeholders occupy $1-$3 (see searchClause).
 const subcatsCTE = `
 	WITH RECURSIVE subcats AS (
-		SELECT id FROM categories WHERE $2::bigint IS NOT NULL AND id = $2
+		SELECT id FROM categories WHERE $4::bigint IS NOT NULL AND id = $4
 		UNION ALL
 		SELECT c.id FROM categories c JOIN subcats sc ON c.parent_id = sc.id
 	)`
 
+// searchArgs binds the three searchClause placeholders for a query.
+func (q ListQuery) searchArgs() (any, any, bool) {
+	toks := searchTokens(q.Search)
+	if len(toks) == 0 {
+		return nil, nil, false
+	}
+	return pq.Array(toks), q.Search, q.Fuzzy
+}
+
 func (r *Repository) List(ctx context.Context, q ListQuery) ([]Product, error) {
+	toks, raw, fuzzy := q.searchArgs()
 	var rows []Product
 	err := r.db.SelectContext(ctx, &rows, subcatsCTE+selectProduct+`
 		WHERE p.is_active = true AND p.is_service = false
-		  AND ($1::text   IS NULL OR p.name ILIKE '%' || $1 || '%' OR p.barcode = $1)
-		  AND ($2::bigint IS NULL OR p.category_id IN (SELECT id FROM subcats))
-		  AND ($3 = false OR COALESCE(s.quantity,0) <= p.reorder_level)
-		ORDER BY p.name, p.id
-		LIMIT $4 OFFSET $5`,
-		nullStr(q.Search), q.CategoryID, q.LowStock, q.Limit, q.offset())
+		  AND `+searchClause+`
+		  AND ($4::bigint IS NULL OR p.category_id IN (SELECT id FROM subcats))
+		  AND ($5 = false OR COALESCE(s.quantity,0) <= p.reorder_level)
+		ORDER BY `+searchRank+` p.name, p.id
+		LIMIT $6 OFFSET $7`,
+		toks, raw, fuzzy, q.CategoryID, q.LowStock, q.Limit, q.offset())
 	return rows, err
 }
+
+// searchRank puts the most likely hit first when the user is searching: an exact
+// barcode, then names that START with what was typed (so "pen" leads with "Pen
+// Box", not "Atlas Chooty Blue Pen"), then everything else alphabetically. With
+// no search term every product ranks 3 and the order collapses to plain by-name.
+const searchRank = `
+	CASE
+		WHEN $2::text IS NOT NULL AND p.barcode = $2 THEN 0
+		WHEN $2::text IS NOT NULL AND lower(p.name) LIKE lower($2) || '%' THEN 1
+		WHEN $2::text IS NOT NULL AND lower(p.name) LIKE '%' || lower($2) || '%' THEN 2
+		ELSE 3
+	END,`
 
 // ListAll returns every active, non-service product with no pagination, for
 // spreadsheet export where the whole catalog must round-trip (the paginated
@@ -143,14 +184,15 @@ func (r *Repository) ListAll(ctx context.Context) ([]Product, error) {
 
 func (r *Repository) Count(ctx context.Context, q ListQuery) (int, error) {
 	var n int
+	toks, raw, fuzzy := q.searchArgs()
 	err := r.db.GetContext(ctx, &n, subcatsCTE+`
 		SELECT COUNT(*) FROM products p
 		LEFT JOIN stock s ON s.product_id = p.id
 		WHERE p.is_active = true AND p.is_service = false
-		  AND ($1::text   IS NULL OR p.name ILIKE '%' || $1 || '%' OR p.barcode = $1)
-		  AND ($2::bigint IS NULL OR p.category_id IN (SELECT id FROM subcats))
-		  AND ($3 = false OR COALESCE(s.quantity,0) <= p.reorder_level)`,
-		nullStr(q.Search), q.CategoryID, q.LowStock)
+		  AND `+searchClause+`
+		  AND ($4::bigint IS NULL OR p.category_id IN (SELECT id FROM subcats))
+		  AND ($5 = false OR COALESCE(s.quantity,0) <= p.reorder_level)`,
+		toks, raw, fuzzy, q.CategoryID, q.LowStock)
 	return n, err
 }
 

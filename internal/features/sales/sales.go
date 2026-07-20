@@ -293,9 +293,18 @@ type ListFilter struct {
 	Offset    int
 }
 
+// MaxListLimit is the largest page List will serve.
+const MaxListLimit = 500
+
 func (r *Repository) List(ctx context.Context, f ListFilter) ([]Sale, error) {
-	if f.Limit <= 0 || f.Limit > 500 {
+	// Clamp DOWN TO the maximum, never below it: the old "> 500 → 100" rule
+	// meant a caller asking for 10000 got 100, and any total summed from the
+	// returned rows silently omitted the rest.
+	switch {
+	case f.Limit <= 0:
 		f.Limit = 100
+	case f.Limit > MaxListLimit:
+		f.Limit = MaxListLimit
 	}
 	var status *string
 	if f.Status != "" {
@@ -333,4 +342,56 @@ func (r *Repository) List(ctx context.Context, f ListFilter) ([]Sale, error) {
 		ORDER BY s.created_at DESC, s.id DESC
 		LIMIT $6 OFFSET $7`, f.From, f.To, f.CashierID, status, receipt, f.Limit, f.Offset, method, query)
 	return rows, err
+}
+
+// ListSummary is the whole-filter aggregate behind a page of List results.
+// Reports must take their totals from here, never by summing a rendered page.
+type ListSummary struct {
+	Count    int             `db:"count"`
+	Gross    decimal.Decimal `db:"gross"`
+	Discount decimal.Decimal `db:"discount"`
+	Net      decimal.Decimal `db:"net"`
+}
+
+// Summarize aggregates every sale matching f, ignoring Limit/Offset entirely.
+// The WHERE clause is kept identical to List above — change one, change both.
+func (r *Repository) Summarize(ctx context.Context, f ListFilter) (*ListSummary, error) {
+	var status *string
+	if f.Status != "" {
+		status = &f.Status
+	}
+	var receipt *string
+	if f.Receipt != "" {
+		receipt = &f.Receipt
+	}
+	var method *string
+	if f.Method != "" {
+		method = &f.Method
+	}
+	var query *string
+	if f.Query != "" {
+		query = &f.Query
+	}
+	var out ListSummary
+	err := r.q.GetContext(ctx, &out, `
+		SELECT count(*)                        AS count,
+		       COALESCE(SUM(s.subtotal), 0)    AS gross,
+		       COALESCE(SUM(s.discount), 0)    AS discount,
+		       COALESCE(SUM(s.total), 0)       AS net
+		FROM sales s
+		JOIN users u ON u.id = s.cashier_id
+		LEFT JOIN customers c ON c.id = s.customer_id
+		WHERE ($1::timestamptz IS NULL OR s.created_at >= $1)
+		  AND ($2::timestamptz IS NULL OR s.created_at <  $2)
+		  AND ($3::bigint IS NULL OR s.cashier_id = $3)
+		  AND ($4::text IS NULL OR s.status = $4::sale_status)
+		  AND ($5::text IS NULL OR s.receipt_no ILIKE '%' || $5 || '%')
+		  AND ($6::text IS NULL OR EXISTS (
+		      SELECT 1 FROM payments p WHERE p.sale_id = s.id AND p.method = $6::payment_method))
+		  AND ($7::text IS NULL OR
+		       s.receipt_no ILIKE '%' || $7 || '%' OR
+		       c.name       ILIKE '%' || $7 || '%' OR
+		       c.phone      ILIKE '%' || $7 || '%')`,
+		f.From, f.To, f.CashierID, status, receipt, method, query)
+	return &out, err
 }

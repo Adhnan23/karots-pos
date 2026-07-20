@@ -3,7 +3,6 @@ package adminpages
 import (
 	"strconv"
 
-	"karots-pos/internal/features/products"
 	"karots-pos/internal/features/purchasereturns"
 	"karots-pos/internal/features/suppliers"
 	"karots-pos/internal/money"
@@ -109,7 +108,6 @@ type PurchaseReturnEntryData struct {
 	UserName  string
 	Symbol    string
 	Suppliers []suppliers.Supplier
-	Products  []products.Product
 }
 
 templ PurchaseReturnEntryPage(d PurchaseReturnEntryData) {

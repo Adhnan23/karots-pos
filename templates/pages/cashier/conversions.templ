@@ -1,0 +1,132 @@
+package cashierpages
+
+import (
+	"strconv"
+
+	"karots-pos/internal/features/conversions"
+	"karots-pos/internal/money"
+	"karots-pos/templates/layouts"
+)
+
+// The till-side conversions screen is RUN ONLY — no create, edit or delete.
+// A definition sets the ratio, and a wrong ratio corrupts stock on every future
+// run, so authoring stays in admin. Running a pre-approved recipe is safe and
+// every run is attributed to the cashier in the admin Run History.
+
+type ConversionsData struct {
+	CashierName   string
+	Role          string
+	ShowChangePin bool
+	Rows          []conversions.Conversion
+	Search        string
+}
+
+templ Conversions(d ConversionsData) {
+	@layouts.Cashier("Conversions", d.CashierName, d.Role, "conversions", d.ShowChangePin) {
+		<div class="p-4 max-w-5xl mx-auto">
+			<div class="mb-4">
+				<h1 class="text-2xl font-bold">Convert Stock</h1>
+				<p class="text-sm text-slate-500">Break a pack into loose units. Set up by your manager — pick one and enter how much.</p>
+			</div>
+			<form method="get" action="/cashier/conversions" class="flex items-end gap-2 mb-4">
+				<input
+					name="search"
+					value={ d.Search }
+					placeholder="Search either product…"
+					class="flex-1 border rounded-lg px-3 py-2.5 text-base"
+				/>
+				<button class="px-5 py-2.5 rounded-lg bg-slate-800 text-white">Search</button>
+				if d.Search != "" {
+					<a class="px-5 py-2.5 rounded-lg border" href="/cashier/conversions">Clear</a>
+				}
+			</form>
+			<div id="conversion-list" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+				if len(d.Rows) == 0 {
+					<p class="col-span-full py-10 text-center text-slate-500">
+						No conversions set up. Ask your manager to add one.
+					</p>
+				} else {
+					for _, cv := range d.Rows {
+						@conversionCard(cv)
+					}
+				}
+			</div>
+		</div>
+	}
+}
+
+// conversionCard is a touch-sized target rather than a table row — this screen
+// is used standing at a till, often on a small display.
+templ conversionCard(cv conversions.Conversion) {
+	<div class="bg-white rounded-2xl shadow-sm p-4 flex flex-col gap-2">
+		<div class="font-semibold">{ cv.FromName }</div>
+		<div class="text-sm text-slate-500">
+			→ { cv.ToName } &nbsp;·&nbsp; 1 { cv.FromUnitAbbr } gives { cv.Ratio.String() } { cv.ToUnitAbbr }
+		</div>
+		<div class="text-sm">
+			if cv.Runnable() {
+				<span class="text-slate-500">Available:</span>
+				<span class="font-semibold">{ money.Display(cv.FromStock) } { cv.FromUnitAbbr }</span>
+			} else {
+				<span class="text-rose-600 font-medium">Out of stock — nothing to convert</span>
+			}
+		</div>
+		if cv.Runnable() {
+			<button
+				class="mt-1 px-4 py-2.5 rounded-lg bg-indigo-600 text-white font-semibold"
+				hx-get={ "/cashier/conversions/run/" + strconv.FormatInt(cv.ID, 10) }
+				hx-target="#modal-container"
+				hx-swap="innerHTML"
+			>Convert</button>
+		} else {
+			<button class="mt-1 px-4 py-2.5 rounded-lg bg-slate-200 text-slate-400 font-semibold" disabled>Convert</button>
+		}
+	</div>
+}
+
+templ ConversionRunForm(cv conversions.Conversion) {
+	@cashierModal("Convert Stock") {
+		<form
+			class="p-6 space-y-4"
+			hx-post={ "/cashier/conversions/" + strconv.FormatInt(cv.ID, 10) + "/run" }
+			hx-swap="none"
+		>
+			<p class="text-sm text-slate-600">
+				<span class="font-semibold">{ cv.FromName }</span> →
+				<span class="font-semibold">{ cv.ToName }</span>
+			</p>
+			<div class="rounded-lg bg-slate-50 border px-4 py-3 text-sm">
+				<div class="flex justify-between">
+					<span class="text-slate-500">Available</span>
+					<span class="font-semibold">{ money.Display(cv.FromStock) } { cv.FromUnitAbbr }</span>
+				</div>
+			</div>
+			<div x-data={ "{qty:0, ratio:" + cv.Ratio.String() + ", max:" + cv.FromStock.String() + "}" }>
+				<label class="block text-sm font-medium mb-1">How many { cv.FromUnitAbbr } to convert?</label>
+				<input
+					name="quantity"
+					type="number"
+					step="0.001"
+					min="0"
+					required
+					autofocus
+					x-model.number="qty"
+					x-bind:max="max"
+					class="w-full border rounded-lg px-3 py-3 text-lg"
+				/>
+				<p class="text-sm mt-2" x-show="qty > 0" x-cloak>
+					<span x-show="qty <= max" class="text-emerald-700">
+						You will get <span class="font-bold" x-text="(qty * ratio).toFixed(3)"></span> { cv.ToUnitAbbr } of { cv.ToName }.
+					</span>
+					<span x-show="qty > max" class="text-rose-600 font-medium">
+						Only { money.Display(cv.FromStock) } { cv.FromUnitAbbr } available.
+					</span>
+				</p>
+			</div>
+			<div class="flex justify-end gap-3 pt-2">
+				<button type="button" class="px-4 py-2 rounded-lg border" x-on:click="$dispatch('close-modal')">Cancel</button>
+				<button type="submit" class="px-4 py-2 rounded-lg bg-indigo-600 text-white font-semibold">Convert</button>
+			</div>
+		</form>
+	}
+}

@@ -45,3 +45,11 @@ func writeCSV(c echo.Context, filename string, header []string, rows [][]string)
 // csvMoney formats a decimal as a plain 2dp string for CSV cells (no symbol or
 // thousands separators, so spreadsheets parse it as a number).
 func csvMoney(d decimal.Decimal) string { return d.StringFixed(2) }
+
+// ptrStr renders an optional string column as a blank cell rather than "<nil>".
+func ptrStr(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
