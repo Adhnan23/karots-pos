@@ -60,11 +60,11 @@ func (a *adminUI) Hub(c echo.Context) error {
 // Carriers renders the carrier & device management page.
 func (a *adminUI) Carriers(c echo.Context) error {
 	ctx := c.Request().Context()
-	cs, err := a.p.store.Carriers(ctx)
+	cs, err := a.p.store.AllCarriers(ctx)
 	if err != nil {
 		return err
 	}
-	ds, err := a.p.store.Devices(ctx)
+	ds, err := a.p.store.AllDevices(ctx)
 	if err != nil {
 		return err
 	}
@@ -73,7 +73,7 @@ func (a *adminUI) Carriers(c echo.Context) error {
 
 // CarriersTable is the HTMX row fragment.
 func (a *adminUI) CarriersTable(c echo.Context) error {
-	cs, err := a.p.store.Carriers(c.Request().Context())
+	cs, err := a.p.store.AllCarriers(c.Request().Context())
 	if err != nil {
 		return err
 	}
@@ -88,11 +88,11 @@ func (a *adminUI) CarrierCreate(c echo.Context) error {
 	if name == "" {
 		return apperr.Validation("carrier name is required")
 	}
-	exists, err := a.p.store.CarrierExists(ctx, name)
+	taken, err := a.p.store.CarrierNameTaken(ctx, name, 0)
 	if err != nil {
 		return err
 	}
-	if exists {
+	if taken {
 		return apperr.Conflict("a carrier with that name already exists")
 	}
 
@@ -117,7 +117,7 @@ func (a *adminUI) CarrierCreate(c echo.Context) error {
 		return err
 	}
 
-	cs, err := a.p.store.Carriers(ctx)
+	cs, err := a.p.store.AllCarriers(ctx)
 	if err != nil {
 		return err
 	}
@@ -673,14 +673,35 @@ func (a *adminUI) DeviceCreate(c echo.Context) error {
 	if !forRecharge && !forMoney {
 		return apperr.Validation("choose at least one use (recharge and/or money transfer)")
 	}
-	if _, err := a.p.store.CreateDevice(ctx, carrierID, label, strings.TrimSpace(c.FormValue("number")), forRecharge, forMoney, true); err != nil {
-		return err
+	// Opening float: money already on the SIM when the shop is onboarded. Parsed
+	// before the insert so a bad amount fails without leaving a half-set-up device.
+	opening := decimal.Zero
+	if raw := strings.TrimSpace(c.FormValue("opening_float")); raw != "" {
+		opening, err = money.Parse(raw)
+		if err != nil || opening.IsNegative() {
+			return apperr.Validation("opening balance must be a non-negative amount")
+		}
 	}
-	ds, err := a.p.store.Devices(ctx)
+
+	deviceID, err := a.p.store.CreateDevice(ctx, carrierID, label, strings.TrimSpace(c.FormValue("number")), forRecharge, forMoney, true)
 	if err != nil {
 		return err
 	}
-	return response.RenderFragment(c, DeviceRows(ds), response.Toast(label+" added", "success"))
+	if opening.IsPositive() {
+		if err := a.p.store.RecordOpeningFloat(ctx, carrierID, deviceID, opening, middleware.CurrentUserID(c)); err != nil {
+			return err
+		}
+	}
+
+	ds, err := a.p.store.AllDevices(ctx)
+	if err != nil {
+		return err
+	}
+	msg := label + " added"
+	if opening.IsPositive() {
+		msg += " with " + money.Display(opening) + " opening float"
+	}
+	return response.RenderFragment(c, DeviceRows(ds), response.Toast(msg, "success"))
 }
 
 // DeviceDelete retires a device (its history is preserved).
@@ -693,26 +714,174 @@ func (a *adminUI) DeviceDelete(c echo.Context) error {
 	if err := a.p.store.DeactivateDevice(ctx, id); err != nil {
 		return err
 	}
-	ds, err := a.p.store.Devices(ctx)
+	ds, err := a.p.store.AllDevices(ctx)
 	if err != nil {
 		return err
 	}
 	return response.RenderFragment(c, DeviceRows(ds))
 }
 
-// CarrierDelete soft-deletes a carrier (sales history is preserved).
-func (a *adminUI) CarrierDelete(c echo.Context) error {
+// CarrierEditForm opens the rename dialog.
+func (a *adminUI) CarrierEditForm(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	cv, err := a.p.store.Carrier(c.Request().Context(), id)
+	if err != nil {
+		return apperr.NotFound("carrier")
+	}
+	return response.RenderFragment(c, CarrierEditForm(*cv))
+}
+
+// CarrierRename renames a carrier and its hidden service product, so the product
+// the sales actually post to keeps matching the carrier the owner sees.
+//
+// Renaming replaces the old delete-then-re-add workaround, which could not work:
+// the delete kept the row (and its name) forever, so the name could never be
+// used again.
+func (a *adminUI) CarrierRename(c echo.Context) error {
 	ctx := c.Request().Context()
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		return apperr.BadRequest("invalid id")
 	}
-	if err := a.p.store.DeactivateCarrier(ctx, id); err != nil {
-		return err
+	name := strings.TrimSpace(c.FormValue("name"))
+	if name == "" {
+		return apperr.Validation("carrier name is required")
 	}
-	cs, err := a.p.store.Carriers(ctx)
+	cur, err := a.p.store.Carrier(ctx, id)
+	if err != nil {
+		return apperr.NotFound("carrier")
+	}
+	taken, err := a.p.store.CarrierNameTaken(ctx, name, id)
 	if err != nil {
 		return err
 	}
-	return response.RenderFragment(c, CarrierRows(cs), response.Trigger(map[string]any{"carriers-changed": true}))
+	if taken {
+		return apperr.Conflict("another carrier is already using that name")
+	}
+	if err := a.p.store.RenameCarrier(ctx, id, name); err != nil {
+		return err
+	}
+	// Keep the hidden service product's name in step. Best-effort: a failure
+	// here must not roll back a rename the owner already sees applied.
+	if p, gerr := a.p.core.Products.Get(ctx, cur.ProductID); gerr == nil && p != nil {
+		_ = a.p.core.Products.Rename(ctx, cur.ProductID, name+" Recharge")
+	}
+	cs, err := a.p.store.AllCarriers(ctx)
+	if err != nil {
+		return err
+	}
+	return response.RenderFragment(c, CarrierRows(cs),
+		response.ToastAnd("Renamed to "+name, "success", "carriers-changed"))
+}
+
+// CarrierToggle disables or re-enables a carrier. Carriers are never deleted:
+// a disabled carrier disappears from the till and every picker but keeps its
+// history and can be switched back on.
+func (a *adminUI) CarrierToggle(c echo.Context) error {
+	ctx := c.Request().Context()
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	cur, err := a.p.store.Carrier(ctx, id)
+	if err != nil {
+		return apperr.NotFound("carrier")
+	}
+	// Re-enabling can collide: another carrier may have taken the name while
+	// this one was off. Say so plainly instead of failing on a constraint.
+	if !cur.IsActive {
+		taken, terr := a.p.store.CarrierNameTaken(ctx, cur.Name, id)
+		if terr != nil {
+			return terr
+		}
+		if taken {
+			return apperr.Conflict("another active carrier is already named " + cur.Name +
+				" — rename one of them first")
+		}
+	}
+	if err := a.p.store.SetCarrierActive(ctx, id, !cur.IsActive); err != nil {
+		return err
+	}
+	cs, err := a.p.store.AllCarriers(ctx)
+	if err != nil {
+		return err
+	}
+	word := "enabled"
+	if cur.IsActive {
+		word = "disabled"
+	}
+	return response.RenderFragment(c, CarrierRows(cs),
+		response.ToastAnd(cur.Name+" "+word, "success", "carriers-changed"))
+}
+
+// DeviceEditForm opens the device editor.
+func (a *adminUI) DeviceEditForm(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	d, err := a.p.store.Device(c.Request().Context(), id)
+	if err != nil {
+		return apperr.NotFound("device")
+	}
+	return response.RenderFragment(c, DeviceEditForm(*d))
+}
+
+// DeviceUpdate edits a device in place. A SIM whose number changes is the same
+// float account, so this keeps its balance, sessions and ledger together instead
+// of splitting them across a retired row and a new one.
+func (a *adminUI) DeviceUpdate(c echo.Context) error {
+	ctx := c.Request().Context()
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	label := strings.TrimSpace(c.FormValue("label"))
+	if label == "" {
+		return apperr.Validation("device label is required")
+	}
+	forRecharge := c.FormValue("for_recharge") != ""
+	forMoney := c.FormValue("for_money") != ""
+	if !forRecharge && !forMoney {
+		return apperr.Validation("a device must be used for reloads, money, or both")
+	}
+	if err := a.p.store.UpdateDevice(ctx, id, label,
+		strings.TrimSpace(c.FormValue("number")), forRecharge, forMoney); err != nil {
+		return err
+	}
+	ds, err := a.p.store.AllDevices(ctx)
+	if err != nil {
+		return err
+	}
+	return response.RenderFragment(c, DeviceRows(ds),
+		response.ToastAnd(label+" updated", "success", "devices-changed"))
+}
+
+// DeviceToggle retires or restores a device.
+func (a *adminUI) DeviceToggle(c echo.Context) error {
+	ctx := c.Request().Context()
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	d, err := a.p.store.Device(ctx, id)
+	if err != nil {
+		return apperr.NotFound("device")
+	}
+	if err := a.p.store.SetDeviceActive(ctx, id, !d.IsActive); err != nil {
+		return err
+	}
+	ds, err := a.p.store.AllDevices(ctx)
+	if err != nil {
+		return err
+	}
+	word := "restored"
+	if d.IsActive {
+		word = "retired"
+	}
+	return response.RenderFragment(c, DeviceRows(ds),
+		response.ToastAnd(d.Label+" "+word, "success", "devices-changed"))
 }

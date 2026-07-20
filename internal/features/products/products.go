@@ -196,6 +196,14 @@ func (r *Repository) Count(ctx context.Context, q ListQuery) (int, error) {
 	return n, err
 }
 
+// Rename updates just the name column. Returns sql.ErrNoRows if the id is unknown
+// so the service can report a 404 rather than a silent no-op.
+func (r *Repository) Rename(ctx context.Context, id int64, name string) error {
+	var got int64
+	return r.db.GetContext(ctx, &got,
+		`UPDATE products SET name = $2, updated_at = now() WHERE id = $1 RETURNING id`, id, name)
+}
+
 func (r *Repository) FindByID(ctx context.Context, id int64) (*Product, error) {
 	var p Product
 	err := r.db.GetContext(ctx, &p, selectProduct+` WHERE p.id = $1`, id)

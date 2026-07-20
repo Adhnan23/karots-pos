@@ -340,6 +340,27 @@ func (s *Service) Update(ctx context.Context, id int64, in UpdateInput) (*Produc
 	return s.Get(ctx, id)
 }
 
+// Rename changes only a product's name, leaving every other field untouched.
+//
+// A narrow operation on purpose: callers that hold a product id but not a full
+// UpdateInput (the recharge plugin renaming a carrier's hidden service product)
+// would otherwise have to reconstruct every field from a Product and convert the
+// decimals back to strings, which loses precision and silently drops anything
+// added to the input struct later.
+func (s *Service) Rename(ctx context.Context, id int64, name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return apperr.Validation("product name is required")
+	}
+	if err := s.repo.Rename(ctx, id, name); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return apperr.NotFound("product")
+		}
+		return mapWriteErr(err)
+	}
+	return nil
+}
+
 func (s *Service) Delete(ctx context.Context, id int64) error {
 	if _, err := s.repo.FindByID(ctx, id); err != nil {
 		return apperr.NotFound("product")

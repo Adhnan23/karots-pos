@@ -166,6 +166,8 @@ func txLabel(t string) string {
 		return "reload"
 	case "refill":
 		return "supplier refill"
+	case "opening":
+		return "opening balance"
 	}
 	return t
 }

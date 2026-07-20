@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/shopspring/decimal"
 )
 
 // Carrier is a recharge carrier (Dialog, Mobitel, …). ProductID is the hidden
@@ -42,17 +43,62 @@ func (s *Store) CreateCarrier(ctx context.Context, name string, productID int64)
 	return id, err
 }
 
-// DeactivateCarrier soft-deletes a carrier (its sales history is preserved).
-func (s *Store) DeactivateCarrier(ctx context.Context, id int64) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE recharge_carriers SET is_active = false WHERE id = $1`, id)
+// AllCarriers lists every carrier including disabled ones, for the admin screen
+// where they can be renamed or switched back on. Active first, then by name.
+func (s *Store) AllCarriers(ctx context.Context) ([]Carrier, error) {
+	var cs []Carrier
+	err := s.db.SelectContext(ctx, &cs,
+		`SELECT id, name, product_id, is_active FROM recharge_carriers
+		 ORDER BY is_active DESC, name`)
+	return cs, err
+}
+
+// SetCarrierActive enables or disables a carrier. Carriers are never deleted:
+// disabling hides them from the till and every picker while keeping their sales,
+// float sessions and ledger intact, and it is reversible. Deleting used to be
+// the only option and was a one-way door — the row survived as a tombstone that
+// held its name forever, so the same carrier could never be added back.
+func (s *Store) SetCarrierActive(ctx context.Context, id int64, active bool) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE recharge_carriers SET is_active = $2 WHERE id = $1`, id, active)
 	return err
 }
 
-// CarrierExists reports whether an active carrier already uses this name.
-func (s *Store) CarrierExists(ctx context.Context, name string) (bool, error) {
+// RenameCarrier changes a carrier's display name. A carrier that rebrands is
+// still the same carrier, so renaming keeps every past sale attached to it.
+func (s *Store) RenameCarrier(ctx context.Context, id int64, name string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE recharge_carriers SET name = $2 WHERE id = $1`, id, name)
+	return err
+}
+
+// Carrier returns one carrier by id, enabled or not.
+func (s *Store) Carrier(ctx context.Context, id int64) (*Carrier, error) {
+	var c Carrier
+	err := s.db.GetContext(ctx, &c,
+		`SELECT id, name, product_id, is_active FROM recharge_carriers WHERE id = $1`, id)
+	if err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
+// CarrierNameTaken reports whether another ENABLED carrier already uses this
+// name. Pass excludeID when renaming so a carrier does not collide with itself;
+// pass 0 when creating.
+//
+// Scoped to enabled carriers to match the partial unique index added in
+// migration 00012. Checking only active names while the DB enforced uniqueness
+// across ALL names is precisely what made the old failure so confusing: the app
+// said the name was free and the database then refused the insert — after the
+// hidden service product had already been created and left orphaned.
+func (s *Store) CarrierNameTaken(ctx context.Context, name string, excludeID int64) (bool, error) {
 	var ok bool
-	err := s.db.GetContext(ctx, &ok,
-		`SELECT EXISTS (SELECT 1 FROM recharge_carriers WHERE lower(name) = lower($1) AND is_active = true)`, name)
+	err := s.db.GetContext(ctx, &ok, `
+		SELECT EXISTS (
+			SELECT 1 FROM recharge_carriers
+			WHERE lower(name) = lower($1) AND is_active = true AND id <> $2
+		)`, name, excludeID)
 	return ok, err
 }
 
@@ -117,6 +163,81 @@ func (s *Store) CreateDevice(ctx context.Context, carrierID int64, label, number
 // DeactivateDevice retires a device (its history is preserved).
 func (s *Store) DeactivateDevice(ctx context.Context, id int64) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE recharge_devices SET is_active = false WHERE id = $1`, id)
+	return err
+}
+
+// AllDevices lists every device including retired ones, for the admin screen.
+func (s *Store) AllDevices(ctx context.Context) ([]Device, error) {
+	var ds []Device
+	err := s.db.SelectContext(ctx, &ds, `
+		SELECT d.id, d.carrier_id, d.label, COALESCE(d.number,'') AS number,
+		       d.is_active, c.name AS carrier, d.for_recharge, d.for_money, d.tracks_float
+		FROM recharge_devices d
+		JOIN recharge_carriers c ON c.id = d.carrier_id
+		ORDER BY d.is_active DESC, c.name, d.label`)
+	return ds, err
+}
+
+// Device returns one device by id, active or not.
+func (s *Store) Device(ctx context.Context, id int64) (*Device, error) {
+	var d Device
+	err := s.db.GetContext(ctx, &d, `
+		SELECT d.id, d.carrier_id, d.label, COALESCE(d.number,'') AS number,
+		       d.is_active, c.name AS carrier, d.for_recharge, d.for_money, d.tracks_float
+		FROM recharge_devices d
+		JOIN recharge_carriers c ON c.id = d.carrier_id
+		WHERE d.id = $1`, id)
+	if err != nil {
+		return nil, err
+	}
+	return &d, nil
+}
+
+// UpdateDevice edits a device in place. A SIM whose number changes is still the
+// same float account, so editing keeps its balance, sessions and ledger — the
+// only alternative before this was retire-and-recreate, which silently split one
+// device's history across two rows.
+//
+// The carrier is deliberately not editable: moving a device to another carrier
+// would reassign every past transaction's float to the wrong account.
+func (s *Store) UpdateDevice(ctx context.Context, id int64, label, number string, forRecharge, forMoney bool) error {
+	var num *string
+	if strings.TrimSpace(number) != "" {
+		trimmed := strings.TrimSpace(number)
+		num = &trimmed
+	}
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE recharge_devices
+		SET label = $2, number = $3, for_recharge = $4, for_money = $5
+		WHERE id = $1`, id, label, num, forRecharge, forMoney)
+	return err
+}
+
+// RecordOpeningFloat declares money already sitting on a device at onboarding.
+//
+// This is the float equivalent of opening stock: float_delta = +amount with NO
+// cash movement and NO expense, because nothing was bought — the balance simply
+// pre-dates the POS. The alternatives were a reload or a supplier refill, both
+// of which book an expense and would have invented a purchase that never
+// happened, quietly distorting the P&L on day one.
+//
+// session_id = 0 puts it on the same carry-over path DeviceBalance already uses
+// for float moved outside a session, so it is picked up without touching the
+// balance query.
+func (s *Store) RecordOpeningFloat(ctx context.Context, carrierID, deviceID int64, amount decimal.Decimal, userID int64) error {
+	note := "opening float balance at onboarding"
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO recharge_transactions
+			(session_id, carrier_id, device_id, type, amount, cash_delta, float_delta, note, created_by)
+		VALUES (0, $1, $2, 'opening', $3, 0, $3, $4, $5)`,
+		carrierID, deviceID, amount, note, userID)
+	return err
+}
+
+// SetDeviceActive retires or restores a device.
+func (s *Store) SetDeviceActive(ctx context.Context, id int64, active bool) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE recharge_devices SET is_active = $2 WHERE id = $1`, id, active)
 	return err
 }
 
