@@ -38,6 +38,7 @@
 - `internal/features/recipes/variance.go` — expected-vs-actual consumption
 - `templates/fragments/admin/recipe.templ` — the recipe editor fragment
 - `plugins/documents/migrations/00004_consumables_to_core.sql` — move existing paper rows into core recipes
+- `migrations/0048_own_use_staff_movements.sql` — shop own-use and staff-welfare movement types
 
 **Modify:**
 - `internal/features/sales/service.go:246` — expand a stored recipe when no components were supplied
@@ -1147,6 +1148,217 @@ Restart the server and confirm the admin section renders and the goose version t
 ```bash
 git add plugins/documents/plugin.json plugins/documents/documents.go
 git commit -m "refactor(documents): rename to Print & Copy in the UI, key unchanged"
+```
+
+---
+
+### Task 10: Shop own-use and staff-welfare stock movements
+
+Stock leaves for two legitimate reasons that are neither a sale nor a loss: the
+shop uses its own stock (adhesive, a pen for the counter), and staff eat edible
+stock. Today the only options are **Adjust**, which books no cost at all so the
+money silently vanishes, and **Damage**, which books the cost as a *loss* and so
+mislabels deliberate use as breakage.
+
+Both get their own P&L line. Neither is recoverable — the shop absorbs them.
+
+**Files:**
+- Create: `migrations/0048_own_use_staff_movements.sql`
+- Modify: `internal/features/reports/reports.go:20-36,112-119`
+- Modify: `internal/features/stock/service.go`
+
+**Interfaces:**
+- Produces: movement types `own_use` and `staff`; `reports.PL.OwnUse` and
+  `reports.PL.StaffWelfare`; `stock.Service.Consume(ctx, in ConsumeInput, userID)`.
+- Task 11 calls `Consume` from the admin and cashier UIs.
+
+- [ ] **Step 1: Write the migration**
+
+```sql
+-- +goose NO TRANSACTION
+-- +goose Up
+-- Stock leaves for reasons that are neither a sale nor a loss:
+--   own_use — the shop consumed its own stock (adhesive, cleaning supplies)
+--   staff   — staff ate or took stock
+-- Adjust books no cost, so using it here would make the money disappear without
+-- ever reaching the P&L. Damage books cost as a LOSS, which reads as breakage or
+-- theft and hides how much the shop deliberately consumes. Both need their own
+-- type so their cost can be reported on its own line.
+--
+-- NO TRANSACTION: PostgreSQL forbids using an enum value in the same
+-- transaction that added it, and goose wraps migrations in one by default.
+ALTER TYPE stock_movement_type ADD VALUE IF NOT EXISTS 'own_use';
+ALTER TYPE stock_movement_type ADD VALUE IF NOT EXISTS 'staff';
+
+-- +goose Down
+-- PostgreSQL cannot drop a value from an enum. Rows of these types would have to
+-- be re-typed and the enum rebuilt, which is not a safe automatic rollback, so
+-- the values are deliberately left in place. They are inert when unused.
+SELECT 1;
+```
+
+- [ ] **Step 2: Apply and verify both values exist**
+
+Run:
+```bash
+make migrate
+docker compose exec -T postgres psql -U pos_user -d pos_db -tAc "
+SELECT unnest(enum_range(NULL::stock_movement_type));" | grep -E "own_use|staff"
+```
+Expected: both `own_use` and `staff` are listed.
+
+- [ ] **Step 3: Add the two P&L lines**
+
+In `internal/features/reports/reports.go`, add to the `PL` struct beside `Losses`:
+
+```go
+	OwnUse       decimal.Decimal `json:"own_use"`        // stock the shop consumed itself
+	StaffWelfare decimal.Decimal `json:"staff_welfare"`  // stock taken by staff
+```
+
+Then, immediately after the existing losses query, add:
+
+```go
+	// Stock the shop consumed itself, and stock taken by staff. Kept off the
+	// Losses line on purpose: both are deliberate and expected, and folding them
+	// into losses would make breakage look worse than it is while hiding how
+	// much the shop actually consumes.
+	if err := s.db.GetContext(ctx, &pl.OwnUse, `
+		SELECT COALESCE(SUM(cost),0) FROM stock_movements
+		WHERE type = 'own_use' AND created_at >= $1 AND created_at < $2`,
+		from, to); err != nil {
+		return nil, apperr.Internal("failed to compute own-use cost", err)
+	}
+	if err := s.db.GetContext(ctx, &pl.StaffWelfare, `
+		SELECT COALESCE(SUM(cost),0) FROM stock_movements
+		WHERE type = 'staff' AND created_at >= $1 AND created_at < $2`,
+		from, to); err != nil {
+		return nil, apperr.Internal("failed to compute staff welfare cost", err)
+	}
+```
+
+- [ ] **Step 4: Subtract them from net profit**
+
+Find the `NetProfit` calculation (its comment reads
+`gross - expenses - losses + recoveries + other income`) and subtract the two new
+figures, updating that comment to match. Without this the P&L overstates profit
+by exactly the cost of everything consumed internally — the same bug the Losses
+line exists to prevent.
+
+- [ ] **Step 5: Generalise the damage path**
+
+`stock.Service.Damage` already decrements stock, depletes FEFO for the cost and
+writes a movement. Add a `Consume` that does the same for an arbitrary reason,
+and reimplement `Damage` as a call to it so there is one code path:
+
+```go
+// ConsumeInput records stock leaving for a non-sale reason.
+type ConsumeInput struct {
+	ProductID int64  `json:"product_id" form:"product_id" validate:"required,gt=0"`
+	Quantity  string `json:"quantity"   form:"quantity"   validate:"required"`
+	Reason    string `json:"reason"     form:"reason"`
+	Note      string `json:"note"       form:"note"`
+}
+
+// consumeReasons maps a UI reason to its movement type. Anything not listed is
+// rejected rather than defaulting, so a typo can never silently book stock to
+// the wrong P&L line.
+var consumeReasons = map[string]string{
+	"damage":  MoveDamage,
+	"own_use": MoveOwnUse,
+	"staff":   MoveStaff,
+}
+```
+
+Add `MoveOwnUse = "own_use"` and `MoveStaff = "staff"` to the movement-type
+constants in `internal/features/stock/stock.go`.
+
+- [ ] **Step 6: Verify the cost reaches the right line**
+
+Record an own-use movement for a product with a known cost, then:
+
+```bash
+docker compose exec -T postgres psql -U pos_user -d pos_db -c "
+SELECT type, quantity, cost FROM stock_movements WHERE type IN ('own_use','staff') ORDER BY id DESC LIMIT 5;"
+```
+Expected: a non-zero `cost`. A zero cost means FEFO depletion was skipped and the
+P&L line will always read zero.
+
+Then open Finance / P&L and confirm the figure appears on its own line and that
+Stock losses did **not** change.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add migrations/0048_own_use_staff_movements.sql internal/features/reports/reports.go internal/features/stock/
+git commit -m "feat(stock): own-use and staff-welfare movements with their own P&L lines"
+```
+
+---
+
+### Task 11: Recording shop use and staff consumption
+
+The cashier is who notices that the counter needs adhesive or that someone took a
+drink, so this must be reachable at the till — exactly like Damage already is.
+
+**Files:**
+- Modify: `internal/web/cashier.go`, `internal/web/admin_more.go`, `internal/web/web.go`
+- Modify: `templates/pages/cashier/more.templ`, `templates/pages/admin/stock.templ`
+- Modify: `templates/layouts/cashier.templ`
+
+**Interfaces:**
+- Consumes: `stock.Service.Consume`, `stock.ConsumeInput` from Task 10.
+
+- [ ] **Step 1: Replace the Damage form with a reason-driven one**
+
+The existing Damage modal already picks a product and a quantity. Add a reason
+selector so one form covers all three, and reuse it in both admin and cashier:
+
+```html
+<div>
+	<label class="block text-sm font-medium mb-1">Reason</label>
+	<select name="reason" class="w-full border rounded-lg px-3 py-2">
+		<option value="damage">Damaged / expired — written off as a loss</option>
+		<option value="own_use">Shop used it — counter supplies, cleaning</option>
+		<option value="staff">Staff took it — food, drinks</option>
+	</select>
+	<p class="text-xs text-slate-500 mt-1">
+		Each reason reports on its own line, so deliberate use is never mistaken for breakage.
+	</p>
+</div>
+```
+
+- [ ] **Step 2: Point the handlers at Consume**
+
+In both `cashierUI.DamageRecord` and `adminUI.DamageRecord`, bind
+`stock.ConsumeInput` instead of `stock.DamageInput` and call
+`h.s.stock.Consume(ctx, in, middleware.CurrentUserID(c))`. Keep the routes and
+their names: `/cashier/damage` and `/admin/stock/damage` are already linked from
+the nav, and renaming them would break bookmarks for no user benefit. Update the
+nav labels from "Damage" to "Write-off" in `templates/layouts/cashier.templ`.
+
+- [ ] **Step 3: Verify each reason lands on its own line**
+
+Record one movement of each reason from the till, then confirm three distinct
+types appear and that Finance shows three separate figures:
+
+```bash
+docker compose exec -T postgres psql -U pos_user -d pos_db -c "
+SELECT type, count(*), SUM(cost) FROM stock_movements
+WHERE type IN ('damage','own_use','staff') GROUP BY type ORDER BY type;"
+```
+
+- [ ] **Step 4: Verify the Stock Movements report can filter them**
+
+The type filter added earlier lists movement types explicitly. Add `own_use` and
+`staff` options to it in `templates/pages/admin/stock.templ`, then confirm
+filtering by each returns only those rows.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add internal/web/ templates/
+git commit -m "feat(stock): record shop own-use and staff consumption from admin and till"
 ```
 
 ---
