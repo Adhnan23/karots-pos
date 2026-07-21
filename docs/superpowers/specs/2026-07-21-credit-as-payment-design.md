@@ -104,19 +104,70 @@ The drawer needs no change: `CashCollectedSince` already counts only `cash`
 - `saleType` initialises to `retail`; any stored `credit` default falls back to
   `retail` (`app.js:300`, `app.js:894`).
 
+### Two other places `credit` is stored — both must be converted first
+
+**`settings.default_sale_type`** (`internal/features/settings/settings.go:63`)
+is validated `oneof=retail wholesale credit` and the Settings page offers
+**Credit** as the shop-wide default (`templates/pages/admin/settings.templ:65`).
+The till seeds `saleType` from it (`internal/web/cashier.go:99`).
+
+This is the dangerous one. If a shop has that default set to `credit` and the
+API starts rejecting `sale_type=credit`, **every sale fails** — the till is
+unusable until an admin changes a setting they cannot reach past a broken till.
+The migration must therefore rewrite the setting, and it must do so before the
+tightened validation ships. This deployment has it set to `retail`, but the
+migration cannot assume that.
+
+Changes: drop `credit` from the validation tag, remove the third
+`@saleTypeOption` from the settings page, and convert the stored value.
+
+**`held_sales.sale_type`** (`internal/features/heldsales/heldsales.go:29`) — a
+parked sale stores the type it was held under and restores it. A sale held as
+`credit` before the change would restore an invalid type and be rejected on
+checkout, stranding the parked basket. The migration converts these too. There
+are zero held sales in this deployment.
+
 ### Reports and receipts
 
 Every place that infers credit from `sale_type` reads the sale's `status` (or
-the on-account payment total) instead. This is what stops the Receipts and
-Sales sections describing a fully-paid sale as credit. The Sales report keeps
-both columns — Type is now honestly just the price list, Status carries the
-credit fact.
+the on-account payment total) instead. `sale_type` is still displayed — it is
+honest now, being just the price list — in the Sales report
+(`templates/pages/admin/mgmt_reports.templ:144`), admin Sales
+(`templates/pages/admin/sales.templ:97`), the dashboard
+(`templates/pages/admin/dashboard.templ:87`) and the cashier's recent-sales list
+(`templates/pages/cashier/more.templ:67`).
+
+**The receipts lists are the real defect.** Both the cashier's Receipts → Sales
+tab (`templates/pages/cashier/receipts.templ:83`) and the admin one
+(`templates/pages/admin/receipts.templ:101`) show a single **Type** column drawn
+from `sale_type`, and carry **no status at all**. A sale where the customer
+still owes money is therefore listed as plain "Retail", indistinguishable from
+one paid in full. Nothing in either list reveals a debt.
+
+Both lists gain a status indication beside the type: a muted "Paid" for a
+completed sale and a highlighted **"On account"** for `status = 'credit'`,
+plus the existing return states. This is what the owner is describing when they
+say the receipts section is affected.
+
+The printed slip already handles this correctly — it keys off
+`Sale.Status == "credit"` and prints a "Total due" line
+(`templates/pages/cashier/receipt.templ:153`) — so it needs no change, which
+also confirms `status` is the right field to read.
 
 ### Migration
 
-One migration rewrites any surviving `sale_type = 'credit'` row to `'retail'`.
-There are **zero** such rows in the live database today, so this is a safety net
-for other deployments rather than a data fix.
+One migration rewrites every stored `credit` sale type to `retail`, in all
+three places it can live:
+
+```sql
+UPDATE sales       SET sale_type = 'retail' WHERE sale_type = 'credit';
+UPDATE held_sales  SET sale_type = 'retail' WHERE sale_type = 'credit';
+UPDATE settings    SET default_sale_type = 'retail' WHERE default_sale_type = 'credit';
+```
+
+All three are zero rows in this deployment, but the settings one is not
+optional: shipping the tightened validation against a shop whose default is
+`credit` would reject every sale.
 
 The `sale_type` enum keeps its `credit` label: Postgres cannot drop an enum
 value without rewriting the type, and the risk of that outweighs the tidiness.
@@ -147,6 +198,13 @@ function so each case is a table row:
 - A part-credit sale prints a receipt showing both lines and the balance due.
 - The Sales report shows Type `retail` with Status `credit` — and no sale
   anywhere is typed `credit`.
+- **Both receipts lists show "On account" against that sale** and "Paid"
+  against a fully-paid one — the check that the reported receipts problem is
+  actually fixed.
+- The Settings page no longer offers Credit as a default sale type, and a
+  database seeded with `default_sale_type = 'credit'` still takes sales after
+  migrating.
+- A sale held before the change and resumed after it still checks out.
 
 ## Out of scope
 
