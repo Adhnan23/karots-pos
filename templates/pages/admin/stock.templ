@@ -76,6 +76,8 @@ templ StockPage(d StockData) {
 						@moveTypeOption("adjust", "Adjustment", d.MoveType)
 						@moveTypeOption("return", "Return", d.MoveType)
 						@moveTypeOption("damage", "Damage", d.MoveType)
+						@moveTypeOption("own_use", "Shop own use", d.MoveType)
+						@moveTypeOption("staff", "Staff welfare", d.MoveType)
 					</select>
 				</div>
 				<table class="w-full text-sm">
@@ -184,6 +186,8 @@ templ StockMovementsPage(d StockMovementsData) {
 						@moveTypeOption("adjust", "Adjustment", d.MoveType)
 						@moveTypeOption("return", "Return", d.MoveType)
 						@moveTypeOption("damage", "Damage", d.MoveType)
+						@moveTypeOption("own_use", "Shop own use", d.MoveType)
+						@moveTypeOption("staff", "Staff welfare", d.MoveType)
 						@moveTypeOption("conversion", "Conversion", d.MoveType)
 						@moveTypeOption("purchase_return", "Purchase return", d.MoveType)
 						@moveTypeOption("warranty_replacement", "Warranty", d.MoveType)
@@ -294,19 +298,30 @@ templ moveTypeOption(value, label, selected string) {
 }
 
 templ DamageForm() {
-	@modalShell("Record Damage / Write-off") {
+	@modalShell("Remove Stock") {
 		<form class="p-6 space-y-4" hx-post="/admin/stock/damage" hx-swap="none">
 			<div>
 				<label class="block text-sm font-medium mb-1">Product</label>
 				@adminfragments.ProductPicker("product_id", 0, "", "Search product…")
 			</div>
 			<div>
-				<label class="block text-sm font-medium mb-1">Quantity to write off</label>
+				<label class="block text-sm font-medium mb-1">Quantity</label>
 				<input name="quantity" type="number" step="0.001" min="0" required class="w-full border rounded-lg px-3 py-2"/>
 			</div>
 			<div>
 				<label class="block text-sm font-medium mb-1">Reason</label>
-				<input name="note" class="w-full border rounded-lg px-3 py-2" placeholder="spoilage, breakage, expiry…"/>
+				<select name="reason" class="w-full border rounded-lg px-3 py-2">
+					<option value="damage">Damaged / expired — written off as a loss</option>
+					<option value="own_use">Shop used it — counter supplies, cleaning</option>
+					<option value="staff">Staff took it — food, drinks</option>
+				</select>
+				<p class="text-xs text-slate-500 mt-1">
+					Each reason reports on its own line, so deliberate use is never mistaken for breakage.
+				</p>
+			</div>
+			<div>
+				<label class="block text-sm font-medium mb-1">Note</label>
+				<input name="note" class="w-full border rounded-lg px-3 py-2" placeholder="spoilage, counter use, staff drink…"/>
 			</div>
 			@modalButtons()
 		</form>

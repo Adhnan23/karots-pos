@@ -438,19 +438,32 @@ func (h *cashierUI) Damage(c echo.Context) error {
 	}))
 }
 
+// consumeMsg names what happened for the toast and the audit trail, so the log
+// distinguishes deliberate use from breakage rather than calling everything a
+// write-off.
+var consumeMsg = map[string]string{
+	"damage":  "Damage written off",
+	"own_use": "Recorded as shop own use",
+	"staff":   "Recorded as staff welfare",
+}
+
+// DamageRecord removes stock for any non-sale reason. The route keeps its name
+// because the nav already links to it; the reason field decides which P&L line
+// the cost lands on.
 func (h *cashierUI) DamageRecord(c echo.Context) error {
-	var in stock.DamageInput
+	var in stock.ConsumeInput
 	if err := c.Bind(&in); err != nil {
 		return apperr.BadRequest("invalid form")
 	}
 	if err := c.Validate(&in); err != nil {
 		return err
 	}
-	if err := h.s.stock.Damage(c.Request().Context(), in, middleware.CurrentUserID(c)); err != nil {
+	if err := h.s.stock.Consume(c.Request().Context(), in, middleware.CurrentUserID(c)); err != nil {
 		return err
 	}
-	h.s.logAudit(c, audit.ActionUpdate, "product", strconv.FormatInt(in.ProductID, 10), "damage write-off")
-	return htmxDone(c, "Damage written off", "reload-stock")
+	msg := consumeMsg[in.Reason]
+	h.s.logAudit(c, audit.ActionUpdate, "product", strconv.FormatInt(in.ProductID, 10), msg)
+	return htmxDone(c, msg, "reload-stock")
 }
 
 // QuickItem creates a missing product on the fly so the cashier can sell an item

@@ -1318,17 +1318,17 @@ func (a *adminUI) DamageForm(c echo.Context) error {
 }
 
 func (a *adminUI) DamageRecord(c echo.Context) error {
-	var in stock.DamageInput
+	var in stock.ConsumeInput
 	if err := c.Bind(&in); err != nil {
 		return apperr.BadRequest("invalid form")
 	}
 	if err := c.Validate(&in); err != nil {
 		return err
 	}
-	if err := a.s.stock.Damage(c.Request().Context(), in, middleware.CurrentUserID(c)); err != nil {
+	if err := a.s.stock.Consume(c.Request().Context(), in, middleware.CurrentUserID(c)); err != nil {
 		return err
 	}
-	return htmxDone(c, "Damage written off", "reload-stock")
+	return htmxDone(c, consumeMsg[in.Reason], "reload-stock")
 }
 
 // ============================ Customer edit / pay ============================

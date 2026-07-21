@@ -161,25 +161,36 @@ type DamageData struct {
 }
 
 templ Damage(d DamageData) {
-	@layouts.Cashier("Damage", d.CashierName, d.Role, "damage", d.ShowChangePin) {
+	@layouts.Cashier("Write-off", d.CashierName, d.Role, "damage", d.ShowChangePin) {
 		<div class="h-full overflow-auto p-6">
 			<div class="max-w-md mx-auto bg-white rounded-xl shadow-sm p-6">
-				<h1 class="text-xl font-bold mb-1">Record Damage / Write-off</h1>
-				<p class="text-sm text-slate-500 mb-4">Remove spoiled, broken or expired stock from inventory.</p>
+				<h1 class="text-xl font-bold mb-1">Remove Stock</h1>
+				<p class="text-sm text-slate-500 mb-4">Stock leaving for any reason other than a sale — breakage, shop use, or staff.</p>
 				<form class="space-y-4" hx-post="/cashier/damage" hx-swap="none" x-data x-on:reload-stock.window="$el.reset()">
 					<div>
 						<label class="block text-sm font-medium mb-1">Product</label>
 						@adminfragments.ProductPicker("product_id", 0, "", "Search product…")
 					</div>
 					<div>
-						<label class="block text-sm font-medium mb-1">Quantity to write off</label>
+						<label class="block text-sm font-medium mb-1">Quantity</label>
 						<input name="quantity" type="number" step="0.001" min="0" required class="w-full border rounded-lg px-3 py-2"/>
 					</div>
 					<div>
 						<label class="block text-sm font-medium mb-1">Reason</label>
-						<input name="note" class="w-full border rounded-lg px-3 py-2" placeholder="spoilage, breakage, expiry…"/>
+						<select name="reason" class="w-full border rounded-lg px-3 py-2">
+							<option value="damage">Damaged / expired — written off as a loss</option>
+							<option value="own_use">Shop used it — counter supplies, cleaning</option>
+							<option value="staff">Staff took it — food, drinks</option>
+						</select>
+						<p class="text-xs text-slate-500 mt-1">
+							Each reason reports on its own line, so deliberate use is never mistaken for breakage.
+						</p>
 					</div>
-					<button type="submit" class="w-full py-2.5 rounded-lg bg-rose-600 text-white font-medium">Write Off</button>
+					<div>
+						<label class="block text-sm font-medium mb-1">Note</label>
+						<input name="note" class="w-full border rounded-lg px-3 py-2" placeholder="spoilage, counter use, staff drink…"/>
+					</div>
+					<button type="submit" class="w-full py-2.5 rounded-lg bg-rose-600 text-white font-medium">Remove Stock</button>
 				</form>
 			</div>
 		</div>

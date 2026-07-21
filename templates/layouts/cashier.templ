@@ -37,7 +37,7 @@ templ Cashier(title, userName, role, active string, showChangePin bool) {
 					<nav class="flex items-center gap-1 text-sm">
 						@cashierTab("/cashier", "Sell", active == "pos")
 						@cashierTab("/cashier/returns", "Returns", active == "returns")
-						@cashierTab("/cashier/damage", "Damage", active == "damage")
+						@cashierTab("/cashier/damage", "Write-off", active == "damage")
 						@cashierTab("/cashier/conversions", "Convert", active == "conversions")
 						@cashierTab("/cashier/credit", "Credit", active == "credit")
 						@cashierTab("/cashier/receipts", "Receipts", active == "receipts")
