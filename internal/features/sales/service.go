@@ -71,14 +71,14 @@ type serialBatch struct {
 }
 
 type PaymentInput struct {
-	Method    string  `json:"method"    validate:"required,oneof=cash card online wallet"`
+	Method    string  `json:"method"    validate:"required,oneof=cash card online wallet credit"`
 	Amount    string  `json:"amount"    validate:"required"`
 	Reference *string `json:"reference"`
 }
 
 type CreateInput struct {
 	CustomerID   *int64         `json:"customer_id"`
-	SaleType     string         `json:"sale_type"     validate:"required,oneof=retail wholesale credit"`
+	SaleType     string         `json:"sale_type"     validate:"required,oneof=retail wholesale"`
 	Discount     string         `json:"discount"`
 	DiscountType string         `json:"discount_type" validate:"omitempty,oneof=fixed percent"`
 	Notes        *string        `json:"notes"`
@@ -346,36 +346,46 @@ func (s *Service) Create(ctx context.Context, in CreateInput, cashierID int64) (
 			return apperr.Validation("bill discount exceeds the sale total")
 		}
 
-		paid := decimal.Zero
+		methods := make([]string, 0, len(in.Payments))
+		amounts := make([]decimal.Decimal, 0, len(in.Payments))
 		for _, p := range in.Payments {
 			amt, err := money.Parse(p.Amount)
 			if err != nil || amt.IsNegative() {
 				return apperr.Validation("payment amount is invalid")
 			}
-			paid = paid.Add(amt)
+			methods = append(methods, p.Method)
+			amounts = append(amounts, amt)
 		}
+		tender := SplitTender(methods, amounts)
 
-		status := "completed"
-		change := decimal.Zero
-		if paid.GreaterThanOrEqual(total) {
-			change = paid.Sub(total)
-		} else {
-			// Underpayment becomes customer credit.
-			owed := total.Sub(paid)
-			if in.CustomerID == nil {
-				return apperr.Validation("a customer is required to put the balance on credit")
-			}
-			cust, err := custRepo.FindByID(ctx, *in.CustomerID)
+		// The customer is only loaded when something is going on their account,
+		// so an ordinary cash sale still costs no extra query.
+		available := decimal.Zero
+		var cust *customers.Customer
+		if tender.OnAccount.IsPositive() && in.CustomerID != nil {
+			c, err := custRepo.FindByID(ctx, *in.CustomerID)
 			if err != nil {
 				return apperr.Validation("selected customer not found")
 			}
-			if owed.GreaterThan(cust.AvailableCredit()) {
-				return apperr.Conflict(fmt.Sprintf("credit limit exceeded (available %s)", money.Display(cust.AvailableCredit())))
-			}
-			if err := custRepo.AddBalance(ctx, cust.ID, owed); err != nil {
+			cust = c
+			available = c.AvailableCredit()
+		}
+		if err := CheckTender(tender, total, in.CustomerID != nil, available); err != nil {
+			return err
+		}
+
+		// Status follows the on-account line alone. It used to follow
+		// underpayment, which converted a sale to credit silently — the debt was
+		// then recorded as an ordinary retail sale and never showed in the
+		// receipts list.
+		status := "completed"
+		change := tender.Paid.Add(tender.OnAccount).Sub(total)
+		if tender.OnAccount.IsPositive() {
+			if err := custRepo.AddBalance(ctx, cust.ID, tender.OnAccount); err != nil {
 				return apperr.Internal("failed to update customer balance", err)
 			}
 			status = "credit"
+			change = decimal.Zero
 		}
 
 		receiptNo, err := saleRepo.NextReceiptNo(ctx)
@@ -393,11 +403,12 @@ func (s *Service) Create(ctx context.Context, in CreateInput, cashierID int64) (
 			DiscountValue: billDiscValue,
 			Tax:           taxTotal,
 			Total:         total,
-			PaidAmount:    paid,
-			ChangeGiven:   change,
-			Status:        status,
-			CashierID:     cashierID,
-			Notes:         in.Notes,
+			// Money actually received — the on-account part is a debt, not a payment.
+			PaidAmount:  tender.Paid,
+			ChangeGiven: change,
+			Status:      status,
+			CashierID:   cashierID,
+			Notes:       in.Notes,
 		})
 		if err != nil {
 			return apperr.Internal("failed to save sale", err)
