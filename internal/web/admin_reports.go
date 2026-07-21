@@ -563,3 +563,37 @@ func (a *adminUI) BatchReport(c echo.Context) error {
 	d.Rows = paginate(rows, d.Page, reportPageSize)
 	return response.RenderPage(c, adminpages.BatchReport(d))
 }
+
+// RecipeVarianceReport compares what recipes say was consumed against what
+// stock actually moved. A yield is an estimate ("this bag makes 50 cups"), so
+// drift is expected; this is what makes the drift visible instead of letting it
+// quietly bleed stock.
+func (a *adminUI) RecipeVarianceReport(c echo.Context) error {
+	ctx := c.Request().Context()
+	from, to, fromStr, toStr, preset, err := rangeStrings(c)
+	if err != nil {
+		return err
+	}
+	rows, err := a.s.recipes.Variance(ctx, from, to)
+	if err != nil {
+		return err
+	}
+	if wantsCSV(c) {
+		out := make([][]string, 0, len(rows))
+		for _, r := range rows {
+			out = append(out, []string{
+				r.ComponentName, r.UnitAbbr, r.Expected.String(), r.Actual.String(),
+				r.Diff.String(), r.DriftPct().String(),
+			})
+		}
+		return writeCSV(c, "recipe_variance_"+fromStr+"_"+toStr,
+			[]string{"Ingredient", "Unit", "Expected", "Actual", "Difference", "Drift %"}, out)
+	}
+	page := pageParam(c)
+	return response.RenderPage(c, adminpages.RecipeVarianceReport(adminpages.RecipeVarianceData{
+		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx),
+		From: fromStr, To: toStr, Preset: preset,
+		Rows:  paginate(rows, page, reportPageSize),
+		Total: len(rows), Page: page, PageSize: reportPageSize,
+	}))
+}

@@ -7,6 +7,7 @@ import (
 	"karots-pos/internal/features/customers"
 	"karots-pos/internal/features/products"
 	"karots-pos/internal/features/purchases"
+	"karots-pos/internal/features/recipes"
 	"karots-pos/internal/features/reports"
 	"karots-pos/internal/features/sales"
 	"karots-pos/internal/features/stock"
@@ -728,5 +729,76 @@ templ BatchReport(d BatchReportData) {
 		@rptTruncNote(len(d.Rows), d.Total)
 		@rptPager(batchQuery(d), d.Page, d.PageSize, d.Total)
 		</div>
+	}
+}
+
+// ============================ Recipe variance ============================
+
+// RecipeVarianceData compares what recipes say was consumed against what stock
+// actually moved. A yield ("this bag makes 50 cups") is an estimate, so drift is
+// expected; the report exists so the estimate can be corrected rather than
+// quietly bleeding stock.
+type RecipeVarianceData struct {
+	ShopName, Symbol      string
+	From, To, Preset      string
+	Rows                  []recipes.VarianceRow
+	Total, Page, PageSize int
+}
+
+templ RecipeVarianceReport(d RecipeVarianceData) {
+	@layouts.Report("Recipe Variance", d.ShopName) {
+		<p class="text-sm text-slate-500 mb-5">
+			{ d.From } to { d.To } · what the recipes expected to use, against what stock actually moved.
+		</p>
+		<div class="no-print flex flex-wrap items-end justify-between gap-3 mb-5">
+			@filterPresetRow(rangeQuery(d.Preset, d.From, d.To), d.Preset)
+			<a class="px-4 py-1.5 rounded-lg border text-sm" href={ templ.SafeURL(pgHref(rangeQuery(d.Preset, d.From, d.To), 1) + "&format=csv") }>Download CSV</a>
+		</div>
+		<table class="w-full text-sm">
+			<thead class="text-left text-slate-500 border-b">
+				<tr>
+					<th class="py-1.5">Ingredient</th>
+					<th class="py-1.5 text-right">Expected</th>
+					<th class="py-1.5 text-right">Actual</th>
+					<th class="py-1.5 text-right">Difference</th>
+					<th class="py-1.5 text-right">Drift</th>
+				</tr>
+			</thead>
+			<tbody>
+				for _, r := range d.Rows {
+					<tr class="border-b last:border-0">
+						<td class="py-1.5 font-medium">{ r.ComponentName }</td>
+						<td class="py-1.5 text-right">{ money.Display(r.Expected) } { r.UnitAbbr }</td>
+						<td class="py-1.5 text-right">{ money.Display(r.Actual) } { r.UnitAbbr }</td>
+						<td class={ "py-1.5 text-right " + varianceTone(r) }>{ money.Display(r.Diff) }</td>
+						<td class={ "py-1.5 text-right " + varianceTone(r) }>{ r.DriftPct().String() }%</td>
+					</tr>
+				}
+				if len(d.Rows) == 0 {
+					<tr><td colspan="5" class="py-6 text-center text-slate-400">No recipe ingredients moved in this period.</td></tr>
+				}
+			</tbody>
+		</table>
+		<p class="text-xs text-slate-500 mt-4">
+			A positive difference means more stock moved than the recipe predicted — the real yield is lower than stated.
+			Negative means the ingredient is going further than expected. Small drift is normal; a large one means the
+			yield should be corrected on the Services &amp; Recipes page.
+		</p>
+		@rptTruncNote(d.Total, d.PageSize)
+		@rptPager(rangeQuery(d.Preset, d.From, d.To), d.Page, d.PageSize, d.Total)
+	}
+}
+
+// varianceTone highlights only meaningful drift, so rounding noise on a
+// fractional ingredient does not paint the whole column red.
+func varianceTone(r recipes.VarianceRow) string {
+	p := r.DriftPct()
+	switch {
+	case p.Abs().GreaterThan(decimal.NewFromInt(10)):
+		return "text-rose-600 font-medium"
+	case p.Abs().GreaterThan(decimal.NewFromInt(3)):
+		return "text-amber-600"
+	default:
+		return "text-slate-600"
 	}
 }

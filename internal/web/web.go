@@ -237,6 +237,7 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	ag.DELETE("/groups/:id/items/:productId", admin.GroupItemRemove)
 	ag.PUT("/groups/:id/items/:productId/emoji", admin.GroupItemEmoji)
 	ag.POST("/products", admin.ProductCreate)
+	ag.GET("/reports/recipe-variance", admin.RecipeVarianceReport)
 	ag.GET("/services", admin.Services)
 	ag.GET("/services/table", admin.ServicesTable)
 	ag.GET("/services/form", admin.ServiceForm)
