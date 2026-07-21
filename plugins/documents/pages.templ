@@ -6,14 +6,14 @@ import "karots-pos/internal/features/products"
 import "karots-pos/internal/features/cashregister"
 import "strconv"
 
-// HubPage is the Communication Store management screen: services (with their
+// HubPage is the Print & Copy management screen: services (with their
 // price matrix + consumable mappings for metered work) and an add-service form,
 // rendered inside the core admin shell.
 templ HubPage(d HubData) {
-	@layouts.Admin("Communication Store", d.UserName, "documents-hub") {
+	@layouts.Admin("Print & Copy", d.UserName, "documents-hub") {
 		<div class="mb-6 flex items-start justify-between gap-4">
 			<div>
-				<h1 class="text-2xl font-bold">🖨 Communication Store</h1>
+				<h1 class="text-2xl font-bold">🖨 Print &amp; Copy</h1>
 				<p class="text-sm text-slate-500">Photocopy / print / laminate / bind pricing &amp; the paper they consume, plus custom labour jobs.</p>
 			</div>
 		</div>
@@ -217,8 +217,8 @@ templ serviceCard(symbol string, vm ServiceVM, prods []products.Product) {
 
 // ReportPage shows revenue / consumable cost / labour and a per-service breakdown.
 templ ReportPage(d ReportData) {
-	@layouts.Admin("Communication Store — Report", d.UserName, "documents-report") {
-		<h1 class="text-2xl font-bold mb-6">🖨 Communication Store — Report</h1>
+	@layouts.Admin("Print & Copy — Report", d.UserName, "documents-report") {
+		<h1 class="text-2xl font-bold mb-6">🖨 Print &amp; Copy — Report</h1>
 		<div class="space-y-6">
 			<form method="get" action="/admin/documents/report" class="flex flex-wrap gap-2 items-end">
 				@docPreset("today", "Today", d.Preset)
@@ -275,7 +275,7 @@ templ ReportPage(d ReportData) {
 // to pay for that one job (or dismisses it), choosing whether the cash comes from
 // an open till (which also records that drawer's withdrawal) or external funds.
 templ LabourPage(d LabourData) {
-	@layouts.Admin("Communication Store — Labour payments", d.UserName, "documents-labour") {
+	@layouts.Admin("Print & Copy — Labour payments", d.UserName, "documents-labour") {
 		<h1 class="text-2xl font-bold mb-2">🖨 Labour payments</h1>
 		<p class="text-sm text-slate-500 mb-6">Custom jobs from the till, each waiting on a labour decision. Pay an amount per job (books a <strong>Labour</strong> expense) — from a till also records that drawer's cash withdrawal — or dismiss jobs that need no payout.</p>
 		if len(d.Rows) == 0 {

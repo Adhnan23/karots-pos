@@ -15,7 +15,7 @@ type Plugin struct {
 	store *Store
 }
 
-func (p *Plugin) Name() string { return "Documents" }
+func (p *Plugin) Name() string { return "Print & Copy" }
 
 // Migrations runs under goose_db_version_documents, independent of core.
 func (p *Plugin) Migrations() (fs.FS, string) { return migrations.FS, "documents" }
@@ -47,26 +47,26 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 	reg.Cashier().GET("/documents/job", ch.JobFragment)
 
 	reg.AddCashierMenuRoot(plugin.CashierMenuRoot{
-		Key: "documents", Emoji: "🖨", Label: "Documents", ChildrenURL: "/cashier/documents/menu",
+		Key: "documents", Emoji: "🖨", Label: "Print & Copy", ChildrenURL: "/cashier/documents/menu",
 	})
 
 	reg.AddReportCard(plugin.ReportCard{
 		Href:  "/admin/documents/report",
-		Label: "🖨 Documents",
+		Label: "🖨 Print & Copy",
 		Desc:  "Print/copy revenue, paper used & labour",
 	})
 	reg.AddAdminNav(plugin.AdminNavEntry{
-		SectionLabel: "Communication Store", Icon: "🖨",
-		Href: "/admin/documents", Label: "Communication Store", Key: "documents-hub",
+		SectionLabel: "Print & Copy", Icon: "🖨",
+		Href: "/admin/documents", Label: "Print & Copy", Key: "documents-hub",
 		Desc: "Services, pricing & consumables",
 	})
 	reg.AddAdminNav(plugin.AdminNavEntry{
-		SectionLabel: "Communication Store", Icon: "🖨",
+		SectionLabel: "Print & Copy", Icon: "🖨",
 		Href: "/admin/documents/report", Label: "Report", Key: "documents-report",
 		Desc: "Revenue, paper used & profit",
 	})
 	reg.AddAdminNav(plugin.AdminNavEntry{
-		SectionLabel: "Communication Store", Icon: "🖨",
+		SectionLabel: "Print & Copy", Icon: "🖨",
 		Href: "/admin/documents/labour", Label: "Labour payments", Key: "documents-labour",
 		Desc: "Pay labour on custom jobs",
 	})
