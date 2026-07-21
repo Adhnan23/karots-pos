@@ -11,6 +11,7 @@ import (
 	"karots-pos/internal/features/warranty"
 	"karots-pos/internal/money"
 	"karots-pos/internal/plugin"
+	adminfragments "karots-pos/templates/fragments/admin"
 	"karots-pos/templates/layouts"
 	"karots-pos/templates/shared"
 )
@@ -91,7 +92,7 @@ templ RcSalesTab(d RcSalesData) {
 		<div class="bg-white rounded-2xl shadow-sm overflow-hidden">
 			<table class="w-full text-sm">
 				<thead class="text-left text-slate-500 border-b bg-slate-50">
-					<tr><th class="px-4 py-2">Receipt</th><th class="px-4 py-2">Date</th><th class="px-4 py-2">Type</th><th class="px-4 py-2 text-right">Total</th><th class="px-4 py-2 text-right">Print</th></tr>
+					<tr><th class="px-4 py-2">Receipt</th><th class="px-4 py-2">Date</th><th class="px-4 py-2">Type</th><th class="px-4 py-2">Status</th><th class="px-4 py-2 text-right">Total</th><th class="px-4 py-2 text-right">Print</th></tr>
 				</thead>
 				<tbody>
 					for _, s := range d.Rows {
@@ -99,6 +100,7 @@ templ RcSalesTab(d RcSalesData) {
 							<td class="px-4 py-2 font-medium">{ s.ReceiptNo }</td>
 							<td class="px-4 py-2 text-slate-500">{ datetime.DateTime(s.CreatedAt) }</td>
 							<td class="px-4 py-2 capitalize">{ s.SaleType }</td>
+							<td class="px-4 py-2">@adminfragments.SaleStatusBadge(s.Status)</td>
 							<td class="px-4 py-2 text-right">{ money.Format(d.Symbol, s.Total) }</td>
 							<td class="px-4 py-2 text-right">
 								<button type="button" hx-post={ "/cashier/print/" + strconv.FormatInt(s.ID, 10) } hx-swap="none" class="px-3 py-1 rounded-lg bg-indigo-600 text-white text-xs font-medium">🧾 Reprint</button>
@@ -107,7 +109,7 @@ templ RcSalesTab(d RcSalesData) {
 						</tr>
 					}
 					if len(d.Rows) == 0 {
-						<tr><td colspan="5" class="px-4 py-8 text-center text-slate-400">No matching sales.</td></tr>
+						<tr><td colspan="6" class="px-4 py-8 text-center text-slate-400">No matching sales.</td></tr>
 					}
 				</tbody>
 			</table>

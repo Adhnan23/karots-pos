@@ -1,0 +1,20 @@
+package adminfragments
+
+// SaleStatusBadge shows whether a sale is settled. The receipts lists used to
+// show only the sale type, so a sale the customer still owed money on was
+// listed as plain "Retail" — the debt was invisible exactly where someone would
+// look for it.
+templ SaleStatusBadge(status string) {
+	switch status {
+		case "credit":
+			<span class="px-2 py-0.5 rounded-full text-xs bg-amber-100 text-amber-800 font-medium">On account</span>
+		case "returned":
+			<span class="px-2 py-0.5 rounded-full text-xs bg-rose-100 text-rose-700">Returned</span>
+		case "partially_returned":
+			<span class="px-2 py-0.5 rounded-full text-xs bg-rose-50 text-rose-600">Part returned</span>
+		case "void":
+			<span class="px-2 py-0.5 rounded-full text-xs bg-slate-200 text-slate-600">Void</span>
+		default:
+			<span class="text-xs text-slate-400">Paid</span>
+	}
+}
