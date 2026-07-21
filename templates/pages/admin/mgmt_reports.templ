@@ -4,6 +4,7 @@ import (
 	"strconv"
 
 	"karots-pos/internal/features/cashregister"
+	"karots-pos/internal/features/categories"
 	"karots-pos/internal/features/customers"
 	"karots-pos/internal/features/products"
 	"karots-pos/internal/features/purchases"
@@ -13,6 +14,7 @@ import (
 	"karots-pos/internal/features/stock"
 	"karots-pos/internal/features/suppliers"
 	"karots-pos/internal/money"
+	adminfragments "karots-pos/templates/fragments/admin"
 	"karots-pos/templates/layouts"
 
 	"github.com/shopspring/decimal"
@@ -549,6 +551,8 @@ templ rptTruncNote(shown, total int) {
 type InventoryReportData struct {
 	ShopName, Symbol string
 	Val              products.Valuation
+	Breadcrumb       []products.Crumb
+	Categories       []categories.TreeNode
 	Rows             []products.Product
 	Total            int
 	Page, PageSize   int
@@ -556,12 +560,21 @@ type InventoryReportData struct {
 	IncludeZero      bool
 }
 
+// invCatID renders the selected category for the picker's hidden input.
+func invCatID(d InventoryReportData) string {
+	if d.CategoryID == nil {
+		return ""
+	}
+	return strconv.FormatInt(*d.CategoryID, 10)
+}
+
 templ InventoryReport(d InventoryReportData) {
 	@layouts.Report("Inventory Valuation", d.ShopName) {
-		<div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+		<div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
 			@invStat("Stock value at cost", money.Format(d.Symbol, d.Val.CostValue), "text-slate-900")
 			@invStat("Value at retail", money.Format(d.Symbol, d.Val.RetailValue), "text-slate-900")
 			@invStat("Potential margin", money.Format(d.Symbol, d.Val.Margin())+" ("+d.Val.MarginPct().String()+"%)", "text-emerald-600")
+			@invStat("Units on hand", d.Val.Units.Format(), "text-slate-900")
 			@invStat("Products in stock", strconv.Itoa(d.Val.InStock)+" of "+strconv.Itoa(d.Val.SKUs), "text-slate-900")
 		</div>
 		if d.Val.MissingCost > 0 || d.Val.NegativeQty > 0 {
@@ -574,29 +587,55 @@ templ InventoryReport(d InventoryReportData) {
 				}
 			</div>
 		}
-		<h2 class="font-semibold mb-2">By category</h2>
+		<div class="flex items-center gap-2 mb-2 flex-wrap">
+			<h2 class="font-semibold">By category</h2>
+			<nav class="text-sm text-slate-500 flex items-center gap-1 flex-wrap">
+				<a class="hover:underline" href="/admin/reports/inventory">All</a>
+				for _, cr := range d.Breadcrumb {
+					<span class="text-slate-300">▸</span>
+					<a class="hover:underline" href={ templ.SafeURL("/admin/reports/inventory?category_id=" + strconv.FormatInt(cr.ID, 10)) }>{ cr.Name }</a>
+				}
+			</nav>
+		</div>
 		<table class="w-full text-sm mb-6">
 			<thead class="text-left text-slate-500 border-b">
-				<tr><th class="py-1.5">Category</th><th class="py-1.5 text-right">In stock</th><th class="py-1.5 text-right">Cost value</th><th class="py-1.5 text-right">Retail value</th><th class="py-1.5 text-right">Share</th></tr>
+				<tr>
+					<th class="py-1.5">Category</th>
+					<th class="py-1.5 text-right">In stock</th>
+					<th class="py-1.5 text-right">Units</th>
+					<th class="py-1.5 text-right">Cost value</th>
+					<th class="py-1.5 text-right">Retail value</th>
+					<th class="py-1.5 text-right">Share</th>
+				</tr>
 			</thead>
 			<tbody>
-				for _, r := range d.Val.Categories {
+				for _, r := range d.Val.Children {
 					<tr class="border-b last:border-0">
-						<td class="py-1.5 font-medium">{ r.Category }</td>
+						<td class="py-1.5 font-medium">
+							if r.Direct {
+								<span class="text-slate-500 font-normal">directly in { r.Name }</span>
+							} else if r.HasChildren {
+								<a class="text-indigo-600 hover:underline" href={ templ.SafeURL("/admin/reports/inventory?category_id=" + strconv.FormatInt(r.CategoryID, 10)) }>{ r.Name } ▸</a>
+							} else {
+								<a class="text-indigo-600 hover:underline" href={ templ.SafeURL("/admin/reports/inventory?category_id=" + strconv.FormatInt(r.CategoryID, 10)) }>{ r.Name }</a>
+							}
+						</td>
 						<td class="py-1.5 text-right">{ strconv.Itoa(r.InStock) } / { strconv.Itoa(r.SKUs) }</td>
+						<td class="py-1.5 text-right">{ r.Units.Format() }</td>
 						<td class="py-1.5 text-right">{ money.Format(d.Symbol, r.CostValue) }</td>
 						<td class="py-1.5 text-right">{ money.Format(d.Symbol, r.RetailValue) }</td>
 						<td class="py-1.5 text-right text-slate-500">{ pctOf(r.CostValue, d.Val.CostValue) }%</td>
 					</tr>
 				}
-				if len(d.Val.Categories) == 0 {
-					<tr><td colspan="5" class="py-6 text-center text-slate-400">No products.</td></tr>
+				if len(d.Val.Children) == 0 {
+					<tr><td colspan="6" class="py-6 text-center text-slate-400">No products.</td></tr>
 				}
 			</tbody>
 			<tfoot class="border-t-2 font-semibold">
 				<tr>
 					<td class="py-2">Total</td>
 					<td class="py-2 text-right">{ strconv.Itoa(d.Val.InStock) } / { strconv.Itoa(d.Val.SKUs) }</td>
+					<td class="py-2 text-right">{ d.Val.Units.Format() }</td>
 					<td class="py-2 text-right">{ money.Format(d.Symbol, d.Val.CostValue) }</td>
 					<td class="py-2 text-right">{ money.Format(d.Symbol, d.Val.RetailValue) }</td>
 					<td class="py-2 text-right">100%</td>
@@ -613,12 +652,9 @@ templ InventoryReport(d InventoryReportData) {
 			<form method="get" action="/admin/reports/inventory" class="flex flex-wrap items-end gap-3 mb-4">
 				<div>
 					<label class="block text-xs text-slate-500 mb-1">Category</label>
-					<select name="category_id" class="border rounded-lg px-3 py-1.5">
-						<option value="">All categories</option>
-						for _, r := range d.Val.Categories {
-							<option value={ strconv.FormatInt(r.CategoryID, 10) } selected?={ d.CategoryID != nil && *d.CategoryID == r.CategoryID }>{ r.Category }</option>
-						}
-					</select>
+					<div class="min-w-[14rem]">
+						@adminfragments.CategoryPicker(d.Categories, "category_id", invCatID(d), true, "All categories", false)
+					</div>
 				</div>
 				<label class="flex items-center gap-2 text-sm pb-1.5">
 					<input type="checkbox" name="include_zero" value="1" checked?={ d.IncludeZero } class="rounded"/>

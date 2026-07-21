@@ -18,27 +18,33 @@ import (
 // Cost basis is the product's current cost_price (not per-batch cost): it is
 // what the owner typed during capture and what they expect to see back.
 
-// ValuationRow is one root category's slice of the inventory.
-type ValuationRow struct {
-	CategoryID  int64           `db:"category_id"`
-	Category    string          `db:"category"`
-	SKUs        int             `db:"skus"`
-	InStock     int             `db:"in_stock"`
-	CostValue   decimal.Decimal `db:"cost_value"`
-	RetailValue decimal.Decimal `db:"retail_value"`
-	MissingCost int             `db:"missing_cost"`
-	NegativeQty int             `db:"negative_qty"`
+// ValuationNode is one row of the category breakdown: a child category rolled
+// up over its whole subtree, or — when Direct is true — the products filed
+// directly on the category being viewed, which belong to no child.
+type ValuationNode struct {
+	CategoryID  int64
+	Name        string
+	Direct      bool
+	HasChildren bool
+	SKUs        int
+	InStock     int
+	Units       UnitTally
+	CostValue   decimal.Decimal
+	RetailValue decimal.Decimal
 }
 
-// Valuation is the whole-catalog summary plus its per-category breakdown.
+// Valuation is one branch of the catalogue: its own totals, the child rows
+// beneath it, and the path back to the root.
 type Valuation struct {
 	SKUs        int
 	InStock     int
+	Units       UnitTally
 	CostValue   decimal.Decimal
 	RetailValue decimal.Decimal
 	MissingCost int
 	NegativeQty int
-	Categories  []ValuationRow
+	Children    []ValuationNode
+	Breadcrumb  []Crumb
 }
 
 // Margin is the potential profit locked up in stock (retail − cost).
@@ -52,32 +58,185 @@ func (v Valuation) MarginPct() decimal.Decimal {
 	return v.Margin().Div(v.RetailValue).Mul(decimal.NewFromInt(100)).Round(1)
 }
 
-// rootCatsCTE maps every category to the root of its tree, so the breakdown is
-// a short list of top-level categories instead of 128 leaves.
-const rootCatsCTE = `
-	WITH RECURSIVE roots AS (
-		SELECT id, id AS root_id, name AS root_name FROM categories WHERE parent_id IS NULL
-		UNION ALL
-		SELECT c.id, r.root_id, r.root_name FROM categories c JOIN roots r ON c.parent_id = r.id
+// subtreeCTE maps every descendant category to the child-of-current it sits
+// under, so grouping by `top` gives one rolled-up row per child. $1 NULL means
+// the whole catalogue, whose children are the root categories.
+//
+// This replaces an earlier CTE that mapped every category to its ROOT, which
+// made the report permanently blind below the top level: its category filter
+// compared against root_id, so passing a sub-category's id matched nothing.
+const subtreeCTE = `
+	WITH RECURSIVE sub AS (
+		SELECT id, id AS top FROM categories
+		 WHERE ($1::bigint IS NULL AND parent_id IS NULL) OR parent_id = $1
+	  UNION ALL
+		SELECT c.id, s.top FROM categories c JOIN sub s ON c.parent_id = s.id
 	)`
 
-func (r *Repository) Valuation(ctx context.Context) ([]ValuationRow, error) {
-	var rows []ValuationRow
-	err := r.db.SelectContext(ctx, &rows, rootCatsCTE+`
-		SELECT rt.root_id AS category_id, rt.root_name AS category,
-		       count(*)                                                   AS skus,
-		       count(*) FILTER (WHERE COALESCE(s.quantity,0) > 0)         AS in_stock,
-		       COALESCE(SUM(COALESCE(s.quantity,0) * p.cost_price), 0)    AS cost_value,
-		       COALESCE(SUM(COALESCE(s.quantity,0) * p.selling_price), 0) AS retail_value,
-		       count(*) FILTER (WHERE COALESCE(s.quantity,0) > 0 AND COALESCE(p.cost_price,0) = 0) AS missing_cost,
-		       count(*) FILTER (WHERE COALESCE(s.quantity,0) < 0)         AS negative_qty
+// branchCTE is the same walk seeded with the node itself, for totals: it
+// includes products filed directly on an interior category, which belong to
+// that branch but sit in none of its children.
+const branchCTE = `
+	WITH RECURSIVE sub AS (
+		SELECT id FROM categories
+		 WHERE ($1::bigint IS NULL AND parent_id IS NULL) OR id = $1
+	  UNION ALL
+		SELECT c.id FROM categories c JOIN sub s ON c.parent_id = s.id
+	)`
+
+// childRow is one (child category × unit) group, folded into ValuationNode below.
+type childRow struct {
+	CategoryID  int64           `db:"category_id"`
+	Name        string          `db:"name"`
+	HasChildren bool            `db:"has_children"`
+	UnitAbbr    string          `db:"unit_abbr"`
+	SKUs        int             `db:"skus"`
+	InStock     int             `db:"in_stock"`
+	Units       decimal.Decimal `db:"units"`
+	CostValue   decimal.Decimal `db:"cost_value"`
+	RetailValue decimal.Decimal `db:"retail_value"`
+}
+
+// ValuationChildren returns one rolled-up row per child of categoryID (or per
+// root category when nil). Quantities come back grouped by unit so the tally
+// can keep units apart; everything else sums across those groups, which is safe
+// because a product has exactly one unit.
+func (r *Repository) ValuationChildren(ctx context.Context, categoryID *int64) ([]ValuationNode, error) {
+	var rows []childRow
+	if err := r.db.SelectContext(ctx, &rows, subtreeCTE+`
+		SELECT s.top AS category_id, tc.name,
+		       EXISTS (SELECT 1 FROM categories k WHERE k.parent_id = s.top) AS has_children,
+		       COALESCE(u.abbreviation, '')                               AS unit_abbr,
+		       count(p.id)                                                AS skus,
+		       count(p.id) FILTER (WHERE COALESCE(st.quantity,0) > 0)     AS in_stock,
+		       COALESCE(SUM(st.quantity), 0)                              AS units,
+		       COALESCE(SUM(st.quantity * p.cost_price), 0)               AS cost_value,
+		       COALESCE(SUM(st.quantity * p.selling_price), 0)            AS retail_value
+		FROM sub s
+		JOIN categories tc ON tc.id = s.top
+		LEFT JOIN products p ON p.category_id = s.id AND p.is_active AND NOT p.is_service
+		LEFT JOIN units u    ON u.id = p.unit_id
+		LEFT JOIN stock st   ON st.product_id = p.id
+		GROUP BY s.top, tc.name, u.abbreviation
+		ORDER BY tc.name`, categoryID); err != nil {
+		return nil, err
+	}
+	return foldChildren(rows), nil
+}
+
+// foldChildren collapses the per-unit groups into one node per category,
+// preserving input order so the caller's ORDER BY still decides the layout.
+func foldChildren(rows []childRow) []ValuationNode {
+	idx := make(map[int64]int, len(rows))
+	out := make([]ValuationNode, 0, len(rows))
+	for _, r := range rows {
+		i, ok := idx[r.CategoryID]
+		if !ok {
+			out = append(out, ValuationNode{
+				CategoryID: r.CategoryID, Name: r.Name, HasChildren: r.HasChildren,
+			})
+			i = len(out) - 1
+			idx[r.CategoryID] = i
+		}
+		n := &out[i]
+		n.SKUs += r.SKUs
+		n.InStock += r.InStock
+		n.CostValue = n.CostValue.Add(r.CostValue)
+		n.RetailValue = n.RetailValue.Add(r.RetailValue)
+		if r.UnitAbbr != "" && r.Units.IsPositive() {
+			n.Units = append(n.Units, UnitQty{Abbr: r.UnitAbbr, Qty: r.Units})
+		}
+	}
+	return out
+}
+
+// ValuationBranch totals the whole subtree rooted at categoryID, including
+// products filed directly on it.
+func (r *Repository) ValuationBranch(ctx context.Context, categoryID *int64) (Valuation, error) {
+	var rows []struct {
+		UnitAbbr    string          `db:"unit_abbr"`
+		SKUs        int             `db:"skus"`
+		InStock     int             `db:"in_stock"`
+		Units       decimal.Decimal `db:"units"`
+		CostValue   decimal.Decimal `db:"cost_value"`
+		RetailValue decimal.Decimal `db:"retail_value"`
+		MissingCost int             `db:"missing_cost"`
+		NegativeQty int             `db:"negative_qty"`
+	}
+	err := r.db.SelectContext(ctx, &rows, branchCTE+`
+		SELECT COALESCE(u.abbreviation, '')                           AS unit_abbr,
+		       count(p.id)                                            AS skus,
+		       count(p.id) FILTER (WHERE COALESCE(st.quantity,0) > 0) AS in_stock,
+		       COALESCE(SUM(st.quantity), 0)                          AS units,
+		       COALESCE(SUM(st.quantity * p.cost_price), 0)           AS cost_value,
+		       COALESCE(SUM(st.quantity * p.selling_price), 0)        AS retail_value,
+		       count(p.id) FILTER (WHERE COALESCE(st.quantity,0) > 0 AND COALESCE(p.cost_price,0) = 0) AS missing_cost,
+		       count(p.id) FILTER (WHERE COALESCE(st.quantity,0) < 0) AS negative_qty
+		FROM sub s
+		LEFT JOIN products p ON p.category_id = s.id AND p.is_active AND NOT p.is_service
+		LEFT JOIN units u    ON u.id = p.unit_id
+		LEFT JOIN stock st   ON st.product_id = p.id
+		GROUP BY u.abbreviation`, categoryID)
+	if err != nil {
+		return Valuation{}, err
+	}
+	var v Valuation
+	for _, row := range rows {
+		v.SKUs += row.SKUs
+		v.InStock += row.InStock
+		v.MissingCost += row.MissingCost
+		v.NegativeQty += row.NegativeQty
+		v.CostValue = v.CostValue.Add(row.CostValue)
+		v.RetailValue = v.RetailValue.Add(row.RetailValue)
+		if row.UnitAbbr != "" && row.Units.IsPositive() {
+			v.Units = append(v.Units, UnitQty{Abbr: row.UnitAbbr, Qty: row.Units})
+		}
+	}
+	return v, nil
+}
+
+// directNode returns the pseudo-row for products filed directly on categoryID —
+// they belong to this branch but to none of its children, so without it the
+// child rows would not add up to the branch total.
+func (r *Repository) directNode(ctx context.Context, categoryID int64, name string) (*ValuationNode, error) {
+	var rows []childRow
+	if err := r.db.SelectContext(ctx, &rows, `
+		SELECT $1::bigint AS category_id, $2::text AS name, false AS has_children,
+		       COALESCE(u.abbreviation, '')                           AS unit_abbr,
+		       count(p.id)                                            AS skus,
+		       count(p.id) FILTER (WHERE COALESCE(st.quantity,0) > 0) AS in_stock,
+		       COALESCE(SUM(st.quantity), 0)                          AS units,
+		       COALESCE(SUM(st.quantity * p.cost_price), 0)           AS cost_value,
+		       COALESCE(SUM(st.quantity * p.selling_price), 0)        AS retail_value
 		FROM products p
-		JOIN roots rt     ON rt.id = p.category_id
-		LEFT JOIN stock s ON s.product_id = p.id
-		WHERE p.is_active = true AND p.is_service = false
-		GROUP BY rt.root_id, rt.root_name
-		ORDER BY cost_value DESC, rt.root_name`)
-	return rows, err
+		LEFT JOIN units u  ON u.id = p.unit_id
+		LEFT JOIN stock st ON st.product_id = p.id
+		WHERE p.category_id = $1 AND p.is_active AND NOT p.is_service
+		GROUP BY u.abbreviation`, categoryID, name); err != nil {
+		return nil, err
+	}
+	nodes := foldChildren(rows)
+	if len(nodes) == 0 || nodes[0].SKUs == 0 {
+		return nil, nil
+	}
+	n := nodes[0]
+	n.Direct = true
+	return &n, nil
+}
+
+// Ancestors returns the path from the root down to categoryID.
+func (r *Repository) Ancestors(ctx context.Context, categoryID int64) ([]Crumb, error) {
+	var rows []catRow
+	if err := r.db.SelectContext(ctx, &rows, `
+		WITH RECURSIVE up AS (
+			SELECT id, name, parent_id FROM categories WHERE id = $1
+		  UNION ALL
+			SELECT c.id, c.name, c.parent_id FROM categories c JOIN up ON up.parent_id = c.id
+		)
+		SELECT id, name, parent_id FROM up`, categoryID); err != nil {
+		return nil, err
+	}
+	return orderAncestors(rows, categoryID), nil
 }
 
 // ValuationQuery filters the (screen-only) product detail list under the summary.
@@ -98,10 +257,11 @@ func (q *ValuationQuery) Normalize() {
 // limit <= 0 returns every match (used by the CSV export).
 func (r *Repository) ValuationRows(ctx context.Context, q ValuationQuery, limit, offset int) ([]Product, error) {
 	var rows []Product
-	err := r.db.SelectContext(ctx, &rows, rootCatsCTE+selectProduct+`
-		JOIN roots rt ON rt.id = p.category_id
+	// The $1 IS NULL arm short-circuits before the subquery is consulted, so the
+	// whole catalogue is returned rather than being narrowed to root categories.
+	err := r.db.SelectContext(ctx, &rows, branchCTE+selectProduct+`
 		WHERE p.is_active = true AND p.is_service = false
-		  AND ($1::bigint IS NULL OR rt.root_id = $1)
+		  AND ($1::bigint IS NULL OR p.category_id IN (SELECT id FROM sub))
 		  AND ($2 = true OR COALESCE(s.quantity,0) <> 0)
 		ORDER BY COALESCE(s.quantity,0) * p.cost_price DESC, p.name
 		LIMIT NULLIF($3, 0) OFFSET $4`,
@@ -111,13 +271,12 @@ func (r *Repository) ValuationRows(ctx context.Context, q ValuationQuery, limit,
 
 func (r *Repository) ValuationRowCount(ctx context.Context, q ValuationQuery) (int, error) {
 	var n int
-	err := r.db.GetContext(ctx, &n, rootCatsCTE+`
+	err := r.db.GetContext(ctx, &n, branchCTE+`
 		SELECT count(*)
 		FROM products p
-		JOIN roots rt     ON rt.id = p.category_id
 		LEFT JOIN stock s ON s.product_id = p.id
 		WHERE p.is_active = true AND p.is_service = false
-		  AND ($1::bigint IS NULL OR rt.root_id = $1)
+		  AND ($1::bigint IS NULL OR p.category_id IN (SELECT id FROM sub))
 		  AND ($2 = true OR COALESCE(s.quantity,0) <> 0)`,
 		q.CategoryID, q.IncludeZero)
 	return n, err
@@ -125,22 +284,60 @@ func (r *Repository) ValuationRowCount(ctx context.Context, q ValuationQuery) (i
 
 // --- service ---
 
-// Valuation returns whole-catalog stock value plus a per-root-category breakdown.
-func (s *Service) Valuation(ctx context.Context) (*Valuation, error) {
-	rows, err := s.repo.Valuation(ctx)
+// Valuation returns one branch of the catalogue: its totals, its child rows and
+// its breadcrumb. A nil categoryID is the whole shop.
+func (s *Service) Valuation(ctx context.Context, categoryID *int64) (*Valuation, error) {
+	// Resolve the path first, because it doubles as an existence check. A
+	// category that has been deleted since someone bookmarked it would
+	// otherwise render an empty branch reading Rs 0.00, which looks like the
+	// shop has lost all its stock; fall back to the whole catalogue instead.
+	var crumbs []Crumb
+	if categoryID != nil {
+		found, cerr := s.repo.Ancestors(ctx, *categoryID)
+		if cerr != nil {
+			return nil, apperr.Internal("failed to resolve the category path", cerr)
+		}
+		if len(found) == 0 {
+			categoryID = nil
+		}
+		crumbs = found
+	}
+
+	v, err := s.repo.ValuationBranch(ctx, categoryID)
 	if err != nil {
 		return nil, apperr.Internal("failed to value inventory", err)
 	}
-	v := &Valuation{Categories: rows}
-	for _, r := range rows {
-		v.SKUs += r.SKUs
-		v.InStock += r.InStock
-		v.MissingCost += r.MissingCost
-		v.NegativeQty += r.NegativeQty
-		v.CostValue = v.CostValue.Add(r.CostValue)
-		v.RetailValue = v.RetailValue.Add(r.RetailValue)
+	children, err := s.repo.ValuationChildren(ctx, categoryID)
+	if err != nil {
+		return nil, apperr.Internal("failed to break inventory down by category", err)
 	}
-	return v, nil
+	v.Children = children
+	if categoryID != nil {
+		v.Breadcrumb = crumbs
+		name := ""
+		if len(crumbs) > 0 {
+			name = crumbs[len(crumbs)-1].Name
+		}
+		direct, derr := s.repo.directNode(ctx, *categoryID, name)
+		if derr != nil {
+			return nil, apperr.Internal("failed to total this category's own products", derr)
+		}
+		if direct != nil {
+			v.Children = append(v.Children, *direct)
+		}
+	}
+	return &v, nil
+}
+
+// CategoryPath returns the root-to-leaf path of a category. It lives here
+// because this package already owns the ancestor walk used by the inventory
+// breadcrumb; exposing it avoids a second implementation.
+func (s *Service) CategoryPath(ctx context.Context, categoryID int64) ([]Crumb, error) {
+	crumbs, err := s.repo.Ancestors(ctx, categoryID)
+	if err != nil {
+		return nil, apperr.Internal("failed to resolve the category path", err)
+	}
+	return crumbs, nil
 }
 
 // ValuationDetail returns page q.Page of the product list behind the summary,

@@ -483,7 +483,7 @@ func (a *adminUI) InventoryReport(c echo.Context) error {
 				"Cost", "Retail", "Cost value", "Retail value"}, out)
 	}
 
-	val, err := a.s.products.Valuation(ctx)
+	val, err := a.s.products.Valuation(ctx, q.CategoryID)
 	if err != nil {
 		return err
 	}
@@ -491,10 +491,16 @@ func (a *adminUI) InventoryReport(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	cats, err := a.s.categories.Tree(ctx)
+	if err != nil {
+		return err
+	}
 	return response.RenderPage(c, adminpages.InventoryReport(adminpages.InventoryReportData{
 		ShopName:    a.shopName(ctx),
 		Symbol:      a.symbol(ctx),
 		Val:         *val,
+		Breadcrumb:  val.Breadcrumb,
+		Categories:  cats,
 		Rows:        rows,
 		Total:       total,
 		Page:        q.Page,
