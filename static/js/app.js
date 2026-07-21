@@ -1810,8 +1810,11 @@ function grn(symbol, config) {
       }
       this.busy = true;
       try {
-        await apiFetch("POST", url, body);
+        const res = await apiFetch("POST", url, body);
         toast(this.savedMsg || (this.editId > 0 ? "Purchase order updated" : "Purchase order saved"), "success");
+        // An order taken at the counter prints a slip the supplier takes away.
+        const printUrl = res && res.data && res.data.print_url;
+        if (printUrl) window.open(printUrl, "_blank");
         window.location = this.redirect;
       } catch (_) {
         /* toast already shown */

@@ -100,6 +100,8 @@ type counterReceiveConfig struct {
 	SupplierID   int64
 	SupplierName string
 	PostURL      string
+	SavedMsg     string
+	WithPayment  bool
 	Sources      []adminfragments.LocationChoice
 }
 
@@ -112,13 +114,17 @@ func counterReceiveConfigJSON(cfg counterReceiveConfig) string {
 	for _, s := range cfg.Sources {
 		srcs = append(srcs, src{Value: s.Value, Label: s.Label})
 	}
+	msg := cfg.SavedMsg
+	if msg == "" {
+		msg = "Goods received"
+	}
 	b, _ := json.Marshal(map[string]any{
 		"supplierId":   strconv.FormatInt(cfg.SupplierID, 10),
 		"supplierName": cfg.SupplierName,
 		"postUrl":      cfg.PostURL,
 		"redirect":     "/cashier/suppliers",
-		"savedMsg":     "Goods received",
-		"withPayment":  true,
+		"savedMsg":     msg,
+		"withPayment":  cfg.WithPayment,
 		"sources":      srcs,
 	})
 	return string(b)
@@ -224,6 +230,8 @@ func (h *cashierUI) ReceiveForm(c echo.Context) error {
 			SupplierID:   id,
 			SupplierName: sup.Name,
 			PostURL:      "/cashier/suppliers/" + strconv.FormatInt(id, 10) + "/receive",
+			SavedMsg:     "Goods received",
+			WithPayment:  true,
 			Sources:      sources,
 		}),
 	}))
@@ -298,6 +306,65 @@ func (h *cashierUI) ReceiveWalkIn(c echo.Context) error {
 	return response.Created(c, d)
 }
 
+// OrderForm renders the counter order screen — what the supplier should send
+// next time.
+func (h *cashierUI) OrderForm(c echo.Context) error {
+	ctx := c.Request().Context()
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	sup, err := h.s.suppliers.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	return response.RenderPage(c, cashierpages.SupplierOrder(cashierpages.SupplierOrderData{
+		CashierName:   middleware.CurrentUserName(c),
+		Role:          middleware.CurrentRole(c),
+		ShowChangePin: h.showChangePin(c),
+		Symbol:        h.cashierSymbol(ctx),
+		Supplier:      *sup,
+		ConfigJSON: counterReceiveConfigJSON(counterReceiveConfig{
+			SupplierID:   id,
+			SupplierName: sup.Name,
+			PostURL:      "/cashier/suppliers/" + strconv.FormatInt(id, 10) + "/order",
+			SavedMsg:     "Order saved",
+			WithPayment:  false,
+		}),
+	}))
+}
+
+// OrderCreate records what the supplier should send next time as a normal draft
+// purchase order, stamped with the cashier who took it.
+//
+// The phone call to the owner is the approval, so there is no second
+// confirmation step — the draft simply appears in the owner's Purchases list.
+func (h *cashierUI) OrderCreate(c echo.Context) error {
+	ctx := c.Request().Context()
+	supplierID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	var in purchases.CreateInput
+	if err := c.Bind(&in); err != nil {
+		return apperr.BadRequest("invalid request body")
+	}
+	in.SupplierID = supplierID
+	if err := c.Validate(&in); err != nil {
+		return err
+	}
+	d, err := h.s.purchases.CreateDraft(ctx, in, middleware.CurrentUserID(c))
+	if err != nil {
+		return err
+	}
+	h.s.logAudit(c, audit.ActionCreate, "purchase", strconv.FormatInt(d.Purchase.ID, 10),
+		"took a supplier order at the counter")
+	return response.Created(c, map[string]any{
+		"id":        d.Purchase.ID,
+		"print_url": "/cashier/suppliers/orders/print?ids=" + strconv.FormatInt(d.Purchase.ID, 10),
+	})
+}
+
 // SupplierPayAtCounter records a payment handed over at the till.
 //
 // Mirrors the admin handler through the same paySupplierTx helper; the only
@@ -362,4 +429,11 @@ func (h *cashierUI) SupplierPayAtCounter(c echo.Context) error {
 		h.s.printMoneyReceipt(ctx, rec)
 	}
 	return htmxDone(c, msg, "reload-suppliers")
+}
+
+// OrderPrint renders the printable order slip for the supplier to take away.
+// The renderer lives on Server because /admin/purchases/po/print is out of
+// reach for a cashier.
+func (h *cashierUI) OrderPrint(c echo.Context) error {
+	return h.s.renderPOPrint(c)
 }

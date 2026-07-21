@@ -214,7 +214,27 @@ func (a *adminUI) PurchaseDraftDelete(c echo.Context) error {
 // DraftPOPrint renders printable Purchase Order document(s) for the given draft
 // IDs — combined on one page or one-per-supplier (page-broken).
 func (a *adminUI) DraftPOPrint(c echo.Context) error {
+	return a.s.renderPOPrint(c)
+}
+
+// renderPOPrint builds the printable Purchase Order page. It lives on Server so
+// the counter can print the order it just took without a second copy of the
+// renderer — a cashier cannot reach /admin.
+func (s *Server) renderPOPrint(c echo.Context) error {
 	ctx := c.Request().Context()
+	shopName, symbol, address, phone := "Shop", "Rs.", "", ""
+	if cfg, err := s.settings.Get(ctx); err == nil && cfg != nil {
+		if cfg.ShopName != "" {
+			shopName = cfg.ShopName
+		}
+		symbol = cfg.CurrencySymbol
+		if cfg.Address != nil {
+			address = *cfg.Address
+		}
+		if cfg.Phone != nil {
+			phone = *cfg.Phone
+		}
+	}
 	ids := parseIDList(c.QueryParam("ids"))
 	if len(ids) == 0 {
 		return apperr.BadRequest("no purchase orders selected")
@@ -223,26 +243,26 @@ func (a *adminUI) DraftPOPrint(c echo.Context) error {
 	if mode != "separate" {
 		mode = "combined"
 	}
-	details, err := a.s.purchases.GetMany(ctx, ids)
+	details, err := s.purchases.GetMany(ctx, ids)
 	if err != nil {
 		return err
 	}
 	orders := make([]adminpages.POOrder, 0, len(details))
 	for _, det := range details {
 		o := adminpages.POOrder{Detail: det}
-		if sup, err := a.s.suppliers.Get(ctx, det.Purchase.SupplierID); err == nil && sup != nil {
+		if sup, err := s.suppliers.Get(ctx, det.Purchase.SupplierID); err == nil && sup != nil {
 			o.Supplier = *sup
 		}
 		orders = append(orders, o)
 	}
 	d := adminpages.POPrintData{
-		ShopName: a.shopName(ctx),
-		Symbol:   a.symbol(ctx),
+		ShopName: shopName,
+		Symbol:   symbol,
 		Mode:     mode,
 		IDs:      c.QueryParam("ids"),
 		Orders:   orders,
 	}
-	d.Address, d.Phone = a.shopContact(ctx)
+	d.Address, d.Phone = address, phone
 	return response.RenderPage(c, adminpages.POPrintPage(d))
 }
 

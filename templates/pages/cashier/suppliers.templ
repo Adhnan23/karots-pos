@@ -80,7 +80,10 @@ templ SuppliersTable(d SuppliersData) {
 									href={ templ.SafeURL("/cashier/suppliers/" + strconv.FormatInt(s.ID, 10) + "/receive") }
 									class="text-indigo-600 hover:underline"
 								>Receive</a>
-								<span class="text-slate-300 cursor-not-allowed" title="Coming next">Order</span>
+								<a
+									href={ templ.SafeURL("/cashier/suppliers/" + strconv.FormatInt(s.ID, 10) + "/order") }
+									class="text-slate-600 hover:underline"
+								>Order</a>
 							</div>
 						</td>
 					</tr>
@@ -290,6 +293,77 @@ templ SupplierReceive(d SupplierReceiveData) {
 								</button>
 							</div>
 						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+	}
+}
+
+// ====================== Taking an order ======================
+
+type SupplierOrderData struct {
+	CashierName   string
+	Role          string
+	ShowChangePin bool
+	Symbol        string
+	Supplier      suppliers.Supplier
+	ConfigJSON    string
+}
+
+templ SupplierOrder(d SupplierOrderData) {
+	@layouts.Cashier("Order", d.CashierName, d.Role, "suppliers", d.ShowChangePin) {
+		<div class="h-full overflow-auto p-6">
+			<div class="max-w-3xl mx-auto">
+				<div class="flex items-center justify-between mb-4">
+					<div>
+						<h1 class="text-xl font-bold">Order from { d.Supplier.Name }</h1>
+						<p class="text-sm text-slate-500">What should they send next time? Saves as an order the owner can see, and prints a slip for the supplier.</p>
+					</div>
+					<a href="/cashier/suppliers" class="text-slate-500 hover:underline">← Back</a>
+				</div>
+				<div class="bg-white rounded-2xl shadow-sm p-6" x-data={ "grn('" + d.Symbol + "', " + d.ConfigJSON + ")" } x-on:keydown.window="onKey($event)">
+					<div class="mb-4">
+						<label class="block text-sm font-medium mb-1">Wanted by</label>
+						<input type="date" x-model="expectedDate" class="w-full md:w-64 border rounded-lg px-3 py-2"/>
+					</div>
+					<table class="w-full text-sm mb-3">
+						<thead class="text-left text-slate-500 border-b">
+							<tr>
+								<th class="py-2">Product</th>
+								<th class="py-2 w-40">How many</th>
+								<th></th>
+							</tr>
+						</thead>
+						<tbody>
+							<template x-for="(l, i) in lines" x-bind:key="i">
+								<tr class="border-b">
+									<td class="py-1 pr-2 relative" x-on:click.away="l._open=false">
+										<input type="text" x-model="l.product_name" x-on:input="pick(l)" x-on:focus="pick(l)" placeholder="Search name or barcode…" class="w-full border rounded px-2 py-1"/>
+										<div x-show="l._open && l._results.length" class="absolute z-20 left-0 right-0 mt-1 bg-white border rounded-lg shadow max-h-56 overflow-auto" x-cloak>
+											<template x-for="r in l._results" x-bind:key="r.id">
+												<button type="button" x-on:click="choose(l, r)" class="block w-full text-left px-3 py-1.5 hover:bg-slate-100" x-text="r.name + (r.barcode ? '  ·  ' + r.barcode : '')"></button>
+											</template>
+										</div>
+									</td>
+									<td class="py-1 pr-2">
+										<div class="flex items-center rounded border">
+											<button type="button" x-on:click="decLine(l)" class="px-2 text-slate-500 hover:bg-slate-100" aria-label="Fewer">−</button>
+											<input type="number" step="0.001" min="0" x-model.number="l.quantity" class="w-full border-x px-1 py-1 text-center"/>
+											<button type="button" x-on:click="incLine(l)" class="px-2 text-slate-500 hover:bg-slate-100" aria-label="More">+</button>
+										</div>
+									</td>
+									<td class="py-1 text-right"><button type="button" class="text-red-500" x-on:click="removeLine(i)">✕</button></td>
+								</tr>
+							</template>
+						</tbody>
+					</table>
+					<button type="button" class="text-indigo-600 text-sm mb-4" x-on:click="addLine()">+ Add line <span class="text-slate-400">(F4)</span></button>
+					<div class="flex items-center justify-between border-t pt-4">
+						<p class="text-xs text-slate-500 max-w-sm">Prices are left for the owner — this is a request, not a receipt.</p>
+						<button type="button" x-on:click="submit()" x-bind:disabled="busy" class="px-5 py-2.5 rounded-lg bg-indigo-600 text-white font-semibold disabled:opacity-40">
+							Save &amp; print order <span class="opacity-70">(F10)</span>
+						</button>
 					</div>
 				</div>
 			</div>
