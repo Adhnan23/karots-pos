@@ -12,6 +12,7 @@ import (
 	appdb "karots-pos/internal/db"
 	"karots-pos/internal/features/customers"
 	"karots-pos/internal/features/products"
+	"karots-pos/internal/features/recipes"
 	"karots-pos/internal/features/stock"
 	"karots-pos/internal/features/warranty"
 	"karots-pos/internal/money"
@@ -249,6 +250,23 @@ func (s *Service) Create(ctx context.Context, in CreateInput, cashierID int64) (
 			var lineComps []ServiceComponentParsed
 			if p.IsService {
 				serviceProducts[p.ID] = true
+				// A stored recipe supplies the components when the caller did not.
+				// The documents plugin passes explicit components (its paper choice
+				// depends on the size picked at the till), so an explicit list always
+				// wins; everything else — coffee, any service with a recipe — is
+				// expanded here so no plugin is needed to sell it.
+				if len(it.Components) == 0 {
+					rcs, rerr := recipes.NewRepository(tx).For(ctx, p.ID)
+					if rerr != nil {
+						return apperr.Internal("failed to load recipe", rerr)
+					}
+					for _, cons := range recipes.Expand(rcs, qty) {
+						it.Components = append(it.Components, ServiceComponent{
+							ProductID: cons.ProductID,
+							Quantity:  cons.Qty.String(),
+						})
+					}
+				}
 				for _, comp := range it.Components {
 					if comp.ProductID <= 0 {
 						continue
