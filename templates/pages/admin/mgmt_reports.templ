@@ -317,6 +317,10 @@ type PurchasesReportData struct {
 templ PurchasesReport(d PurchasesReportData) {
 	@layouts.Report("Purchases Report", d.ShopName) {
 		@rptRangeForm("/admin/reports/purchases", d.Preset, d.From, d.To) {
+			<a
+				class="no-print px-4 py-1.5 rounded-lg border text-sm"
+				href={ templ.SafeURL("/admin/reports/purchases?format=csv&from=" + d.From + "&to=" + d.To) }
+			>Download CSV</a>
 		}
 		@rptPeriodLine(d.From, d.To)
 		<table class="w-full text-sm">

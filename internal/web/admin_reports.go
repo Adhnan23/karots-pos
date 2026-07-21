@@ -341,6 +341,29 @@ func (a *adminUI) PurchasesReport(c echo.Context) error {
 		d.Due = d.Due.Add(p.Total.Sub(p.PaidAmount))
 	}
 	d.Count = len(inRange)
+	// The CSV carries every purchase in the range, not the page being viewed —
+	// a download that silently stopped at the page break would be the same class
+	// of quiet under-reporting as the row cap this report used to have.
+	if wantsCSV(c) {
+		out := make([][]string, 0, len(inRange))
+		for _, p := range inRange {
+			invoice := ""
+			if p.InvoiceNo != nil {
+				invoice = *p.InvoiceNo
+			}
+			out = append(out, []string{
+				p.CreatedAt.Format("2006-01-02"),
+				p.SupplierName,
+				invoice,
+				p.Status,
+				csvMoney(p.Total),
+				csvMoney(p.PaidAmount),
+				csvMoney(p.Total.Sub(p.PaidAmount)),
+			})
+		}
+		return writeCSV(c, "purchases_"+fromStr+"_to_"+toStr,
+			[]string{"Date", "Supplier", "Invoice", "Status", "Total", "Paid", "Due"}, out)
+	}
 	d.Rows = paginate(inRange, d.Page, reportPageSize)
 	return response.RenderPage(c, adminpages.PurchasesReport(d))
 }
