@@ -30,6 +30,11 @@ type Expense struct {
 	ExpenseDate time.Time       `db:"expense_date" json:"expense_date"`
 	CreatedAt   time.Time       `db:"created_at"   json:"created_at"`
 	PaidByName  *string         `db:"paid_by_name" json:"paid_by_name,omitempty"`
+	// ServiceProductID attributes an operating cost (a toner change, a machine
+	// repair) to the service it belongs to. It is NOT per-unit consumption and
+	// never enters COGS: the core P&L still counts it once, as an expense.
+	ServiceProductID *int64  `db:"service_product_id" json:"service_product_id,omitempty"`
+	ServiceName      *string `db:"service_name"       json:"service_name,omitempty"`
 }
 
 type CreateInput struct {
@@ -37,6 +42,8 @@ type CreateInput struct {
 	Amount      string  `json:"amount"       form:"amount"       validate:"required"`
 	Description *string `json:"description"  form:"description"`
 	ExpenseDate string  `json:"expense_date" form:"expense_date"`
+	// ServiceProductID is optional; 0 or absent means "not attributed".
+	ServiceProductID int64 `json:"service_product_id" form:"service_product_id"`
 }
 
 // Filter narrows the expense list by date range.
@@ -52,9 +59,10 @@ func NewRepository(q db.Queryer) *Repository { return &Repository{q: q} }
 func (r *Repository) List(ctx context.Context, f Filter) ([]Expense, error) {
 	var rows []Expense
 	err := r.q.SelectContext(ctx, &rows, `
-		SELECT e.*, u.name AS paid_by_name
+		SELECT e.*, u.name AS paid_by_name, sp.name AS service_name
 		FROM expenses e
 		LEFT JOIN users u ON u.id = e.paid_by
+		LEFT JOIN products sp ON sp.id = e.service_product_id
 		WHERE ($1::date IS NULL OR e.expense_date >= $1)
 		  AND ($2::date IS NULL OR e.expense_date <= $2)
 		ORDER BY e.expense_date DESC, e.id DESC
@@ -62,12 +70,13 @@ func (r *Repository) List(ctx context.Context, f Filter) ([]Expense, error) {
 	return rows, err
 }
 
-func (r *Repository) Create(ctx context.Context, category string, amount decimal.Decimal, desc *string, paidBy *int64, date time.Time) (*Expense, error) {
+func (r *Repository) Create(ctx context.Context, category string, amount decimal.Decimal, desc *string, paidBy *int64, date time.Time, serviceID *int64) (*Expense, error) {
 	var e Expense
 	err := r.q.GetContext(ctx, &e, `
-		INSERT INTO expenses (category, amount, description, paid_by, expense_date)
-		VALUES ($1,$2,$3,$4,$5) RETURNING *, NULL::varchar AS paid_by_name`,
-		category, amount, desc, paidBy, date)
+		INSERT INTO expenses (category, amount, description, paid_by, expense_date, service_product_id)
+		VALUES ($1,$2,$3,$4,$5,$6)
+		RETURNING *, NULL::varchar AS paid_by_name, NULL::varchar AS service_name`,
+		category, amount, desc, paidBy, date, serviceID)
 	if err != nil {
 		return nil, err
 	}
@@ -77,9 +86,10 @@ func (r *Repository) Create(ctx context.Context, category string, amount decimal
 func (r *Repository) FindByID(ctx context.Context, id int64) (*Expense, error) {
 	var e Expense
 	err := r.q.GetContext(ctx, &e, `
-		SELECT e.*, u.name AS paid_by_name
+		SELECT e.*, u.name AS paid_by_name, sp.name AS service_name
 		FROM expenses e
 		LEFT JOIN users u ON u.id = e.paid_by
+		LEFT JOIN products sp ON sp.id = e.service_product_id
 		WHERE e.id = $1`, id)
 	if err != nil {
 		return nil, err
@@ -87,10 +97,11 @@ func (r *Repository) FindByID(ctx context.Context, id int64) (*Expense, error) {
 	return &e, nil
 }
 
-func (r *Repository) Update(ctx context.Context, id int64, category string, amount decimal.Decimal, desc *string, date time.Time) error {
+func (r *Repository) Update(ctx context.Context, id int64, category string, amount decimal.Decimal, desc *string, date time.Time, serviceID *int64) error {
 	res, err := r.q.ExecContext(ctx, `
-		UPDATE expenses SET category=$1, amount=$2, description=$3, expense_date=$4 WHERE id=$5`,
-		category, amount, desc, date, id)
+		UPDATE expenses SET category=$1, amount=$2, description=$3, expense_date=$4, service_product_id=$5
+		WHERE id=$6`,
+		category, amount, desc, date, serviceID, id)
 	if err != nil {
 		return err
 	}
@@ -145,12 +156,20 @@ func parseCreate(in CreateInput, userID int64) (category string, amt decimal.Dec
 	return strings.TrimSpace(in.Category), amt, in.Description, paidBy, date, nil
 }
 
+// serviceRef turns the form's 0-means-none into a nullable reference.
+func serviceRef(id int64) *int64 {
+	if id <= 0 {
+		return nil
+	}
+	return &id
+}
+
 func (s *Service) Create(ctx context.Context, in CreateInput, userID int64) (*Expense, error) {
 	category, amt, desc, paidBy, date, err := parseCreate(in, userID)
 	if err != nil {
 		return nil, err
 	}
-	e, err := s.repo.Create(ctx, category, amt, desc, paidBy, date)
+	e, err := s.repo.Create(ctx, category, amt, desc, paidBy, date, serviceRef(in.ServiceProductID))
 	if err != nil {
 		return nil, apperr.Internal("failed to record expense", err)
 	}
@@ -164,7 +183,7 @@ func (s *Service) CreateInTx(ctx context.Context, q db.Queryer, in CreateInput, 
 	if err != nil {
 		return nil, err
 	}
-	e, err := NewRepository(q).Create(ctx, category, amt, desc, paidBy, date)
+	e, err := NewRepository(q).Create(ctx, category, amt, desc, paidBy, date, serviceRef(in.ServiceProductID))
 	if err != nil {
 		return nil, apperr.Internal("failed to record expense", err)
 	}
@@ -194,7 +213,7 @@ func (s *Service) Update(ctx context.Context, id int64, in CreateInput) error {
 			return apperr.Validation("date must be YYYY-MM-DD")
 		}
 	}
-	err = s.repo.Update(ctx, id, strings.TrimSpace(in.Category), amt, in.Description, date)
+	err = s.repo.Update(ctx, id, strings.TrimSpace(in.Category), amt, in.Description, date, serviceRef(in.ServiceProductID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return apperr.NotFound("expense")
 	}

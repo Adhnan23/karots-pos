@@ -592,3 +592,12 @@ func defaultUnitID(ctx context.Context, tx *sqlx.Tx) (int64, error) {
 		`SELECT id FROM units ORDER BY (abbreviation = 'pcs') DESC, id ASC LIMIT 1`)
 	return id, err
 }
+
+// ListServices returns active service products for attribution pickers.
+func (s *Service) ListServices(ctx context.Context) ([]Product, error) {
+	rows, err := s.repo.ListServices(ctx)
+	if err != nil {
+		return nil, apperr.Internal("failed to load services", err)
+	}
+	return rows, nil
+}

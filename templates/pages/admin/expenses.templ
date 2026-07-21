@@ -4,6 +4,7 @@ import (
 	"strconv"
 
 	"karots-pos/internal/features/expenses"
+	"karots-pos/internal/features/products"
 	"karots-pos/internal/money"
 	adminfragments "karots-pos/templates/fragments/admin"
 	"karots-pos/templates/layouts"
@@ -83,6 +84,13 @@ templ ExpensesPage(d ExpensesData) {
 type ExpenseFormData struct {
 	Expense *expenses.Expense
 	Sources []adminfragments.LocationChoice
+	// Services are the active service products this cost can be attributed to.
+	Services []products.Product
+}
+
+// expServiceSelected marks the currently attributed service when editing.
+func expServiceSelected(e *expenses.Expense, id int64) bool {
+	return e != nil && e.ServiceProductID != nil && *e.ServiceProductID == id
 }
 
 templ ExpenseForm(d ExpenseFormData) {
@@ -131,6 +139,21 @@ templ ExpenseForm(d ExpenseFormData) {
 				<label class="block text-sm font-medium mb-1">Description</label>
 				<input name="description" value={ expVal(d.Expense, "description") } class="w-full border rounded-lg px-3 py-2"/>
 			</div>
+			if len(d.Services) > 0 {
+				<div>
+					<label class="block text-sm font-medium mb-1">Relates to service (optional)</label>
+					<select name="service_product_id" class="w-full border rounded-lg px-3 py-2">
+						<option value="0">— not attributed —</option>
+						for _, sp := range d.Services {
+							<option value={ strconv.FormatInt(sp.ID, 10) } selected?={ expServiceSelected(d.Expense, sp.ID) }>{ sp.Name }</option>
+						}
+					</select>
+					<p class="text-xs text-slate-500 mt-1">
+						Tag machine, toner or servicing costs so they show against that service's profit.
+						Still counted once, as an operating expense.
+					</p>
+				</div>
+			}
 			@modalButtons()
 		</form>
 	}

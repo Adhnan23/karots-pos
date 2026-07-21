@@ -385,3 +385,14 @@ func nullStr(s string) *string {
 	}
 	return &s
 }
+
+// ListServices returns active service products. Services are few by nature
+// (a photocopy counter, a coffee, a recharge line), so this is an unpaged list
+// meant for pickers that attribute something to a service.
+func (r *Repository) ListServices(ctx context.Context) ([]Product, error) {
+	var rows []Product
+	err := r.db.SelectContext(ctx, &rows, selectProduct+`
+		WHERE p.is_service AND p.is_active
+		ORDER BY p.name`)
+	return rows, err
+}

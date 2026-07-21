@@ -408,7 +408,11 @@ func (a *adminUI) ExpenseForm(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	return response.RenderFragment(c, adminpages.ExpenseForm(adminpages.ExpenseFormData{Sources: sources}))
+	svcs, err := a.s.products.ListServices(c.Request().Context())
+	if err != nil {
+		return err
+	}
+	return response.RenderFragment(c, adminpages.ExpenseForm(adminpages.ExpenseFormData{Sources: sources, Services: svcs}))
 }
 
 func (a *adminUI) ExpenseEditForm(c echo.Context) error {
@@ -420,7 +424,11 @@ func (a *adminUI) ExpenseEditForm(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	return response.RenderFragment(c, adminpages.ExpenseForm(adminpages.ExpenseFormData{Expense: e}))
+	svcs, err := a.s.products.ListServices(c.Request().Context())
+	if err != nil {
+		return err
+	}
+	return response.RenderFragment(c, adminpages.ExpenseForm(adminpages.ExpenseFormData{Expense: e, Services: svcs}))
 }
 
 func (a *adminUI) ExpenseUpdate(c echo.Context) error {
