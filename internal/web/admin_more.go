@@ -181,36 +181,9 @@ func (a *adminUI) SupplierPay(c echo.Context) error {
 		return err
 	}
 
-	in := supplierpay.PayInput{
-		Method:    c.FormValue("method"),
-		Reference: strings.TrimSpace(c.FormValue("reference")),
-		Note:      strings.TrimSpace(c.FormValue("note")),
-	}
-	// Read the per-invoice allocation inputs the form rendered (alloc_<id>).
-	for _, pu := range invoices {
-		raw := strings.TrimSpace(c.FormValue("alloc_" + strconv.FormatInt(pu.ID, 10)))
-		if raw == "" {
-			continue
-		}
-		amt, perr := money.Parse(raw)
-		if perr != nil || amt.IsNegative() {
-			return apperr.Validation("invalid allocation amount")
-		}
-		if amt.IsZero() {
-			continue
-		}
-		in.Allocations = append(in.Allocations, supplierpay.Alloc{PurchaseID: pu.ID, Amount: amt})
-	}
-	// Fallback for a supplier carrying a balance with no open invoices: a plain
-	// unallocated amount that just reduces the payable.
-	if len(invoices) == 0 {
-		if raw := strings.TrimSpace(c.FormValue("amount")); raw != "" {
-			amt, perr := money.Parse(raw)
-			if perr != nil || amt.IsNegative() {
-				return apperr.Validation("invalid amount")
-			}
-			in.Unallocated = amt
-		}
+	in, err := parseAllocations(c, invoices)
+	if err != nil {
+		return err
 	}
 
 	userID := middleware.CurrentUserID(c)
@@ -234,25 +207,11 @@ func (a *adminUI) SupplierPay(c echo.Context) error {
 	var res *supplierpay.Result
 	var rec *cashflow.Receipt
 	err = appdb.WithTx(ctx, a.db, func(tx *sqlx.Tx) error {
-		r, err := a.s.supplierPay.PayTx(ctx, tx, id, in, userID)
-		if err != nil {
-			return err
-		}
-		res = r
-		if r.Method == "cash" {
-			rec, err = a.s.cashflow.MoveTx(ctx, tx, cashflow.MoveInput{
-				From:        src,
-				To:          cashflow.External(),
-				Amount:      r.Total,
-				Reason:      "supplier payment: " + name,
-				ReceiptKind: "supplier_payment",
-				Party:       name,
-				Ref:         &cashflow.Ref{Kind: "supplier_payment", ID: r.PaymentID},
-				ActorID:     userID,
-			})
-			return err
-		}
-		return nil
+		r, k, txErr := a.s.paySupplierTx(ctx, tx, payRequest{
+			SupplierID: id, SupplierName: name, In: in, Source: src,
+		}, userID)
+		res, rec = r, k
+		return txErr
 	})
 	if err != nil {
 		return err

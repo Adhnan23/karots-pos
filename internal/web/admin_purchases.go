@@ -7,12 +7,17 @@ import (
 	"strings"
 
 	"karots-pos/internal/apperr"
+	appdb "karots-pos/internal/db"
 	"karots-pos/internal/features/audit"
+	"karots-pos/internal/features/cashflow"
 	"karots-pos/internal/features/purchases"
+	"karots-pos/internal/features/supplierpay"
 	"karots-pos/internal/middleware"
 	"karots-pos/internal/response"
+	adminfragments "karots-pos/templates/fragments/admin"
 	adminpages "karots-pos/templates/pages/admin"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/labstack/echo/v4"
 )
 
@@ -121,11 +126,16 @@ func (a *adminUI) PurchaseReceiveForm(c echo.Context) error {
 			cur[it.ProductID] = [2]string{p.CostPrice.String(), p.SellingPrice.String()}
 		}
 	}
+	// Where the cash would come from if the supplier is paid on the spot.
+	sources, err := a.cashLocationChoices(ctx)
+	if err != nil {
+		return err
+	}
 	return response.RenderPage(c, adminpages.PurchaseReceivePage(adminpages.PurchaseReceiveData{
 		UserName:   middleware.CurrentUserName(c),
 		Symbol:     a.symbol(ctx),
 		Detail:     *d,
-		ConfigJSON: receiveConfigJSON(*d, cur),
+		ConfigJSON: receiveConfigJSON(*d, cur, sources),
 	}))
 }
 
@@ -137,18 +147,54 @@ func (a *adminUI) PurchaseReceive(c echo.Context) error {
 	if err != nil {
 		return apperr.BadRequest("invalid id")
 	}
-	var in purchases.ReceiveInput
-	if err := c.Bind(&in); err != nil {
+	var req receiveRequest
+	if err := c.Bind(&req); err != nil {
 		return apperr.BadRequest("invalid request body")
 	}
+	in := req.ReceiveInput
 	if err := c.Validate(&in); err != nil {
 		return err
 	}
-	d, err := a.s.purchases.Receive(ctx, id, in, middleware.CurrentUserID(c))
+	pay, err := parsePayNow(req.PayFields)
+	if err != nil {
+		return err
+	}
+	userID := middleware.CurrentUserID(c)
+
+	var d *purchases.Detail
+	var rec *cashflow.Receipt
+	err = appdb.WithTx(ctx, a.db, func(tx *sqlx.Tx) error {
+		got, txErr := purchases.ReceiveTx(ctx, tx, id, in, userID)
+		if txErr != nil {
+			return txErr
+		}
+		d = got
+		if !pay.amount.IsPositive() {
+			return nil
+		}
+		name := ""
+		if sup, gerr := a.s.suppliers.Get(ctx, d.Purchase.SupplierID); gerr == nil {
+			name = sup.Name
+		}
+		_, k, txErr := a.s.paySupplierTx(ctx, tx, payRequest{
+			SupplierID:   d.Purchase.SupplierID,
+			SupplierName: name,
+			In: supplierpay.PayInput{
+				Method:      pay.method,
+				Allocations: []supplierpay.Alloc{{PurchaseID: id, Amount: pay.amount}},
+			},
+			Source: pay.source,
+		}, userID)
+		rec = k
+		return txErr
+	})
 	if err != nil {
 		return err
 	}
 	a.s.logAudit(c, audit.ActionUpdate, "purchase", strconv.FormatInt(id, 10), "received purchase order")
+	if rec != nil {
+		a.s.printMoneyReceipt(ctx, rec)
+	}
 	return response.OK(c, d)
 }
 
@@ -300,7 +346,7 @@ func entryConfigJSON(d purchases.Detail) string {
 // receiveConfigJSON serialises a draft's lines for the receive screen (ordered +
 // editable received qty defaulting to ordered). cur holds each product's current
 // {cost, sell} so the screen can flag a squeezed margin and suggest a new price.
-func receiveConfigJSON(d purchases.Detail, cur map[int64][2]string) string {
+func receiveConfigJSON(d purchases.Detail, cur map[int64][2]string, sources []adminfragments.LocationChoice) string {
 	type line struct {
 		ProductID    int64  `json:"product_id"`
 		ProductName  string `json:"product_name"`
@@ -338,9 +384,18 @@ func receiveConfigJSON(d purchases.Detail, cur map[int64][2]string) string {
 			CurSell:      curSell,
 		})
 	}
+	type src struct {
+		Value string `json:"value"`
+		Label string `json:"label"`
+	}
+	srcs := make([]src, 0, len(sources))
+	for _, s := range sources {
+		srcs = append(srcs, src{Value: s.Value, Label: s.Label})
+	}
 	b, _ := json.Marshal(map[string]any{
-		"id":    d.Purchase.ID,
-		"lines": lines,
+		"id":      d.Purchase.ID,
+		"lines":   lines,
+		"sources": srcs,
 	})
 	return string(b)
 }

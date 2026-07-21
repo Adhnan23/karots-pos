@@ -1809,7 +1809,10 @@ function grnReceive(symbol, config) {
     invoiceNo: "",
     dueDate: "",
     discount: 0,
-    paid: 0,
+    payAmount: 0,
+    payMethod: "cash",
+    paySource: (config.sources && config.sources[0] && config.sources[0].value) || "",
+    sources: config.sources || [],
     keepRemainder: true,
     busy: false,
     lines: (config.lines || []).map((l) => ({
@@ -1905,7 +1908,9 @@ function grnReceive(symbol, config) {
         await apiFetch("POST", "/admin/purchases/" + this.id + "/receive", {
           invoice_no: this.invoiceNo || null,
           discount: String(this.discount || 0),
-          paid_amount: String(this.paid || 0),
+          pay_amount: String(this.payAmount || 0),
+          pay_method: this.payMethod,
+          pay_source: this.paySource,
           due_date: this.dueDate || "",
           keep_remainder: !!this.keepRemainder && this.hasShortfall(),
           items: items,
