@@ -96,7 +96,12 @@ func (h *cashierUI) POS(c echo.Context) error {
 	symbol, defaultType, askToPrint := "Rs.", "retail", true
 	if cfg, err := h.s.settings.Get(ctx); err == nil {
 		symbol = cfg.CurrencySymbol
-		defaultType = cfg.DefaultSaleType
+		// A database that predates credit-as-a-payment may still hold 'credit'
+		// here. Falling back keeps the till usable instead of seeding every sale
+		// with a type the API now rejects — a state only a working till could fix.
+		if cfg.DefaultSaleType == "retail" || cfg.DefaultSaleType == "wholesale" {
+			defaultType = cfg.DefaultSaleType
+		}
 		askToPrint = cfg.AskToPrint
 	}
 	return response.RenderPage(c, cashierpages.POS(cashierpages.POSData{

@@ -60,7 +60,7 @@ type UpdateInput struct {
 	AskToPrint            bool    `json:"ask_to_print"      form:"ask_to_print"`
 	ForcePinChange        bool    `json:"force_pin_change"         form:"force_pin_change"`
 	AllowCashierPinChange bool    `json:"allow_cashier_pin_change" form:"allow_cashier_pin_change"`
-	DefaultSaleType       string  `json:"default_sale_type" form:"default_sale_type" validate:"required,oneof=retail wholesale credit"`
+	DefaultSaleType       string  `json:"default_sale_type" form:"default_sale_type" validate:"required,oneof=retail wholesale"`
 	ReceiptPrinter        string  `json:"receipt_printer"   form:"receipt_printer"   validate:"omitempty,max=100"`
 	LabelPrinter          string  `json:"label_printer"     form:"label_printer"     validate:"omitempty,max=100"`
 	// *PrinterNet are the optional "network printer" text inputs (tcp://host:9100).
