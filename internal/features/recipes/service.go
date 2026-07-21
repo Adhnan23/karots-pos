@@ -2,6 +2,7 @@ package recipes
 
 import (
 	"context"
+	"strings"
 
 	"karots-pos/internal/apperr"
 	appdb "karots-pos/internal/db"
@@ -24,8 +25,43 @@ func (s *Service) For(ctx context.Context, productID int64) ([]Component, error)
 	return cs, nil
 }
 
-// Replace validates and stores a product's whole recipe.
-func (s *Service) Replace(ctx context.Context, productID int64, cs []Component) error {
+// CostsFor returns a product's non-stock cost lines.
+func (s *Service) CostsFor(ctx context.Context, productID int64) ([]CostLine, error) {
+	ls, err := s.repo.CostsFor(ctx, productID)
+	if err != nil {
+		return nil, apperr.Internal("failed to load recipe costs", err)
+	}
+	return ls, nil
+}
+
+// Summaries returns the per-unit cost split keyed by service product id.
+func (s *Service) Summaries(ctx context.Context) (map[int64]Costs, error) {
+	m, err := s.repo.Summaries(ctx)
+	if err != nil {
+		return nil, apperr.Internal("failed to summarise recipes", err)
+	}
+	return m, nil
+}
+
+// Replace validates and stores a product's whole recipe: its stock components
+// and its non-stock cost lines, in one transaction so a half-saved recipe can
+// never be sold from.
+func (s *Service) Replace(ctx context.Context, productID int64, cs []Component, ls []CostLine) error {
+	seen := make(map[string]bool, len(ls))
+	for i, l := range ls {
+		label := strings.TrimSpace(l.Label)
+		if label == "" {
+			return apperr.Validation("each cost line needs a name")
+		}
+		if l.CostPerUnit.IsNegative() {
+			return apperr.Validation("a cost line cannot be negative")
+		}
+		if seen[strings.ToLower(label)] {
+			return apperr.Validation("two cost lines cannot share the name " + label)
+		}
+		seen[strings.ToLower(label)] = true
+		ls[i].Label = label
+	}
 	for _, c := range cs {
 		if c.ComponentProductID == productID {
 			return apperr.Validation("a product cannot consume itself")
@@ -37,7 +73,10 @@ func (s *Service) Replace(ctx context.Context, productID int64, cs []Component) 
 		}
 	}
 	return appdb.WithTx(ctx, s.db, func(tx *sqlx.Tx) error {
-		return s.repo.Replace(ctx, tx, productID, cs)
+		if err := s.repo.Replace(ctx, tx, productID, cs); err != nil {
+			return err
+		}
+		return s.repo.ReplaceCosts(ctx, tx, productID, ls)
 	})
 }
 

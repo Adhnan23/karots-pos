@@ -7,10 +7,13 @@ import (
 
 	"karots-pos/internal/features/categories"
 	"karots-pos/internal/features/products"
+	"karots-pos/internal/features/recipes"
 	"karots-pos/internal/features/units"
 	"karots-pos/internal/money"
 	adminfragments "karots-pos/templates/fragments/admin"
 	"karots-pos/templates/layouts"
+
+	"github.com/shopspring/decimal"
 )
 
 // ServicesData lists every service product with how many ingredients its recipe
@@ -22,7 +25,25 @@ type ServicesData struct {
 	UserName string
 	Rows     []products.Product
 	Counts   map[int64]int
-	Symbol   string
+	// Costs is what one unit is estimated to cost, split into the stock part
+	// (which becomes COGS on a sale) and the non-stock part (which never does).
+	Costs  map[int64]recipes.Costs
+	Symbol string
+}
+
+// svcMargin is the cash left over per unit after the FULL estimated cost,
+// including the non-stock lines. It is a pricing figure, not a profit figure:
+// reported profit only ever subtracts the stock part.
+func svcMargin(p products.Product, c recipes.Costs) decimal.Decimal {
+	return p.SellingPrice.Sub(c.True())
+}
+
+// svcMarginTone flags a service priced at or below what it costs to make.
+func svcMarginTone(m decimal.Decimal) string {
+	if m.IsNegative() {
+		return "text-rose-600 font-semibold"
+	}
+	return "text-emerald-700"
 }
 
 templ ServicesPage(d ServicesData) {
@@ -49,6 +70,8 @@ templ ServicesPage(d ServicesData) {
 						<th class="py-2 px-3">Service</th>
 						<th class="py-2 px-3">Category</th>
 						<th class="py-2 px-3 text-right">Price</th>
+						<th class="py-2 px-3 text-right">Cost / unit</th>
+						<th class="py-2 px-3 text-right">Left over</th>
 						<th class="py-2 px-3">Recipe</th>
 						<th class="py-2 px-3"></th>
 					</tr>
@@ -70,7 +93,7 @@ templ ServicesPage(d ServicesData) {
 templ ServiceRows(d ServicesData) {
 	if len(d.Rows) == 0 {
 		<tr>
-			<td colspan="5" class="py-8 text-center text-slate-400">
+			<td colspan="7" class="py-8 text-center text-slate-400">
 				No services yet. Create one to sell something that consumes stock without holding any.
 			</td>
 		</tr>
@@ -80,6 +103,25 @@ templ ServiceRows(d ServicesData) {
 			<td class="py-2 px-3 font-medium">{ p.Name }</td>
 			<td class="py-2 px-3 text-slate-600">{ p.CategoryName }</td>
 			<td class="py-2 px-3 text-right">{ money.Format(d.Symbol, p.SellingPrice) }</td>
+			<td class="py-2 px-3 text-right">
+				if c, ok := d.Costs[p.ID]; ok {
+					<div>{ money.Format(d.Symbol, c.True()) }</div>
+					if c.Other.IsPositive() {
+						<div class="text-xs text-slate-400">
+							{ money.Format(d.Symbol, c.Stock) } stock + { money.Format(d.Symbol, c.Other) } other
+						</div>
+					}
+				} else {
+					<span class="text-slate-400">—</span>
+				}
+			</td>
+			<td class="py-2 px-3 text-right">
+				if c, ok := d.Costs[p.ID]; ok {
+					<span class={ svcMarginTone(svcMargin(p, c)) }>{ money.Format(d.Symbol, svcMargin(p, c)) }</span>
+				} else {
+					<span class="text-slate-400">—</span>
+				}
+			</td>
 			<td class="py-2 px-3">
 				if d.Counts[p.ID] > 0 {
 					<span class="px-2 py-0.5 rounded-full text-xs bg-emerald-100 text-emerald-700">

@@ -895,7 +895,11 @@ func (a *adminUI) ProductRecipeForm(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	return response.RenderFragment(c, adminpages.RecipeForm(*p, cs))
+	ls, err := a.s.recipes.CostsFor(ctx, id)
+	if err != nil {
+		return err
+	}
+	return response.RenderFragment(c, adminpages.RecipeForm(*p, cs, ls, a.symbol(ctx)))
 }
 
 // ProductRecipeSave replaces a product's whole recipe.
@@ -932,7 +936,29 @@ func (a *adminUI) ProductRecipeSave(c echo.Context) error {
 		comp.WholeUnits = form.Get("whole_"+raw) == "1"
 		cs = append(cs, comp)
 	}
-	if err := a.s.recipes.Replace(c.Request().Context(), id, cs); err != nil {
+
+	// Non-stock cost lines (electricity, a service fee). Blank rows are dropped
+	// rather than rejected: the editor always renders one empty row to type in.
+	labels := form["cost_label[]"]
+	amounts2 := form["cost_amount[]"]
+	ls := make([]recipes.CostLine, 0, len(labels))
+	for i, label := range labels {
+		label = strings.TrimSpace(label)
+		raw := ""
+		if i < len(amounts2) {
+			raw = strings.TrimSpace(amounts2[i])
+		}
+		if label == "" && raw == "" {
+			continue
+		}
+		amt, aerr := money.Parse(raw)
+		if aerr != nil || amt.IsNegative() {
+			return apperr.Validation("each cost line needs an amount of zero or more")
+		}
+		ls = append(ls, recipes.CostLine{Label: label, CostPerUnit: amt})
+	}
+
+	if err := a.s.recipes.Replace(c.Request().Context(), id, cs, ls); err != nil {
 		return err
 	}
 	a.s.logAudit(c, audit.ActionUpdate, "product", strconv.FormatInt(id, 10), "recipe updated")
@@ -951,10 +977,15 @@ func (a *adminUI) servicesData(c echo.Context) (adminpages.ServicesData, error) 
 	if err != nil {
 		return adminpages.ServicesData{}, err
 	}
+	costs, err := a.s.recipes.Summaries(ctx)
+	if err != nil {
+		return adminpages.ServicesData{}, err
+	}
 	return adminpages.ServicesData{
 		UserName: middleware.CurrentUserName(c),
 		Rows:     rows,
 		Counts:   counts,
+		Costs:    costs,
 		Symbol:   a.symbol(ctx),
 	}, nil
 }

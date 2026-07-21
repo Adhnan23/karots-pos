@@ -21,6 +21,48 @@ type Component struct {
 	// joined, for display
 	ComponentName string `db:"component_name"`
 	UnitAbbr      string `db:"unit_abbr"`
+	// CostPrice is the component's current cost, used only to estimate what one
+	// unit of the finished item costs. The COGS actually booked on a sale comes
+	// from the batches depleted FEFO, not from here.
+	CostPrice decimal.Decimal `db:"cost_price"`
+}
+
+// CostLine is a part of a recipe that is not stock: electricity for the coffee
+// machine, a service fee, gas. It is a costing aid only — see Costs for why it
+// never reaches the sale or the P&L.
+type CostLine struct {
+	ID          int64           `db:"id"`
+	Label       string          `db:"label"`
+	CostPerUnit decimal.Decimal `db:"cost_per_unit"`
+}
+
+// Costs splits what one unit of a service costs into the part that moves stock
+// and the part that does not.
+//
+// Only Stock can ever become COGS. Other is an estimate the owner types in, and
+// the real bill behind it is already recorded as an expense tagged to this
+// service; adding it to COGS as well would charge the shop twice for the same
+// electricity. True exists purely to answer "what should I charge for a cup?".
+type Costs struct {
+	Stock decimal.Decimal
+	Other decimal.Decimal
+}
+
+func (c Costs) True() decimal.Decimal { return c.Stock.Add(c.Other) }
+
+// CostPerUnit estimates the cost of making one unit, reusing Consumed so a
+// yield component ("this bag makes 50 cups") is divided exactly as it is when
+// stock is actually deducted.
+func CostPerUnit(cs []Component, costs []CostLine) Costs {
+	out := Costs{Stock: decimal.Zero, Other: decimal.Zero}
+	one := decimal.NewFromInt(1)
+	for _, c := range cs {
+		out.Stock = out.Stock.Add(c.Consumed(one).Mul(c.CostPrice))
+	}
+	for _, l := range costs {
+		out.Other = out.Other.Add(l.CostPerUnit)
+	}
+	return out
 }
 
 // Consumption is one component and how much of it a sale line uses.

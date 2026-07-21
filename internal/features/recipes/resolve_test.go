@@ -94,3 +94,44 @@ func TestExpandIgnoresNonPositiveQuantity(t *testing.T) {
 		t.Errorf("negative qty produced %d consumptions, want 0", len(out))
 	}
 }
+
+// The coffee example the owner described: milk powder by weight, a whole paper
+// cup, and electricity as a non-stock cost line. Stock cost and true cost must
+// be reported separately so only the former can ever reach COGS.
+func TestCostPerUnitSeparatesStockFromOtherCosts(t *testing.T) {
+	cs := []Component{
+		{ComponentProductID: 1, QtyPerUnit: qty("18"), CostPrice: dec("1.20")},               // 18 g @ 1.20 = 21.60
+		{ComponentProductID: 2, QtyPerUnit: qty("1"), WholeUnits: true, CostPrice: dec("8")}, // 8.00
+	}
+	costs := []CostLine{{Label: "Electricity", CostPerUnit: dec("3")}}
+
+	got := CostPerUnit(cs, costs)
+	if !got.Stock.Equal(dec("29.60")) {
+		t.Errorf("stock cost = %s, want 29.60", got.Stock)
+	}
+	if !got.Other.Equal(dec("3")) {
+		t.Errorf("other cost = %s, want 3", got.Other)
+	}
+	if !got.True().Equal(dec("32.60")) {
+		t.Errorf("true cost = %s, want 32.60", got.True())
+	}
+}
+
+// A yield component spreads one unit across many sales: a bag making 50 cups at
+// Rs 1000 costs Rs 20 a cup, not Rs 1000.
+func TestCostPerUnitUsesYieldNotWholeUnit(t *testing.T) {
+	cs := []Component{{ComponentProductID: 1, YieldUnits: qty("50"), CostPrice: dec("1000")}}
+	if got := CostPerUnit(cs, nil); !got.Stock.Equal(dec("20")) {
+		t.Errorf("stock cost = %s, want 20", got.Stock)
+	}
+}
+
+// With no cost lines the true cost is exactly the stock cost — the feature must
+// not shift the numbers of every existing recipe.
+func TestCostPerUnitWithoutCostLines(t *testing.T) {
+	cs := []Component{{ComponentProductID: 1, QtyPerUnit: qty("2"), CostPrice: dec("5")}}
+	got := CostPerUnit(cs, nil)
+	if !got.True().Equal(got.Stock) || !got.Stock.Equal(dec("10")) {
+		t.Errorf("stock=%s true=%s, want both 10", got.Stock, got.True())
+	}
+}
