@@ -223,8 +223,12 @@ In a small shop the cashier is often alone when a supplier walks in. Ticking
 - **take an order** — saved as a normal draft PO stamped with their name, and
   printed for the supplier to take away;
 - **add a supplier or a product met for the first time** — a supplier by name and
-  phone, a product from the delivery line with the cost and price off the
-  invoice. New products land in Uncategorized flagged `needs_review`, so they
+  phone; a product from a delivery line with the cost and price off the invoice,
+  or, when a rep is taking an order and describes something you don't stock, from
+  its **name alone**. No price is asked at order time: the rep quotes from memory,
+  and that number would become the catalogue price of an item nobody has seen. A
+  priceless item is harmless because with no stock it cannot be sold, and
+  receiving the delivery sets the real cost and price from the invoice. New products land in Uncategorized flagged `needs_review`, so they
   appear in **Admin → Products → Review** for a real category and a tidy name.
   Without this a delivery containing anything new could only be half-recorded,
   which leaves the stock and the payable both wrong.

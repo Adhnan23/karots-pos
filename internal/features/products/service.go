@@ -616,29 +616,34 @@ type IntakeInput struct {
 	UnitID  int64  `json:"unit_id"       form:"unit_id"`
 }
 
-// CreateForIntake makes a product that has just arrived on a delivery, so the
-// receiving line can carry it.
+// CreateForIntake makes a product first met on a supplier's visit, so a
+// purchase line can carry it. Stock always starts at zero.
 //
 // Deliberately not QuickCreate: that one exists for a sale about to happen, so
 // it seeds stock to the quantity being sold and leaves cost at zero. Here the
-// goods have not been booked yet — the receive posts the stock and opens the
-// costed batch itself — so stock starts at zero and the cost comes off the
-// supplier's invoice, which is better data than the till ever has.
+// goods have not been booked yet — a receive posts the stock and opens the
+// costed batch itself.
 //
-// Lands in Uncategorized and flagged needs_review, stamped with whoever took the
-// delivery, so it surfaces in the admin review queue for a real category and a
-// tidy name.
+// Prices are optional because the two callers differ. A delivery has the
+// invoice in hand, so the web layer insists on both. An order does not: the rep
+// quotes from memory, and that number would become the catalogue price of
+// something never seen. A priceless item is safe here because with no stock it
+// cannot be sold, and receiving overwrites cost and price from the real invoice.
+//
+// Lands in Uncategorized and flagged needs_review, stamped with whoever entered
+// it, so it surfaces in the admin review queue for a real category and a tidy
+// name.
 func (s *Service) CreateForIntake(ctx context.Context, in IntakeInput, userID int64) (*Product, error) {
 	name := strings.TrimSpace(in.Name)
 	if name == "" {
 		return nil, apperr.Validation("item name is required")
 	}
-	cost, err := money.Parse(in.Cost)
-	if err != nil || cost.IsNegative() {
+	cost, err := parseOptionalMoney(in.Cost)
+	if err != nil {
 		return nil, apperr.Validation("cost price must be a non-negative amount")
 	}
-	selling, err := money.Parse(in.Selling)
-	if err != nil || selling.IsNegative() {
+	selling, err := parseOptionalMoney(in.Selling)
+	if err != nil {
 		return nil, apperr.Validation("selling price must be a non-negative amount")
 	}
 
@@ -677,4 +682,17 @@ func (s *Service) CreateForIntake(ctx context.Context, in IntakeInput, userID in
 		return nil, err
 	}
 	return s.Get(ctx, newID)
+}
+
+// parseOptionalMoney reads a money field that may legitimately be blank (zero).
+func parseOptionalMoney(raw string) (decimal.Decimal, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return decimal.Zero, nil
+	}
+	v, err := money.Parse(raw)
+	if err != nil || v.IsNegative() {
+		return decimal.Zero, errors.New("invalid amount")
+	}
+	return v, nil
 }

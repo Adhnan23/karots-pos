@@ -219,7 +219,9 @@ type SupplierReceiveData struct {
 	Symbol        string
 	Supplier      suppliers.Supplier
 	Drafts        []purchases.Purchase
-	ConfigJSON    string
+	// OrderID is set when receiving against an order already placed.
+	OrderID    int64
+	ConfigJSON string
 }
 
 templ SupplierReceive(d SupplierReceiveData) {
@@ -228,8 +230,13 @@ templ SupplierReceive(d SupplierReceiveData) {
 			<div class="max-w-4xl mx-auto">
 				<div class="flex items-center justify-between mb-4">
 					<div>
+					if d.OrderID > 0 {
+						<h1 class="text-xl font-bold">Receive order #{ strconv.FormatInt(d.OrderID, 10) } from { d.Supplier.Name }</h1>
+						<p class="text-sm text-slate-500">Lines are what you ordered — change any quantity to what actually turned up.</p>
+					} else {
 						<h1 class="text-xl font-bold">Receive from { d.Supplier.Name }</h1>
 						<p class="text-sm text-slate-500">Enter what actually arrived, from the supplier's invoice.</p>
+					}
 					</div>
 					<a href="/cashier/suppliers" class="text-slate-500 hover:underline">← Back</a>
 				</div>
@@ -240,7 +247,7 @@ templ SupplierReceive(d SupplierReceiveData) {
 						<div class="flex flex-wrap gap-2">
 							for _, po := range d.Drafts {
 								<a
-									href={ templ.SafeURL("/admin/purchases/" + strconv.FormatInt(po.ID, 10) + "/receive") }
+									href={ templ.SafeURL("/cashier/suppliers/orders/" + strconv.FormatInt(po.ID, 10) + "/receive") }
 									class="px-3 py-1.5 rounded-lg bg-white border border-amber-300 hover:bg-amber-100"
 								>Order #{ strconv.FormatInt(po.ID, 10) } — { money.Format(d.Symbol, po.Total) }</a>
 							}
@@ -378,9 +385,16 @@ templ SupplierOrder(d SupplierOrderData) {
 								<tr class="border-b">
 									<td class="py-1 pr-2 relative" x-on:click.away="l._open=false">
 										<input type="text" x-model="l.product_name" x-on:input="pick(l)" x-on:focus="pick(l)" placeholder="Search name or barcode…" class="w-full border rounded px-2 py-1"/>
-										<div x-show="l._open && l._results.length" class="absolute z-20 left-0 right-0 mt-1 bg-white border rounded-lg shadow max-h-56 overflow-auto" x-cloak>
+										<div x-show="l._open && (l._results.length || (canCreateProducts && (l.product_name || '').trim()))" class="absolute z-20 left-0 right-0 mt-1 bg-white border rounded-lg shadow max-h-56 overflow-auto" x-cloak>
 											<template x-for="r in l._results" x-bind:key="r.id">
 												<button type="button" x-on:click="choose(l, r)" class="block w-full text-left px-3 py-1.5 hover:bg-slate-100" x-text="r.name + (r.barcode ? '  ·  ' + r.barcode : '')"></button>
+											</template>
+											<template x-if="canCreateProducts && (l.product_name || '').trim()">
+												<button type="button" x-on:click="createProduct(l)" class="block w-full text-left px-3 py-2 border-t bg-slate-50 hover:bg-slate-100">
+													<span class="text-indigo-600 font-medium">+ Add</span>
+													<span x-text="'&quot;' + l.product_name + '&quot;'"></span>
+													<span class="block text-xs text-slate-500" x-text="newItemHint(l)"></span>
+												</button>
 											</template>
 										</div>
 									</td>

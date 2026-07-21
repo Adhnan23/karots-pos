@@ -1696,6 +1696,8 @@ function grn(symbol, config) {
     // otherwise a delivery containing something new simply can't be recorded.
     productUrl: config.productUrl || "",
     canCreateProducts: !!config.productUrl,
+    // An order has no invoice behind it, so no prices are asked for or sent.
+    productNeedsPrices: config.productNeedsPrices !== false,
 
     pick(l) {
       poProductSearch(l);
@@ -1727,7 +1729,10 @@ function grn(symbol, config) {
       if (Array.isArray(config.lines) && config.lines.length > 0) {
         this.lines = config.lines.map((l) => ({
           product_id: Number(l.product_id) || 0,
-          product_name: l.name || "",
+          product_name: l.name || l.product_name || "",
+          // ordered is set only when receiving against an order, so the planned
+          // quantity survives a short delivery.
+          ordered: l.ordered || "",
           quantity: Number(l.quantity) || 0,
           cost_price: Number(l.cost_price) || 0,
           selling_price: Number(l.selling_price) || 0,
@@ -1744,7 +1749,7 @@ function grn(symbol, config) {
       return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     },
     addLine() {
-      this.lines.push({ product_id: 0, product_name: "", quantity: 0, cost_price: 0, selling_price: 0, expiry_date: "", _open: false, _results: [] });
+      this.lines.push({ product_id: 0, product_name: "", ordered: "", quantity: 0, cost_price: 0, selling_price: 0, expiry_date: "", _open: false, _results: [] });
     },
     removeLine(i) {
       this.lines.splice(i, 1);
@@ -1777,6 +1782,7 @@ function grn(symbol, config) {
     // cost is on the invoice in the cashier's hand, and a zero cost would book
     // the eventual sale as pure profit.
     newItemHint(l) {
+      if (!this.productNeedsPrices) return "— we don't stock it yet; prices come with the delivery";
       if (!(Number(l.cost_price) > 0)) return "— enter what it costs you first";
       if (!(Number(l.selling_price) > 0)) return "— enter what you'll sell it for";
       return "— new item, you can tidy it up later";
@@ -1786,14 +1792,17 @@ function grn(symbol, config) {
       if (!name) { toast("Type the item name first", "error"); return; }
       const cost = Number(l.cost_price) || 0;
       const sell = Number(l.selling_price) || 0;
-      if (cost <= 0) { toast("Enter what it costs you first", "error"); return; }
-      if (sell <= 0) { toast("Enter what you'll sell it for", "error"); return; }
+      if (this.productNeedsPrices) {
+        if (cost <= 0) { toast("Enter what it costs you first", "error"); return; }
+        if (sell <= 0) { toast("Enter what you'll sell it for", "error"); return; }
+      }
       try {
-        const res = await apiFetch("POST", this.productUrl, {
-          name: name,
-          cost_price: String(cost),
-          selling_price: String(sell),
-        });
+        const body = { name: name };
+        if (this.productNeedsPrices) {
+          body.cost_price = String(cost);
+          body.selling_price = String(sell);
+        }
+        const res = await apiFetch("POST", this.productUrl, body);
         const p = res && res.data;
         if (!p) return;
         l.product_id = p.id;
@@ -1821,6 +1830,7 @@ function grn(symbol, config) {
         .map((l) => ({
           product_id: Number(l.product_id),
           quantity: String(l.quantity),
+          ordered_qty: l.ordered ? String(l.ordered) : "",
           cost_price: String(l.cost_price || 0),
           selling_price: String(l.selling_price || 0),
           expiry_date: l.expiry_date || "",
@@ -1877,8 +1887,6 @@ function grnReceive(symbol, config) {
     sources: config.sources || [],
     // When set, a product the search can't find can be created from the line —
     // otherwise a delivery containing something new simply can't be recorded.
-    productUrl: config.productUrl || "",
-    canCreateProducts: !!config.productUrl,
     keepRemainder: true,
     busy: false,
     lines: (config.lines || []).map((l) => ({
@@ -2141,43 +2149,6 @@ function pret(symbol) {
     },
     subtotal() {
       return this.lines.reduce((s, l) => s + this.lineSub(l), 0);
-    },
-    // newItemHint nudges for the two numbers a new item genuinely needs: the
-    // cost is on the invoice in the cashier's hand, and a zero cost would book
-    // the eventual sale as pure profit.
-    newItemHint(l) {
-      if (!(Number(l.cost_price) > 0)) return "— enter what it costs you first";
-      if (!(Number(l.selling_price) > 0)) return "— enter what you'll sell it for";
-      return "— new item, you can tidy it up later";
-    },
-    async createProduct(l) {
-      const name = (l.product_name || "").trim();
-      if (!name) { toast("Type the item name first", "error"); return; }
-      const cost = Number(l.cost_price) || 0;
-      const sell = Number(l.selling_price) || 0;
-      if (cost <= 0) { toast("Enter what it costs you first", "error"); return; }
-      if (sell <= 0) { toast("Enter what you'll sell it for", "error"); return; }
-      try {
-        const res = await apiFetch("POST", this.productUrl, {
-          name: name,
-          cost_price: String(cost),
-          selling_price: String(sell),
-        });
-        const p = res && res.data;
-        if (!p) return;
-        l.product_id = p.id;
-        l.product_name = p.name;
-        l._results = [];
-        l._open = false;
-        toast(p.name + " added — it'll show in the owner's review list", "success");
-      } catch (_) {
-        /* toast already shown */
-      }
-    },
-    // Fill the payment box with the whole invoice — the common case when a
-    // supplier delivers and is paid on the spot.
-    payAll() {
-      this.payAmount = Number(this.subtotal().toFixed(2));
     },
     async submit() {
       if (this.busy) return;

@@ -104,8 +104,23 @@ type counterReceiveConfig struct {
 	PostURL      string
 	SavedMsg     string
 	WithPayment  bool
-	ProductURL   string // set to allow creating a product from a delivery line
-	Sources      []adminfragments.LocationChoice
+	ProductURL   string // set to allow creating a product from a line
+	// ProductNoPrices marks the order screen, where a product is created from a
+	// name alone — there is no invoice yet, so no price is asked for.
+	ProductNoPrices bool
+	// Lines prefills the editor when receiving against an order already placed.
+	Lines   []counterLine
+	Sources []adminfragments.LocationChoice
+}
+
+// counterLine is one prefilled row of an order being received.
+type counterLine struct {
+	ProductID   int64  `json:"product_id"`
+	Name        string `json:"name"`
+	Ordered     string `json:"ordered"`
+	Quantity    string `json:"quantity"`
+	CostPrice   string `json:"cost_price"`
+	SellingPric string `json:"selling_price"`
 }
 
 func counterReceiveConfigJSON(cfg counterReceiveConfig) string {
@@ -122,14 +137,16 @@ func counterReceiveConfigJSON(cfg counterReceiveConfig) string {
 		msg = "Goods received"
 	}
 	b, _ := json.Marshal(map[string]any{
-		"supplierId":   strconv.FormatInt(cfg.SupplierID, 10),
-		"supplierName": cfg.SupplierName,
-		"postUrl":      cfg.PostURL,
-		"redirect":     "/cashier/suppliers",
-		"savedMsg":     msg,
-		"withPayment":  cfg.WithPayment,
-		"productUrl":   cfg.ProductURL,
-		"sources":      srcs,
+		"supplierId":         strconv.FormatInt(cfg.SupplierID, 10),
+		"supplierName":       cfg.SupplierName,
+		"postUrl":            cfg.PostURL,
+		"redirect":           "/cashier/suppliers",
+		"savedMsg":           msg,
+		"withPayment":        cfg.WithPayment,
+		"productUrl":         cfg.ProductURL,
+		"productNeedsPrices": !cfg.ProductNoPrices,
+		"lines":              cfg.Lines,
+		"sources":            srcs,
 	})
 	return string(b)
 }
@@ -330,11 +347,13 @@ func (h *cashierUI) OrderForm(c echo.Context) error {
 		Symbol:        h.cashierSymbol(ctx),
 		Supplier:      *sup,
 		ConfigJSON: counterReceiveConfigJSON(counterReceiveConfig{
-			SupplierID:   id,
-			SupplierName: sup.Name,
-			PostURL:      "/cashier/suppliers/" + strconv.FormatInt(id, 10) + "/order",
-			SavedMsg:     "Order saved",
-			WithPayment:  false,
+			SupplierID:      id,
+			SupplierName:    sup.Name,
+			PostURL:         "/cashier/suppliers/" + strconv.FormatInt(id, 10) + "/order",
+			SavedMsg:        "Order saved",
+			WithPayment:     false,
+			ProductURL:      "/cashier/suppliers/products/wanted",
+			ProductNoPrices: true,
 		}),
 	}))
 }
@@ -476,21 +495,183 @@ func (h *cashierUI) SupplierQuickCreate(c echo.Context) error {
 // invoice — which makes the stock, the invoice total and therefore the payment
 // all wrong. See products.CreateForIntake for why this is not the till's
 // quick-add.
+//
+// Both prices are required here, and checked server-side rather than only in the
+// form: the cashier is holding the invoice, and a zero cost would book the
+// eventual sale as pure profit.
 func (h *cashierUI) ProductQuickCreate(c echo.Context) error {
 	var in products.IntakeInput
 	if err := c.Bind(&in); err != nil {
 		return apperr.BadRequest("invalid request")
 	}
+	if err := requirePositive(in.Cost, "cost price"); err != nil {
+		return err
+	}
+	if err := requirePositive(in.Selling, "selling price"); err != nil {
+		return err
+	}
+	return h.createIntakeProduct(c, in, "added on a delivery at the counter: ")
+}
+
+// ProductWantedCreate adds a product the supplier's rep has just described while
+// taking an order — something the shop has never stocked.
+//
+// Name only, on purpose. There is no invoice yet: the rep quotes from memory and
+// that number would become the catalogue price of an item nobody has seen. It is
+// safe to leave priceless because with no stock it cannot be sold, and receiving
+// the delivery overwrites cost and price from the real invoice.
+func (h *cashierUI) ProductWantedCreate(c echo.Context) error {
+	var in products.IntakeInput
+	if err := c.Bind(&in); err != nil {
+		return apperr.BadRequest("invalid request")
+	}
+	in.Cost, in.Selling = "", "" // never take a quoted price as fact
+	return h.createIntakeProduct(c, in, "added while taking an order at the counter: ")
+}
+
+func (h *cashierUI) createIntakeProduct(c echo.Context, in products.IntakeInput, note string) error {
 	p, err := h.s.products.CreateForIntake(c.Request().Context(), in, middleware.CurrentUserID(c))
 	if err != nil {
 		return err
 	}
-	h.s.logAudit(c, audit.ActionCreate, "product", strconv.FormatInt(p.ID, 10),
-		"added on a delivery at the counter: "+p.Name)
+	h.s.logAudit(c, audit.ActionCreate, "product", strconv.FormatInt(p.ID, 10), note+p.Name)
 	return response.Created(c, p)
+}
+
+// requirePositive rejects a blank or non-positive money field by name.
+func requirePositive(raw, label string) error {
+	v, err := money.Parse(strings.TrimSpace(raw))
+	if err != nil || !v.IsPositive() {
+		return apperr.Validation(label + " is required")
+	}
+	return nil
 }
 
 // SupplierNewForm renders the counter's add-a-supplier dialog.
 func (h *cashierUI) SupplierNewForm(c echo.Context) error {
 	return response.RenderFragment(c, cashierpages.SupplierNewForm())
+}
+
+// ReceiveAgainstOrderForm renders the counter receive screen prefilled from an
+// order already placed, so a delivery that was ordered closes that order off
+// instead of being typed in fresh as a second purchase.
+func (h *cashierUI) ReceiveAgainstOrderForm(c echo.Context) error {
+	ctx := c.Request().Context()
+	poID, err := strconv.ParseInt(c.Param("poID"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	d, err := h.s.purchases.Get(ctx, poID)
+	if err != nil {
+		return err
+	}
+	if d.Purchase.Status != "draft" {
+		return c.Redirect(303, "/cashier/suppliers")
+	}
+	sup, err := h.s.suppliers.Get(ctx, d.Purchase.SupplierID)
+	if err != nil {
+		return err
+	}
+	sources, err := h.cashierCashSources(ctx, middleware.CurrentUserID(c), middleware.CurrentUserName(c))
+	if err != nil {
+		return err
+	}
+	lines := make([]counterLine, 0, len(d.Items))
+	for _, it := range d.Items {
+		ordered := it.Quantity.String()
+		if it.OrderedQty != nil {
+			ordered = it.OrderedQty.String()
+		}
+		lines = append(lines, counterLine{
+			ProductID:   it.ProductID,
+			Name:        it.ProductName,
+			Ordered:     ordered,
+			Quantity:    ordered,
+			CostPrice:   it.CostPrice.String(),
+			SellingPric: it.SellingPrice.String(),
+		})
+	}
+	return response.RenderPage(c, cashierpages.SupplierReceive(cashierpages.SupplierReceiveData{
+		CashierName:   middleware.CurrentUserName(c),
+		Role:          middleware.CurrentRole(c),
+		ShowChangePin: h.showChangePin(c),
+		Symbol:        h.cashierSymbol(ctx),
+		Supplier:      *sup,
+		OrderID:       poID,
+		ConfigJSON: counterReceiveConfigJSON(counterReceiveConfig{
+			SupplierID:   d.Purchase.SupplierID,
+			SupplierName: sup.Name,
+			PostURL:      "/cashier/suppliers/orders/" + strconv.FormatInt(poID, 10) + "/receive",
+			SavedMsg:     "Goods received",
+			WithPayment:  true,
+			ProductURL:   "/cashier/suppliers/products",
+			Lines:        lines,
+			Sources:      sources,
+		}),
+	}))
+}
+
+// ReceiveAgainstOrder takes in a delivery against an order already placed,
+// optionally paying in the same transaction.
+func (h *cashierUI) ReceiveAgainstOrder(c echo.Context) error {
+	ctx := c.Request().Context()
+	poID, err := strconv.ParseInt(c.Param("poID"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	var req receiveRequest
+	if err := c.Bind(&req); err != nil {
+		return apperr.BadRequest("invalid request body")
+	}
+	in := req.ReceiveInput
+	if err := c.Validate(&in); err != nil {
+		return err
+	}
+	pay, err := parsePayNow(req.PayFields)
+	if err != nil {
+		return err
+	}
+	if pay.amount.IsPositive() && pay.method == "cash" {
+		if pay.source, err = h.counterSource(c, req.PaySource); err != nil {
+			return err
+		}
+	}
+	userID := middleware.CurrentUserID(c)
+
+	var d *purchases.Detail
+	var rec *cashflow.Receipt
+	err = appdb.WithTx(ctx, h.s.db, func(tx *sqlx.Tx) error {
+		got, txErr := purchases.ReceiveTx(ctx, tx, poID, in, userID)
+		if txErr != nil {
+			return txErr
+		}
+		d = got
+		if !pay.amount.IsPositive() {
+			return nil
+		}
+		name := ""
+		if sup, gerr := h.s.suppliers.Get(ctx, d.Purchase.SupplierID); gerr == nil {
+			name = sup.Name
+		}
+		_, k, txErr := h.s.paySupplierTx(ctx, tx, payRequest{
+			SupplierID:   d.Purchase.SupplierID,
+			SupplierName: name,
+			In: supplierpay.PayInput{
+				Method:      pay.method,
+				Allocations: []supplierpay.Alloc{{PurchaseID: poID, Amount: pay.amount}},
+			},
+			Source: pay.source,
+		}, userID)
+		rec = k
+		return txErr
+	})
+	if err != nil {
+		return err
+	}
+	h.s.logAudit(c, audit.ActionUpdate, "purchase", strconv.FormatInt(poID, 10),
+		"received an order at the counter")
+	if rec != nil {
+		h.s.printMoneyReceipt(ctx, rec)
+	}
+	return response.OK(c, d)
 }
