@@ -73,12 +73,15 @@ func demo(db *sqlx.DB) error {
 	// ---- Purchases (restock well above opening, create supplier dues) ----
 	expiry := func(n int) string { return now.AddDate(0, 0, n).Format("2006-01-02") }
 	type pin = purchases.ItemInput
-	mkPurchase := func(supplier string, paid string, daysAgo int, items []pin) error {
+	// Demo purchases are left unpaid: paying a supplier now means a real payment
+	// row plus cash leaving a locker or till (see supplierpay + cashflow), and
+	// the seeder has neither. Unpaid is also the more useful demo — it gives the
+	// supplier-dues screens something to show.
+	mkPurchase := func(supplier string, daysAgo int, items []pin) error {
 		inv := fmt.Sprintf("INV-%d", 1000+daysAgo)
 		d, err := purchaseSvc.Create(ctx, purchases.CreateInput{
 			SupplierID: sup(supplier),
 			InvoiceNo:  &inv,
-			PaidAmount: paid,
 			Items:      items,
 		}, adminID)
 		if err != nil {
@@ -86,20 +89,20 @@ func demo(db *sqlx.DB) error {
 		}
 		return touch(db, `UPDATE purchases SET created_at=$1 WHERE id=$2`, day(daysAgo, 9), d.Purchase.ID)
 	}
-	if err := mkPurchase("Colombo Distributors (Pvt) Ltd", "30000", 12, []pin{
+	if err := mkPurchase("Colombo Distributors (Pvt) Ltd", 12, []pin{
 		{ProductID: prods["1000000000017"], Quantity: "50", CostPrice: "230", SellingPrice: "250"}, // Sugar
 		{ProductID: prods["1000000000024"], Quantity: "60", CostPrice: "210", SellingPrice: "240"}, // Rice Samba
 		{ProductID: prods["1000000000031"], Quantity: "40", CostPrice: "120", SellingPrice: "150"}, // Tea
 	}); err != nil {
 		return err
 	}
-	if err := mkPurchase("Kandy Wholesale Traders", "10000", 9, []pin{
+	if err := mkPurchase("Kandy Wholesale Traders", 9, []pin{
 		{ProductID: prods["1000000000062"], Quantity: "40", CostPrice: "300", SellingPrice: "340"}, // Dhal
 		{ProductID: prods["1000000000079"], Quantity: "40", CostPrice: "260", SellingPrice: "300"}, // Red Rice
 	}); err != nil {
 		return err
 	}
-	if err := mkPurchase("Lanka Beverages Agency", "0", 8, []pin{
+	if err := mkPurchase("Lanka Beverages Agency", 8, []pin{
 		{ProductID: prods["1000000000048"], Quantity: "36", CostPrice: "320", SellingPrice: "380", ExpiryDate: expiry(120)}, // Coca-Cola
 		{ProductID: prods["1000000000086"], Quantity: "30", CostPrice: "260", SellingPrice: "310", ExpiryDate: expiry(120)}, // Sprite
 		{ProductID: prods["1000000000055"], Quantity: "60", CostPrice: "60", SellingPrice: "90"},                            // Mineral Water

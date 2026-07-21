@@ -1784,7 +1784,6 @@ function grn(symbol, config) {
         await apiFetch("POST", url, {
           supplier_id: Number(this.supplierId),
           discount: "0",
-          paid_amount: "0",
           expected_date: this.expectedDate || "",
           notes: this.notes || null,
           items: items,

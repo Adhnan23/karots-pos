@@ -43,7 +43,6 @@ type CreateInput struct {
 	SupplierID   int64       `json:"supplier_id" validate:"required,gt=0"`
 	InvoiceNo    *string     `json:"invoice_no"`
 	Discount     string      `json:"discount"`
-	PaidAmount   string      `json:"paid_amount"`
 	DueDate      string      `json:"due_date"`
 	ExpectedDate string      `json:"expected_date"`
 	Notes        *string     `json:"notes"`
@@ -62,14 +61,18 @@ func parseDate(s string) (*time.Time, error) {
 	return &d, nil
 }
 
-func (s *Service) Create(ctx context.Context, in CreateInput, userID int64) (*Detail, error) {
+// CreateTx records a delivery that had no prior order: a purchase already in
+// received state, with stock, batches, movements and pricing applied, and the
+// full total added to the supplier's balance.
+//
+// Paying is deliberately not part of this. It happens in the web layer, which
+// composes CreateTx with supplierpay.PayTx and cashflow.MoveTx in one
+// transaction — this package cannot import either (supplierpay imports it), and
+// the field that used to live here marked invoices paid without moving a cent.
+func CreateTx(ctx context.Context, tx *sqlx.Tx, in CreateInput, userID int64) (*Detail, error) {
 	discount, err := money.Parse(in.Discount)
 	if err != nil || discount.IsNegative() {
 		return nil, apperr.Validation("discount must be a non-negative amount")
-	}
-	paid, err := money.Parse(in.PaidAmount)
-	if err != nil || paid.IsNegative() {
-		return nil, apperr.Validation("paid amount must be a non-negative amount")
 	}
 	var dueDate *time.Time
 	if in.DueDate != "" {
@@ -80,37 +83,41 @@ func (s *Service) Create(ctx context.Context, in CreateInput, userID int64) (*De
 		dueDate = &d
 	}
 
+	repo := NewRepository(tx)
+	stk := stock.NewRepository(tx)
+	sup := suppliers.NewRepository(tx)
+
+	lines, subtotal, err := parseLines(in.Items)
+	if err != nil {
+		return nil, err
+	}
+
+	total := subtotal.Sub(discount)
+	if total.IsNegative() {
+		return nil, apperr.Validation("discount exceeds purchase subtotal")
+	}
+
+	purchaseID, err := repo.InsertPurchase(ctx, purchaseRow{
+		SupplierID: in.SupplierID, InvoiceNo: in.InvoiceNo, Status: receivedStatus(decimal.Zero, total),
+		Subtotal: subtotal, Discount: discount, Total: total, Paid: decimal.Zero,
+		DueDate: dueDate, ReceivedBy: userID, Notes: in.Notes,
+	})
+	if err != nil {
+		return nil, mapErr(err)
+	}
+
+	if err := applyReceivedLines(ctx, repo, stk, sup, purchaseID, in.SupplierID, lines, total, userID); err != nil {
+		return nil, err
+	}
+
+	return loadDetailTx(ctx, repo, purchaseID)
+}
+
+// Create is CreateTx in its own transaction.
+func (s *Service) Create(ctx context.Context, in CreateInput, userID int64) (*Detail, error) {
 	var detail *Detail
-	err = appdb.WithTx(ctx, s.db, func(tx *sqlx.Tx) error {
-		repo := NewRepository(tx)
-		stk := stock.NewRepository(tx)
-		sup := suppliers.NewRepository(tx)
-
-		lines, subtotal, err := parseLines(in.Items)
-		if err != nil {
-			return err
-		}
-
-		total := subtotal.Sub(discount)
-		if total.IsNegative() {
-			return apperr.Validation("discount exceeds purchase subtotal")
-		}
-		status := receivedStatus(paid, total)
-
-		purchaseID, err := repo.InsertPurchase(ctx, purchaseRow{
-			SupplierID: in.SupplierID, InvoiceNo: in.InvoiceNo, Status: status,
-			Subtotal: subtotal, Discount: discount, Total: total, Paid: paid,
-			DueDate: dueDate, ReceivedBy: userID, Notes: in.Notes,
-		})
-		if err != nil {
-			return mapErr(err)
-		}
-
-		if err := applyReceivedLines(ctx, repo, stk, sup, purchaseID, in.SupplierID, lines, total.Sub(paid), userID); err != nil {
-			return err
-		}
-
-		d, err := s.loadDetail(ctx, repo, purchaseID)
+	err := appdb.WithTx(ctx, s.db, func(tx *sqlx.Tx) error {
+		d, err := CreateTx(ctx, tx, in, userID)
 		if err != nil {
 			return err
 		}
@@ -343,7 +350,7 @@ func (s *Service) CreateDraftsFromReorder(ctx context.Context, in ReorderPOInput
 	err := appdb.WithTx(ctx, s.db, func(tx *sqlx.Tx) error {
 		for _, supID := range order {
 			id, err := createDraftTx(ctx, tx, CreateInput{
-				SupplierID: supID, Discount: "0", PaidAmount: "0", Items: bySup[supID],
+				SupplierID: supID, Discount: "0", Items: bySup[supID],
 			}, userID)
 			if err != nil {
 				return err
@@ -420,7 +427,6 @@ func (s *Service) UpdateDraft(ctx context.Context, id int64, in CreateInput, use
 type ReceiveInput struct {
 	InvoiceNo  *string     `json:"invoice_no"`
 	Discount   string      `json:"discount"`
-	PaidAmount string      `json:"paid_amount"`
 	DueDate    string      `json:"due_date"`
 	Notes      *string     `json:"notes"`
 	Items      []ItemInput `json:"items" validate:"required,min=1,dive"`
@@ -450,21 +456,20 @@ func parseReceiveLines(items []ItemInput) ([]PurchaseItem, decimal.Decimal, erro
 // Receive turns a draft into a received purchase: it rewrites the lines with the
 // actually-received quantities (overstock allowed), records invoice/paid/due, and
 // posts all the inventory + payable effects. Only drafts can be received.
-func (s *Service) Receive(ctx context.Context, id int64, in ReceiveInput, userID int64) (*Detail, error) {
+// ReceiveTx takes in the goods against a draft order, inside the caller's
+// transaction. Like CreateTx it records no payment: the web layer composes
+// paying on top so a real payment row, drawer movement and receipt all exist.
+func ReceiveTx(ctx context.Context, tx *sqlx.Tx, id int64, in ReceiveInput, userID int64) (*Detail, error) {
 	discount, err := money.Parse(in.Discount)
 	if err != nil || discount.IsNegative() {
 		return nil, apperr.Validation("discount must be a non-negative amount")
-	}
-	paid, err := money.Parse(in.PaidAmount)
-	if err != nil || paid.IsNegative() {
-		return nil, apperr.Validation("paid amount must be a non-negative amount")
 	}
 	dueDate, err := parseDate(in.DueDate)
 	if err != nil {
 		return nil, err
 	}
 	var detail *Detail
-	err = appdb.WithTx(ctx, s.db, func(tx *sqlx.Tx) error {
+	err = func(tx *sqlx.Tx) error {
 		repo := NewRepository(tx)
 		stk := stock.NewRepository(tx)
 		sup := suppliers.NewRepository(tx)
@@ -493,13 +498,13 @@ func (s *Service) Receive(ctx context.Context, id int64, in ReceiveInput, userID
 			return apperr.Internal("failed to clear draft lines", err)
 		}
 		if err := repo.UpdateHeader(ctx, id, purchaseRow{
-			InvoiceNo: in.InvoiceNo, Status: receivedStatus(paid, total), Subtotal: subtotal,
-			Discount: discount, Total: total, Paid: paid, DueDate: dueDate,
+			InvoiceNo: in.InvoiceNo, Status: receivedStatus(decimal.Zero, total), Subtotal: subtotal,
+			Discount: discount, Total: total, Paid: decimal.Zero, DueDate: dueDate,
 			ExpectedDate: cur.ExpectedDate, ReceivedBy: userID, Notes: notes,
 		}); err != nil {
 			return apperr.Internal("failed to update purchase", err)
 		}
-		if err := applyReceivedLines(ctx, repo, stk, sup, id, cur.SupplierID, lines, total.Sub(paid), userID); err != nil {
+		if err := applyReceivedLines(ctx, repo, stk, sup, id, cur.SupplierID, lines, total, userID); err != nil {
 			return err
 		}
 		// Partial receipt: carry the still-unreceived quantities into a new draft PO.
@@ -519,14 +524,31 @@ func (s *Service) Receive(ctx context.Context, id int64, in ReceiveInput, userID
 			}
 			if len(rem) > 0 {
 				if _, err := createDraftTx(ctx, tx, CreateInput{
-					SupplierID: cur.SupplierID, Discount: "0", PaidAmount: "0",
+					SupplierID: cur.SupplierID, Discount: "0",
 					Notes: cur.Notes, Items: rem,
 				}, userID); err != nil {
 					return err
 				}
 			}
 		}
-		d, err := s.loadDetail(ctx, repo, id)
+		d, err := loadDetailTx(ctx, repo, id)
+		if err != nil {
+			return err
+		}
+		detail = d
+		return nil
+	}(tx)
+	if err != nil {
+		return nil, err
+	}
+	return detail, nil
+}
+
+// Receive is ReceiveTx in its own transaction.
+func (s *Service) Receive(ctx context.Context, id int64, in ReceiveInput, userID int64) (*Detail, error) {
+	var detail *Detail
+	err := appdb.WithTx(ctx, s.db, func(tx *sqlx.Tx) error {
+		d, err := ReceiveTx(ctx, tx, id, in, userID)
 		if err != nil {
 			return err
 		}
@@ -587,6 +609,12 @@ func (s *Service) Get(ctx context.Context, id int64) (*Detail, error) {
 }
 
 func (s *Service) loadDetail(ctx context.Context, repo *Repository, id int64) (*Detail, error) {
+	return loadDetailTx(ctx, repo, id)
+}
+
+// loadDetailTx is loadDetail without a receiver, so the package-level *Tx
+// functions can use it.
+func loadDetailTx(ctx context.Context, repo *Repository, id int64) (*Detail, error) {
 	p, err := repo.FindByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
