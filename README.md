@@ -221,7 +221,13 @@ In a small shop the cashier is often alone when a supplier walks in. Ticking
 - **take in a delivery** — with or without a prior order, paying all, part or
   none of the invoice in the same step;
 - **take an order** — saved as a normal draft PO stamped with their name, and
-  printed for the supplier to take away.
+  printed for the supplier to take away;
+- **add a supplier or a product met for the first time** — a supplier by name and
+  phone, a product from the delivery line with the cost and price off the
+  invoice. New products land in Uncategorized flagged `needs_review`, so they
+  appear in **Admin → Products → Review** for a real category and a tidy name.
+  Without this a delivery containing anything new could only be half-recorded,
+  which leaves the stock and the payable both wrong.
 
 The flag grants **sight of cost prices**, which is inherent to entering a
 supplier invoice — that is why it is off until you turn it on. It is read fresh
