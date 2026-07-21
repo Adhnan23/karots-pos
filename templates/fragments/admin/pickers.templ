@@ -14,9 +14,20 @@ import (
 
 // ProductPicker searches /api/products and shows each match's on-hand quantity.
 templ ProductPicker(fieldName string, initialID int64, initialName, placeholder string) {
+	@productPickerAt("/api/products", fieldName, initialID, initialName, placeholder)
+}
+
+// ServiceProductPicker also offers non-stocked services, which /api/products
+// hides by default. Used where a service is the point — putting a coffee on a
+// cashier menu card, for instance.
+templ ServiceProductPicker(fieldName string, initialID int64, initialName, placeholder string) {
+	@productPickerAt("/api/products?include_services=1", fieldName, initialID, initialName, placeholder)
+}
+
+templ productPickerAt(url, fieldName string, initialID int64, initialName, placeholder string) {
 	<div
 		class="relative"
-		x-data={ "entityPicker({url:'/api/products', field:" + pickerStr(fieldName) + ", id:'" + pickerID(initialID) + "', name:" + pickerStr(initialName) + "})" }
+		x-data={ "entityPicker({url:'" + url + "', field:" + pickerStr(fieldName) + ", id:'" + pickerID(initialID) + "', name:" + pickerStr(initialName) + "})" }
 	>
 		<input type="hidden" name={ fieldName } x-bind:value="id"/>
 		<input

@@ -79,6 +79,12 @@ type ListQuery struct {
 	CategoryID *int64 `query:"category_id" form:"category_id"`
 	Search     string `query:"search"      form:"search"`
 	LowStock   bool   `query:"low_stock"   form:"low_stock"`
+	// IncludeServices lets a caller see non-stocked service lines, which every
+	// other list deliberately hides (stock, valuation and low-stock columns are
+	// meaningless for them). Needed by pickers that attach a service to
+	// something — a cashier menu card, for instance — otherwise a service can be
+	// created but never put in front of a cashier.
+	IncludeServices bool `query:"include_services" form:"include_services"`
 	// Fuzzy enables typo-tolerant matching. Not a query param: the service sets
 	// it only for the rescue pass after a strict search came back empty.
 	Fuzzy bool `query:"-" form:"-"`
@@ -149,13 +155,13 @@ func (r *Repository) List(ctx context.Context, q ListQuery) ([]Product, error) {
 	toks, raw, fuzzy := q.searchArgs()
 	var rows []Product
 	err := r.db.SelectContext(ctx, &rows, subcatsCTE+selectProduct+`
-		WHERE p.is_active = true AND p.is_service = false
+		WHERE p.is_active = true AND (p.is_service = false OR $8)
 		  AND `+searchClause+`
 		  AND ($4::bigint IS NULL OR p.category_id IN (SELECT id FROM subcats))
 		  AND ($5 = false OR COALESCE(s.quantity,0) <= p.reorder_level)
 		ORDER BY `+searchRank+` p.name, p.id
 		LIMIT $6 OFFSET $7`,
-		toks, raw, fuzzy, q.CategoryID, q.LowStock, q.Limit, q.offset())
+		toks, raw, fuzzy, q.CategoryID, q.LowStock, q.Limit, q.offset(), q.IncludeServices)
 	return rows, err
 }
 
@@ -188,11 +194,11 @@ func (r *Repository) Count(ctx context.Context, q ListQuery) (int, error) {
 	err := r.db.GetContext(ctx, &n, subcatsCTE+`
 		SELECT COUNT(*) FROM products p
 		LEFT JOIN stock s ON s.product_id = p.id
-		WHERE p.is_active = true AND p.is_service = false
+		WHERE p.is_active = true AND (p.is_service = false OR $6)
 		  AND `+searchClause+`
 		  AND ($4::bigint IS NULL OR p.category_id IN (SELECT id FROM subcats))
 		  AND ($5 = false OR COALESCE(s.quantity,0) <= p.reorder_level)`,
-		toks, raw, fuzzy, q.CategoryID, q.LowStock)
+		toks, raw, fuzzy, q.CategoryID, q.LowStock, q.IncludeServices)
 	return n, err
 }
 
