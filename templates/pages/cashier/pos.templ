@@ -151,13 +151,20 @@ templ POS(d POSData) {
 								<button
 									x-on:click="addToCart(p)"
 									class="text-left p-3 rounded-xl bg-white shadow-sm hover:ring-2 hover:ring-indigo-400 disabled:opacity-40"
-									x-bind:disabled="Number(p.stock_qty) <= 0"
+									x-bind:disabled="!p.is_service && Number(p.stock_qty) <= 0"
 								>
 									<div class="font-medium text-sm leading-tight"><span x-show="p.emoji" x-text="p.emoji" class="mr-1"></span><span x-text="p.name"></span></div>
 									<div class="text-indigo-600 font-semibold mt-1" x-text="sym + ' ' + money(p.selling_price)"></div>
 									<div class="text-xs text-slate-400 mt-0.5">
-										<span x-text="'Stock: ' + money3(p.stock_qty)"></span>
-										<span x-text="p.unit_abbr"></span>
+										<template x-if="p.is_service">
+											<span class="text-emerald-600">Made to order</span>
+										</template>
+										<template x-if="!p.is_service">
+											<span>
+												<span x-text="'Stock: ' + money3(p.stock_qty)"></span>
+												<span x-text="p.unit_abbr"></span>
+											</span>
+										</template>
 									</div>
 								</button>
 							</template>
