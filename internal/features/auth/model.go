@@ -19,6 +19,10 @@ type User struct {
 	MustChangePin bool      `db:"must_change_pin" json:"must_change_pin"`
 	IsSystem      bool      `db:"is_system" json:"is_system"`
 	ReceiptPrinter string   `db:"receipt_printer" json:"receipt_printer"`
+	// CanHandleSuppliers lets a cashier pay suppliers, take in deliveries and
+	// place orders from the till. Off by default; admins and managers may do so
+	// regardless of this flag.
+	CanHandleSuppliers bool  `db:"can_handle_suppliers" json:"can_handle_suppliers"`
 	CreatedAt     time.Time `db:"created_at" json:"created_at"`
 }
 

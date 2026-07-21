@@ -48,6 +48,9 @@ type Locker struct {
 	Kind          string          `db:"kind"           json:"kind"`
 	AllowNegative bool            `db:"allow_negative" json:"allow_negative"`
 	IsActive      bool            `db:"is_active"      json:"is_active"`
+	// CashierAccess lets cashiers move money into or out of this locker from the
+	// till. On by default; turn it off for a locker only the owner should touch.
+	CashierAccess bool            `db:"cashier_access" json:"cashier_access"`
 	CreatedAt     time.Time       `db:"created_at"     json:"created_at"`
 	Balance       decimal.Decimal `db:"balance"        json:"balance"`
 }
