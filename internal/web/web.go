@@ -24,6 +24,7 @@ import (
 	"karots-pos/internal/features/products"
 	"karots-pos/internal/features/purchasereturns"
 	"karots-pos/internal/features/purchases"
+	"karots-pos/internal/features/recipes"
 	"karots-pos/internal/features/recovery"
 	"karots-pos/internal/features/reports"
 	"karots-pos/internal/features/sales"
@@ -46,6 +47,7 @@ type Server struct {
 	db               *sqlx.DB
 	auth             *auth.Service
 	products         *products.Service
+	recipes          *recipes.Service
 	categories       *categories.Service
 	units            *units.Service
 	settings         *settings.Service
@@ -78,6 +80,7 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 		db:              db,
 		auth:            authSvc,
 		products:        products.NewService(db),
+		recipes:         recipes.NewService(db),
 		categories:      categories.NewService(db),
 		units:           units.NewService(db),
 		settings:        settings.NewService(db),
@@ -234,6 +237,8 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	ag.DELETE("/groups/:id/items/:productId", admin.GroupItemRemove)
 	ag.PUT("/groups/:id/items/:productId/emoji", admin.GroupItemEmoji)
 	ag.POST("/products", admin.ProductCreate)
+	ag.GET("/products/:id/recipe", admin.ProductRecipeForm)
+	ag.POST("/products/:id/recipe", admin.ProductRecipeSave)
 	ag.PUT("/products/:id", admin.ProductUpdate)
 	ag.DELETE("/products/:id", admin.ProductDelete)
 	ag.GET("/products/import", admin.ProductImportModal)

@@ -12,6 +12,7 @@ import (
 	"karots-pos/internal/features/audit"
 	"karots-pos/internal/features/customers"
 	"karots-pos/internal/features/products"
+	"karots-pos/internal/features/recipes"
 	"karots-pos/internal/features/reports"
 	"karots-pos/internal/features/sales"
 	"karots-pos/internal/features/settings"
@@ -870,4 +871,70 @@ func htmxDone(c echo.Context, msg, reloadEvent string) error {
 func htmxReload(c echo.Context, msg, reloadEvent string) error {
 	c.Response().Header().Set("HX-Trigger", response.ToastAnd(msg, "success", reloadEvent))
 	return c.NoContent(200)
+}
+
+// ============================ Recipes ============================
+
+// ProductRecipeForm opens the recipe editor for a service product.
+func (a *adminUI) ProductRecipeForm(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	ctx := c.Request().Context()
+	p, err := a.s.products.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	// Recipes only make sense for a service: a stocked product has inventory of
+	// its own, and consuming ingredients as well would count the cost twice.
+	if !p.IsService {
+		return apperr.Validation("only service products can have a recipe")
+	}
+	cs, err := a.s.recipes.For(ctx, id)
+	if err != nil {
+		return err
+	}
+	return response.RenderFragment(c, adminpages.RecipeForm(*p, cs))
+}
+
+// ProductRecipeSave replaces a product's whole recipe.
+func (a *adminUI) ProductRecipeSave(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	form, err := c.FormParams()
+	if err != nil {
+		return apperr.BadRequest("invalid form")
+	}
+	ids := form["component_id[]"]
+	amounts := form["amount[]"]
+	modes := form["mode[]"]
+	cs := make([]recipes.Component, 0, len(ids))
+	for i, raw := range ids {
+		cid, perr := strconv.ParseInt(raw, 10, 64)
+		if perr != nil || cid <= 0 || i >= len(amounts) || i >= len(modes) {
+			continue
+		}
+		amt, aerr := money.Parse(amounts[i])
+		if aerr != nil || !amt.IsPositive() {
+			return apperr.Validation("each ingredient needs a positive amount")
+		}
+		comp := recipes.Component{ComponentProductID: cid}
+		if modes[i] == "yield" {
+			comp.YieldUnits = decimal.NullDecimal{Decimal: amt, Valid: true}
+		} else {
+			comp.QtyPerUnit = decimal.NullDecimal{Decimal: amt, Valid: true}
+		}
+		// Keyed by component id, not row position: an unchecked checkbox posts
+		// nothing, so a parallel array would shift and flag the wrong ingredient.
+		comp.WholeUnits = form.Get("whole_"+raw) == "1"
+		cs = append(cs, comp)
+	}
+	if err := a.s.recipes.Replace(c.Request().Context(), id, cs); err != nil {
+		return err
+	}
+	a.s.logAudit(c, audit.ActionUpdate, "product", strconv.FormatInt(id, 10), "recipe updated")
+	return htmxDone(c, "Recipe saved", "reload-products")
 }

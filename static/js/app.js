@@ -2604,3 +2604,43 @@ function categoryTree() {
     },
   };
 }
+
+// recipeEditor backs the admin recipe modal. Rows already stored are rendered
+// server-side; ingredients picked in this session live in `added` until save.
+//
+// The picker itself is a separate Alpine scope, so we read its chosen id/name
+// through Alpine.$data rather than the DOM — setting the hidden input directly
+// would be overwritten by its own x-bind on the next tick.
+function recipeEditor() {
+  return {
+    added: [],
+    error: "",
+    addFromPicker(root) {
+      this.error = "";
+      const scope = root.querySelector("[x-data]");
+      const picker = scope && window.Alpine ? window.Alpine.$data(scope) : null;
+      if (!picker) return;
+      const id = Number(picker.id || 0);
+      const name = picker.name || "";
+      if (!id) {
+        this.error = "Pick an ingredient first.";
+        return;
+      }
+      // One row per ingredient: a duplicate would be rejected by
+      // product_recipes_unique_component, and saying so here explains why.
+      const present = this.$root.querySelectorAll('input[name="component_id[]"]');
+      for (const el of present) {
+        if (Number(el.value) === id) {
+          this.error = name + " is already an ingredient.";
+          return;
+        }
+      }
+      const chosen = (picker.results || []).find((r) => Number(r.id) === id);
+      this.added.push({ id: id, name: name, unit: chosen ? chosen.unit_abbr : "" });
+      picker.id = "";
+      picker.name = "";
+      picker.results = [];
+      picker.open = false;
+    },
+  };
+}
