@@ -634,6 +634,50 @@ func (a *adminUI) CategoryCreate(c echo.Context) error {
 	return htmxDone(c, "Category created", "reload-categories")
 }
 
+// CategoryQuickCreate creates one category from inside a picker and returns it
+// as JSON so the picker can select it without a page reload.
+//
+// Creation goes through FindOrCreateByPath — the same call the CSV product
+// import uses — so asking twice for the same child selects the existing
+// category instead of duplicating it.
+func (a *adminUI) CategoryQuickCreate(c echo.Context) error {
+	name, err := categories.CleanName(c.FormValue("name"))
+	if err != nil {
+		return err
+	}
+	ctx := c.Request().Context()
+
+	path := name
+	depth := 0
+	if raw := strings.TrimSpace(c.FormValue("parent_id")); raw != "" && raw != "0" {
+		pid, perr := strconv.ParseInt(raw, 10, 64)
+		if perr != nil {
+			return apperr.BadRequest("invalid parent category")
+		}
+		crumbs, aerr := a.s.products.CategoryPath(ctx, pid)
+		if aerr != nil {
+			return aerr
+		}
+		if len(crumbs) == 0 {
+			return apperr.NotFound("parent category")
+		}
+		parts := make([]string, 0, len(crumbs)+1)
+		for _, cr := range crumbs {
+			parts = append(parts, cr.Name)
+		}
+		parts = append(parts, name)
+		path = strings.Join(parts, " > ")
+		depth = len(crumbs)
+	}
+
+	id, err := a.s.categories.FindOrCreateByPath(ctx, path)
+	if err != nil {
+		return err
+	}
+	a.s.logAudit(c, audit.ActionCreate, "category", strconv.FormatInt(id, 10), "created from picker: "+path)
+	return response.Created(c, map[string]any{"id": id, "name": name, "depth": depth})
+}
+
 func (a *adminUI) CategoryUpdate(c echo.Context) error {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {

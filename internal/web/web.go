@@ -409,6 +409,7 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	ag.GET("/categories/form", admin.CategoryForm)
 	ag.GET("/categories/form/:id", admin.CategoryForm)
 	ag.POST("/categories", admin.CategoryCreate)
+	ag.POST("/categories/quick", admin.CategoryQuickCreate)
 	ag.PUT("/categories/:id", admin.CategoryUpdate)
 	ag.DELETE("/categories/:id", admin.CategoryDelete)
 
