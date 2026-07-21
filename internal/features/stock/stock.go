@@ -23,6 +23,10 @@ const (
 	MovePurchaseReturn = "purchase_return"
 	MoveWarranty       = "warranty_replacement"
 	MoveRecovery       = "recovery"
+	// Stock leaving for a deliberate, non-sale reason. Neither is a loss: the
+	// shop absorbs them, and each gets its own P&L line.
+	MoveOwnUse = "own_use"
+	MoveStaff  = "staff"
 )
 
 type Movement struct {

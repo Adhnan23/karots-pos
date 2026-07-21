@@ -95,9 +95,43 @@ type DamageInput struct {
 	Note      string `json:"note"       form:"note"`
 }
 
+// ConsumeInput records stock leaving for a non-sale reason.
+type ConsumeInput struct {
+	ProductID int64  `json:"product_id" form:"product_id" validate:"required,gt=0"`
+	Quantity  string `json:"quantity"   form:"quantity"   validate:"required"`
+	Reason    string `json:"reason"     form:"reason"`
+	Note      string `json:"note"       form:"note"`
+}
+
+// consumeReasons maps a UI reason to its movement type. Anything not listed is
+// rejected rather than defaulting, so a typo can never silently book stock to
+// the wrong P&L line.
+var consumeReasons = map[string]string{
+	"damage":  MoveDamage,
+	"own_use": MoveOwnUse,
+	"staff":   MoveStaff,
+}
+
 // Damage writes off stock (spoilage, breakage). It decrements under the same
 // guard as a sale so quantity can never go negative, and audits the loss.
 func (s *Service) Damage(ctx context.Context, in DamageInput, userID int64) error {
+	return s.Consume(ctx, ConsumeInput{
+		ProductID: in.ProductID,
+		Quantity:  in.Quantity,
+		Reason:    "damage",
+		Note:      in.Note,
+	}, userID)
+}
+
+// Consume removes stock for a deliberate, non-sale reason and books its FEFO
+// cost against the movement, so the P&L can report it. Damage, shop own-use and
+// staff consumption all take this one path: they differ only in which line the
+// cost lands on, never in how stock and cost are computed.
+func (s *Service) Consume(ctx context.Context, in ConsumeInput, userID int64) error {
+	mtype, ok := consumeReasons[in.Reason]
+	if !ok {
+		return apperr.Validation("unknown reason for removing stock")
+	}
 	qty, err := money.Parse(in.Quantity)
 	if err != nil || !qty.IsPositive() {
 		return apperr.Validation("quantity must be greater than zero")
@@ -109,7 +143,7 @@ func (s *Service) Damage(ctx context.Context, in DamageInput, userID int64) erro
 			return apperr.Internal("failed to update stock", err)
 		}
 		if !ok {
-			return apperr.Conflict("not enough stock to write off")
+			return apperr.Conflict("not enough stock")
 		}
 		cost, err := repo.DepleteFEFO(ctx, in.ProductID, qty)
 		if err != nil {
@@ -117,11 +151,11 @@ func (s *Service) Damage(ctx context.Context, in DamageInput, userID int64) erro
 		}
 		return repo.InsertMovement(ctx, MovementInput{
 			ProductID: in.ProductID,
-			Type:      MoveDamage,
+			Type:      mtype,
 			Quantity:  qty.Neg(),
 			UserID:    userID,
 			Note:      nilIfEmpty(in.Note),
-			Cost:      cost.Mul(qty), // total worth written off
+			Cost:      cost.Mul(qty), // total worth consumed
 		})
 	})
 }

@@ -31,9 +31,11 @@ type PL struct {
 	GrossMargin   decimal.Decimal  `json:"gross_margin"`   // gross profit / revenue, percent
 	Expenses      decimal.Decimal  `json:"expenses"`       // operating expenses in range
 	Losses        decimal.Decimal  `json:"losses"`         // damage + warranty replacement cost
+	OwnUse        decimal.Decimal  `json:"own_use"`        // stock the shop consumed itself
+	StaffWelfare  decimal.Decimal  `json:"staff_welfare"`  // stock taken by staff
 	Recoveries    decimal.Decimal  `json:"recoveries"`     // value reclaimed from suppliers
 	OtherIncome   decimal.Decimal  `json:"other_income"`   // bank interest credited to lockers in range
-	NetProfit     decimal.Decimal  `json:"net_profit"`     // gross - expenses - losses + recoveries + other income
+	NetProfit     decimal.Decimal  `json:"net_profit"`     // gross - expenses - losses - own use - staff welfare + recoveries + other income
 	Receivables   decimal.Decimal  `json:"receivables"`    // customer dues (current snapshot)
 	Payables      decimal.Decimal  `json:"payables"`       // supplier dues (current snapshot)
 	CashWithdrawn decimal.Decimal  `json:"cash_withdrawn"` // drawer withdrawals in range
@@ -118,6 +120,22 @@ func (s *Service) Compute(ctx context.Context, from, to time.Time) (*PL, error) 
 		from, to); err != nil {
 		return nil, apperr.Internal("failed to compute losses", err)
 	}
+	// Stock the shop consumed itself, and stock taken by staff. Kept off the
+	// Losses line on purpose: both are deliberate and expected, and folding them
+	// into losses would make breakage look worse than it is while hiding how
+	// much the shop actually consumes.
+	if err := s.db.GetContext(ctx, &pl.OwnUse, `
+		SELECT COALESCE(SUM(cost),0) FROM stock_movements
+		WHERE type = 'own_use' AND created_at >= $1 AND created_at < $2`,
+		from, to); err != nil {
+		return nil, apperr.Internal("failed to compute own-use cost", err)
+	}
+	if err := s.db.GetContext(ctx, &pl.StaffWelfare, `
+		SELECT COALESCE(SUM(cost),0) FROM stock_movements
+		WHERE type = 'staff' AND created_at >= $1 AND created_at < $2`,
+		from, to); err != nil {
+		return nil, apperr.Internal("failed to compute staff welfare cost", err)
+	}
 	if err := s.db.GetContext(ctx, &pl.Recoveries, `
 		SELECT COALESCE(SUM(recovered_value),0) FROM loss_recoveries
 		WHERE created_at >= $1 AND created_at < $2`,
@@ -133,7 +151,9 @@ func (s *Service) Compute(ctx context.Context, from, to time.Time) (*PL, error) 
 		SELECT COALESCE(SUM(balance_delta),0) FROM locker_ledger
 		WHERE kind = 'interest' AND created_at >= $1 AND created_at < $2`, from, to)
 
-	pl.NetProfit = pl.GrossProfit.Sub(pl.Expenses).Sub(pl.Losses).Add(pl.Recoveries).Add(pl.OtherIncome)
+	pl.NetProfit = pl.GrossProfit.Sub(pl.Expenses).Sub(pl.Losses).
+		Sub(pl.OwnUse).Sub(pl.StaffWelfare).
+		Add(pl.Recoveries).Add(pl.OtherIncome)
 
 	_ = s.db.GetContext(ctx, &pl.Receivables, `SELECT COALESCE(SUM(outstanding_balance),0) FROM customers`)
 	_ = s.db.GetContext(ctx, &pl.Payables, `SELECT COALESCE(SUM(outstanding_balance),0) FROM suppliers`)
