@@ -804,3 +804,95 @@ func varianceTone(r recipes.VarianceRow) string {
 		return "text-slate-600"
 	}
 }
+
+// ============================ Service profit ============================
+
+// ServiceProfitData answers "did this counter pay for itself" per service:
+// income, what the recipe consumed, the machine/servicing costs tagged to it,
+// and what is left.
+type ServiceProfitData struct {
+	ShopName, Symbol string
+	From, To, Preset string
+	Rows             []reports.ServiceProfitRow
+}
+
+templ ServiceProfitReport(d ServiceProfitData) {
+	@layouts.Report("Service Profit", d.ShopName) {
+		<p class="text-sm text-slate-500 mb-5">
+			{ d.From } to { d.To } · what each service earned, what its recipe consumed,
+			and the running costs tagged to it.
+		</p>
+		<div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+			@invStat("Income", money.Format(d.Symbol, spTotal(d.Rows, "revenue")), "text-slate-900")
+			@invStat("Ingredients", money.Format(d.Symbol, spTotal(d.Rows, "cogs")), "text-slate-900")
+			@invStat("Attributed expenses", money.Format(d.Symbol, spTotal(d.Rows, "expenses")), "text-amber-600")
+			@invStat("Net profit", money.Format(d.Symbol, spTotal(d.Rows, "net")), spTone(spTotal(d.Rows, "net")))
+		</div>
+		<div class="no-print flex flex-wrap items-end justify-between gap-3 mb-5">
+			@filterPresetRow(rangeQuery(d.Preset, d.From, d.To), d.Preset)
+			<a class="px-4 py-1.5 rounded-lg border text-sm" href={ templ.SafeURL(pgHref(rangeQuery(d.Preset, d.From, d.To), 1) + "&format=csv") }>Download CSV</a>
+		</div>
+		<table class="w-full text-sm">
+			<thead class="text-left text-slate-500 border-b">
+				<tr>
+					<th class="py-1.5">Service</th>
+					<th class="py-1.5 text-right">Sold</th>
+					<th class="py-1.5 text-right">Income</th>
+					<th class="py-1.5 text-right">Ingredients</th>
+					<th class="py-1.5 text-right">Gross</th>
+					<th class="py-1.5 text-right">Expenses</th>
+					<th class="py-1.5 text-right">Net profit</th>
+					<th class="py-1.5 text-right">Margin</th>
+				</tr>
+			</thead>
+			<tbody>
+				for _, r := range d.Rows {
+					<tr class="border-b last:border-0">
+						<td class="py-1.5 font-medium">{ r.Name }</td>
+						<td class="py-1.5 text-right">{ money.Display(r.Units) }</td>
+						<td class="py-1.5 text-right">{ money.Format(d.Symbol, r.Revenue) }</td>
+						<td class="py-1.5 text-right text-slate-500">{ money.Format(d.Symbol, r.COGS) }</td>
+						<td class="py-1.5 text-right">{ money.Format(d.Symbol, r.GrossProfit()) }</td>
+						<td class="py-1.5 text-right text-amber-600">{ money.Format(d.Symbol, r.Expenses) }</td>
+						<td class={ "py-1.5 text-right font-medium " + spTone(r.NetProfit()) }>{ money.Format(d.Symbol, r.NetProfit()) }</td>
+						<td class={ "py-1.5 text-right " + spTone(r.NetProfit()) }>{ r.MarginPct().String() }%</td>
+					</tr>
+				}
+				if len(d.Rows) == 0 {
+					<tr><td colspan="8" class="py-6 text-center text-slate-400">No service activity in this period.</td></tr>
+				}
+			</tbody>
+		</table>
+		<p class="text-xs text-slate-500 mt-4">
+			Ingredients come from each service's recipe and are already counted in the shop-wide COGS.
+			Expenses are the ones tagged to a service on the Expenses page — a toner change, a machine repair.
+			They are operating costs, not per-unit costs, so they are subtracted once here and counted once
+			in the main P&amp;L; this table does not add anything to it.
+		</p>
+	}
+}
+
+// spTotal sums one column so the summary cards and the table cannot disagree.
+func spTotal(rows []reports.ServiceProfitRow, field string) decimal.Decimal {
+	t := decimal.Zero
+	for _, r := range rows {
+		switch field {
+		case "revenue":
+			t = t.Add(r.Revenue)
+		case "cogs":
+			t = t.Add(r.COGS)
+		case "expenses":
+			t = t.Add(r.Expenses)
+		case "net":
+			t = t.Add(r.NetProfit())
+		}
+	}
+	return t
+}
+
+func spTone(v decimal.Decimal) string {
+	if v.IsNegative() {
+		return "text-rose-600"
+	}
+	return "text-emerald-700"
+}

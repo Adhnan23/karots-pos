@@ -40,6 +40,7 @@ func reportHubCards() []reportHubCard {
 		{"/admin/reports/inventory", "Inventory Valuation", "Stock on hand at cost & retail"},
 		{"/admin/reports/batches", "Batches / Expiry", "Live batches and expiry dates"},
 		{"/admin/reports/recipe-variance", "Recipe Variance", "Expected vs actual ingredient use"},
+		{"/admin/reports/service-profit", "Service Profit", "Income, ingredients & costs per service"},
 		{"/admin/reports/low-stock", "Low Stock", "Items at or below reorder level"},
 		{"/admin/reports/expiring", "Expiring Stock", "Batches expiring soon"},
 		{"/admin/damage", "Damage Report", "Damaged/written-off stock & recovery"},

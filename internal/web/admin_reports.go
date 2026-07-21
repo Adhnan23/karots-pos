@@ -599,3 +599,34 @@ func (a *adminUI) RecipeVarianceReport(c echo.Context) error {
 		Total: len(rows), Page: page, PageSize: reportPageSize,
 	}))
 }
+
+// ServiceProfitReport answers "did this counter pay for itself" per service.
+// The shop-wide P&L blends every service into one number, and no stock report
+// includes them at all, so this is the only place the question can be asked.
+func (a *adminUI) ServiceProfitReport(c echo.Context) error {
+	ctx := c.Request().Context()
+	from, to, fromStr, toStr, preset, err := rangeStrings(c)
+	if err != nil {
+		return err
+	}
+	rows, err := a.s.reports.ServiceProfit(ctx, from, to)
+	if err != nil {
+		return err
+	}
+	if wantsCSV(c) {
+		out := make([][]string, 0, len(rows))
+		for _, r := range rows {
+			out = append(out, []string{
+				r.Name, r.Units.String(), csvMoney(r.Revenue), csvMoney(r.COGS),
+				csvMoney(r.GrossProfit()), csvMoney(r.Expenses),
+				csvMoney(r.NetProfit()), r.MarginPct().String(),
+			})
+		}
+		return writeCSV(c, "service_profit_"+fromStr+"_"+toStr,
+			[]string{"Service", "Sold", "Income", "Ingredients", "Gross", "Expenses", "Net profit", "Margin %"}, out)
+	}
+	return response.RenderPage(c, adminpages.ServiceProfitReport(adminpages.ServiceProfitData{
+		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx),
+		From: fromStr, To: toStr, Preset: preset, Rows: rows,
+	}))
+}

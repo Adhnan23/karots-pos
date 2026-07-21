@@ -571,3 +571,76 @@ func RegisterAPI(e *echo.Echo, db *sqlx.DB, cfg *config.Config) {
 	g := e.Group("/api/reports", middleware.JWTAuth(cfg.JWTSecret), middleware.RequireRole("admin", "manager"))
 	g.GET("/finance", api.Finance)
 }
+
+// ServiceProfitRow is one service's whole economic picture for a period:
+// what it earned, what its recipe consumed, and what running it cost.
+type ServiceProfitRow struct {
+	ProductID int64           `db:"product_id"`
+	Name      string          `db:"name"`
+	Units     decimal.Decimal `db:"units"`
+	Revenue   decimal.Decimal `db:"revenue"`
+	COGS      decimal.Decimal `db:"cogs"`
+	Expenses  decimal.Decimal `db:"expenses"`
+}
+
+// GrossProfit is revenue less what the recipe consumed.
+func (r ServiceProfitRow) GrossProfit() decimal.Decimal { return r.Revenue.Sub(r.COGS) }
+
+// NetProfit also subtracts expenses attributed to this service — the toner
+// change, the machine repair. Those are not per-unit costs, so they never enter
+// COGS; they are subtracted once, here, where the question is "did this counter
+// pay for itself".
+func (r ServiceProfitRow) NetProfit() decimal.Decimal { return r.GrossProfit().Sub(r.Expenses) }
+
+// MarginPct is net profit as a percentage of revenue; zero when nothing sold.
+func (r ServiceProfitRow) MarginPct() decimal.Decimal {
+	if r.Revenue.IsZero() {
+		return decimal.Zero
+	}
+	return r.NetProfit().Div(r.Revenue).Mul(decimal.NewFromInt(100)).Round(1)
+}
+
+// ServiceProfit reports each service product's income, ingredient cost and
+// attributed running costs for a period.
+//
+// Services are absent from every stock-facing report (they hold no inventory),
+// and the shop-wide P&L blends them into one number, so there was no way to ask
+// "what did the coffee machine actually make me". A service with no sales but
+// real expenses still appears: a counter that cost money and earned nothing is
+// exactly what this report has to be able to show.
+func (s *Service) ServiceProfit(ctx context.Context, from, to time.Time) ([]ServiceProfitRow, error) {
+	var rows []ServiceProfitRow
+	if err := s.db.SelectContext(ctx, &rows, `
+		WITH sold AS (
+			SELECT si.product_id,
+			       SUM(si.quantity - si.returned_qty) AS units,
+			       SUM( (si.subtotal / NULLIF(si.quantity,0)) * (si.quantity - si.returned_qty) ) AS revenue,
+			       SUM( (si.quantity - si.returned_qty) * si.cost_price ) AS cogs
+			FROM sale_items si
+			JOIN sales sa ON sa.id = si.sale_id
+			WHERE sa.status <> 'void' AND sa.created_at >= $1 AND sa.created_at < $2
+			GROUP BY si.product_id
+		),
+		tagged AS (
+			SELECT service_product_id AS product_id, SUM(amount) AS expenses
+			FROM expenses
+			WHERE service_product_id IS NOT NULL
+			  AND expense_date >= $1 AND expense_date < $2
+			GROUP BY service_product_id
+		)
+		SELECT p.id AS product_id, p.name,
+		       COALESCE(so.units,0)    AS units,
+		       COALESCE(so.revenue,0)  AS revenue,
+		       COALESCE(so.cogs,0)     AS cogs,
+		       COALESCE(tg.expenses,0) AS expenses
+		FROM products p
+		LEFT JOIN sold   so ON so.product_id = p.id
+		LEFT JOIN tagged tg ON tg.product_id = p.id
+		WHERE p.is_service
+		  AND (so.product_id IS NOT NULL OR tg.product_id IS NOT NULL)
+		ORDER BY COALESCE(so.revenue,0) - COALESCE(so.cogs,0) - COALESCE(tg.expenses,0) DESC`,
+		from, to); err != nil {
+		return nil, apperr.Internal("failed to load service profit", err)
+	}
+	return rows, nil
+}
