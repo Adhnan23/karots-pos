@@ -204,11 +204,37 @@ at the till (a `🖨 Photocopy` tab beside `📶 Reload`):
 
 | Surface | Path | Who | Does |
 |---|---|---|---|
-| **Cashier terminal** | `/cashier` | all roles | barcode scan, product search, live cart, retail/wholesale/credit checkout, **split-tender payments (cash/card/online)**, **hold/park & resume sales**, **count-by-denomination drawer open/close**, **mid-shift withdrawals**, **day-end Z-report**, thermal receipt (80mm/58mm) + **reprint**, **returns/refunds**, **damage write-off**, **credit collection**, **serial/warranty lookup & replacement** |
+| **Cashier terminal** | `/cashier` | all roles | barcode scan, product search, live cart, retail/wholesale/credit checkout, **split-tender payments (cash/card/online)**, **hold/park & resume sales**, **count-by-denomination drawer open/close**, **mid-shift withdrawals**, **day-end Z-report**, thermal receipt (80mm/58mm) + **reprint**, **returns/refunds**, **damage write-off**, **credit collection**, **serial/warranty lookup & replacement**, **suppliers at the counter** (opt-in per user) |
 | **Admin panel** | `/admin` | admin, manager | dashboard + alerts, products, inventory & **FEFO batches**, sales + **partial returns**, purchasing (GRN) + **supplier returns**, suppliers, customers & credit, expenses, **finance/profit** (net of returns, with **losses & recoveries**), reports (incl. **customer dues**, **returns**, **profit-by-category**, **sales-trend**, **warranty**), **cash register sessions & denominations**, **categories (nested)**, units, **conversions**, **barcode labels**, **warranty tracking + supplier recovery**, **damage report**, users, **audit log**, settings + **backup/restore** |
 
 Both call the **same services**. The cashier UI talks to the JSON API
 (`/api/*`); the admin panel is server-rendered HTML with HTMX partials.
+
+### Suppliers at the counter
+
+In a small shop the cashier is often alone when a supplier walks in. Ticking
+**Can deal with suppliers** on a user (Admin → Users, off by default) adds a
+**Suppliers** tab to the terminal, where that person can:
+
+- **pay a supplier** — cash leaves their own drawer, or a locker the owner has
+  marked *Cashiers can use*, and produces a `CR-` receipt;
+- **take in a delivery** — with or without a prior order, paying all, part or
+  none of the invoice in the same step;
+- **take an order** — saved as a normal draft PO stamped with their name, and
+  printed for the supplier to take away.
+
+The flag grants **sight of cost prices**, which is inherent to entering a
+supplier invoice — that is why it is off until you turn it on. It is read fresh
+on every request, so turning it off takes effect on their next click rather than
+at their next login. Where the cash may come from is enforced on the server, not
+just in the picker: a cashier cannot reach a locker you have kept to yourself,
+or another cashier's drawer.
+
+Paying a supplier and receiving the goods are **one transaction**. If the
+payment fails — an empty locker, a closed till — the goods roll back with it, so
+stock can never land without the payable that pays for it. Cash handed over at
+the counter reduces what the drawer is expected to hold, so the day still
+balances.
 
 ### Inventory: FEFO batch tracking
 
