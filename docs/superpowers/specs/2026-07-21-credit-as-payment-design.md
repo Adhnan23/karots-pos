@@ -37,7 +37,8 @@ sale to credit with no deliberate act.
 |---|---|
 | What is `sale_type`? | **A price list only: `retail` or `wholesale`.** The Credit button is removed. |
 | How is credit taken? | **A payment line with method `credit`**, labelled "On account" in the UI. |
-| Short payment? | **Refused.** Checkout blocks and names the shortfall; credit only happens when someone chose it. |
+| Short payment? | **Confirmed, not refused.** Completing a short-paid sale raises a prompt naming the shortfall and the customer; confirming adds the On-account line itself. |
+| Account line but paid in full? | **The mirror prompt** — offer to take it off the account and complete as a normal paid sale. |
 | Change on a credit sale? | **Not possible.** When any amount is on account, payments must equal the total exactly. |
 | New enum values? | **None.** `payment_method` already contains `credit`. |
 
@@ -72,7 +73,12 @@ Rules, in order:
 1. `paid.Add(onAccount)` must be `>= total`. Otherwise reject with
    `apperr.Validation` naming the shortfall — for example
    *"Rs 700.00 is unpaid — take the money or put it on a customer's account."*
-   This replaces the silent conversion and is the fix for the reported problem.
+
+   The server refuses rather than converting, because a silent conversion is
+   the bug. The **till never sends a short-paid sale**: it resolves the
+   shortfall through the confirmation prompt below and posts an explicit
+   On-account line. This server rule is therefore the backstop, not the
+   cashier's experience of it.
 2. When `onAccount` is positive:
    - `in.CustomerID` is required (message: *"choose a customer to put this on account"*).
    - `paid.Add(onAccount)` must **equal** `total`; a credit sale gives no change.
@@ -98,11 +104,44 @@ The drawer needs no change: `CashCollectedSince` already counts only `cash`
   *"pick a customer first"* until a customer is selected.
 - While a positive on-account amount is entered, show
   *"<Customer> will owe Rs X"* beneath the payment lines.
-- Disable **Complete sale** whenever `paid + onAccount < total`, showing the
-  shortfall. The client mirrors the server rule; the server remains the
-  authority.
 - `saleType` initialises to `retail`; any stored `credit` default falls back to
   `retail` (`app.js:300`, `app.js:894`).
+
+#### The confirmation prompt
+
+**Complete sale** stays enabled. Pressing it checks the tender before posting
+and, when something does not add up, raises a prompt instead of submitting.
+
+**Short paid** (`paid + onAccount < total`) — the common case, and the one the
+owner reports going wrong:
+
+> **Rs 700.00 is not paid**
+> Total Rs 1,200.00 · Cash Rs 500.00 · Short Rs 700.00
+> Put Rs 700.00 on Nimal's account? *(Nimal can owe up to Rs 5,000)*
+> `[ Go back ]` `[ Put on account ]`
+
+Confirming **adds the On-account line for the shortfall** and completes the
+sale, so a genuine credit sale is one extra tap rather than a manual tender
+entry. Going back returns to the payment box with everything intact.
+
+**Account line no longer needed** (`onAccount > 0` and `paid >= total`) — the
+mirror case:
+
+> **Nothing left on account**
+> Cash covers the whole Rs 1,200.00, but Rs 1,200.00 is marked On account.
+> `[ Go back ]` `[ Remove from account ]`
+
+Confirming drops the On-account line and completes as a normal paid sale.
+
+Two guards against clicking through without reading, because a prompt nobody
+reads is no better than the silent conversion it replaces:
+
+- **No button is focused by default**, so Enter or a stray keypress cannot
+  confirm it. This is a deliberate departure from the other dialogs in the
+  till, which do focus their primary action.
+- **"Put on account" is disabled with no customer selected**, showing
+  *"pick a customer first"*. An accidental credit sale is then impossible
+  rather than merely discouraged.
 
 ### Two other places `credit` is stored — both must be converted first
 
@@ -191,8 +230,19 @@ function so each case is a table row:
 - short payment with no on-account line → validation error naming the shortfall
 - on account plus overpayment → validation error (no change on a credit sale)
 
+The prompt decision itself is a pure function of the tender — given `total`,
+`paid`, `onAccount` and whether a customer is selected, it returns *none*,
+*offer to put on account* (with the shortfall) or *offer to remove from
+account*. Testing it directly keeps the rule out of the click handler.
+
 **Live:**
 - Each case above through the real till.
+- Short-paying raises the prompt; confirming adds the On-account line and
+  completes; going back leaves the cart and tender untouched.
+- The prompt's confirm button is **not** focused — pressing Enter on it does
+  nothing — and is disabled until a customer is picked.
+- Marking the whole bill On account and then taking full cash raises the mirror
+  prompt, and confirming completes it as a paid sale with no customer balance.
 - The customer's balance moves by exactly the on-account amount.
 - The drawer's expected cash moves by exactly the cash amount.
 - A part-credit sale prints a receipt showing both lines and the balance due.
