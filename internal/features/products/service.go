@@ -483,7 +483,12 @@ func (s *Service) ImportOne(ctx context.Context, in ImportRow) (ImportResult, er
 				return ferr
 			}
 		}
-		if existing == nil {
+		// Only a row WITHOUT a barcode may fall back to matching by name. A row
+		// that carries its own barcode and did not match one is a different
+		// product, even if something already in the catalog shares its name —
+		// two same-named rows with different barcodes used to merge into a single
+		// mongrel holding one row's quantity and the other's barcode and price.
+		if existing == nil && w.Barcode == nil {
 			if p, ferr := repo.FindByName(ctx, name); ferr == nil {
 				existing = p
 			} else if !errors.Is(ferr, sql.ErrNoRows) {
