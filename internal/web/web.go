@@ -120,12 +120,20 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	// and it gives an immediate force-logout. Fails closed (missing user / query
 	// error → rejected). The hidden system admin is a real, always-active row, so
 	// it is never affected. Installed once here; every JWTAuth instance honours it.
-	middleware.SetUserValidator(func(ctx context.Context, userID int64) bool {
-		var active bool
-		if err := db.GetContext(ctx, &active, `SELECT is_active FROM users WHERE id = $1`, userID); err != nil {
-			return false
+	//
+	// The same lookup also carries the per-user supplier flag, so gating that
+	// costs no extra query — and revoking it takes effect on the next request
+	// rather than whenever the user happens to log in again.
+	middleware.SetUserValidator(func(ctx context.Context, userID int64) (middleware.UserFlags, bool) {
+		var row struct {
+			Active             bool `db:"is_active"`
+			CanHandleSuppliers bool `db:"can_handle_suppliers"`
 		}
-		return active
+		if err := db.GetContext(ctx, &row,
+			`SELECT is_active, can_handle_suppliers FROM users WHERE id = $1`, userID); err != nil {
+			return middleware.UserFlags{}, false
+		}
+		return middleware.UserFlags{CanHandleSuppliers: row.CanHandleSuppliers}, row.Active
 	})
 	jwt := middleware.JWTAuth(cfg.JWTSecret)
 	// pinGuard forces users carrying a server-assigned PIN to change it before

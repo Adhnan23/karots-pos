@@ -12,9 +12,9 @@ import (
 )
 
 // UserValidator reports whether the user behind a verified token may still act —
-// i.e. the account still exists and is active. It is injected so this package
-// keeps no dependency on the auth feature.
-type UserValidator func(ctx context.Context, userID int64) bool
+// i.e. the account still exists and is active — and returns their per-user
+// flags. It is injected so this package keeps no dependency on the auth feature.
+type UserValidator func(ctx context.Context, userID int64) (UserFlags, bool)
 
 // userValidator is set once at startup (SetUserValidator) and consulted by every
 // JWTAuth instance. A package-level hook keeps JWTAuth's signature unchanged, so
@@ -74,14 +74,24 @@ func JWTAuth(secret string) echo.MiddlewareFunc {
 			// A valid signature isn't enough: the account may have been deleted or
 			// deactivated since the token was issued. Reject it so a fired/disabled
 			// user is forced out instead of riding their cookie until it expires.
-			if userValidator != nil && !userValidator(c.Request().Context(), claims.UserID) {
-				return apperr.Unauthorized("your account is no longer active — please sign in again")
+			var flags UserFlags
+			if userValidator != nil {
+				f, ok := userValidator(c.Request().Context(), claims.UserID)
+				if !ok {
+					return apperr.Unauthorized("your account is no longer active — please sign in again")
+				}
+				flags = f
 			}
 			c.Set(ctxUserID, claims.UserID)
 			c.Set(ctxRole, claims.Role)
 			c.Set(ctxName, claims.Name)
 			c.Set(ctxMustChangePin, claims.MustChangePin)
 			c.Set(ctxLocked, claims.Locked)
+			c.Set(ctxCanSuppliers, flags.CanHandleSuppliers)
+			// Templates read the flags from the request context (see flags.go),
+			// which response.render hands to templ.
+			c.SetRequest(c.Request().WithContext(
+				context.WithValue(c.Request().Context(), ctxFlagsKey, flags)))
 			return next(c)
 		}
 	}
