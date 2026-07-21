@@ -205,7 +205,6 @@ templ POS(d POSData) {
 						<div class="flex rounded-lg border overflow-hidden text-sm shrink-0">
 							<button type="button" x-on:click="saleType='retail'" x-bind:class="saleType==='retail' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600'" class="px-3 py-1.5">Retail</button>
 							<button type="button" x-on:click="saleType='wholesale'" x-bind:class="saleType==='wholesale' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600'" class="px-3 py-1.5 border-l">Wholesale</button>
-							<button type="button" x-on:click="saleType='credit'" x-bind:class="saleType==='credit' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600'" class="px-3 py-1.5 border-l">Credit</button>
 						</div>
 						<!-- Customer: searchable chooser (the list can grow large) -->
 						<div class="relative flex-1 min-w-0" x-on:keydown.escape="custOpen=false">
@@ -314,6 +313,14 @@ templ POS(d POSData) {
 										<button type="button" x-on:click="selectMethod(p, 'cash', $event)" x-bind:class="p.method==='cash' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600'" class="px-2 py-1">Cash</button>
 										<button type="button" x-on:click="selectMethod(p, 'card', $event)" x-bind:class="p.method==='card' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600'" class="px-2 py-1 border-l">Card</button>
 										<button type="button" x-on:click="selectMethod(p, 'online', $event)" x-bind:class="p.method==='online' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600'" class="px-2 py-1 border-l">Online</button>
+										<button
+											type="button"
+											x-on:click="customerId && selectMethod(p, 'credit', $event)"
+											x-bind:disabled="!customerId"
+											x-bind:title="customerId ? 'Put this amount on the customer account' : 'Pick a customer first'"
+											x-bind:class="p.method==='credit' ? 'bg-amber-600 text-white' : 'bg-white text-slate-600'"
+											class="px-2 py-1 border-l disabled:opacity-40"
+										>On account</button>
 										if len(plugin.TenderMethods()) > 0 {
 											for _, t := range plugin.TenderMethods() {
 												<button type="button" x-on:click={ "selectMethod(p, '" + t.Value + "', $event)" } x-bind:class={ "p.method==='" + t.Value + "' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600'" } class="px-2 py-1 border-l">{ t.Label }</button>
@@ -333,6 +340,10 @@ templ POS(d POSData) {
 								</div>
 							</template>
 							<button type="button" x-on:click="addPayment()" class="text-xs text-indigo-600 font-medium">+ Add payment</button>
+						</div>
+						<div class="text-sm text-amber-700" x-show="accountTotal() > 0" x-cloak>
+							<span x-text="customerLabel() || 'Customer'"></span> will owe
+							<span class="font-semibold" x-text="sym + ' ' + money(accountTotal())"></span>
 						</div>
 						<div class="flex justify-between text-sm" x-show="paidTotal() > 0">
 							<span>Paid</span><span x-text="sym + ' ' + money(paidTotal())"></span>
@@ -599,6 +610,44 @@ templ POS(d POSData) {
 						<button x-on:click="printReceipt()" class="w-full mt-4 py-2.5 rounded-lg bg-slate-800 text-white font-medium">🧾 Print Bill</button>
 						<button x-on:click="newSale()" class="w-full mt-2 py-2.5 rounded-lg bg-indigo-600 text-white font-medium">New Sale</button>
 					</div>
+				</div>
+			</div>
+
+			<!-- Credit confirmation. Deliberately focuses NOTHING: a prompt that
+			     Enter can dismiss is no better than the silent conversion it
+			     replaces. -->
+			<div x-show="creditPrompt" x-cloak class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+				<div class="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 space-y-3">
+					<template x-if="creditPrompt && creditPrompt.kind === 'shortfall'">
+						<div class="space-y-3">
+							<h3 class="text-lg font-semibold" x-text="sym + ' ' + money(creditPrompt.amount) + ' is not paid'"></h3>
+							<p class="text-sm text-slate-600">
+								Put it on
+								<span class="font-medium" x-text="customerLabel() || 'the customer'"></span>'s account?
+							</p>
+							<p class="text-sm text-amber-700" x-show="!creditPrompt.hasCustomer" x-cloak>
+								Pick a customer first, or go back and take the money.
+							</p>
+							<div class="flex gap-2 pt-1">
+								<button type="button" x-on:click="cancelCreditPrompt()" class="flex-1 px-4 py-2.5 rounded-lg border font-semibold">Go back</button>
+								<button type="button" x-on:click="confirmPutOnAccount()" x-bind:disabled="!creditPrompt.hasCustomer" class="flex-1 px-4 py-2.5 rounded-lg bg-amber-600 text-white font-semibold disabled:opacity-40">Put on account</button>
+							</div>
+						</div>
+					</template>
+					<template x-if="creditPrompt && creditPrompt.kind === 'overcovered'">
+						<div class="space-y-3">
+							<h3 class="text-lg font-semibold">Nothing left on account</h3>
+							<p class="text-sm text-slate-600">
+								The payments already cover this sale, but
+								<span class="font-medium" x-text="sym + ' ' + money(creditPrompt.amount)"></span>
+								is marked On account.
+							</p>
+							<div class="flex gap-2 pt-1">
+								<button type="button" x-on:click="cancelCreditPrompt()" class="flex-1 px-4 py-2.5 rounded-lg border font-semibold">Go back</button>
+								<button type="button" x-on:click="confirmRemoveFromAccount()" class="flex-1 px-4 py-2.5 rounded-lg bg-indigo-600 text-white font-semibold">Remove from account</button>
+							</div>
+						</div>
+					</template>
 				</div>
 			</div>
 		</div>

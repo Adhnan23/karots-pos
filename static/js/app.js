@@ -1298,11 +1298,21 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections) {
         /* analytics-only; the sale itself already succeeded */
       }
     },
+    // Money actually tendered. An "On account" line is a debt, not money, so it
+    // is excluded here — counting it would show change due on a sale where
+    // nothing was handed over.
     paidTotal() {
-      return this.payments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+      return this.payments
+        .filter((p) => p.method !== "credit")
+        .reduce((s, p) => s + (Number(p.amount) || 0), 0);
+    },
+    accountTotal() {
+      return this.payments
+        .filter((p) => p.method === "credit")
+        .reduce((s, p) => s + (Number(p.amount) || 0), 0);
     },
     changeDue() {
-      return Math.max(0, this.paidTotal() - this.total());
+      return Math.max(0, this.paidTotal() + this.accountTotal() - this.total());
     },
     // Advisory greedy breakdown of the change due into available denominations,
     // high→low. Stateless suggestion only — we don't track the live drawer mix,
@@ -1318,8 +1328,10 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections) {
       }
       return out; // any sub-smallest remainder is simply not representable; ignore
     },
+    // What is still unsettled: an on-account line settles the sale even though
+    // no money changed hands, so it counts here.
     balanceDue() {
-      return Math.max(0, this.total() - this.paidTotal());
+      return Math.max(0, this.total() - this.paidTotal() - this.accountTotal());
     },
     // Fill a payment line with the still-unpaid balance (quick "exact" button).
     fillRemaining(idx) {
@@ -1330,8 +1342,54 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections) {
       this.payments[idx].amount = Math.max(0, this.total() - others);
     },
 
-    async checkout() {
+    // --- credit confirmation ---
+    // tenderIssue is the whole rule in one place, so the click handler stays a
+    // click handler. Returns null when the tender is fine, otherwise what the
+    // prompt should offer to do about it.
+    tenderIssue(total, paid, onAccount, hasCustomer) {
+      const t = Number(total) || 0;
+      const p = Number(paid) || 0;
+      const a = Number(onAccount) || 0;
+      const covered = p + a;
+      if (covered < t - 0.005) {
+        return { kind: "shortfall", amount: Number((t - covered).toFixed(2)), hasCustomer: !!hasCustomer };
+      }
+      if (a > 0 && covered > t + 0.005) {
+        return { kind: "overcovered", amount: Number(a.toFixed(2)), hasCustomer: !!hasCustomer };
+      }
+      return null;
+    },
+    creditPrompt: null,
+    // Confirming the shortfall prompt adds the on-account line itself, so a
+    // genuine credit sale is one extra tap rather than a manual tender entry.
+    confirmPutOnAccount() {
+      const amt = this.creditPrompt.amount;
+      this.creditPrompt = null;
+      this.payments.push({ method: "credit", amount: amt, reference: "" });
+      this.checkout(true);
+    },
+    confirmRemoveFromAccount() {
+      this.creditPrompt = null;
+      this.payments = this.payments.filter((p) => p.method !== "credit");
+      this.checkout(true);
+    },
+    cancelCreditPrompt() {
+      this.creditPrompt = null;
+    },
+
+    async checkout(confirmed) {
       if (this.cart.length === 0 || this.busy) return;
+      // Raise the prompt rather than posting a tender that does not add up.
+      // `confirmed` is set by the prompt's own buttons so it cannot loop.
+      if (!confirmed) {
+        const issue = this.tenderIssue(
+          this.total(), this.paidTotal(), this.accountTotal(), this.customerId,
+        );
+        if (issue) {
+          this.creditPrompt = issue;
+          return;
+        }
+      }
       // Serial-tracked lines need a serial for every unit before we can sell.
       for (const it of this.cart) {
         if (!it.track_serial) continue;
