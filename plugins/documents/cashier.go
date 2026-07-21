@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"karots-pos/internal/apperr"
+	"karots-pos/internal/features/recipes"
 	"karots-pos/internal/response"
 
 	"github.com/labstack/echo/v4"
@@ -124,10 +125,27 @@ func (h *cashierUI) Quote(c echo.Context) error {
 	cs, _ := h.p.store.ConsumablesFor(ctx, sid, size)
 	comps := make([]map[string]any, 0, len(cs))
 	consCost := decimal.Zero
+	base := decimal.NewFromInt(int64(baseUnits))
 	for _, cm := range cs {
-		consumed := cm.QtyPerUnit.Mul(decimal.NewFromInt(int64(baseUnits))).Ceil()
+		// Paper is a whole unit — a single copy uses a whole sheet. This used to
+		// Ceil() every component, so a yield-based one (a toner rated for 5000
+		// copies) consumed an entire cartridge on a one-copy job.
+		comp := recipes.Component{
+			ComponentProductID: cm.ProductID,
+			QtyPerUnit:         decimal.NullDecimal{Decimal: cm.QtyPerUnit, Valid: true},
+			WholeUnits:         true,
+		}
+		consumed := comp.Consumed(base)
 		comps = append(comps, map[string]any{"product_id": cm.ProductID, "quantity": consumed.String()})
 		consCost = consCost.Add(consumed.Mul(h.p.store.ConsumableCost(ctx, cm.ProductID)))
+	}
+
+	// Size-agnostic ingredients now live in core recipes (toner, ink) and are
+	// fractional, so they are expanded without rounding up.
+	core, _ := recipes.NewRepository(h.p.core.DB).For(ctx, sv.ProductID)
+	for _, cons := range recipes.Expand(core, base) {
+		comps = append(comps, map[string]any{"product_id": cons.ProductID, "quantity": cons.Qty.String()})
+		consCost = consCost.Add(cons.Qty.Mul(h.p.store.ConsumableCost(ctx, cons.ProductID)))
 	}
 
 	return response.OK(c, map[string]any{
