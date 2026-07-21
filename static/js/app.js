@@ -2259,6 +2259,23 @@ function intake(sym) {
     seq: 0,
     busy: false,
 
+    // syncLabelQty mirrors the stock quantity into the label count, which is
+    // almost always what you want: 12 pens in, 12 stickers out.
+    //
+    // It must clamp. The label input is a whole number from 1 to 200, so a
+    // quantity of 0, 2.5 or 250 copied across verbatim makes it invalid, and an
+    // invalid field blocks the whole form — silently, because when "Print
+    // labels" is off the field is hidden and the browser cannot focus it to
+    // show the message. Stock simply never got created.
+    syncLabelQty() {
+      const n = Math.floor(Number(this.qty));
+      if (!Number.isFinite(n) || n < 1) {
+        this.labelQty = "1";
+        return;
+      }
+      this.labelQty = String(Math.min(200, n));
+    },
+
     async search() {
       const s = (this.q || "").trim();
       if (!s) {

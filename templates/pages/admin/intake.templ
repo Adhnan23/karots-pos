@@ -95,7 +95,7 @@ templ IntakePage(d IntakeData) {
 					</div>
 					<div>
 						<label class="block text-sm font-medium mb-1">Opening quantity</label>
-						<input name="quantity" type="number" step="0.001" min="0" x-model="qty" x-on:input="labelQty = qty" class="w-full border rounded-lg px-3 py-2"/>
+						<input name="quantity" type="number" step="0.001" min="0" x-model="qty" x-on:input="syncLabelQty()" class="w-full border rounded-lg px-3 py-2"/>
 					</div>
 					@intakeBarcodePreview("intake-preview-new", "newName", "cBarcode")
 					@intakeLabelControls()
@@ -135,7 +135,7 @@ templ IntakePage(d IntakeData) {
 					</div>
 					<div>
 						<label class="block text-sm font-medium mb-1">Quantity to add</label>
-						<input name="quantity" type="number" step="0.001" min="0" x-model="qty" x-on:input="labelQty = qty" class="w-full border rounded-lg px-3 py-2"/>
+						<input name="quantity" type="number" step="0.001" min="0" x-model="qty" x-on:input="syncLabelQty()" class="w-full border rounded-lg px-3 py-2"/>
 					</div>
 					@intakeBarcodePreview("intake-preview-restock", "pName", "pBarcode")
 					@intakeLabelControls()
@@ -196,7 +196,16 @@ templ intakeLabelControls() {
 			<div class="grid grid-cols-2 gap-4">
 				<div>
 					<label class="block text-sm font-medium mb-1">Number of labels</label>
-					<input name="label_qty" type="number" min="1" max="200" x-model="labelQty" class="w-full border rounded-lg px-3 py-2"/>
+					<!--
+					  Disabled while hidden. A disabled control is skipped by form
+					  validation, so a stale value here can never silently block the
+					  save — the browser refuses to submit but cannot focus a hidden
+					  field to say why, and the item just never gets created.
+					-->
+					<input
+						name="label_qty" type="number" min="1" max="200" x-model="labelQty"
+						x-bind:disabled="!printLabels" class="w-full border rounded-lg px-3 py-2"
+					/>
 				</div>
 				<div class="flex items-end">
 					<label class="inline-flex items-center gap-2 text-sm">
