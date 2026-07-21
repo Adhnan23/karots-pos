@@ -20,7 +20,7 @@ type Batch struct {
 	QtyRemaining   decimal.Decimal `db:"qty_remaining"    json:"qty_remaining"`
 	CostPrice      decimal.Decimal `db:"cost_price"       json:"cost_price"`
 	Source         string          `db:"source"           json:"source"`
-	CreatedAt      time.Time        `db:"created_at"       json:"created_at"`
+	CreatedAt      time.Time       `db:"created_at"       json:"created_at"`
 	// joined
 	ProductName string `db:"product_name" json:"product_name"`
 	UnitAbbr    string `db:"unit_abbr"    json:"unit_abbr"`
@@ -44,12 +44,53 @@ func (r *Repository) InsertBatch(ctx context.Context, b NewBatch) (int64, error)
 		b.Source = "purchase"
 	}
 	var id int64
+	// A blank cost box at intake would otherwise freeze this lot at zero for
+	// good — cost is never revisited once the batch exists — so inherit the
+	// product's current cost. Genuinely free stock stays free, because a free
+	// product's own cost is zero too.
 	err := r.q.GetContext(ctx, &id, `
 		INSERT INTO stock_batches
 			(product_id, purchase_item_id, batch_no, expiry_date, qty_received, qty_remaining, cost_price, source)
-		VALUES ($1,$2,$3,$4,$5,$5,$6,$7) RETURNING id`,
+		VALUES ($1,$2,$3,$4,$5,$5,
+			CASE WHEN $6::numeric = 0
+			     THEN COALESCE((SELECT cost_price FROM products WHERE id = $1), 0)
+			     ELSE $6::numeric END,
+			$7) RETURNING id`,
 		b.ProductID, b.PurchaseItemID, b.BatchNo, b.ExpiryDate, b.Quantity, b.CostPrice, b.Source)
 	return id, err
+}
+
+// consumedLot is one batch's contribution to a depletion: how much was taken
+// and what that batch says it cost.
+type consumedLot struct {
+	Qty  decimal.Decimal
+	Cost decimal.Decimal
+}
+
+// costOfConsumed returns the weighted-average cost per unit of a depletion.
+//
+// A lot whose batch cost is zero is charged at productCost instead. Cost is
+// frozen into a batch when the batch is created, so stock added before its cost
+// was entered — a blank cost box at intake — is stuck at zero even after the
+// product's cost is corrected. Left alone it books Rs 0 of COGS and reports the
+// whole sale as profit, which is worse than being slightly stale.
+//
+// The rescue is per lot, not on the final average: one properly-costed batch
+// would lift the average above zero and hide the free one. A product whose own
+// cost is also zero stays at zero — that one really is free.
+func costOfConsumed(lots []consumedLot, qty, productCost decimal.Decimal) decimal.Decimal {
+	if !qty.IsPositive() {
+		return decimal.Zero
+	}
+	total := decimal.Zero
+	for _, l := range lots {
+		cost := l.Cost
+		if cost.IsZero() {
+			cost = productCost
+		}
+		total = total.Add(l.Qty.Mul(cost))
+	}
+	return total.Div(qty).Round(2)
 }
 
 // DepleteFEFO consumes qty from a product's batches, earliest-expiry-first, and
@@ -80,7 +121,8 @@ func (r *Repository) DepleteFEFO(ctx context.Context, productID int64, qty decim
 	}
 
 	remaining := qty
-	totalCost := decimal.Zero
+	lots := make([]consumedLot, 0, len(batches))
+	zeroCost := false
 	for _, b := range batches {
 		if !remaining.IsPositive() {
 			break
@@ -91,15 +133,20 @@ func (r *Repository) DepleteFEFO(ctx context.Context, productID int64, qty decim
 			take, b.ID); err != nil {
 			return decimal.Zero, err
 		}
-		totalCost = totalCost.Add(take.Mul(b.Cost))
+		lots = append(lots, consumedLot{Qty: take, Cost: b.Cost})
+		zeroCost = zeroCost || b.Cost.IsZero()
 		remaining = remaining.Sub(take)
 	}
-	// Weighted-average cost over the requested quantity.
-	avgCost := decimal.Zero
-	if qty.IsPositive() {
-		avgCost = totalCost.Div(qty).Round(2)
+
+	// Only pay for the extra lookup when something actually needs rescuing.
+	fallback := decimal.Zero
+	if zeroCost {
+		var err error
+		if fallback, err = r.productCost(ctx, productID); err != nil {
+			return decimal.Zero, err
+		}
 	}
-	return avgCost, nil
+	return costOfConsumed(lots, qty, fallback), nil
 }
 
 // productCost reads a product's current cost price (used to value adjustment
