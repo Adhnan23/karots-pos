@@ -109,6 +109,24 @@ func (r *Repository) List(ctx context.Context, activeOnly bool) ([]Locker, error
 	return rows, err
 }
 
+// ListForCashier lists the active lockers a cashier may move money into or out
+// of. Separate from List rather than a flag on it so an admin screen can never
+// accidentally inherit the restriction — the admin picker must keep showing
+// every locker.
+func (r *Repository) ListForCashier(ctx context.Context) ([]Locker, error) {
+	var rows []Locker
+	err := r.q.SelectContext(ctx, &rows, `
+		SELECT l.*, COALESCE(le.bal, 0) AS balance
+		FROM lockers l
+		LEFT JOIN (
+			SELECT locker_id, SUM(balance_delta) AS bal
+			FROM locker_ledger GROUP BY locker_id
+		) le ON le.locker_id = l.id
+		WHERE l.is_active = true AND l.cashier_access = true
+		ORDER BY l.name`)
+	return rows, err
+}
+
 // Get loads one locker with its live balance.
 func (r *Repository) Get(ctx context.Context, id int64) (*Locker, error) {
 	var l Locker
@@ -137,12 +155,12 @@ func (r *Repository) GetForUpdate(ctx context.Context, id int64) (*Locker, error
 
 // Create inserts a locker row (no opening balance — the service writes that as a
 // ledger entry in the same transaction).
-func (r *Repository) Create(ctx context.Context, name, kind string, allowNeg bool) (*Locker, error) {
+func (r *Repository) Create(ctx context.Context, name, kind string, allowNeg, cashierAccess bool) (*Locker, error) {
 	var l Locker
 	err := r.q.GetContext(ctx, &l, `
-		INSERT INTO lockers (name, kind, allow_negative)
-		VALUES ($1, $2, $3) RETURNING *, 0::numeric AS balance`,
-		name, kind, allowNeg)
+		INSERT INTO lockers (name, kind, allow_negative, cashier_access)
+		VALUES ($1, $2, $3, $4) RETURNING *, 0::numeric AS balance`,
+		name, kind, allowNeg, cashierAccess)
 	if err != nil {
 		return nil, err
 	}
@@ -150,10 +168,10 @@ func (r *Repository) Create(ctx context.Context, name, kind string, allowNeg boo
 }
 
 // Update edits a locker's editable fields (not its balance).
-func (r *Repository) Update(ctx context.Context, id int64, name, kind string, allowNeg, isActive bool) error {
+func (r *Repository) Update(ctx context.Context, id int64, name, kind string, allowNeg, isActive, cashierAccess bool) error {
 	res, err := r.q.ExecContext(ctx, `
-		UPDATE lockers SET name=$1, kind=$2, allow_negative=$3, is_active=$4 WHERE id=$5`,
-		name, kind, allowNeg, isActive, id)
+		UPDATE lockers SET name=$1, kind=$2, allow_negative=$3, is_active=$4, cashier_access=$5 WHERE id=$6`,
+		name, kind, allowNeg, isActive, cashierAccess, id)
 	if err != nil {
 		return err
 	}
@@ -223,6 +241,9 @@ type CreateInput struct {
 	Kind           string `form:"kind"            json:"kind"`
 	AllowNegative  string `form:"allow_negative"  json:"allow_negative"`
 	OpeningBalance string `form:"opening_balance" json:"opening_balance"`
+	// CashierAccess is an HTML checkbox. A new locker's form ships it ticked, so
+	// an omitted value here means the owner deliberately unticked it.
+	CashierAccess  string `form:"cashier_access"  json:"cashier_access"`
 }
 
 // UpdateInput is the admin edit-locker form.
@@ -231,6 +252,7 @@ type UpdateInput struct {
 	Kind          string `form:"kind"           json:"kind"`
 	AllowNegative string `form:"allow_negative" json:"allow_negative"`
 	IsActive      string `form:"is_active"      json:"is_active"`
+	CashierAccess string `form:"cashier_access" json:"cashier_access"`
 }
 
 func truthy(s string) bool {
@@ -251,6 +273,16 @@ func NewService(db *sqlx.DB) *Service { return &Service{db: db, repo: NewReposit
 
 func (s *Service) List(ctx context.Context, activeOnly bool) ([]Locker, error) {
 	rows, err := s.repo.List(ctx, activeOnly)
+	if err != nil {
+		return nil, apperr.Internal("failed to list lockers", err)
+	}
+	return rows, nil
+}
+
+// ListForCashier lists only the lockers the owner has marked usable by
+// cashiers. See Repository.ListForCashier.
+func (s *Service) ListForCashier(ctx context.Context) ([]Locker, error) {
+	rows, err := s.repo.ListForCashier(ctx)
 	if err != nil {
 		return nil, apperr.Internal("failed to list lockers", err)
 	}
@@ -299,7 +331,7 @@ func (s *Service) Create(ctx context.Context, in CreateInput, userID int64) (*Lo
 	var created *Locker
 	err := db.WithTx(ctx, s.db, func(tx *sqlx.Tx) error {
 		repo := NewRepository(tx)
-		l, err := repo.Create(ctx, name, kind, allowNeg)
+		l, err := repo.Create(ctx, name, kind, allowNeg, truthy(in.CashierAccess))
 		if err != nil {
 			return err
 		}
@@ -337,7 +369,7 @@ func (s *Service) Update(ctx context.Context, id int64, in UpdateInput) error {
 	if !validKind(kind) {
 		return apperr.Validation("invalid locker kind")
 	}
-	err := s.repo.Update(ctx, id, name, kind, truthy(in.AllowNegative), truthy(in.IsActive))
+	err := s.repo.Update(ctx, id, name, kind, truthy(in.AllowNegative), truthy(in.IsActive), truthy(in.CashierAccess))
 	if errors.Is(err, sql.ErrNoRows) {
 		return apperr.NotFound("locker")
 	}

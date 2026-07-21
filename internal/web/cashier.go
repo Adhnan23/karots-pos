@@ -418,7 +418,9 @@ func (h *cashierUI) ReturnSubmit(c echo.Context) error {
 // dialogs (opening float from / banking to / mid-shift move to-from a locker).
 func (h *cashierUI) CashierLockers(c echo.Context) error {
 	ctx := c.Request().Context()
-	rows, err := h.s.lockers.List(ctx, true)
+	// Only the lockers the owner has marked usable by cashiers — the drawer
+	// dialogs used to offer every active locker, including the owner's own safe.
+	rows, err := h.s.lockers.ListForCashier(ctx)
 	if err != nil {
 		return err
 	}

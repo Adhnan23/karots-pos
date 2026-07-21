@@ -124,6 +124,13 @@ templ LockerForm(l *lockers.Locker) {
 				<input type="checkbox" name="allow_negative" value="on" checked?={ l != nil && l.AllowNegative } class="rounded"/>
 				Allow negative balance (e.g. owner's pocket — he may put in more than he takes)
 			</label>
+			<label class="flex items-start gap-2 text-sm">
+				<input type="checkbox" name="cashier_access" value="on" checked?={ l == nil || l.CashierAccess } class="rounded mt-0.5"/>
+				<span>
+					Cashiers can use this
+					<span class="block text-xs text-slate-500">Lets cashiers move money into or out of it from the till. Turn off for a locker only you should touch.</span>
+				</span>
+			</label>
 			if l != nil {
 				<label class="flex items-center gap-2 text-sm">
 					<input type="checkbox" name="is_active" value="on" checked?={ l.IsActive } class="rounded"/>
