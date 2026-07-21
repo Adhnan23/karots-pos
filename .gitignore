@@ -12,3 +12,6 @@ dist/
 
 # Playwright MCP scratch output
 .playwright-mcp/
+
+# Editor settings — personal, not part of the shop.
+.vscode/

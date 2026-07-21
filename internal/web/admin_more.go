@@ -295,10 +295,14 @@ func (a *adminUI) PurchaseReturns(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	page := pageParam(c)
 	return response.RenderPage(c, adminpages.PurchaseReturnsPage(adminpages.PurchaseReturnsData{
 		UserName: middleware.CurrentUserName(c),
 		Symbol:   a.symbol(ctx),
-		Rows:     rows,
+		Rows:     paginate(rows, page, reportPageSize),
+		Page:     page,
+		PageSize: reportPageSize,
+		Total:    len(rows),
 	}))
 }
 

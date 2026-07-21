@@ -13,6 +13,11 @@ type PurchaseReturnsData struct {
 	UserName string
 	Symbol   string
 	Rows     []purchasereturns.PurchaseReturn
+	// Page/PageSize/Total drive the pager. The list used to stop at the 100 most
+	// recent returns with nothing on screen to say older ones existed.
+	Page     int
+	PageSize int
+	Total    int
 }
 
 templ PurchaseReturnsPage(d PurchaseReturnsData) {
@@ -50,6 +55,7 @@ templ PurchaseReturnsPage(d PurchaseReturnsData) {
 					}
 				</tbody>
 			</table>
+			@rptPager("", d.Page, d.PageSize, d.Total)
 		</div>
 	}
 }

@@ -82,16 +82,19 @@ func (r *Repository) InsertItem(ctx context.Context, prID, productID int64, qty,
 	return err
 }
 
-func (r *Repository) List(ctx context.Context, limit int) ([]PurchaseReturn, error) {
-	if limit <= 0 || limit > 500 {
-		limit = 100
-	}
+// List returns every purchase return, newest first.
+//
+// There is deliberately no row cap. It used to stop at the 100 most recent,
+// which quietly put older returns out of reach with nothing on screen to say
+// so; the page pages through the whole history instead. Returns are a
+// low-volume table, so reading it whole costs little.
+func (r *Repository) List(ctx context.Context) ([]PurchaseReturn, error) {
 	var rows []PurchaseReturn
 	err := r.q.SelectContext(ctx, &rows, `
 		SELECT pr.*, s.name AS supplier_name
 		FROM purchase_returns pr
 		JOIN suppliers s ON s.id = pr.supplier_id
-		ORDER BY pr.created_at DESC LIMIT $1`, limit)
+		ORDER BY pr.created_at DESC`)
 	return rows, err
 }
 
@@ -126,7 +129,7 @@ type Service struct {
 func NewService(db *sqlx.DB) *Service { return &Service{db: db, repo: NewRepository(db)} }
 
 func (s *Service) List(ctx context.Context) ([]PurchaseReturn, error) {
-	rows, err := s.repo.List(ctx, 100)
+	rows, err := s.repo.List(ctx)
 	if err != nil {
 		return nil, apperr.Internal("failed to list purchase returns", err)
 	}
