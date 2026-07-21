@@ -40,3 +40,12 @@ func (s *Service) Replace(ctx context.Context, productID int64, cs []Component) 
 		return s.repo.Replace(ctx, tx, productID, cs)
 	})
 }
+
+// Counts returns ingredient counts keyed by service product id.
+func (s *Service) Counts(ctx context.Context) (map[int64]int, error) {
+	m, err := s.repo.Counts(ctx)
+	if err != nil {
+		return nil, apperr.Internal("failed to count recipes", err)
+	}
+	return m, nil
+}

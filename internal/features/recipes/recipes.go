@@ -45,3 +45,21 @@ func (r *Repository) Replace(ctx context.Context, tx *sqlx.Tx, productID int64, 
 	}
 	return nil
 }
+
+// Counts returns the number of ingredients per service product, so a list can
+// show "3 ingredients" without loading every recipe.
+func (r *Repository) Counts(ctx context.Context) (map[int64]int, error) {
+	var rows []struct {
+		ProductID int64 `db:"product_id"`
+		N         int   `db:"n"`
+	}
+	if err := r.q.SelectContext(ctx, &rows,
+		`SELECT product_id, COUNT(*) AS n FROM product_recipes GROUP BY product_id`); err != nil {
+		return nil, err
+	}
+	out := make(map[int64]int, len(rows))
+	for _, r := range rows {
+		out[r.ProductID] = r.N
+	}
+	return out, nil
+}

@@ -938,3 +938,77 @@ func (a *adminUI) ProductRecipeSave(c echo.Context) error {
 	a.s.logAudit(c, audit.ActionUpdate, "product", strconv.FormatInt(id, 10), "recipe updated")
 	return htmxDone(c, "Recipe saved", "reload-products")
 }
+
+// ============================ Services ============================
+
+func (a *adminUI) servicesData(c echo.Context) (adminpages.ServicesData, error) {
+	ctx := c.Request().Context()
+	rows, err := a.s.products.ListServices(ctx)
+	if err != nil {
+		return adminpages.ServicesData{}, err
+	}
+	counts, err := a.s.recipes.Counts(ctx)
+	if err != nil {
+		return adminpages.ServicesData{}, err
+	}
+	return adminpages.ServicesData{
+		UserName: middleware.CurrentUserName(c),
+		Rows:     rows,
+		Counts:   counts,
+		Symbol:   a.symbol(ctx),
+	}, nil
+}
+
+// Services lists service products. They are excluded from the Products page
+// (that list filters is_service = false), so this is the only place a recipe
+// can be reached from.
+func (a *adminUI) Services(c echo.Context) error {
+	d, err := a.servicesData(c)
+	if err != nil {
+		return err
+	}
+	return response.RenderPage(c, adminpages.ServicesPage(d))
+}
+
+func (a *adminUI) ServicesTable(c echo.Context) error {
+	d, err := a.servicesData(c)
+	if err != nil {
+		return err
+	}
+	return response.RenderFragment(c, adminpages.ServiceRows(d))
+}
+
+func (a *adminUI) ServiceForm(c echo.Context) error {
+	cats, err := a.s.categories.Tree(c.Request().Context())
+	if err != nil {
+		return err
+	}
+	us, err := a.s.units.List(c.Request().Context())
+	if err != nil {
+		return err
+	}
+	return response.RenderFragment(c, adminpages.ServiceForm(adminpages.ServiceFormData{Categories: cats, Units: us}))
+}
+
+// ServiceCreate makes a non-stocked product. IsService is forced here rather
+// than bound from the form: the shared product form must never be able to turn
+// a stocked item into a service, which would orphan its inventory.
+func (a *adminUI) ServiceCreate(c echo.Context) error {
+	var in products.CreateInput
+	if err := c.Bind(&in); err != nil {
+		return apperr.BadRequest("invalid form")
+	}
+	in.IsService = true
+	if strings.TrimSpace(in.SellingPrice) == "" {
+		in.SellingPrice = "0"
+	}
+	if err := c.Validate(&in); err != nil {
+		return err
+	}
+	p, err := a.s.products.Create(c.Request().Context(), in)
+	if err != nil {
+		return err
+	}
+	a.s.logAudit(c, audit.ActionCreate, "product", strconv.FormatInt(p.ID, 10), "created service "+in.Name)
+	return htmxDone(c, "Service created", "reload-products")
+}

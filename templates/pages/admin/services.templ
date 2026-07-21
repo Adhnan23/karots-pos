@@ -1,0 +1,170 @@
+package adminpages
+
+import (
+	"strconv"
+
+	"strings"
+
+	"karots-pos/internal/features/categories"
+	"karots-pos/internal/features/products"
+	"karots-pos/internal/features/units"
+	"karots-pos/internal/money"
+	adminfragments "karots-pos/templates/fragments/admin"
+	"karots-pos/templates/layouts"
+)
+
+// ServicesData lists every service product with how many ingredients its recipe
+// declares. Services never appear on the Products page (that list is filtered to
+// is_service = false, because stock, valuation and low-stock columns are
+// meaningless for a non-stocked line), so without this page a recipe would be
+// unreachable from the UI.
+type ServicesData struct {
+	UserName string
+	Rows     []products.Product
+	Counts   map[int64]int
+	Symbol   string
+}
+
+templ ServicesPage(d ServicesData) {
+	@layouts.Admin("Services & Recipes", d.UserName, "services") {
+		<div class="flex items-center justify-between mb-6">
+			<div>
+				<h1 class="text-2xl font-bold">Services &amp; Recipes</h1>
+				<p class="text-sm text-slate-500">
+					Things you sell that hold no stock of their own — a photocopy, a cup of coffee, a top-up.
+					A recipe says what one of them consumes.
+				</p>
+			</div>
+			<button
+				class="px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium"
+				hx-get="/admin/services/form"
+				hx-target="#modal-container"
+				hx-swap="innerHTML"
+			>+ New Service</button>
+		</div>
+		<div class="bg-white rounded-2xl shadow-sm p-6">
+			<table class="w-full text-sm">
+				<thead class="text-left text-slate-500 border-b">
+					<tr>
+						<th class="py-2 px-3">Service</th>
+						<th class="py-2 px-3">Category</th>
+						<th class="py-2 px-3 text-right">Price</th>
+						<th class="py-2 px-3">Recipe</th>
+						<th class="py-2 px-3"></th>
+					</tr>
+				</thead>
+				<tbody
+					id="services-tbody"
+					hx-get="/admin/services/table"
+					hx-trigger="reload-products from:body"
+					hx-target="#services-tbody"
+					hx-swap="innerHTML"
+				>
+					@ServiceRows(d)
+				</tbody>
+			</table>
+		</div>
+	}
+}
+
+templ ServiceRows(d ServicesData) {
+	if len(d.Rows) == 0 {
+		<tr>
+			<td colspan="5" class="py-8 text-center text-slate-400">
+				No services yet. Create one to sell something that consumes stock without holding any.
+			</td>
+		</tr>
+	}
+	for _, p := range d.Rows {
+		<tr class="border-b last:border-0 hover:bg-slate-50">
+			<td class="py-2 px-3 font-medium">{ p.Name }</td>
+			<td class="py-2 px-3 text-slate-600">{ p.CategoryName }</td>
+			<td class="py-2 px-3 text-right">{ money.Format(d.Symbol, p.SellingPrice) }</td>
+			<td class="py-2 px-3">
+				if d.Counts[p.ID] > 0 {
+					<span class="px-2 py-0.5 rounded-full text-xs bg-emerald-100 text-emerald-700">
+						{ strconv.Itoa(d.Counts[p.ID]) } ingredients
+					</span>
+				} else {
+					<span class="text-slate-400">—</span>
+				}
+			</td>
+			<td class="py-2 px-3 text-right whitespace-nowrap">
+				<button
+					class="text-indigo-600 hover:underline text-sm"
+					hx-get={ "/admin/products/" + strconv.FormatInt(p.ID, 10) + "/recipe" }
+					hx-target="#modal-container"
+					hx-swap="innerHTML"
+				>Recipe</button>
+				<button
+					class="text-indigo-600 hover:underline text-sm ml-3"
+					hx-get={ "/admin/products/form/" + strconv.FormatInt(p.ID, 10) }
+					hx-target="#modal-container"
+					hx-swap="innerHTML"
+				>Edit</button>
+			</td>
+		</tr>
+	}
+}
+
+// ServiceFormData creates a service product. Only the fields a service can
+// meaningfully carry are offered: no stock, no reorder level, no supplier.
+type ServiceFormData struct {
+	Categories []categories.TreeNode
+	Units      []units.Unit
+}
+
+// svcUnitOptions/svcDefaultUnit mirror the product form's behaviour: a service
+// still needs a unit (a coffee is sold per cup, a photocopy per sheet), and a
+// new one defaults to "pcs" when it exists rather than whatever sorts first.
+func svcUnitOptions(us []units.Unit) []adminfragments.PickerOption {
+	out := make([]adminfragments.PickerOption, 0, len(us))
+	for _, u := range us {
+		out = append(out, adminfragments.PickerOption{ID: u.ID, Label: u.Name + " (" + u.Abbreviation + ")"})
+	}
+	return out
+}
+
+func svcDefaultUnit(us []units.Unit) int64 {
+	for _, u := range us {
+		if strings.EqualFold(u.Abbreviation, "pcs") {
+			return u.ID
+		}
+	}
+	if len(us) > 0 {
+		return us[0].ID
+	}
+	return 0
+}
+
+templ ServiceForm(d ServiceFormData) {
+	@modalShell("New Service") {
+		<form class="p-6 space-y-4" hx-post="/admin/services" hx-swap="none">
+			<div>
+				<label class="block text-sm font-medium mb-1">Name</label>
+				<input name="name" required maxlength="150" placeholder="e.g. Coffee, Photocopy A4" class="w-full border rounded-lg px-3 py-2"/>
+			</div>
+			<div class="grid grid-cols-2 gap-4">
+				<div>
+					<label class="block text-sm font-medium mb-1">Category</label>
+					@adminfragments.CategoryPicker(d.Categories, "category_id", "", false, "", false)
+				</div>
+				<div>
+					<label class="block text-sm font-medium mb-1">Sold by</label>
+					@adminfragments.OptionPicker("unit_id", svcUnitOptions(d.Units), svcDefaultUnit(d.Units), "Select unit…")
+				</div>
+			</div>
+			<div class="grid grid-cols-2 gap-4">
+				<div>
+					<label class="block text-sm font-medium mb-1">Selling price</label>
+					<input name="selling_price" type="number" step="0.01" min="0" value="0" class="w-full border rounded-lg px-3 py-2"/>
+				</div>
+			</div>
+			<p class="text-xs text-slate-500">
+				A service holds no stock. What it consumes is set afterwards with the Recipe button,
+				and that consumption becomes the line's cost when it is sold.
+			</p>
+			@modalButtons()
+		</form>
+	}
+}
