@@ -182,6 +182,25 @@ func (r *Repository) List(ctx context.Context, limit int) ([]Purchase, error) {
 	return rows, err
 }
 
+// ListBetween lists the purchases actually received in a date window, oldest
+// last. Drafts are excluded: an order that has not arrived is not a purchase,
+// and counting one inflates both what was bought and what is owed.
+//
+// Unlike List it has no row cap. The Purchases report filters by date, and a cap
+// applied before that filter quietly empties any range older than the most
+// recent rows — the report would report less than the truth without saying so.
+func (r *Repository) ListBetween(ctx context.Context, from, to time.Time) ([]Purchase, error) {
+	var rows []Purchase
+	err := r.q.SelectContext(ctx, &rows, `
+		SELECT pu.*, s.name AS supplier_name, u.name AS received_by_name
+		FROM purchases pu
+		JOIN suppliers s ON s.id = pu.supplier_id
+		LEFT JOIN users u ON u.id = pu.received_by
+		WHERE pu.status <> 'draft' AND pu.created_at >= $1 AND pu.created_at < $2
+		ORDER BY pu.created_at DESC`, from, to)
+	return rows, err
+}
+
 // ListByStatus lists draft purchases (Purchase Orders, draft=true) or received
 // history (draft=false), newest first.
 func (r *Repository) ListByStatus(ctx context.Context, draft bool, limit int) ([]Purchase, error) {

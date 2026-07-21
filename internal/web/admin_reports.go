@@ -324,7 +324,10 @@ func (a *adminUI) PurchasesReport(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	all, err := a.s.purchases.List(ctx)
+	// Received purchases only, and the whole range — the previous version listed
+	// the most recent 100 purchases of any status and filtered afterwards, so
+	// drafts inflated the totals and an older range could come back near-empty.
+	inRange, err := a.s.purchases.ListBetween(ctx, from, to)
 	if err != nil {
 		return err
 	}
@@ -332,12 +335,7 @@ func (a *adminUI) PurchasesReport(c echo.Context) error {
 		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx), From: fromStr, To: toStr, Preset: preset,
 		Page: pageParam(c), PageSize: reportPageSize,
 	}
-	inRange := all[:0:0]
-	for _, p := range all {
-		if p.CreatedAt.Before(from) || !p.CreatedAt.Before(to) {
-			continue
-		}
-		inRange = append(inRange, p)
+	for _, p := range inRange {
 		d.Total = d.Total.Add(p.Total)
 		d.Paid = d.Paid.Add(p.PaidAmount)
 		d.Due = d.Due.Add(p.Total.Sub(p.PaidAmount))

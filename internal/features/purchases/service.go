@@ -492,6 +492,12 @@ func ReceiveTx(ctx context.Context, tx *sqlx.Tx, id int64, in ReceiveInput, user
 		if notes == nil {
 			notes = cur.Notes
 		}
+		// What was ordered, read before the planned lines are dropped — the only
+		// record of an item that never arrived.
+		ordered, err := repo.Items(ctx, id)
+		if err != nil {
+			return apperr.Internal("failed to load the ordered lines", err)
+		}
 		// Drop the planned lines, then re-insert as received lines (which posts the
 		// stock/batch/movement/pricing effects via applyReceivedLines).
 		if err := repo.DeleteItems(ctx, id); err != nil {
@@ -508,20 +514,12 @@ func ReceiveTx(ctx context.Context, tx *sqlx.Tx, id int64, in ReceiveInput, user
 			return err
 		}
 		// Partial receipt: carry the still-unreceived quantities into a new draft PO.
+		//
+		// Worked out from the draft's own lines, not from what turned up: an item
+		// ordered but delivered in no quantity at all is left off the receive
+		// entirely, and used to be forgotten with it.
 		if in.KeepRemainder {
-			rem := make([]ItemInput, 0, len(lines))
-			for _, ln := range lines {
-				if ln.OrderedQty == nil {
-					continue // an extra item that wasn't ordered — nothing left to order
-				}
-				short := ln.OrderedQty.Sub(ln.Quantity)
-				if short.IsPositive() {
-					rem = append(rem, ItemInput{
-						ProductID: ln.ProductID, Quantity: short.String(),
-						CostPrice: ln.CostPrice.String(), SellingPrice: ln.SellingPrice.String(),
-					})
-				}
-			}
+			rem := remainderLines(ordered, lines)
 			if len(rem) > 0 {
 				if _, err := createDraftTx(ctx, tx, CreateInput{
 					SupplierID: cur.SupplierID, Discount: "0",
@@ -629,8 +627,21 @@ func loadDetailTx(ctx context.Context, repo *Repository, id int64) (*Detail, err
 	return &Detail{Purchase: *p, Items: items}, nil
 }
 
+// List returns recent purchases of any status for the JSON API's activity
+// listing. It is capped, so it is NOT a reporting source: filtering its result
+// by date would silently miss anything past the cap. Reports use ListBetween.
 func (s *Service) List(ctx context.Context) ([]Purchase, error) {
 	rows, err := s.repo.List(ctx, 100)
+	if err != nil {
+		return nil, apperr.Internal("failed to list purchases", err)
+	}
+	return rows, nil
+}
+
+// ListBetween returns the purchases received in a date window (drafts excluded,
+// no row cap) — what the Purchases report is actually about.
+func (s *Service) ListBetween(ctx context.Context, from, to time.Time) ([]Purchase, error) {
+	rows, err := s.repo.ListBetween(ctx, from, to)
 	if err != nil {
 		return nil, apperr.Internal("failed to list purchases", err)
 	}
@@ -682,4 +693,49 @@ func RegisterAPI(e *echo.Echo, db *sqlx.DB, cfg *config.Config) {
 	g.GET("", api.List)
 	g.GET("/:id", api.Get)
 	g.POST("", api.Create)
+}
+
+
+// remainderLines works out what is still owed after a delivery: for each item on
+// the original order, how much of it did not turn up.
+//
+// It reads from the order rather than from the delivery on purpose. A line that
+// arrived in no quantity at all is simply absent from the receive — the form
+// drops zero-quantity rows — so deriving the remainder from what arrived loses
+// it silently, and the shop goes on believing it is still coming.
+//
+// Quantities are summed per product, so an order listing the same item twice
+// behaves. Anything delivered that was never ordered is ignored: an unexpected
+// extra is not something still owed.
+func remainderLines(ordered, received []PurchaseItem) []ItemInput {
+	got := make(map[int64]decimal.Decimal, len(received))
+	for _, ln := range received {
+		got[ln.ProductID] = got[ln.ProductID].Add(ln.Quantity)
+	}
+	want := make(map[int64]decimal.Decimal, len(ordered))
+	order := make([]int64, 0, len(ordered))
+	first := make(map[int64]PurchaseItem, len(ordered))
+	for _, ln := range ordered {
+		if _, seen := want[ln.ProductID]; !seen {
+			order = append(order, ln.ProductID)
+			first[ln.ProductID] = ln
+		}
+		want[ln.ProductID] = want[ln.ProductID].Add(ln.Quantity)
+	}
+
+	out := make([]ItemInput, 0, len(order))
+	for _, pid := range order {
+		short := want[pid].Sub(got[pid])
+		if !short.IsPositive() {
+			continue
+		}
+		src := first[pid]
+		out = append(out, ItemInput{
+			ProductID:    pid,
+			Quantity:     short.String(),
+			CostPrice:    src.CostPrice.String(),
+			SellingPrice: src.SellingPrice.String(),
+		})
+	}
+	return out
 }
