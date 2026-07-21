@@ -6,6 +6,7 @@ package money
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/shopspring/decimal"
 )
@@ -73,4 +74,19 @@ func sign(neg bool) string {
 		return "-"
 	}
 	return ""
+}
+
+// Qty renders a stock quantity for display: thousands separated, up to three
+// decimal places, with trailing zeros dropped. A count of 1755 reads "1,755"
+// rather than "1,755.00", while a genuinely part-used 3.6 stays "3.6".
+func Qty(d decimal.Decimal) string {
+	s := d.Round(3).String()
+	if strings.Contains(s, ".") {
+		s = strings.TrimRight(s, "0")
+		s = strings.TrimSuffix(s, ".")
+	}
+	if s == "" || s == "-" {
+		return "0"
+	}
+	return withThousands(s)
 }
