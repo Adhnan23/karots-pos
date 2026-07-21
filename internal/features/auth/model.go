@@ -1,6 +1,9 @@
 package auth
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // Role constants mirror the user_role enum.
 const (
@@ -56,6 +59,10 @@ type CreateUserInput struct {
 	Role  string `json:"role"  form:"role"  validate:"required,oneof=admin manager cashier"`
 	PIN   string `json:"pin"   form:"pin"   validate:"required,min=4,max=6,numeric"`
 	ReceiptPrinter string `json:"receipt_printer" form:"receipt_printer" validate:"omitempty,max=100"`
+	// CanHandleSuppliers arrives as an HTML checkbox: "on" when ticked, absent
+	// otherwise. Read as a string, not a bool, so an unticked box means false
+	// rather than a bind error.
+	CanHandleSuppliers string `json:"can_handle_suppliers" form:"can_handle_suppliers" validate:"omitempty"`
 }
 
 // UpdateUserInput edits a user's profile/role and optionally resets the PIN
@@ -66,6 +73,19 @@ type UpdateUserInput struct {
 	Role  string `json:"role"  form:"role"  validate:"required,oneof=admin manager cashier"`
 	PIN   string `json:"pin"   form:"pin"   validate:"omitempty,min=4,max=6,numeric"`
 	ReceiptPrinter string `json:"receipt_printer" form:"receipt_printer" validate:"omitempty,max=100"`
+	// CanHandleSuppliers arrives as an HTML checkbox — see CreateUserInput. An
+	// absent value revokes, which is what a browser sends for an unticked box.
+	CanHandleSuppliers string `json:"can_handle_suppliers" form:"can_handle_suppliers" validate:"omitempty"`
+}
+
+// checkboxOn reads an HTML checkbox value. Browsers omit unticked boxes and
+// send "on" for ticked ones; JSON clients may send "true".
+func checkboxOn(s string) bool {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "on", "true", "1", "yes":
+		return true
+	}
+	return false
 }
 
 // ChangeOwnPINInput is a user changing their own PIN (self-service or forced).

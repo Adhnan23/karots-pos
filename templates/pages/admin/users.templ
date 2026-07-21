@@ -99,6 +99,20 @@ templ UserForm(u *auth.User) {
 				<input name="receipt_printer" value={ usrVal(u, "receipt_printer") } class="w-full border rounded-lg px-3 py-2" placeholder="tcp://192.168.1.50:9100"/>
 				<p class="text-xs text-slate-500">Network printer address for this cashier's counter. Leave blank to use the shop's default receipt printer. Paper size, logo and footer come from Settings.</p>
 			</div>
+			<div>
+				<label class="flex items-start gap-3">
+					<input
+						type="checkbox"
+						name="can_handle_suppliers"
+						checked?={ u != nil && u.CanHandleSuppliers }
+						class="mt-1 w-4 h-4"
+					/>
+					<span>
+						<span class="text-sm font-medium">Can deal with suppliers</span>
+						<span class="block text-xs text-slate-500">Lets this person pay suppliers, take in deliveries and place orders from the till. They will see cost prices. Leave off for anyone who only sells.</span>
+					</span>
+				</label>
+			</div>
 			@modalButtons()
 		</form>
 	}
