@@ -226,6 +226,8 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	sg.GET("/table", cashier.SuppliersTable)
 	sg.GET("/pay/:id", cashier.SupplierPayForm)
 	sg.POST("/:id/payment", cashier.SupplierPayAtCounter)
+	sg.GET("/:id/receive", cashier.ReceiveForm)
+	sg.POST("/:id/receive", cashier.ReceiveWalkIn)
 
 	// Admin (manager/admin)
 	ag := e.Group("/admin", jwt, lockGuard, pinGuard, middleware.RequireRole(auth.RoleAdmin, auth.RoleManager))

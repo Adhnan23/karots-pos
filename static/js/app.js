@@ -1682,6 +1682,16 @@ function grn(symbol, config) {
     notes: config.notes || "",
     lines: [],
     busy: false,
+    // Counter mode: a fixed supplier, a different endpoint, and an optional
+    // "paying now" block. Absent config leaves the admin draft flow untouched.
+    postUrl: config.postUrl || "",
+    redirect: config.redirect || "/admin/purchases",
+    savedMsg: config.savedMsg || "",
+    withPayment: !!config.withPayment,
+    payAmount: 0,
+    payMethod: "cash",
+    paySource: (config.sources && config.sources[0] && config.sources[0].value) || "",
+    sources: config.sources || [],
 
     pick(l) {
       poProductSearch(l);
@@ -1759,6 +1769,11 @@ function grn(symbol, config) {
     subtotal() {
       return this.lines.reduce((s, l) => s + this.lineSub(l), 0);
     },
+    // Fill the payment box with the whole invoice — the common case when a
+    // supplier delivers and is paid on the spot.
+    payAll() {
+      this.payAmount = Number(this.subtotal().toFixed(2));
+    },
     async submit() {
       if (this.busy) return;
       if (!this.supplierId) {
@@ -1778,18 +1793,26 @@ function grn(symbol, config) {
         toast("Add at least one line", "error");
         return;
       }
-      const url = this.editId > 0 ? "/admin/purchases/" + this.editId + "/edit" : "/admin/purchases";
+      const url = this.postUrl
+        ? this.postUrl
+        : this.editId > 0 ? "/admin/purchases/" + this.editId + "/edit" : "/admin/purchases";
+      const body = {
+        supplier_id: Number(this.supplierId),
+        discount: "0",
+        expected_date: this.expectedDate || "",
+        notes: this.notes || null,
+        items: items,
+      };
+      if (this.withPayment) {
+        body.pay_amount = String(this.payAmount || 0);
+        body.pay_method = this.payMethod;
+        body.pay_source = this.paySource;
+      }
       this.busy = true;
       try {
-        await apiFetch("POST", url, {
-          supplier_id: Number(this.supplierId),
-          discount: "0",
-          expected_date: this.expectedDate || "",
-          notes: this.notes || null,
-          items: items,
-        });
-        toast(this.editId > 0 ? "Purchase order updated" : "Purchase order saved", "success");
-        window.location = "/admin/purchases";
+        await apiFetch("POST", url, body);
+        toast(this.savedMsg || (this.editId > 0 ? "Purchase order updated" : "Purchase order saved"), "success");
+        window.location = this.redirect;
       } catch (_) {
         /* toast already shown */
       } finally {
@@ -2075,6 +2098,11 @@ function pret(symbol) {
     },
     subtotal() {
       return this.lines.reduce((s, l) => s + this.lineSub(l), 0);
+    },
+    // Fill the payment box with the whole invoice — the common case when a
+    // supplier delivers and is paid on the spot.
+    payAll() {
+      this.payAmount = Number(this.subtotal().toFixed(2));
     },
     async submit() {
       if (this.busy) return;

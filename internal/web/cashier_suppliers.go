@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"encoding/json"
 	"strconv"
 	"strings"
 
@@ -9,6 +10,7 @@ import (
 	appdb "karots-pos/internal/db"
 	"karots-pos/internal/features/audit"
 	"karots-pos/internal/features/cashflow"
+	"karots-pos/internal/features/purchases"
 	"karots-pos/internal/features/supplierpay"
 	"karots-pos/internal/middleware"
 	"karots-pos/internal/money"
@@ -91,6 +93,37 @@ func (h *cashierUI) cashierCashSources(ctx context.Context, userID int64, userNa
 	return out, nil
 }
 
+// counterReceiveConfig seeds the counter's line editor. It reuses the admin
+// grn() Alpine component, which takes the endpoint and the payment block from
+// its config — one line editor and one product search, two screens.
+type counterReceiveConfig struct {
+	SupplierID   int64
+	SupplierName string
+	PostURL      string
+	Sources      []adminfragments.LocationChoice
+}
+
+func counterReceiveConfigJSON(cfg counterReceiveConfig) string {
+	type src struct {
+		Value string `json:"value"`
+		Label string `json:"label"`
+	}
+	srcs := make([]src, 0, len(cfg.Sources))
+	for _, s := range cfg.Sources {
+		srcs = append(srcs, src{Value: s.Value, Label: s.Label})
+	}
+	b, _ := json.Marshal(map[string]any{
+		"supplierId":   strconv.FormatInt(cfg.SupplierID, 10),
+		"supplierName": cfg.SupplierName,
+		"postUrl":      cfg.PostURL,
+		"redirect":     "/cashier/suppliers",
+		"savedMsg":     "Goods received",
+		"withPayment":  true,
+		"sources":      srcs,
+	})
+	return string(b)
+}
+
 // allowedSource reports whether a submitted cash location is one the counter
 // actually offered.
 //
@@ -151,6 +184,118 @@ func (h *cashierUI) SupplierPayForm(c echo.Context) error {
 		Symbol:   h.cashierSymbol(ctx),
 		Sources:  sources,
 	}))
+}
+
+// ReceiveForm renders the counter delivery screen for one supplier.
+func (h *cashierUI) ReceiveForm(c echo.Context) error {
+	ctx := c.Request().Context()
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	sup, err := h.s.suppliers.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	sources, err := h.cashierCashSources(ctx, middleware.CurrentUserID(c), middleware.CurrentUserName(c))
+	if err != nil {
+		return err
+	}
+	// Point out any order already open with this supplier, so a delivery that
+	// was ordered gets received against it rather than typed in twice.
+	drafts, err := h.s.purchases.ListDrafts(ctx)
+	if err != nil {
+		return err
+	}
+	mine := make([]purchases.Purchase, 0, 2)
+	for _, d := range drafts {
+		if d.SupplierID == id {
+			mine = append(mine, d)
+		}
+	}
+	return response.RenderPage(c, cashierpages.SupplierReceive(cashierpages.SupplierReceiveData{
+		CashierName:   middleware.CurrentUserName(c),
+		Role:          middleware.CurrentRole(c),
+		ShowChangePin: h.showChangePin(c),
+		Symbol:        h.cashierSymbol(ctx),
+		Supplier:      *sup,
+		Drafts:        mine,
+		ConfigJSON: counterReceiveConfigJSON(counterReceiveConfig{
+			SupplierID:   id,
+			SupplierName: sup.Name,
+			PostURL:      "/cashier/suppliers/" + strconv.FormatInt(id, 10) + "/receive",
+			Sources:      sources,
+		}),
+	}))
+}
+
+// ReceiveWalkIn takes in a delivery that was never ordered — the supplier who
+// simply turns up with goods.
+//
+// Goods and any payment are one transaction, so a failed payment never leaves
+// stock on the shelf without its payable.
+func (h *cashierUI) ReceiveWalkIn(c echo.Context) error {
+	ctx := c.Request().Context()
+	supplierID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	var req createRequest
+	if err := c.Bind(&req); err != nil {
+		return apperr.BadRequest("invalid request body")
+	}
+	in := req.CreateInput
+	in.SupplierID = supplierID // never trust the body for who this is owed to
+	if err := c.Validate(&in); err != nil {
+		return err
+	}
+	pay, err := parsePayNow(req.PayFields)
+	if err != nil {
+		return err
+	}
+	if pay.amount.IsPositive() && pay.method == "cash" {
+		if pay.source, err = h.counterSource(c, req.PaySource); err != nil {
+			return err
+		}
+	}
+	sup, err := h.s.suppliers.Get(ctx, supplierID)
+	if err != nil {
+		return err
+	}
+	userID := middleware.CurrentUserID(c)
+
+	var d *purchases.Detail
+	var rec *cashflow.Receipt
+	err = appdb.WithTx(ctx, h.s.db, func(tx *sqlx.Tx) error {
+		got, txErr := purchases.CreateTx(ctx, tx, in, userID)
+		if txErr != nil {
+			return txErr
+		}
+		d = got
+		if !pay.amount.IsPositive() {
+			return nil
+		}
+		_, k, txErr := h.s.paySupplierTx(ctx, tx, payRequest{
+			SupplierID:   supplierID,
+			SupplierName: sup.Name,
+			In: supplierpay.PayInput{
+				Method:      pay.method,
+				Allocations: []supplierpay.Alloc{{PurchaseID: d.Purchase.ID, Amount: pay.amount}},
+			},
+			Source: pay.source,
+		}, userID)
+		rec = k
+		return txErr
+	})
+	if err != nil {
+		return err
+	}
+	h.s.logAudit(c, audit.ActionCreate, "purchase", strconv.FormatInt(d.Purchase.ID, 10),
+		"received a delivery from "+sup.Name+" at the counter")
+	if rec != nil {
+		h.s.printMoneyReceipt(ctx, rec)
+	}
+	return response.Created(c, d)
 }
 
 // SupplierPayAtCounter records a payment handed over at the till.
