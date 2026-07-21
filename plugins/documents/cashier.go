@@ -126,6 +126,14 @@ func (h *cashierUI) Quote(c echo.Context) error {
 	comps := make([]map[string]any, 0, len(cs))
 	consCost := decimal.Zero
 	base := decimal.NewFromInt(int64(baseUnits))
+	// Anything the plugin already resolved for this size wins over a core recipe
+	// naming the same product. The two lists are independent, so without this an
+	// item listed in both would be deducted and charged twice on every job —
+	// silently, because both numbers look plausible on their own.
+	fromPlugin := make(map[int64]bool, len(cs))
+	for _, cm := range cs {
+		fromPlugin[cm.ProductID] = true
+	}
 	for _, cm := range cs {
 		// Paper is a whole unit — a single copy uses a whole sheet. This used to
 		// Ceil() every component, so a yield-based one (a toner rated for 5000
@@ -144,6 +152,9 @@ func (h *cashierUI) Quote(c echo.Context) error {
 	// fractional, so they are expanded without rounding up.
 	core, _ := recipes.NewRepository(h.p.core.DB).For(ctx, sv.ProductID)
 	for _, cons := range recipes.Expand(core, base) {
+		if fromPlugin[cons.ProductID] {
+			continue
+		}
 		comps = append(comps, map[string]any{"product_id": cons.ProductID, "quantity": cons.Qty.String()})
 		consCost = consCost.Add(cons.Qty.Mul(h.p.store.ConsumableCost(ctx, cons.ProductID)))
 	}
