@@ -2593,15 +2593,85 @@ function categoryPicker(cfg) {
     toggle() {
       this.open = !this.open;
       if (this.open) this.$nextTick(() => this.$refs.search && this.$refs.search.focus());
+      else this.cancelCreate();
     },
     pick(o) {
       this.selected = o ? String(o.id) : "";
       this.open = false;
       this.query = "";
+      this.cancelCreate();
       if (this.reload) this.$nextTick(() => this.$dispatch("category-changed"));
     },
     clear() {
       this.pick(null);
+    },
+
+    // --- inline category creation (only rendered when allowCreate) ---
+    allowCreate: !!cfg.allowCreate,
+    creating: false,
+    createParent: null,
+    newName: "",
+    createError: "",
+    createBusy: false,
+
+    startCreate(parent) {
+      this.creating = true;
+      this.createParent = parent;
+      this.newName = this.query || "";
+      this.createError = "";
+      this.$nextTick(() => this.$refs.newName && this.$refs.newName.focus());
+    },
+    cancelCreate() {
+      this.creating = false;
+      this.createParent = null;
+      this.newName = "";
+      this.createError = "";
+    },
+    async submitCreate() {
+      if (this.createBusy) return;
+      const name = (this.newName || "").trim();
+      if (!name) {
+        this.createError = "Enter a category name.";
+        return;
+      }
+      this.createBusy = true;
+      this.createError = "";
+      try {
+        const body = new URLSearchParams({ name: name });
+        if (this.createParent) body.set("parent_id", String(this.createParent.id));
+        const res = await fetch("/admin/categories/quick", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+          body: body,
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          this.createError = (json.error && json.error.message) || "Could not create that category.";
+          return;
+        }
+        const created = json.data || json;
+        // Splice the new option in directly after its parent so the indented
+        // list still reads as a tree; append when it is top-level.
+        const opt = { id: created.id, name: created.name, depth: created.depth || 0 };
+        const at = this.createParent
+          ? this.options.findIndex((o) => String(o.id) === String(this.createParent.id))
+          : -1;
+        const existing = this.options.findIndex((o) => String(o.id) === String(opt.id));
+        if (existing >= 0) {
+          this.options.splice(existing, 1, opt);
+        } else if (at >= 0) {
+          this.options.splice(at + 1, 0, opt);
+        } else {
+          this.options.push(opt);
+        }
+        this.selected = String(opt.id);
+        this.query = "";
+        this.cancelCreate();
+        this.open = false;
+      } finally {
+        this.createBusy = false;
+      }
     },
   };
 }

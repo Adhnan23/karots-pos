@@ -101,34 +101,63 @@ templ BarcodeForm(p *products.Product) {
 // category <select>. It backs a hidden input named fieldName so it submits like
 // a normal field; includeAll adds an "all" choice (for filters) and reload makes
 // picking fire a "category-changed" event the products filter form listens for.
-templ CategoryPicker(nodes []categories.TreeNode, fieldName, selected string, includeAll bool, allLabel string, reload bool) {
-	<div class="relative" x-data={ categoryPickerData(nodes, fieldName, selected, includeAll, allLabel, reload) } x-on:click.outside="open = false">
+// allowCreate turns on the inline creator: a ＋ on every row nests a new
+// category under that row, so the parent comes from where the user tapped
+// rather than a typed path. Enable it only where a product is being captured,
+// never on a filter.
+templ CategoryPicker(nodes []categories.TreeNode, fieldName, selected string, includeAll bool, allLabel string, reload, allowCreate bool) {
+	<div class="relative" x-data={ categoryPickerData(nodes, fieldName, selected, includeAll, allLabel, reload, allowCreate) } x-on:click.outside="open = false">
 		<input type="hidden" name={ fieldName } x-model="selected"/>
 		<button type="button" x-on:click="toggle()" class="w-full border rounded-lg px-3 py-2 text-left flex items-center justify-between gap-2">
 			<span class="truncate" x-text="label()"></span>
 			<span class="text-slate-400">▾</span>
 		</button>
 		<div x-show="open" x-cloak class="absolute z-50 mt-1 w-full bg-white border rounded-lg shadow-lg max-h-72 overflow-auto">
-			<div class="p-2 border-b sticky top-0 bg-white">
-				<input x-ref="search" x-model="query" type="search" placeholder="Search category…" class="w-full border rounded-lg px-2 py-1.5 text-sm"/>
-			</div>
-			<ul class="py-1 text-sm">
-				if includeAll {
-					<li>
-						<button type="button" x-on:click="clear()" class="w-full text-left px-3 py-1.5 hover:bg-slate-50 text-slate-500" x-text="allLabel"></button>
-					</li>
+			<div x-show="!creating">
+				<div class="p-2 border-b sticky top-0 bg-white">
+					<input x-ref="search" x-model="query" type="search" placeholder="Search category…" class="w-full border rounded-lg px-2 py-1.5 text-sm"/>
+				</div>
+				<ul class="py-1 text-sm">
+					if includeAll {
+						<li>
+							<button type="button" x-on:click="clear()" class="w-full text-left px-3 py-1.5 hover:bg-slate-50 text-slate-500" x-text="allLabel"></button>
+						</li>
+					}
+					<template x-for="o in filtered()" x-bind:key="o.id">
+						<li class="flex items-center">
+							<button type="button" x-on:click="pick(o)" x-bind:style="indent(o)" class="flex-1 text-left py-1.5 pr-3 hover:bg-slate-50" x-bind:class="String(o.id) === String(selected) ? 'bg-indigo-50 text-indigo-700 font-medium' : ''">
+								<span x-show="o.depth > 0" class="text-slate-300">↳ </span><span x-text="o.name"></span>
+							</button>
+							if allowCreate {
+								<button type="button" title="Add a category under this one" x-on:click.stop="startCreate(o)" class="px-2 py-1.5 text-slate-400 hover:text-indigo-600">＋</button>
+							}
+						</li>
+					</template>
+					<template x-if="filtered().length === 0">
+						<li class="px-3 py-2 text-slate-400">No matches.</li>
+					</template>
+				</ul>
+				if allowCreate {
+					<button type="button" x-on:click="startCreate(null)" class="w-full text-left px-3 py-2 border-t text-indigo-600 hover:bg-slate-50 text-sm">
+						＋ New top-level category
+					</button>
 				}
-				<template x-for="o in filtered()" x-bind:key="o.id">
-					<li>
-						<button type="button" x-on:click="pick(o)" x-bind:style="indent(o)" class="w-full text-left py-1.5 pr-3 hover:bg-slate-50" x-bind:class="String(o.id) === String(selected) ? 'bg-indigo-50 text-indigo-700 font-medium' : ''">
-							<span x-show="o.depth > 0" class="text-slate-300">↳ </span><span x-text="o.name"></span>
-						</button>
-					</li>
-				</template>
-				<template x-if="filtered().length === 0">
-					<li class="px-3 py-2 text-slate-400">No matches.</li>
-				</template>
-			</ul>
+			</div>
+			if allowCreate {
+				<div x-show="creating" x-cloak class="p-3 space-y-2">
+					<div class="text-xs text-slate-500" x-text="createParent ? ('New under “' + createParent.name + '”') : 'New top-level category'"></div>
+					<input
+						x-ref="newName" x-model="newName" type="text" placeholder="Category name"
+						x-on:keydown.enter.prevent="submitCreate()" x-on:keydown.escape.prevent="cancelCreate()"
+						class="w-full border rounded-lg px-2 py-1.5 text-sm"
+					/>
+					<p class="text-xs text-rose-600" x-show="createError" x-cloak x-text="createError"></p>
+					<div class="flex gap-2">
+						<button type="button" x-on:click="submitCreate()" x-bind:disabled="createBusy" class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-sm disabled:opacity-40">Create</button>
+						<button type="button" x-on:click="cancelCreate()" class="px-3 py-1.5 rounded-lg border text-sm">Cancel</button>
+					</div>
+				</div>
+			}
 		</div>
 	</div>
 }
@@ -170,7 +199,7 @@ templ ProductForm(p *products.Product, cats []categories.TreeNode, us []units.Un
 				<div class="grid grid-cols-2 gap-4">
 					<div>
 						<label class="block text-sm font-medium mb-1">Category</label>
-						@CategoryPicker(cats, "category_id", productCatID(p), false, "", false)
+						@CategoryPicker(cats, "category_id", productCatID(p), false, "", false, true)
 					</div>
 					<div>
 						<label class="block text-sm font-medium mb-1">Unit</label>

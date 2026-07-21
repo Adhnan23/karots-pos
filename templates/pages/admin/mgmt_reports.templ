@@ -653,7 +653,7 @@ templ InventoryReport(d InventoryReportData) {
 				<div>
 					<label class="block text-xs text-slate-500 mb-1">Category</label>
 					<div class="min-w-[14rem]">
-						@adminfragments.CategoryPicker(d.Categories, "category_id", invCatID(d), true, "All categories", false)
+						@adminfragments.CategoryPicker(d.Categories, "category_id", invCatID(d), true, "All categories", false, false)
 					</div>
 				</div>
 				<label class="flex items-center gap-2 text-sm pb-1.5">

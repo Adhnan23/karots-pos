@@ -14,7 +14,7 @@ import (
 // categoryPickerData builds the x-data init string for the categoryPicker Alpine
 // component (static/js/app.js): the category options as JSON plus the picker
 // config. Used by both the product form and the products filter.
-func categoryPickerData(nodes []categories.TreeNode, fieldName, selected string, includeAll bool, allLabel string, reload bool) string {
+func categoryPickerData(nodes []categories.TreeNode, fieldName, selected string, includeAll bool, allLabel string, reload, allowCreate bool) string {
 	type opt struct {
 		ID    int64  `json:"id"`
 		Name  string `json:"name"`
@@ -25,12 +25,13 @@ func categoryPickerData(nodes []categories.TreeNode, fieldName, selected string,
 		opts = append(opts, opt{ID: n.ID, Name: n.Name, Depth: n.Depth})
 	}
 	cfg := map[string]any{
-		"name":       fieldName,
-		"selected":   selected,
-		"options":    opts,
-		"includeAll": includeAll,
-		"allLabel":   allLabel,
-		"reload":     reload,
+		"name":        fieldName,
+		"selected":    selected,
+		"options":     opts,
+		"includeAll":  includeAll,
+		"allLabel":    allLabel,
+		"reload":      reload,
+		"allowCreate": allowCreate,
 	}
 	b, _ := json.Marshal(cfg)
 	return "categoryPicker(" + string(b) + ")"

@@ -65,7 +65,7 @@ templ StockTakePage(d StockTakeData) {
 		<form method="get" action="/admin/stock/take" class="flex flex-wrap gap-3 mb-4" x-on:category-changed="$el.submit()">
 			<input type="search" name="search" value={ d.Search } placeholder="Search by name or barcode…" class="flex-1 min-w-[14rem] max-w-sm border rounded-lg px-3 py-2"/>
 			<div class="w-56">
-				@adminfragments.CategoryPicker(d.Categories, "category_id", d.CategoryID, true, "All categories", true)
+				@adminfragments.CategoryPicker(d.Categories, "category_id", d.CategoryID, true, "All categories", true, false)
 			</div>
 			<button class="px-4 py-2 rounded-lg border font-medium">Search</button>
 		</form>

@@ -58,7 +58,7 @@ templ ProductsPage(d ProductsData) {
 					class="flex-1 min-w-[14rem] max-w-sm border rounded-lg px-3 py-2"
 				/>
 				<div class="w-56">
-					@adminfragments.CategoryPicker(d.Categories, "category_id", d.CategoryID, true, "All categories", true)
+					@adminfragments.CategoryPicker(d.Categories, "category_id", d.CategoryID, true, "All categories", true, false)
 				</div>
 			</form>
 			<div id="product-list">
