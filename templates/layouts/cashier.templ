@@ -1,10 +1,15 @@
 package layouts
 
-import "karots-pos/internal/features/auth"
+import (
+	"karots-pos/internal/features/auth"
+	"karots-pos/internal/middleware"
+)
 
 // cashierPalette is the command-palette destination list for the terminal. The
 // Admin entry is only meaningful for admins/managers, but it's harmless to list.
-func cashierPalette(role string) []paletteEntry {
+// Suppliers is gated on the same rule as its routes, so it never offers a
+// destination the user would be refused at.
+func cashierPalette(role string, canSuppliers bool) []paletteEntry {
 	out := []paletteEntry{
 		{"/cashier", "Sell", "Terminal"},
 		{"/cashier/returns", "Returns", "Terminal"},
@@ -14,6 +19,9 @@ func cashierPalette(role string) []paletteEntry {
 		{"/cashier/receipts", "Receipts", "Terminal"},
 		{"/cashier/labels", "Print Labels", "Terminal"},
 		{"/cashier/warranty", "Warranty", "Terminal"},
+	}
+	if middleware.MaySeeSuppliers(role, canSuppliers) {
+		out = append(out, paletteEntry{"/cashier/suppliers", "Suppliers", "Terminal"})
 	}
 	for _, t := range pluginCashierTabs() {
 		out = append(out, paletteEntry{t.Href, t.Label, "Terminal"})
@@ -43,6 +51,9 @@ templ Cashier(title, userName, role, active string, showChangePin bool) {
 						@cashierTab("/cashier/receipts", "Receipts", active == "receipts")
 						@cashierTab("/cashier/labels", "Labels", active == "labels")
 						@cashierTab("/cashier/warranty", "Warranty", active == "warranty")
+						if middleware.MaySeeSuppliers(role, middleware.CanHandleSuppliersCtx(ctx)) {
+							@cashierTab("/cashier/suppliers", "Suppliers", active == "suppliers")
+						}
 						for _, t := range pluginCashierTabs() {
 							@cashierTab(t.Href, t.Label, active == t.Key)
 						}
@@ -81,7 +92,7 @@ templ Cashier(title, userName, role, active string, showChangePin bool) {
 			<div class="flex-1 min-h-0">
 				{ children... }
 			</div>
-			@CommandPalette(paletteJSON(cashierPalette(role)))
+			@CommandPalette(paletteJSON(cashierPalette(role, middleware.CanHandleSuppliersCtx(ctx))))
 		</div>
 	}
 }

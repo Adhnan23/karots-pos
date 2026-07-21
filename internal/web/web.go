@@ -218,6 +218,15 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	cg.GET("/warranty/lookup", cashier.WarrantyLookup)
 	cg.POST("/warranty/replace", cashier.WarrantyReplace)
 
+	// Suppliers at the counter (per-user permission; admins/managers always pass).
+	// A supplier turning up while the cashier is alone used to mean calling the
+	// owner away or recording nothing at all.
+	sg := cg.Group("/suppliers", middleware.RequireSupplierAccess())
+	sg.GET("", cashier.Suppliers)
+	sg.GET("/table", cashier.SuppliersTable)
+	sg.GET("/pay/:id", cashier.SupplierPayForm)
+	sg.POST("/:id/payment", cashier.SupplierPayAtCounter)
+
 	// Admin (manager/admin)
 	ag := e.Group("/admin", jwt, lockGuard, pinGuard, middleware.RequireRole(auth.RoleAdmin, auth.RoleManager))
 	ag.GET("", admin.Dashboard)
