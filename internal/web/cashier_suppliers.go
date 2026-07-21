@@ -10,8 +10,10 @@ import (
 	appdb "karots-pos/internal/db"
 	"karots-pos/internal/features/audit"
 	"karots-pos/internal/features/cashflow"
+	"karots-pos/internal/features/products"
 	"karots-pos/internal/features/purchases"
 	"karots-pos/internal/features/supplierpay"
+	"karots-pos/internal/features/suppliers"
 	"karots-pos/internal/middleware"
 	"karots-pos/internal/money"
 	"karots-pos/internal/response"
@@ -102,6 +104,7 @@ type counterReceiveConfig struct {
 	PostURL      string
 	SavedMsg     string
 	WithPayment  bool
+	ProductURL   string // set to allow creating a product from a delivery line
 	Sources      []adminfragments.LocationChoice
 }
 
@@ -125,6 +128,7 @@ func counterReceiveConfigJSON(cfg counterReceiveConfig) string {
 		"redirect":     "/cashier/suppliers",
 		"savedMsg":     msg,
 		"withPayment":  cfg.WithPayment,
+		"productUrl":   cfg.ProductURL,
 		"sources":      srcs,
 	})
 	return string(b)
@@ -232,6 +236,7 @@ func (h *cashierUI) ReceiveForm(c echo.Context) error {
 			PostURL:      "/cashier/suppliers/" + strconv.FormatInt(id, 10) + "/receive",
 			SavedMsg:     "Goods received",
 			WithPayment:  true,
+			ProductURL:   "/cashier/suppliers/products",
 			Sources:      sources,
 		}),
 	}))
@@ -436,4 +441,56 @@ func (h *cashierUI) SupplierPayAtCounter(c echo.Context) error {
 // reach for a cashier.
 func (h *cashierUI) OrderPrint(c echo.Context) error {
 	return h.s.renderPOPrint(c)
+}
+
+// SupplierQuickCreate adds a supplier nobody has dealt with before, from the
+// counter.
+//
+// Name and phone only: a supplier is standing there with boxes, and the address
+// and credit terms can wait. Without this the cashier's only options were to
+// record the delivery against the wrong supplier or not record it at all — the
+// very thing the counter exists to prevent.
+func (h *cashierUI) SupplierQuickCreate(c echo.Context) error {
+	ctx := c.Request().Context()
+	name := strings.TrimSpace(c.FormValue("name"))
+	if name == "" {
+		return apperr.Validation("supplier name is required")
+	}
+	in := suppliers.CreateInput{Name: name, CreditDays: 0, OpeningBalance: "0"}
+	if phone := strings.TrimSpace(c.FormValue("phone")); phone != "" {
+		in.Phone = &phone
+	}
+	sup, err := h.s.suppliers.Create(ctx, in)
+	if err != nil {
+		return err
+	}
+	h.s.logAudit(c, audit.ActionCreate, "supplier", strconv.FormatInt(sup.ID, 10),
+		"added supplier at the counter: "+sup.Name)
+	return htmxDone(c, sup.Name+" added", "reload-suppliers")
+}
+
+// ProductQuickCreate adds a product that has just arrived on a delivery, so the
+// receive line can carry it.
+//
+// Without this the line simply could not be filled, so the item was left off the
+// invoice — which makes the stock, the invoice total and therefore the payment
+// all wrong. See products.CreateForIntake for why this is not the till's
+// quick-add.
+func (h *cashierUI) ProductQuickCreate(c echo.Context) error {
+	var in products.IntakeInput
+	if err := c.Bind(&in); err != nil {
+		return apperr.BadRequest("invalid request")
+	}
+	p, err := h.s.products.CreateForIntake(c.Request().Context(), in, middleware.CurrentUserID(c))
+	if err != nil {
+		return err
+	}
+	h.s.logAudit(c, audit.ActionCreate, "product", strconv.FormatInt(p.ID, 10),
+		"added on a delivery at the counter: "+p.Name)
+	return response.Created(c, p)
+}
+
+// SupplierNewForm renders the counter's add-a-supplier dialog.
+func (h *cashierUI) SupplierNewForm(c echo.Context) error {
+	return response.RenderFragment(c, cashierpages.SupplierNewForm())
 }

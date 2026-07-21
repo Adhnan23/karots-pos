@@ -231,6 +231,11 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	sg.GET("/:id/order", cashier.OrderForm)
 	sg.POST("/:id/order", cashier.OrderCreate)
 	sg.GET("/orders/print", cashier.OrderPrint)
+	// A supplier or a product met for the first time at the counter. Without
+	// these the cashier hits a dead end mid-delivery.
+	sg.GET("/new", cashier.SupplierNewForm)
+	sg.POST("/new", cashier.SupplierQuickCreate)
+	sg.POST("/products", cashier.ProductQuickCreate)
 
 	// Admin (manager/admin)
 	ag := e.Group("/admin", jwt, lockGuard, pinGuard, middleware.RequireRole(auth.RoleAdmin, auth.RoleManager))

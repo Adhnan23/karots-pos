@@ -606,3 +606,75 @@ func (s *Service) ListServices(ctx context.Context) ([]Product, error) {
 	}
 	return rows, nil
 }
+
+// IntakeInput is a product first met on a supplier's delivery note.
+type IntakeInput struct {
+	Name    string `json:"name"          form:"name"`
+	Cost    string `json:"cost_price"    form:"cost_price"`
+	Selling string `json:"selling_price" form:"selling_price"`
+	Barcode string `json:"barcode"       form:"barcode"`
+	UnitID  int64  `json:"unit_id"       form:"unit_id"`
+}
+
+// CreateForIntake makes a product that has just arrived on a delivery, so the
+// receiving line can carry it.
+//
+// Deliberately not QuickCreate: that one exists for a sale about to happen, so
+// it seeds stock to the quantity being sold and leaves cost at zero. Here the
+// goods have not been booked yet — the receive posts the stock and opens the
+// costed batch itself — so stock starts at zero and the cost comes off the
+// supplier's invoice, which is better data than the till ever has.
+//
+// Lands in Uncategorized and flagged needs_review, stamped with whoever took the
+// delivery, so it surfaces in the admin review queue for a real category and a
+// tidy name.
+func (s *Service) CreateForIntake(ctx context.Context, in IntakeInput, userID int64) (*Product, error) {
+	name := strings.TrimSpace(in.Name)
+	if name == "" {
+		return nil, apperr.Validation("item name is required")
+	}
+	cost, err := money.Parse(in.Cost)
+	if err != nil || cost.IsNegative() {
+		return nil, apperr.Validation("cost price must be a non-negative amount")
+	}
+	selling, err := money.Parse(in.Selling)
+	if err != nil || selling.IsNegative() {
+		return nil, apperr.Validation("selling price must be a non-negative amount")
+	}
+
+	var newID int64
+	err = appdb.WithTx(ctx, s.db, func(tx *sqlx.Tx) error {
+		catID, err := ensureUncategorized(ctx, tx)
+		if err != nil {
+			return apperr.Internal("failed to resolve category", err)
+		}
+		unitID := in.UnitID
+		if unitID <= 0 {
+			unitID, err = defaultUnitID(ctx, tx)
+			if err != nil {
+				return apperr.Internal("failed to resolve unit", err)
+			}
+		}
+		id, err := NewRepository(tx).Insert(ctx, writeRow{
+			Name:        name,
+			Barcode:     nullStr(strings.TrimSpace(in.Barcode)),
+			CategoryID:  catID,
+			UnitID:      unitID,
+			Cost:        cost,
+			Selling:     selling,
+			Wholesale:   decimal.Zero,
+			Tax:         decimal.Zero,
+			NeedsReview: true,
+			CreatedBy:   &userID,
+		})
+		if err != nil {
+			return mapWriteErr(err)
+		}
+		newID = id
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return s.Get(ctx, newID)
+}

@@ -1692,6 +1692,10 @@ function grn(symbol, config) {
     payMethod: "cash",
     paySource: (config.sources && config.sources[0] && config.sources[0].value) || "",
     sources: config.sources || [],
+    // When set, a product the search can't find can be created from the line —
+    // otherwise a delivery containing something new simply can't be recorded.
+    productUrl: config.productUrl || "",
+    canCreateProducts: !!config.productUrl,
 
     pick(l) {
       poProductSearch(l);
@@ -1769,6 +1773,38 @@ function grn(symbol, config) {
     subtotal() {
       return this.lines.reduce((s, l) => s + this.lineSub(l), 0);
     },
+    // newItemHint nudges for the two numbers a new item genuinely needs: the
+    // cost is on the invoice in the cashier's hand, and a zero cost would book
+    // the eventual sale as pure profit.
+    newItemHint(l) {
+      if (!(Number(l.cost_price) > 0)) return "— enter what it costs you first";
+      if (!(Number(l.selling_price) > 0)) return "— enter what you'll sell it for";
+      return "— new item, you can tidy it up later";
+    },
+    async createProduct(l) {
+      const name = (l.product_name || "").trim();
+      if (!name) { toast("Type the item name first", "error"); return; }
+      const cost = Number(l.cost_price) || 0;
+      const sell = Number(l.selling_price) || 0;
+      if (cost <= 0) { toast("Enter what it costs you first", "error"); return; }
+      if (sell <= 0) { toast("Enter what you'll sell it for", "error"); return; }
+      try {
+        const res = await apiFetch("POST", this.productUrl, {
+          name: name,
+          cost_price: String(cost),
+          selling_price: String(sell),
+        });
+        const p = res && res.data;
+        if (!p) return;
+        l.product_id = p.id;
+        l.product_name = p.name;
+        l._results = [];
+        l._open = false;
+        toast(p.name + " added — it'll show in the owner's review list", "success");
+      } catch (_) {
+        /* toast already shown */
+      }
+    },
     // Fill the payment box with the whole invoice — the common case when a
     // supplier delivers and is paid on the spot.
     payAll() {
@@ -1839,6 +1875,10 @@ function grnReceive(symbol, config) {
     payMethod: "cash",
     paySource: (config.sources && config.sources[0] && config.sources[0].value) || "",
     sources: config.sources || [],
+    // When set, a product the search can't find can be created from the line —
+    // otherwise a delivery containing something new simply can't be recorded.
+    productUrl: config.productUrl || "",
+    canCreateProducts: !!config.productUrl,
     keepRemainder: true,
     busy: false,
     lines: (config.lines || []).map((l) => ({
@@ -2101,6 +2141,38 @@ function pret(symbol) {
     },
     subtotal() {
       return this.lines.reduce((s, l) => s + this.lineSub(l), 0);
+    },
+    // newItemHint nudges for the two numbers a new item genuinely needs: the
+    // cost is on the invoice in the cashier's hand, and a zero cost would book
+    // the eventual sale as pure profit.
+    newItemHint(l) {
+      if (!(Number(l.cost_price) > 0)) return "— enter what it costs you first";
+      if (!(Number(l.selling_price) > 0)) return "— enter what you'll sell it for";
+      return "— new item, you can tidy it up later";
+    },
+    async createProduct(l) {
+      const name = (l.product_name || "").trim();
+      if (!name) { toast("Type the item name first", "error"); return; }
+      const cost = Number(l.cost_price) || 0;
+      const sell = Number(l.selling_price) || 0;
+      if (cost <= 0) { toast("Enter what it costs you first", "error"); return; }
+      if (sell <= 0) { toast("Enter what you'll sell it for", "error"); return; }
+      try {
+        const res = await apiFetch("POST", this.productUrl, {
+          name: name,
+          cost_price: String(cost),
+          selling_price: String(sell),
+        });
+        const p = res && res.data;
+        if (!p) return;
+        l.product_id = p.id;
+        l.product_name = p.name;
+        l._results = [];
+        l._open = false;
+        toast(p.name + " added — it'll show in the owner's review list", "success");
+      } catch (_) {
+        /* toast already shown */
+      }
     },
     // Fill the payment box with the whole invoice — the common case when a
     // supplier delivers and is paid on the spot.

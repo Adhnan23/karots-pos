@@ -26,8 +26,17 @@ templ Suppliers(d SuppliersData) {
 	@layouts.Cashier("Suppliers", d.CashierName, d.Role, "suppliers", d.ShowChangePin) {
 		<div class="h-full overflow-auto p-6">
 			<div class="max-w-4xl mx-auto">
-				<h1 class="text-xl font-bold mb-1">Suppliers</h1>
-				<p class="text-sm text-slate-500 mb-4">Pay a supplier, take in a delivery, or note down an order — without calling the owner.</p>
+				<div class="flex items-start justify-between mb-4">
+					<div>
+						<h1 class="text-xl font-bold mb-1">Suppliers</h1>
+						<p class="text-sm text-slate-500">Pay a supplier, take in a delivery, or note down an order — without calling the owner.</p>
+					</div>
+					<button
+						hx-get="/cashier/suppliers/new"
+						hx-target="#modal-container"
+						class="shrink-0 px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium"
+					>+ New supplier</button>
+				</div>
 				<input
 					name="q"
 					value={ d.Query }
@@ -179,6 +188,28 @@ templ SupplierPayForm(d SupplierPayData) {
 	}
 }
 
+// SupplierNewForm adds a supplier nobody has dealt with before. Name and phone
+// only — the rest can wait until the boxes are off the counter.
+templ SupplierNewForm() {
+	@cashierModal("New Supplier") {
+		<form class="p-6 space-y-4" hx-post="/cashier/suppliers/new" hx-swap="none">
+			<div>
+				<label class="block text-sm font-medium mb-1">Supplier name</label>
+				<input name="name" required autofocus class="w-full border rounded-lg px-3 py-2" placeholder="e.g. Kandy Wholesale"/>
+			</div>
+			<div>
+				<label class="block text-sm font-medium mb-1">Phone <span class="text-slate-400 font-normal">(optional)</span></label>
+				<input name="phone" class="w-full border rounded-lg px-3 py-2" placeholder="07XXXXXXXX"/>
+			</div>
+			<p class="text-xs text-slate-500">Address and credit terms can be filled in later — this is enough to record a delivery or a payment now.</p>
+			<div class="flex justify-end gap-3 pt-2">
+				<button type="button" class="px-4 py-2 rounded-lg border" x-on:click="$dispatch('close-modal')">Cancel</button>
+				<button type="submit" class="px-4 py-2 rounded-lg bg-indigo-600 text-white">Add supplier</button>
+			</div>
+		</form>
+	}
+}
+
 // ====================== Receiving a delivery ======================
 
 type SupplierReceiveData struct {
@@ -234,9 +265,16 @@ templ SupplierReceive(d SupplierReceiveData) {
 								<tr class="border-b">
 									<td class="py-1 pr-2 relative" x-on:click.away="l._open=false">
 										<input type="text" x-model="l.product_name" x-on:input="pick(l)" x-on:focus="pick(l)" placeholder="Search name or barcode…" class="w-full border rounded px-2 py-1"/>
-										<div x-show="l._open && l._results.length" class="absolute z-20 left-0 right-0 mt-1 bg-white border rounded-lg shadow max-h-56 overflow-auto" x-cloak>
+										<div x-show="l._open && (l._results.length || (canCreateProducts && (l.product_name || '').trim()))" class="absolute z-20 left-0 right-0 mt-1 bg-white border rounded-lg shadow max-h-56 overflow-auto" x-cloak>
 											<template x-for="r in l._results" x-bind:key="r.id">
 												<button type="button" x-on:click="choose(l, r)" class="block w-full text-left px-3 py-1.5 hover:bg-slate-100" x-text="r.name + (r.barcode ? '  ·  ' + r.barcode : '')"></button>
+											</template>
+											<template x-if="canCreateProducts && (l.product_name || '').trim()">
+												<button type="button" x-on:click="createProduct(l)" class="block w-full text-left px-3 py-2 border-t bg-slate-50 hover:bg-slate-100">
+													<span class="text-indigo-600 font-medium">+ Add</span>
+													<span x-text="'&quot;' + l.product_name + '&quot;'"></span>
+													<span class="block text-xs text-slate-500" x-text="newItemHint(l)"></span>
+												</button>
 											</template>
 										</div>
 									</td>
