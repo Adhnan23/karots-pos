@@ -122,9 +122,14 @@ templ RecipeForm(p products.Product, cs []recipes.Component, ls []recipes.CostLi
 							@costRow(l.Label, l.CostPerUnit.String(), symbol)
 						}
 						@costRow("", "", symbol)
-						@costRow("", "", symbol)
+						<template x-for="key in extraCosts" x-bind:key="key">
+							@costRow("", "", symbol)
+						</template>
 					</tbody>
 				</table>
+				<button type="button" class="text-indigo-600 text-sm mt-2" x-on:click="extraCosts.push(Date.now())">
+					+ Add another cost
+				</button>
 			</div>
 			@modalButtons()
 		</form>

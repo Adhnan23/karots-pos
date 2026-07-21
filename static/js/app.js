@@ -2631,6 +2631,9 @@ function categoryTree() {
 function recipeEditor() {
   return {
     added: [],
+    // Extra blank cost-line rows the user asked for. One blank row is always
+    // rendered; this holds any beyond it.
+    extraCosts: [],
     error: "",
     addFromPicker(root) {
       this.error = "";
