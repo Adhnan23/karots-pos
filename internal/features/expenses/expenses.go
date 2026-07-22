@@ -275,3 +275,41 @@ func RegisterAPI(e *echo.Echo, db *sqlx.DB, cfg *config.Config) {
 	g.POST("", api.Create)
 	g.DELETE("/:id", api.Delete)
 }
+
+// DefaultCategories is the built-in expense category list, in the canonical
+// order the combo box offers them. Learned categories from the DB are appended
+// after these (see MergedCategories).
+func DefaultCategories() []string {
+	return []string{"Rent", "Electricity", "Salary", "Transport", "Water", "Maintenance", "Supplies", "Repairs"}
+}
+
+// DistinctCategories returns every category already used on an expense, so the
+// combo box can suggest them next time without a category-management screen.
+func (r *Repository) DistinctCategories(ctx context.Context) ([]string, error) {
+	var rows []string
+	err := r.q.SelectContext(ctx, &rows,
+		`SELECT DISTINCT category FROM expenses WHERE category <> '' ORDER BY category`)
+	return rows, err
+}
+
+// MergedCategories combines the built-in defaults with categories already used,
+// preserving the defaults' canonical order first, then appending any DB category
+// not already present (compared case-insensitively on the trimmed value) in the
+// order given. Blank/whitespace DB rows are ignored.
+func MergedCategories(distinct []string) []string {
+	defaults := DefaultCategories()
+	seen := make(map[string]bool, len(defaults)+len(distinct))
+	for _, d := range defaults {
+		seen[strings.ToLower(strings.TrimSpace(d))] = true
+	}
+	out := append([]string(nil), defaults...)
+	for _, c := range distinct {
+		key := strings.ToLower(strings.TrimSpace(c))
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, strings.TrimSpace(c))
+	}
+	return out
+}
