@@ -951,12 +951,22 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections) {
     addServiceLine(detail) {
       detail = detail || {};
       const amt = Number(detail.price) || 0;
+      // A metered line (e.g. a 20-copy document job) carries its real quantity
+      // and per-unit price so the cart reads "Rs 5.00 × 20", not "Rs 100.00 × 1".
+      // The server still bills qty × price_override, and components are absolute
+      // (not scaled by qty), so the total and stock depletion are unchanged.
+      // Recharge/custom lines omit qty+unitPrice and stay a single Rs-amt line.
+      const qty = Number(detail.qty) > 0 ? Number(detail.qty) : 1;
+      const unit =
+        detail.unitPrice !== undefined && detail.unitPrice !== null && detail.unitPrice !== ""
+          ? Number(detail.unitPrice)
+          : amt;
       this.cart.push({
         id: detail.id,
         name: detail.name,
-        unit_price: amt,
+        unit_price: unit,
         tax_rate: 0,
-        qty: 1,
+        qty: qty,
         stock: Number.MAX_SAFE_INTEGER,
         allowDecimal: false,
         discount: 0,
@@ -965,7 +975,7 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections) {
         warranty_months: 0,
         serials: [],
         is_service: true,
-        price_override: String(amt),
+        price_override: String(unit),
         // Optional per-line label shown on the receipt (e.g. "A4 colour x20").
         description: detail.description || "",
         // Stock this service line consumes (e.g. paper for a document job):
@@ -2812,10 +2822,10 @@ function categoryPicker(cfg) {
   };
 }
 
-// Collapsible category tree for the admin Categories table. State is purely the
-// set of expanded IDs; a row is visible when every ancestor in its path is
-// expanded — so the default (nothing expanded) shows only top-level rows, and
-// the logic survives HTMX innerHTML swaps with no DOM map to rebuild.
+// Collapsible category tree for the admin Categories page, with inline
+// subcategory creation. Collapse state is the set of expanded IDs; a row is
+// visible when every ancestor in its path is expanded. The component lives on
+// the container, so its state survives the HTMX innerHTML reload of the rows.
 function categoryTree() {
   return {
     expanded: {},
@@ -2824,6 +2834,54 @@ function categoryTree() {
     },
     visible(path) {
       return (path || []).every((id) => this.expanded[id]);
+    },
+
+    // --- inline create ---
+    creatingFor: null, // category id (child), "top" (top-level), or null
+    newName: "",
+    createBusy: false,
+    createError: "",
+    startCreate(id) {
+      this.creatingFor = id;
+      this.newName = "";
+      this.createError = "";
+      this.$nextTick(() => this.$refs.newCat && this.$refs.newCat.focus());
+    },
+    cancelCreate() {
+      this.creatingFor = null;
+      this.newName = "";
+      this.createError = "";
+    },
+    async submitCreate(parentId) {
+      if (this.createBusy) return;
+      const name = (this.newName || "").trim();
+      if (!name) {
+        this.createError = "Enter a category name.";
+        return;
+      }
+      this.createBusy = true;
+      this.createError = "";
+      try {
+        const body = new URLSearchParams({ name: name });
+        if (parentId) body.set("parent_id", String(parentId));
+        const res = await fetch("/admin/categories/quick", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+          body: body,
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          this.createError = (json.error && json.error.message) || "Could not create that category.";
+          return;
+        }
+        // Show the new child: expand its parent, then reload the tree in place.
+        if (parentId) this.expanded[parentId] = true;
+        this.cancelCreate();
+        this.$dispatch("reload-categories");
+      } finally {
+        this.createBusy = false;
+      }
     },
   };
 }
