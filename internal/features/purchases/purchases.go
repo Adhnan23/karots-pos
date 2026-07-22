@@ -21,6 +21,9 @@ type Purchase struct {
 	Discount   decimal.Decimal `db:"discount"    json:"discount"`
 	Total      decimal.Decimal `db:"total"       json:"total"`
 	PaidAmount decimal.Decimal `db:"paid_amount" json:"paid_amount"`
+	// CreditedAmount is value returned to the supplier against this invoice. It
+	// reduces what is owed without claiming any money changed hands.
+	CreditedAmount decimal.Decimal `db:"credited_amount" json:"credited_amount"`
 	DueDate    *time.Time      `db:"due_date"    json:"due_date,omitempty"`
 	ExpectedDate *time.Time    `db:"expected_date" json:"expected_date,omitempty"`
 	ReceivedBy *int64          `db:"received_by" json:"received_by,omitempty"`
@@ -31,8 +34,13 @@ type Purchase struct {
 	ReceivedByName *string `db:"received_by_name" json:"received_by_name,omitempty"`
 }
 
-// Balance is the still-unpaid amount on this purchase.
-func (p Purchase) Balance() decimal.Decimal { return p.Total.Sub(p.PaidAmount) }
+// Balance is what is still owed on this purchase: the total less what was paid
+// AND less anything credited back by returning goods. Returned stock is not a
+// debt, so it must come off here — otherwise the invoice stays on the payment
+// queue and the shop pays for goods it already sent back.
+func (p Purchase) Balance() decimal.Decimal {
+	return p.Total.Sub(p.PaidAmount).Sub(p.CreditedAmount)
+}
 
 type PurchaseItem struct {
 	ID           int64            `db:"id"            json:"id"`
@@ -146,7 +154,8 @@ func (r *Repository) OpenBySupplier(ctx context.Context, supplierID int64) ([]Pu
 		FROM purchases pu
 		JOIN suppliers s ON s.id = pu.supplier_id
 		LEFT JOIN users u ON u.id = pu.received_by
-		WHERE pu.supplier_id = $1 AND pu.status <> 'draft' AND pu.total > pu.paid_amount
+		WHERE pu.supplier_id = $1 AND pu.status <> 'draft'
+		  AND pu.total > pu.paid_amount + pu.credited_amount
 		ORDER BY pu.created_at`, supplierID)
 	return rows, err
 }
@@ -155,17 +164,40 @@ func (r *Repository) OpenBySupplier(ctx context.Context, supplierID int64) ([]Pu
 // (paid when fully settled, otherwise partial). Guarded so it never pays a
 // purchase beyond its total. Returns false if the row couldn't be advanced.
 func (r *Repository) ApplyPayment(ctx context.Context, purchaseID int64, amount decimal.Decimal) (bool, error) {
+	// Credits count against the ceiling: once goods are returned, the money owed
+	// on that invoice drops, and paying the old total would be paying for stock
+	// that went back to the supplier.
 	res, err := r.q.ExecContext(ctx, `
 		UPDATE purchases
 		SET paid_amount = paid_amount + $1,
-		    status = CASE WHEN paid_amount + $1 >= total THEN 'paid'::purchase_status
+		    status = CASE WHEN paid_amount + $1 >= total - credited_amount THEN 'paid'::purchase_status
 		                  ELSE 'partial'::purchase_status END
-		WHERE id = $2 AND paid_amount + $1 <= total`, amount, purchaseID)
+		WHERE id = $2 AND paid_amount + $1 <= total - credited_amount`, amount, purchaseID)
 	if err != nil {
 		return false, err
 	}
 	n, _ := res.RowsAffected()
 	return n > 0, nil
+}
+
+// ApplyCredit books returned value against one invoice and returns how much it
+// could actually absorb. It is capped at what that invoice still owes, so a
+// credit can never drive an invoice negative — the caller carries any excess as a
+// supplier credit instead. FOR UPDATE keeps a concurrent payment from spending
+// the same headroom.
+func (r *Repository) ApplyCredit(ctx context.Context, purchaseID int64, amount decimal.Decimal) (decimal.Decimal, error) {
+	var applied decimal.Decimal
+	err := r.q.GetContext(ctx, &applied, `
+		WITH target AS (
+			SELECT id, LEAST($1, GREATEST(total - paid_amount - credited_amount, 0)) AS apply
+			FROM purchases WHERE id = $2 FOR UPDATE
+		)
+		UPDATE purchases p
+		SET credited_amount = p.credited_amount + target.apply
+		FROM target
+		WHERE p.id = target.id
+		RETURNING target.apply`, amount, purchaseID)
+	return applied, err
 }
 
 func (r *Repository) List(ctx context.Context, limit int) ([]Purchase, error) {

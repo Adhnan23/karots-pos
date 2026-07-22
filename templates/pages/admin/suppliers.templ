@@ -80,7 +80,13 @@ templ SupplierRows(rows []suppliers.Supplier, symbol string) {
 				<td class="py-2 px-3">{ strOrEmpty(s.ContactPerson) }</td>
 				<td class="py-2 px-3">{ strOrEmpty(s.Phone) }</td>
 				<td class="py-2 px-3 text-center">{ strconv.Itoa(s.CreditDays) }</td>
-				<td class="py-2 px-3 text-right">{ money.Format(symbol, s.OutstandingBalance) }</td>
+				<td class="py-2 px-3 text-right">
+					if s.OutstandingBalance.IsNegative() {
+						<span class="text-emerald-700" title="Returned goods worth more than was owed — the supplier owes you">{ money.Format(symbol, s.OutstandingBalance.Neg()) } cr</span>
+					} else {
+						{ money.Format(symbol, s.OutstandingBalance) }
+					}
+				</td>
 				<td class="py-2 px-3 text-right whitespace-nowrap">
 					<button class="text-indigo-600 hover:underline" hx-get={ "/admin/suppliers/form/" + strconv.FormatInt(s.ID, 10) } hx-target="#modal-container" hx-swap="innerHTML">Edit</button>
 					<button class="text-emerald-600 hover:underline ml-3" hx-get={ "/admin/suppliers/pay/" + strconv.FormatInt(s.ID, 10) } hx-target="#modal-container" hx-swap="innerHTML">Pay</button>
@@ -146,7 +152,14 @@ type SupplierPayData struct {
 templ SupplierPaymentForm(d SupplierPayData) {
 	@modalShell("Pay Supplier") {
 		<form class="p-6 space-y-4" x-data="{ method: 'cash' }" hx-post={ "/admin/suppliers/" + strconv.FormatInt(d.Supplier.ID, 10) + "/payment" } hx-swap="none">
-			<p class="text-sm text-slate-600">{ d.Supplier.Name } — currently owed <span class="font-semibold">{ money.Format(d.Symbol, d.Supplier.OutstandingBalance) }</span></p>
+			<!-- A negative balance means goods went back worth more than was owed, so
+			     the supplier owes US. Printing that as "currently owed Rs -1,300" read
+			     as nonsense. -->
+			if d.Supplier.OutstandingBalance.IsNegative() {
+				<p class="text-sm text-emerald-700">{ d.Supplier.Name } — <span class="font-semibold">{ money.Format(d.Symbol, d.Supplier.OutstandingBalance.Neg()) }</span> in credit (returned goods worth more than is owed). Nothing to pay.</p>
+			} else {
+				<p class="text-sm text-slate-600">{ d.Supplier.Name } — currently owed <span class="font-semibold">{ money.Format(d.Symbol, d.Supplier.OutstandingBalance) }</span></p>
+			}
 			if len(d.Invoices) > 0 {
 				<div>
 					<label class="block text-sm font-medium mb-1">Pay invoices (oldest first)</label>

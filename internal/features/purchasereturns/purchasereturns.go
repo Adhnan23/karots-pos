@@ -12,6 +12,7 @@ import (
 	"karots-pos/internal/apperr"
 	"karots-pos/internal/config"
 	appdb "karots-pos/internal/db"
+	"karots-pos/internal/features/purchases"
 	"karots-pos/internal/features/stock"
 	"karots-pos/internal/features/suppliers"
 	"karots-pos/internal/middleware"
@@ -42,7 +43,9 @@ type Item struct {
 	Quantity         decimal.Decimal `db:"quantity"           json:"quantity"`
 	CostPrice        decimal.Decimal `db:"cost_price"         json:"cost_price"`
 	Subtotal         decimal.Decimal `db:"subtotal"           json:"subtotal"`
-	ProductName      string          `db:"product_name"       json:"product_name"`
+	// BatchID is the lot that physically went back, when one was named.
+	BatchID     *int64 `db:"batch_id"     json:"batch_id,omitempty"`
+	ProductName string `db:"product_name" json:"product_name"`
 }
 
 type Detail struct {
@@ -54,6 +57,11 @@ type ItemInput struct {
 	ProductID int64  `json:"product_id" validate:"required,gt=0"`
 	Quantity  string `json:"quantity"   validate:"required"`
 	CostPrice string `json:"cost_price" validate:"required"`
+	// BatchID names the lot physically going back. Sending back a damaged NEW
+	// delivery must not drain the OLDEST lot, which is what plain FEFO did — that
+	// left the shop's records claiming stock it no longer had, at a price the till
+	// would go on offering a customer. Zero keeps the old FEFO behaviour.
+	BatchID int64 `json:"batch_id"`
 }
 
 type CreateInput struct {
@@ -75,10 +83,18 @@ func (r *Repository) Insert(ctx context.Context, supplierID, userID int64, ref, 
 	return id, err
 }
 
-func (r *Repository) InsertItem(ctx context.Context, prID, productID int64, qty, cost, subtotal decimal.Decimal) error {
+func (r *Repository) InsertItem(ctx context.Context, prID, productID int64, qty, cost, subtotal decimal.Decimal, batchID *int64) error {
 	_, err := r.q.ExecContext(ctx, `
-		INSERT INTO purchase_return_items (purchase_return_id, product_id, quantity, cost_price, subtotal)
-		VALUES ($1,$2,$3,$4,$5)`, prID, productID, qty, cost, subtotal)
+		INSERT INTO purchase_return_items (purchase_return_id, product_id, quantity, cost_price, subtotal, batch_id)
+		VALUES ($1,$2,$3,$4,$5,$6)`, prID, productID, qty, cost, subtotal, batchID)
+	return err
+}
+
+// InsertAllocation records that this debit note credited an invoice.
+func (r *Repository) InsertAllocation(ctx context.Context, prID, purchaseID int64, amount decimal.Decimal) error {
+	_, err := r.q.ExecContext(ctx, `
+		INSERT INTO purchase_return_allocations (purchase_return_id, purchase_id, amount)
+		VALUES ($1,$2,$3)`, prID, purchaseID, amount)
 	return err
 }
 
@@ -159,11 +175,13 @@ func (s *Service) Create(ctx context.Context, in CreateInput, userID int64) (*De
 		repo := NewRepository(tx)
 		stk := stock.NewRepository(tx)
 		sup := suppliers.NewRepository(tx)
+		puRepo := purchases.NewRepository(tx)
 
 		ref := "purchase_return"
 		total := decimal.Zero
 		type line struct {
-			productID int64
+			productID           int64
+			batchID             *int64
 			qty, cost, subtotal decimal.Decimal
 		}
 		lines := make([]line, 0, len(in.Items))
@@ -183,12 +201,32 @@ func (s *Service) Create(ctx context.Context, in CreateInput, userID int64) (*De
 			if !ok {
 				return apperr.Conflict("not enough stock to return for one of the items")
 			}
-			if _, err := stk.DepleteFEFO(ctx, it.ProductID, qty); err != nil {
+			// Send back the lot that is actually going back. Without a named lot
+			// this falls to FEFO, which drains the oldest stock even when the
+			// delivery being returned is the newest.
+			var batchID *int64
+			if it.BatchID > 0 {
+				b, berr := stk.LockBatch(ctx, it.BatchID, it.ProductID)
+				if berr != nil {
+					if errors.Is(berr, sql.ErrNoRows) {
+						return apperr.Validation("that batch is no longer available to return")
+					}
+					return apperr.Internal("failed to load batch", berr)
+				}
+				if b.QtyRemaining.LessThan(qty) {
+					return apperr.Conflict("only " + b.QtyRemaining.String() + " left in that batch")
+				}
+				if _, derr := stk.DepleteBatch(ctx, b.ID, qty); derr != nil {
+					return apperr.Internal("failed to deplete batch", derr)
+				}
+				id := b.ID
+				batchID = &id
+			} else if _, err := stk.DepleteFEFO(ctx, it.ProductID, qty); err != nil {
 				return apperr.Internal("failed to deplete batches", err)
 			}
 			sub := qty.Mul(cost).Round(2)
 			total = total.Add(sub)
-			lines = append(lines, line{productID: it.ProductID, qty: qty, cost: cost, subtotal: sub})
+			lines = append(lines, line{productID: it.ProductID, batchID: batchID, qty: qty, cost: cost, subtotal: sub})
 		}
 
 		prID, err := repo.Insert(ctx, in.SupplierID, userID, in.Reference, in.Reason, total)
@@ -196,7 +234,7 @@ func (s *Service) Create(ctx context.Context, in CreateInput, userID int64) (*De
 			return apperr.Internal("failed to save purchase return", err)
 		}
 		for _, ln := range lines {
-			if err := repo.InsertItem(ctx, prID, ln.productID, ln.qty, ln.cost, ln.subtotal); err != nil {
+			if err := repo.InsertItem(ctx, prID, ln.productID, ln.qty, ln.cost, ln.subtotal, ln.batchID); err != nil {
 				return apperr.Internal("failed to save return item", err)
 			}
 			id := prID
@@ -207,10 +245,38 @@ func (s *Service) Create(ctx context.Context, in CreateInput, userID int64) (*De
 				return apperr.Internal("failed to record movement", err)
 			}
 		}
-		// Returning goods reduces what we owe the supplier.
+		// Returning goods reduces what we owe the supplier — both in aggregate AND
+		// on the invoices themselves. Crediting the invoices is the part that used
+		// to be missing: the aggregate dropped but the invoices stayed "open", so
+		// the payment screen would still take money for goods already sent back.
+		//
+		// Credit oldest invoice first, exactly how supplier payments allocate. Any
+		// excess (returning more than is currently owed, e.g. against an invoice
+		// already paid) stays as a negative aggregate balance — a supplier credit.
 		if total.IsPositive() {
 			if err := sup.AddBalance(ctx, in.SupplierID, total.Neg()); err != nil {
 				return apperr.Internal("failed to adjust supplier balance", err)
+			}
+			open, err := puRepo.OpenBySupplier(ctx, in.SupplierID)
+			if err != nil {
+				return apperr.Internal("failed to load open invoices", err)
+			}
+			left := total
+			for _, pu := range open {
+				if !left.IsPositive() {
+					break
+				}
+				applied, aerr := puRepo.ApplyCredit(ctx, pu.ID, left)
+				if aerr != nil {
+					return apperr.Internal("failed to credit invoice", aerr)
+				}
+				if !applied.IsPositive() {
+					continue
+				}
+				if aerr := repo.InsertAllocation(ctx, prID, pu.ID, applied); aerr != nil {
+					return apperr.Internal("failed to record credit allocation", aerr)
+				}
+				left = left.Sub(applied)
 			}
 		}
 

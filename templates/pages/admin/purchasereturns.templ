@@ -153,7 +153,7 @@ templ PurchaseReturnEntryPage(d PurchaseReturnEntryData) {
 
 			<table class="w-full text-sm mb-3">
 				<thead class="text-left text-slate-500 border-b">
-					<tr><th class="py-2">Product</th><th class="py-2 w-32">Qty</th><th class="py-2 w-28">Cost</th><th class="py-2 text-right w-28">Subtotal</th><th></th></tr>
+					<tr><th class="py-2">Product</th><th class="py-2 w-56" title="Which delivery is physically going back — defaults to the most recent">Lot going back</th><th class="py-2 w-32">Qty</th><th class="py-2 w-28">Cost</th><th class="py-2 text-right w-28">Subtotal</th><th></th></tr>
 				</thead>
 				<tbody>
 					<template x-for="(l, i) in lines" x-bind:key="i">
@@ -165,6 +165,20 @@ templ PurchaseReturnEntryPage(d PurchaseReturnEntryData) {
 										<button type="button" x-on:click="choose(l, r)" class="block w-full text-left px-3 py-1.5 hover:bg-slate-100" x-text="r.name + (r.barcode ? '  ·  ' + r.barcode : '')"></button>
 									</template>
 								</div>
+							</td>
+							<!-- Which lot is going back. FEFO alone would drain the oldest
+							     stock even when the delivery being returned is the newest. -->
+							<td class="py-1 pr-2">
+								<template x-if="(l.lots || []).length">
+									<select x-model="l.batch_id" x-on:change="onLotChange(l)" class="w-full border rounded px-2 py-1 text-xs">
+										<template x-for="b in l.lots" x-bind:key="b.id">
+											<option x-bind:value="b.id" x-text="lotLabel(b)"></option>
+										</template>
+									</select>
+								</template>
+								<template x-if="!(l.lots || []).length">
+									<span class="text-xs text-slate-400">pick a product</span>
+								</template>
 							</td>
 							<td class="py-1 pr-2">
 								<div class="flex items-center rounded border">

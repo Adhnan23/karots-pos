@@ -2273,11 +2273,45 @@ function pret(symbol) {
     pick(l) {
       poProductSearch(l);
     },
-    choose(l, r) {
+    async choose(l, r) {
       poProductChoose(l, r);
+      await this.loadLots(l);
+    },
+    // Which lots of this product are on hand. Returning goods must send back the
+    // lot that is physically going back — plain FEFO would drain the oldest stock
+    // even when the delivery being returned is the newest one.
+    //
+    // Defaults to the NEWEST lot, because a return is usually a delivery that just
+    // arrived wrong, and prefills that lot's cost so the debit note is valued at
+    // what those goods actually cost.
+    async loadLots(l) {
+      l.lots = [];
+      l.batch_id = 0;
+      if (!Number(l.product_id)) return;
+      try {
+        const json = await apiFetch("GET", "/admin/stock/lots/" + Number(l.product_id), undefined, { silent: true });
+        l.lots = json.data || [];
+      } catch (_) {
+        l.lots = [];
+      }
+      if (l.lots.length) {
+        const newest = l.lots[l.lots.length - 1];
+        l.batch_id = newest.id;
+        l.cost_price = Number(newest.cost_price) || l.cost_price;
+      }
+    },
+    // Re-price the line when the cashier switches lots: each lot cost what it cost.
+    onLotChange(l) {
+      const lot = (l.lots || []).find((b) => String(b.id) === String(l.batch_id));
+      if (lot) l.cost_price = Number(lot.cost_price) || 0;
+    },
+    lotLabel(b) {
+      const qty = String(Number(Number(b.qty_remaining).toFixed(3)));
+      const when = b.expiry_date ? "exp " + String(b.expiry_date).slice(0, 10) : String(b.created_at || "").slice(0, 10);
+      return `${qty} left · ${this.sym} ${this.money(b.cost_price)} · ${when}`;
     },
     addLine() {
-      this.lines.push({ product_id: 0, product_name: "", quantity: 0, cost_price: 0, _open: false, _results: [] });
+      this.lines.push({ product_id: 0, product_name: "", quantity: 0, cost_price: 0, batch_id: 0, lots: [], _open: false, _results: [] });
     },
     removeLine(i) {
       this.lines.splice(i, 1);
@@ -2318,6 +2352,8 @@ function pret(symbol) {
           product_id: Number(l.product_id),
           quantity: String(l.quantity),
           cost_price: String(l.cost_price || 0),
+          // The lot physically going back; 0 falls back to FEFO.
+          batch_id: Number(l.batch_id) || 0,
         }));
       if (items.length === 0) {
         toast("Add at least one line", "error");

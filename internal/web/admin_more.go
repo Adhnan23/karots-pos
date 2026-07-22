@@ -1145,6 +1145,22 @@ func (a *adminUI) BatchesView(c echo.Context) error {
 	return response.RenderFragment(c, adminpages.BatchesModal(*p, batches, a.symbol(ctx)))
 }
 
+// ProductLots lists a product's live lots as JSON, for the purchase-return
+// screen's "which lot is going back" picker. Admin-only and separate from the
+// till's /api/products/price-options because these rows carry cost price, which
+// cashiers have no business seeing.
+func (a *adminUI) ProductLots(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	rows, err := a.s.stock.Batches(c.Request().Context(), id)
+	if err != nil {
+		return err
+	}
+	return response.OK(c, rows)
+}
+
 // BatchPriceSet re-prices one lot from the batch modal. A blank box means "follow
 // the product's current price" and is stored as zero — the same sentinel every
 // lot starts life with.
