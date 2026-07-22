@@ -24,6 +24,33 @@ templ ServiceProductPicker(fieldName string, initialID int64, initialName, place
 	@productPickerAt("/api/products?include_services=1", fieldName, initialID, initialName, placeholder)
 }
 
+// LotPicker asks which lot stock is leaving from, on the screens that REMOVE
+// stock: write-offs, own-use, staff, and stock corrections.
+//
+// Those all used to take the shortfall off the oldest lot, which is a guess — the
+// units that actually went are often from the newest delivery. Once lots carry
+// their own prices that guess leaves the books claiming stock at a price the shop
+// no longer has, which the till then offers a customer.
+//
+// It watches the product picker's hidden field and hides itself entirely unless
+// that product genuinely has more than one live lot, so the single-lot case (and
+// any shop not using per-lot prices) sees no extra step at all.
+templ LotPicker(productField, fieldName, label string) {
+	<div
+		x-data={ "lotPicker({productField:" + pickerStr(productField) + ", field:" + pickerStr(fieldName) + "})" }
+		x-show="lots.length > 1"
+		x-cloak
+	>
+		<label class="block text-sm font-medium mb-1">{ label }</label>
+		<select x-model="batchId" x-bind:name="field" class="w-full border rounded-lg px-3 py-2">
+			<template x-for="b in lots" x-bind:key="b.batch_id">
+				<option x-bind:value="b.batch_id" x-text="lotLabel(b)"></option>
+			</template>
+		</select>
+		<p class="text-xs text-slate-500 mt-1">This product has stock from more than one delivery — pick the one actually leaving.</p>
+	</div>
+}
+
 templ productPickerAt(url, fieldName string, initialID int64, initialName, placeholder string) {
 	<div
 		class="relative"

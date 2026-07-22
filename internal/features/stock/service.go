@@ -33,6 +33,12 @@ type AdjustInput struct {
 	// product, which is what every caller did before per-lot pricing. Ignored
 	// when the adjustment removes stock — there is no new lot to price.
 	SellingPrice string `json:"selling_price" form:"selling_price"`
+	// BatchID names the lot to take from when the adjustment REDUCES stock.
+	// Without it the shortfall comes off the oldest lot, which is a guess: the
+	// units that actually went missing may have been from the newest delivery,
+	// and once lots carry different prices that guess leaves the books offering a
+	// price for stock the shop no longer has. Zero keeps the old FEFO behaviour.
+	BatchID int64 `json:"batch_id" form:"batch_id"`
 }
 
 // Adjust sets a product's stock to an absolute quantity, recording the signed
@@ -80,8 +86,8 @@ func (s *Service) Adjust(ctx context.Context, in AdjustInput, userID int64) erro
 				return apperr.Internal("failed to open adjustment batch", err)
 			}
 		} else {
-			if _, err := repo.DepleteFEFO(ctx, in.ProductID, delta.Abs()); err != nil {
-				return apperr.Internal("failed to adjust batches", err)
+			if _, err := repo.depleteChosen(ctx, in.ProductID, in.BatchID, delta.Abs()); err != nil {
+				return err
 			}
 		}
 		note := nilIfEmpty(in.Note)
@@ -108,6 +114,8 @@ type DamageInput struct {
 	ProductID int64  `json:"product_id" form:"product_id" validate:"required,gt=0"`
 	Quantity  string `json:"quantity"   form:"quantity"   validate:"required"`
 	Note      string `json:"note"       form:"note"`
+	// BatchID names the lot being written off; zero falls back to FEFO.
+	BatchID int64 `json:"batch_id" form:"batch_id"`
 }
 
 // ConsumeInput records stock leaving for a non-sale reason.
@@ -116,6 +124,11 @@ type ConsumeInput struct {
 	Quantity  string `json:"quantity"   form:"quantity"   validate:"required"`
 	Reason    string `json:"reason"     form:"reason"`
 	Note      string `json:"note"       form:"note"`
+	// BatchID names the lot physically being written off / taken. Zero falls back
+	// to FEFO. Which lot it is decides the cost booked against the loss as well as
+	// what the shop is left holding, so guessing shows up in both the P&L and the
+	// price the till offers.
+	BatchID int64 `json:"batch_id" form:"batch_id"`
 }
 
 // consumeReasons maps a UI reason to its movement type. Anything not listed is
@@ -135,6 +148,7 @@ func (s *Service) Damage(ctx context.Context, in DamageInput, userID int64) erro
 		Quantity:  in.Quantity,
 		Reason:    "damage",
 		Note:      in.Note,
+		BatchID:   in.BatchID,
 	}, userID)
 }
 
@@ -160,9 +174,9 @@ func (s *Service) Consume(ctx context.Context, in ConsumeInput, userID int64) er
 		if !ok {
 			return apperr.Conflict("not enough stock")
 		}
-		cost, err := repo.DepleteFEFO(ctx, in.ProductID, qty)
+		cost, err := repo.depleteChosen(ctx, in.ProductID, in.BatchID, qty)
 		if err != nil {
-			return apperr.Internal("failed to deplete batches", err)
+			return err
 		}
 		return repo.InsertMovement(ctx, MovementInput{
 			ProductID: in.ProductID,

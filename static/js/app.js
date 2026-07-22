@@ -1724,6 +1724,56 @@ function docConsumablePicker() {
 // The picker only tracks id/name; the template's x-for renders whatever result
 // fields it wants (e.g. on-hand for products). Used via the ProductPicker /
 // EntityPicker templ components.
+// lotPicker backs the "which lot is leaving?" select on stock-removal forms
+// (write-off, own-use, staff, stock correction).
+//
+// It follows the product picker's hidden input rather than taking a product id
+// up front, because the product is chosen after the form renders. The hidden
+// field's value is set by x-bind, which writes the DOM attribute, so a
+// MutationObserver on attributes sees every change.
+//
+// It stays empty — and the whole block stays hidden — unless the product really
+// has two or more live lots, so nothing changes for a single-lot shop.
+function lotPicker(cfg) {
+  return {
+    field: cfg.field || "batch_id",
+    lots: [],
+    batchId: "",
+    init() {
+      const input = document.querySelector(`input[name="${cfg.productField}"]`);
+      if (!input) return;
+      const sync = () => this.load(input.value);
+      sync();
+      new MutationObserver(sync).observe(input, { attributes: true, attributeFilter: ["value"] });
+      input.addEventListener("change", sync);
+    },
+    async load(productId) {
+      const id = Number(productId) || 0;
+      if (!id) {
+        this.lots = [];
+        this.batchId = "";
+        return;
+      }
+      try {
+        const json = await apiFetch("GET", "/api/products/" + id + "/lots", undefined, { silent: true });
+        this.lots = json.data || [];
+      } catch (_) {
+        this.lots = [];
+      }
+      // Default to the OLDEST lot: that matches what the system did before this
+      // picker existed, so leaving it alone is never a behaviour change.
+      this.batchId = this.lots.length ? String(this.lots[0].batch_id) : "";
+    },
+    lotLabel(b) {
+      const qty = String(Number(Number(b.qty_remaining).toFixed(3)));
+      const when = b.expiry_date
+        ? "exp " + String(b.expiry_date).slice(0, 10)
+        : "in " + String(b.received_at || "").slice(0, 10);
+      return `${qty} left · ${when}`;
+    },
+  };
+}
+
 function entityPicker(cfg) {
   cfg = cfg || {};
   return {

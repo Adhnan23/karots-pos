@@ -242,3 +242,72 @@ func must(t *testing.T, err error) {
 		t.Fatal(err)
 	}
 }
+
+// Removing stock — a write-off, staff taking something, or a count correction —
+// must be able to name the lot it came from. Taking the shortfall off the oldest
+// lot is a guess, and once lots carry their own prices a wrong guess leaves the
+// books claiming stock at a price the shop no longer has.
+func TestDepleteChosenTakesFromTheNamedLot(t *testing.T) {
+	conn := testDB(t)
+	defer conn.Close()
+	ctx := context.Background()
+	tx, err := conn.BeginTxx(ctx, nil)
+	must(t, err)
+	defer tx.Rollback() //nolint:errcheck
+
+	repo, productID, lotA, lotB := twoPricedLots(t, ctx, tx)
+
+	// Name the NEWER lot: the older one must be left completely alone.
+	cost, err := repo.depleteChosen(ctx, productID, lotB, decimal.NewFromInt(3))
+	must(t, err)
+	if !cost.Equal(decimal.NewFromInt(60)) {
+		t.Errorf("cost %s, want the named lot's 60", cost)
+	}
+	var remA, remB decimal.Decimal
+	must(t, tx.GetContext(ctx, &remA, `SELECT qty_remaining FROM stock_batches WHERE id=$1`, lotA))
+	must(t, tx.GetContext(ctx, &remB, `SELECT qty_remaining FROM stock_batches WHERE id=$1`, lotB))
+	if !remA.Equal(decimal.NewFromInt(4)) {
+		t.Errorf("older lot has %s left, want an untouched 4", remA)
+	}
+	if !remB.Equal(decimal.NewFromInt(7)) {
+		t.Errorf("named lot has %s left, want 7", remB)
+	}
+}
+
+// No lot named keeps the old behaviour exactly: oldest first.
+func TestDepleteChosenFallsBackToFEFO(t *testing.T) {
+	conn := testDB(t)
+	defer conn.Close()
+	ctx := context.Background()
+	tx, err := conn.BeginTxx(ctx, nil)
+	must(t, err)
+	defer tx.Rollback() //nolint:errcheck
+
+	repo, productID, lotA, lotB := twoPricedLots(t, ctx, tx)
+
+	if _, err := repo.depleteChosen(ctx, productID, 0, decimal.NewFromInt(3)); err != nil {
+		t.Fatal(err)
+	}
+	var remA, remB decimal.Decimal
+	must(t, tx.GetContext(ctx, &remA, `SELECT qty_remaining FROM stock_batches WHERE id=$1`, lotA))
+	must(t, tx.GetContext(ctx, &remB, `SELECT qty_remaining FROM stock_batches WHERE id=$1`, lotB))
+	if !remA.Equal(decimal.NewFromInt(1)) || !remB.Equal(decimal.NewFromInt(10)) {
+		t.Errorf("FEFO took A=%s B=%s, want the oldest drained first (A=1, B=10)", remA, remB)
+	}
+}
+
+// A lot with less in it than is being removed must be refused, not silently
+// over-drawn into another lot.
+func TestDepleteChosenRefusesMoreThanTheLotHolds(t *testing.T) {
+	conn := testDB(t)
+	defer conn.Close()
+	ctx := context.Background()
+	tx, err := conn.BeginTxx(ctx, nil)
+	must(t, err)
+	defer tx.Rollback() //nolint:errcheck
+
+	repo, productID, lotA, _ := twoPricedLots(t, ctx, tx)
+	if _, err := repo.depleteChosen(ctx, productID, lotA, decimal.NewFromInt(99)); err == nil {
+		t.Error("removing more than the lot holds was allowed")
+	}
+}

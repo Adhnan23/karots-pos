@@ -59,6 +59,21 @@ func (h *APIHandler) PriceOptions(c echo.Context) error {
 	return response.OK(c, opts)
 }
 
+// Lots serves one product's live lots for the lot pickers on stock-removal
+// screens. Any signed-in user: cashiers write off damage too, and the payload
+// carries no cost price.
+func (h *APIHandler) Lots(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	rows, err := h.svc.LotsFor(c.Request().Context(), id)
+	if err != nil {
+		return err
+	}
+	return response.OK(c, rows)
+}
+
 // GenerateBarcode returns a fresh, unused EAN-13 for the "Generate" button next
 // to barcode inputs (product form + label pages).
 func (h *APIHandler) GenerateBarcode(c echo.Context) error {
@@ -138,6 +153,7 @@ func RegisterAPI(e *echo.Echo, db *sqlx.DB, cfg *config.Config) {
 	g.GET("", api.List)
 	g.GET("/:id", api.Get)
 	g.GET("/price-options", api.PriceOptions)
+	g.GET("/:id/lots", api.Lots)
 	g.GET("/barcode/generate", api.GenerateBarcode)
 	g.GET("/barcode/:code", api.GetByBarcode)
 	g.POST("/:id/barcode", api.AssignBarcode)

@@ -346,6 +346,7 @@ templ DamageForm() {
 				<label class="block text-sm font-medium mb-1">Quantity</label>
 				<input name="quantity" type="number" step="0.001" min="0" required class="w-full border rounded-lg px-3 py-2"/>
 			</div>
+			@adminfragments.LotPicker("product_id", "batch_id", "Which delivery is it from")
 			<div>
 				<label class="block text-sm font-medium mb-1">Reason</label>
 				<select name="reason" class="w-full border rounded-lg px-3 py-2">
@@ -382,6 +383,9 @@ templ StockForm(prods []products.Product) {
 					<label class="block text-sm font-medium mb-1">New Quantity (absolute)</label>
 					<input name="new_quantity" type="number" step="0.001" min="0" required class="w-full border rounded-lg px-3 py-2"/>
 				</div>
+				<!-- Only matters when the count goes DOWN; ignored when it goes up,
+				     which opens a fresh lot instead. -->
+				@adminfragments.LotPicker("product_id", "batch_id", "If reducing, take from")
 				<div>
 					<label class="block text-sm font-medium mb-1">Note</label>
 					<input name="note" class="w-full border rounded-lg px-3 py-2" placeholder="reason for adjustment"/>

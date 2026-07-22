@@ -2,7 +2,11 @@ package stock
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"time"
+
+	"karots-pos/internal/apperr"
 
 	"github.com/shopspring/decimal"
 )
@@ -281,6 +285,39 @@ func (r *Repository) DepleteBatch(ctx context.Context, batchID int64, qty decima
 		}
 	}
 	return costOfConsumed([]consumedLot{{Qty: qty, Cost: b.Cost}}, qty, fallback), nil
+}
+
+// depleteChosen removes qty from a named lot, or falls back to FEFO when no lot
+// was named. It is the one place the "which lot is leaving" decision is made for
+// every non-sale removal — write-offs, own-use, staff, and stock corrections —
+// so they cannot drift apart.
+//
+// Naming a lot matters once lots carry different prices: taking the shortfall off
+// the oldest lot is a guess, and a wrong guess leaves the books claiming stock at
+// a price the shop no longer has for the till to go on offering.
+func (r *Repository) depleteChosen(ctx context.Context, productID, batchID int64, qty decimal.Decimal) (decimal.Decimal, error) {
+	if batchID <= 0 {
+		cost, err := r.DepleteFEFO(ctx, productID, qty)
+		if err != nil {
+			return decimal.Zero, apperr.Internal("failed to deplete batches", err)
+		}
+		return cost, nil
+	}
+	b, err := r.LockBatch(ctx, batchID, productID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return decimal.Zero, apperr.Validation("that batch is no longer available")
+		}
+		return decimal.Zero, apperr.Internal("failed to load batch", err)
+	}
+	if b.QtyRemaining.LessThan(qty) {
+		return decimal.Zero, apperr.Conflict("only " + b.QtyRemaining.String() + " left in that batch")
+	}
+	cost, err := r.DepleteBatch(ctx, b.ID, qty)
+	if err != nil {
+		return decimal.Zero, apperr.Internal("failed to deplete batch", err)
+	}
+	return cost, nil
 }
 
 // SetBatchSellingPrice re-prices one lot from the admin batch list. Zero puts the

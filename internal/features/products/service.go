@@ -88,6 +88,20 @@ func (s *Service) PriceOptions(ctx context.Context) (map[int64][]stock.PriceOpti
 	return stock.NewService(s.db).MultiPriceProducts(ctx)
 }
 
+// LotsFor lists one product's live lots for a "which lot is this?" picker on the
+// screens that remove stock (write-off, own-use, staff, stock correction).
+//
+// It deliberately carries no cost price, unlike the admin lots endpoint: a
+// cashier writing off a broken bottle needs to identify the lot, not to see what
+// the shop paid for it.
+func (s *Service) LotsFor(ctx context.Context, productID int64) ([]stock.PriceOption, error) {
+	rows, err := stock.NewRepository(s.db).PriceOptions(ctx, productID)
+	if err != nil {
+		return nil, apperr.Internal("failed to load batches", err)
+	}
+	return rows, nil
+}
+
 // GetByBarcode powers the cashier scanner and price-check lookups.
 func (s *Service) GetByBarcode(ctx context.Context, barcode string) (*Product, error) {
 	p, err := s.repo.FindByBarcode(ctx, strings.TrimSpace(barcode))
