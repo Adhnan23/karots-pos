@@ -343,6 +343,15 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections) {
     showQuickItem: false,
     quickItem: { name: "", price: "", qty: 1, barcode: "", unit_id: 0 },
     units: [],
+    // Per-lot pricing: { productId: [ {batch_id, price, qty_remaining, …} ] } for
+    // the FEW products whose live batches disagree on price (old stock stickered
+    // at the old price sitting next to a new delivery). Loaded once and refreshed
+    // after each sale, so adding an item never costs an extra round trip. Empty
+    // for shops that never price per lot — which is why nothing changes for them.
+    priceOptions: {},
+    // The open "which price?" prompt: the product waiting to be added and the
+    // lots to choose from. The cashier reads the sticker on the package.
+    pricePick: null,
 
     async init() {
       await this.loadDenoms();
@@ -352,6 +361,7 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections) {
       await this.loadUnits();
       await this.loadHolds();
       await this.loadLockers();
+      await this.loadPriceOptions();
       if (!this.session) await this.loadDrawerSections("open");
       // Logout was blocked because the till is still open: jump straight to the
       // count/close dialog. If the session somehow closed already, just finish
@@ -510,7 +520,7 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections) {
     // Touch-friendly qty steppers for cart lines.
     incQty(it) {
       it.qty = (Number(it.qty) || 0) + 1;
-      this.syncSerials(it);
+      this.clampQty(it);
     },
     decQty(it) {
       it.qty = Math.max(0, (Number(it.qty) || 0) - 1);
@@ -685,6 +695,26 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections) {
       } catch (_) {
         this.units = [];
       }
+    },
+    // Products whose live lots disagree on price, with their lots. Best-effort:
+    // if this fails the till simply never prompts and prices at the product's
+    // current price — exactly how it behaved before per-lot pricing existed.
+    async loadPriceOptions() {
+      try {
+        const json = await apiFetch("GET", "/api/products/price-options", undefined, { silent: true });
+        this.priceOptions = json.data || {};
+      } catch (_) {
+        this.priceOptions = {};
+      }
+    },
+    // lotsFor returns the price choices for a product, but only when they are a
+    // real choice: two or more lots that actually differ in price. One lot, or
+    // several agreeing, is not a question worth asking the cashier.
+    lotsFor(productId) {
+      const lots = this.priceOptions[String(productId)] || [];
+      if (lots.length < 2) return [];
+      const distinct = new Set(lots.map((l) => String(l.price)));
+      return distinct.size > 1 ? lots : [];
     },
     async loadDenoms() {
       try {
@@ -916,20 +946,42 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections) {
       }
       return Number(p.selling_price);
     },
-    addToCart(p) {
-      const existing = this.cart.find((x) => x.id === p.id);
+    // addToCart adds a product line. `lot` is set when the cashier has already
+    // chosen which batch this is (see pickLot); when it is absent and the product
+    // has lots at different prices we ask first, because only the person holding
+    // the package can read the price sticker on it.
+    //
+    // `opts.noPrompt` skips that question for callers that cannot answer it — see
+    // scanQuickSale.
+    addToCart(p, lot, opts) {
+      if (!lot && !(opts && opts.noPrompt)) {
+        const lots = this.lotsFor(p.id);
+        if (lots.length) {
+          this.pricePick = { product: p, lots };
+          return;
+        }
+      }
+      // One product can now be two lines at two prices, so a line is identified
+      // by product AND lot — merging on product alone would silently re-price.
+      const lotId = lot ? lot.batch_id : 0;
+      const existing = this.cart.find((x) => x.id === p.id && (x.batch_id || 0) === lotId);
       if (existing) {
         existing.qty = Number(existing.qty) + 1;
-        this.syncSerials(existing);
+        this.clampQty(existing);
         return;
       }
       this.cart.push({
         id: p.id,
         name: p.name,
-        unit_price: this.unitPriceFor(p),
+        unit_price: lot ? Number(lot.price) : this.unitPriceFor(p),
         tax_rate: Number(p.tax_rate) || 0,
         qty: 1,
         stock: Number(p.stock_qty),
+        // The chosen lot: sent to the server, which re-reads the price from it
+        // and depletes that lot instead of taking FEFO. 0 = the normal path.
+        batch_id: lotId,
+        batch_remaining: lot ? Number(lot.qty_remaining) : 0,
+        batch_label: lot ? this.lotLabel(lot) : "",
         // Weight/volume units (kg, g, ltr, ml) accept fractional quantities;
         // everything else is whole-only.
         allowDecimal: !!p.unit_allow_decimal,
@@ -943,6 +995,45 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections) {
         serials: [],
       });
       this.syncSerials(this.cart[this.cart.length - 1]);
+    },
+    // --- "Which price?" prompt -------------------------------------------
+    // qtyText prints a quantity without money's forced 2 decimals, so a count of
+    // 137 reads "137" and a weighed 1.5 kg still reads "1.5".
+    qtyText(v) {
+      const n = Number(v) || 0;
+      return String(Number(n.toFixed(3)));
+    },
+    // lotLabel describes a lot in the few words that let a cashier match it to
+    // the package in their hand: its expiry if it has one, else when it arrived.
+    lotLabel(lot) {
+      if (lot.expiry_date) return "exp " + String(lot.expiry_date).slice(0, 10);
+      if (lot.batch_no) return "batch " + lot.batch_no;
+      return "in " + String(lot.received_at || "").slice(0, 10);
+    },
+    // pickLot resolves the prompt: add the product at the chosen lot's price.
+    pickLot(lot) {
+      const p = this.pricePick && this.pricePick.product;
+      this.pricePick = null;
+      if (p) this.addToCart(p, lot);
+    },
+    cancelPick() {
+      this.pricePick = null;
+    },
+    // Number keys pick a lot without reaching for the mouse; Enter takes the
+    // first, which is the lot normal rotation would sell.
+    pricePickKey(e) {
+      if (!this.pricePick) return;
+      const lots = this.pricePick.lots;
+      if (e.key === "Enter") {
+        e.preventDefault();
+        this.pickLot(lots[0]);
+        return;
+      }
+      const n = parseInt(e.key, 10);
+      if (n >= 1 && n <= lots.length) {
+        e.preventDefault();
+        this.pickLot(lots[n - 1]);
+      }
     },
     // addServiceLine adds a non-stocked service line to the cart (e.g. a plugin
     // recharge top-up). price is the per-line amount sent to the server as
@@ -1044,7 +1135,12 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections) {
         const p = json.data;
         let line = this.cart.find((x) => x.id === p.id);
         if (!line) {
-          this.addToCart(p);
+          // No "which price?" prompt here, deliberately: a code counted on the
+          // phone during a rush says nothing about which physical package is on
+          // the counter, and a modal per scanned code would make the handoff
+          // unusable. These ring at the product's current price; pick a lot by
+          // scanning the item itself at the till when the price matters.
+          this.addToCart(p, null, { noPrompt: true });
           line = this.cart.find((x) => x.id === p.id);
         }
         if (line) {
@@ -1127,6 +1223,49 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections) {
       if (!it.allowDecimal) q = Math.round(q);
       it.qty = q;
       this.syncSerials(it);
+      this.spillOverflow(it);
+    },
+    // spillOverflow keeps a lot-priced line honest. Asking for 10 when the lot the
+    // cashier picked holds only 4 means 4 really are at that price and 6 are not,
+    // so the line clamps to 4 and the remainder opens a new line on the next lot
+    // at ITS price — two receipt lines, matching what leaves the shelf.
+    //
+    // Lines with no lot are untouched: they price off the product and the server's
+    // stock guard still has the final word.
+    spillOverflow(it) {
+      if (!it.batch_id || !(it.batch_remaining > 0)) return;
+      const over = Number(it.qty) - it.batch_remaining;
+      if (over <= 0) return;
+      it.qty = it.batch_remaining;
+      this.syncSerials(it);
+
+      // The next lot with room that isn't already a line in this cart.
+      const lots = this.lotsFor(it.id);
+      const next = lots.find(
+        (l) =>
+          l.batch_id !== it.batch_id &&
+          Number(l.qty_remaining) > 0 &&
+          !this.cart.some((x) => x.id === it.id && x.batch_id === l.batch_id),
+      );
+      if (!next) {
+        toast(`Only ${this.qtyText(it.batch_remaining)} left at ${this.sym} ${this.money(it.unit_price)}`, "error");
+        return;
+      }
+      const src = { ...it, id: it.id };
+      this.cart.push({
+        ...src,
+        unit_price: Number(next.price),
+        qty: 0,
+        batch_id: next.batch_id,
+        batch_remaining: Number(next.qty_remaining),
+        batch_label: this.lotLabel(next),
+        serials: [],
+      });
+      const line = this.cart[this.cart.length - 1];
+      line.qty = over;
+      // Recurse: the remainder may overflow the next lot too.
+      this.clampQty(line);
+      toast(`Split: ${this.qtyText(it.qty)} at ${this.sym} ${this.money(it.unit_price)}, ${this.qtyText(line.qty)} at ${this.sym} ${this.money(line.unit_price)}`, "success");
     },
     removeItem(idx) {
       this.cart.splice(idx, 1);
@@ -1443,6 +1582,10 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections) {
             // Service lines (plugin recharge) carry a per-line amount; ignored by
             // the server for normal stocked products.
             price_override: it.price_override || "",
+            // The lot the cashier picked at the "which price?" prompt. The server
+            // re-reads the price from it — we never send a price for stocked
+            // goods — and depletes that lot instead of taking FEFO.
+            batch_id: it.batch_id || 0,
             // Optional per-line label + consumables for service lines.
             description: it.description || "",
             components: Array.isArray(it.components) ? it.components : [],
@@ -1471,6 +1614,9 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections) {
         }
         await this.loadProducts();
         await this.loadSummary();
+        // Lots just moved: one may now be empty (and stop being a choice), so the
+        // next customer must be offered the current picture, not a stale one.
+        await this.loadPriceOptions();
       } catch (_) {
         /* toast already shown */
       } finally {
