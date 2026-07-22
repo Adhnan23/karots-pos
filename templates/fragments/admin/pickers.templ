@@ -212,6 +212,17 @@ func locationGroups(choices []LocationChoice) []string {
 	return groups
 }
 
+// CategoryDatalist renders an <datalist> of expense categories for an
+// <input list="id">. Shared by the admin and cashier expense forms so both offer
+// the same built-in ∪ learned category suggestions.
+templ CategoryDatalist(id string, cats []string) {
+	<datalist id={ id }>
+		for _, c := range cats {
+			<option value={ c }></option>
+		}
+	</datalist>
+}
+
 // pickerID renders a positive id as a string, or "" for 0 (the new/empty case).
 func pickerID(id int64) string {
 	if id <= 0 {

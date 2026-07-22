@@ -366,6 +366,16 @@ func (a *adminUI) Expenses(c echo.Context) error {
 	}))
 }
 
+// expenseCategories returns the built-in ∪ already-used category list for the
+// expense combo box.
+func (a *adminUI) expenseCategories(ctx context.Context) ([]string, error) {
+	distinct, err := expenses.NewRepository(a.db).DistinctCategories(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return expenses.MergedCategories(distinct), nil
+}
+
 func (a *adminUI) ExpenseForm(c echo.Context) error {
 	sources, err := a.cashLocationChoices(c.Request().Context())
 	if err != nil {
@@ -375,7 +385,11 @@ func (a *adminUI) ExpenseForm(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	return response.RenderFragment(c, adminpages.ExpenseForm(adminpages.ExpenseFormData{Sources: sources, Services: svcs}))
+	cats, err := a.expenseCategories(c.Request().Context())
+	if err != nil {
+		return err
+	}
+	return response.RenderFragment(c, adminpages.ExpenseForm(adminpages.ExpenseFormData{Sources: sources, Services: svcs, Categories: cats}))
 }
 
 func (a *adminUI) ExpenseEditForm(c echo.Context) error {
@@ -391,7 +405,11 @@ func (a *adminUI) ExpenseEditForm(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	return response.RenderFragment(c, adminpages.ExpenseForm(adminpages.ExpenseFormData{Expense: e, Services: svcs}))
+	cats, err := a.expenseCategories(c.Request().Context())
+	if err != nil {
+		return err
+	}
+	return response.RenderFragment(c, adminpages.ExpenseForm(adminpages.ExpenseFormData{Expense: e, Services: svcs, Categories: cats}))
 }
 
 func (a *adminUI) ExpenseUpdate(c echo.Context) error {

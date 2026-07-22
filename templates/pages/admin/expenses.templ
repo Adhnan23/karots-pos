@@ -86,6 +86,8 @@ type ExpenseFormData struct {
 	Sources []adminfragments.LocationChoice
 	// Services are the active service products this cost can be attributed to.
 	Services []products.Product
+	// Categories are the built-in ∪ learned suggestions for the combo box.
+	Categories []string
 }
 
 // expServiceSelected marks the currently attributed service when editing.
@@ -106,14 +108,7 @@ templ ExpenseForm(d ExpenseFormData) {
 				<div>
 					<label class="block text-sm font-medium mb-1">Category</label>
 					<input name="category" required list="expense-cats" value={ expVal(d.Expense, "category") } class="w-full border rounded-lg px-3 py-2"/>
-					<datalist id="expense-cats">
-						<option value="Rent"></option>
-						<option value="Electricity"></option>
-						<option value="Salary"></option>
-						<option value="Transport"></option>
-						<option value="Water"></option>
-						<option value="Maintenance"></option>
-					</datalist>
+					@adminfragments.CategoryDatalist("expense-cats", d.Categories)
 				</div>
 				<div>
 					<label class="block text-sm font-medium mb-1">Amount</label>
