@@ -225,6 +225,91 @@ func (a *adminUI) SupplierPay(c echo.Context) error {
 	return htmxDone(c, "Payment recorded", "reload-suppliers")
 }
 
+// SupplierRefund records money received back from a supplier — settling the
+// credit left after goods went back, or an advance being returned.
+//
+// It is the mirror of SupplierPay: cash arrives from External into a chosen till
+// or locker through cashflow, so the drawer, the ledger and the receipt all move
+// together. supplierpay caps the amount at the credit actually owed, so a refund
+// can never invent money.
+func (a *adminUI) SupplierRefund(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	ctx := c.Request().Context()
+	sup, err := a.s.suppliers.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	in, err := parseRefund(c)
+	if err != nil {
+		return err
+	}
+	userID := middleware.CurrentUserID(c)
+
+	// Cash has to land somewhere; card/online just records the refund.
+	var dest cashflow.Location
+	if in.Method == "cash" {
+		dest, err = parseLocation(c.FormValue("dest"))
+		if err != nil {
+			return err
+		}
+	}
+
+	var res *supplierpay.RefundResult
+	var rec *cashflow.Receipt
+	err = appdb.WithTx(ctx, a.db, func(tx *sqlx.Tx) error {
+		r, txErr := a.s.supplierPay.RefundTx(ctx, tx, id, in, userID)
+		if txErr != nil {
+			return txErr
+		}
+		res = r
+		if r.Method != "cash" {
+			return nil
+		}
+		k, txErr := a.s.cashflow.MoveTx(ctx, tx, cashflow.MoveInput{
+			From:        cashflow.External(),
+			To:          dest,
+			Amount:      r.Amount,
+			Reason:      "refund from " + sup.Name,
+			ReceiptKind: "supplier_refund",
+			Party:       sup.Name,
+			Ref:         &cashflow.Ref{Kind: "supplier_refund", ID: r.RefundID},
+			ActorID:     userID,
+		})
+		rec = k
+		return txErr
+	})
+	if err != nil {
+		return err
+	}
+	a.s.logAudit(c, audit.ActionPayment, "supplier", strconv.FormatInt(id, 10),
+		"refund received "+money.Display(res.Amount)+" ("+res.Method+")")
+	if rec != nil {
+		return a.s.afterMoneyMove(c, rec)
+	}
+	return htmxDone(c, "Refund recorded", "reload-suppliers")
+}
+
+// parseRefund reads the refund form shared by the admin and counter dialogs.
+func parseRefund(c echo.Context) (supplierpay.RefundInput, error) {
+	method, ok := normSupplierMethod(c.FormValue("method"))
+	if !ok {
+		return supplierpay.RefundInput{}, apperr.Validation("refund method must be cash, card or online")
+	}
+	amt, err := money.Parse(strings.TrimSpace(c.FormValue("amount")))
+	if err != nil || !amt.IsPositive() {
+		return supplierpay.RefundInput{}, apperr.Validation("enter the amount received")
+	}
+	return supplierpay.RefundInput{
+		Amount:    amt,
+		Method:    method,
+		Reference: strings.TrimSpace(c.FormValue("reference")),
+		Note:      strings.TrimSpace(c.FormValue("note")),
+	}, nil
+}
+
 // normSupplierMethod mirrors supplierpay.normMethod for the web layer's cash
 // branch decision (blank → cash).
 func normSupplierMethod(m string) (string, bool) {

@@ -74,6 +74,8 @@ templ SuppliersTable(d SuppliersData) {
 						<td class="py-2 px-3 text-right font-medium">
 							if s.OutstandingBalance.IsPositive() {
 								<span class="text-rose-600">{ money.Format(d.Symbol, s.OutstandingBalance) }</span>
+							} else if s.OutstandingBalance.IsNegative() {
+								<span class="text-emerald-700" title="They owe us — returned goods or an advance we paid">{ money.Format(d.Symbol, s.OutstandingBalance.Neg()) } cr</span>
 							} else {
 								<span class="text-slate-400">—</span>
 							}
@@ -115,9 +117,17 @@ type SupplierPayData struct {
 templ SupplierPayForm(d SupplierPayData) {
 	@cashierModal("Pay Supplier") {
 		<form class="p-6 space-y-4" x-data="{ method: 'cash' }" hx-post={ "/cashier/suppliers/" + strconv.FormatInt(d.Supplier.ID, 10) + "/payment" } hx-swap="none">
-			<p class="text-sm text-slate-600">
-				{ d.Supplier.Name } — we owe <span class="font-semibold">{ money.Format(d.Symbol, d.Supplier.OutstandingBalance) }</span>
-			</p>
+			<!-- A negative balance is credit: they owe us, from goods sent back or an
+			     advance we already paid. "We owe Rs -1,300" read as nonsense. -->
+			if d.Supplier.OutstandingBalance.IsNegative() {
+				<p class="text-sm text-emerald-700">
+					{ d.Supplier.Name } — <span class="font-semibold">{ money.Format(d.Symbol, d.Supplier.OutstandingBalance.Neg()) }</span> in credit. Nothing to pay.
+				</p>
+			} else {
+				<p class="text-sm text-slate-600">
+					{ d.Supplier.Name } — we owe <span class="font-semibold">{ money.Format(d.Symbol, d.Supplier.OutstandingBalance) }</span>
+				</p>
+			}
 			if len(d.Invoices) > 0 {
 				<div>
 					<label class="block text-sm font-medium mb-1">Pay invoices (oldest first)</label>
@@ -149,11 +159,18 @@ templ SupplierPayForm(d SupplierPayData) {
 							}
 						</tbody>
 					</table>
+					<!-- Paying beyond the open invoices — an advance for goods not
+					     delivered yet. Previously impossible for a supplier we owed. -->
+					<div class="mt-3 pt-3 border-t">
+						<label class="block text-sm font-medium mb-1">Advance / extra (optional)</label>
+						<p class="text-xs text-slate-500 mb-2">Money paid on top of the invoices above. It stays as credit and is spent on their next delivery.</p>
+						<input name="advance" type="number" step="0.01" min="0" class="w-40 border rounded-lg px-3 py-2 text-right"/>
+					</div>
 				</div>
 			} else {
 				<div>
 					<label class="block text-sm font-medium mb-1">Payment Amount</label>
-					<p class="text-xs text-slate-500 mb-2">No open invoices — this just reduces what we owe them.</p>
+					<p class="text-xs text-slate-500 mb-2">No open invoices — this is an advance, spent automatically on their next delivery.</p>
 					<input name="amount" type="number" step="0.01" min="0" required class="w-full border rounded-lg px-3 py-2"/>
 				</div>
 			}
@@ -185,6 +202,40 @@ templ SupplierPayForm(d SupplierPayData) {
 				<button type="submit" class="px-4 py-2 rounded-lg bg-emerald-600 text-white">Pay</button>
 			</div>
 		</form>
+		<!-- Money handed BACK by the supplier at the counter. Offered only when they
+		     hold a credit; the destination is checked server-side against this
+		     cashier's allowed locations, so it can only land where they may put it. -->
+		if d.Supplier.OutstandingBalance.IsNegative() {
+			<div class="px-6 pb-6 border-t pt-4">
+				<h4 class="text-sm font-semibold text-slate-600 mb-1">Supplier handing money back?</h4>
+				<p class="text-xs text-slate-500 mb-3">They owe us { money.Format(d.Symbol, d.Supplier.OutstandingBalance.Neg()) }. Record what they actually hand over.</p>
+				<form class="space-y-3" x-data="{ method: 'cash' }" hx-post={ "/cashier/suppliers/" + strconv.FormatInt(d.Supplier.ID, 10) + "/refund" } hx-swap="none">
+					<div class="grid grid-cols-2 gap-4">
+						<div>
+							<label class="block text-sm font-medium mb-1">Amount received</label>
+							<input name="amount" type="number" step="0.01" min="0" required
+								value={ money.Display(d.Supplier.OutstandingBalance.Neg()) }
+								class="w-full border rounded-lg px-3 py-2 text-right"/>
+						</div>
+						<div>
+							<label class="block text-sm font-medium mb-1">Method</label>
+							<select name="method" x-model="method" class="w-full border rounded-lg px-3 py-2">
+								<option value="cash">Cash</option>
+								<option value="card">Card</option>
+								<option value="online">Online</option>
+							</select>
+						</div>
+					</div>
+					<div x-show="method === 'cash'" x-cloak>
+						<label class="block text-sm font-medium mb-1">Put the cash into</label>
+						@adminfragments.LocationPicker("dest", "— pick where it goes —", d.Sources)
+					</div>
+					<div class="flex justify-end">
+						<button type="submit" class="px-4 py-2 rounded-lg bg-emerald-600 text-white">Record refund</button>
+					</div>
+				</form>
+			</div>
+		}
 	}
 }
 

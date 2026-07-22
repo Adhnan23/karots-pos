@@ -302,6 +302,13 @@ func (h *cashierUI) ReceiveWalkIn(c echo.Context) error {
 			return txErr
 		}
 		d = got
+		// Spend anything the supplier already holds for us first, then cap what is
+		// paid now at what genuinely remains.
+		remaining, txErr := owedAfterSettlement(ctx, tx, d.Purchase.ID)
+		if txErr != nil {
+			return txErr
+		}
+		pay.amount = clampToBalance(pay.amount, remaining)
 		if !pay.amount.IsPositive() {
 			return nil
 		}
@@ -442,6 +449,79 @@ func (h *cashierUI) SupplierPayAtCounter(c echo.Context) error {
 		"paid "+money.Display(res.Total)+" ("+res.Method+") at the counter")
 
 	msg := "Paid " + money.Display(res.Total) + " to " + sup.Name
+	cfg, _ := h.s.settings.Get(ctx)
+	if rec != nil && cfg != nil && cfg.AskToPrint {
+		printURL := "/cashier/money-receipts/" + strconv.FormatInt(rec.ID, 10) + "/print"
+		c.Response().Header().Set("HX-Trigger",
+			response.PrintPrompt(msg+" · "+rec.ReceiptNo, printURL, false, "reload-suppliers", "close-modal"))
+		return c.NoContent(200)
+	}
+	if rec != nil {
+		h.s.printMoneyReceipt(ctx, rec)
+	}
+	return htmxDone(c, msg, "reload-suppliers")
+}
+
+// SupplierRefundAtCounter records money handed back BY a supplier at the till.
+//
+// Mirrors the admin handler, with the counter's one difference: the destination
+// is validated through counterSource, so a cashier can only put the cash into
+// their own drawer or a locker the owner has opened to them.
+func (h *cashierUI) SupplierRefundAtCounter(c echo.Context) error {
+	ctx := c.Request().Context()
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	sup, err := h.s.suppliers.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	in, err := parseRefund(c)
+	if err != nil {
+		return err
+	}
+	userID := middleware.CurrentUserID(c)
+
+	var dest cashflow.Location
+	if in.Method == "cash" {
+		dest, err = h.counterSource(c, c.FormValue("dest"))
+		if err != nil {
+			return err
+		}
+	}
+
+	var res *supplierpay.RefundResult
+	var rec *cashflow.Receipt
+	err = appdb.WithTx(ctx, h.s.db, func(tx *sqlx.Tx) error {
+		r, txErr := h.s.supplierPay.RefundTx(ctx, tx, id, in, userID)
+		if txErr != nil {
+			return txErr
+		}
+		res = r
+		if r.Method != "cash" {
+			return nil
+		}
+		k, txErr := h.s.cashflow.MoveTx(ctx, tx, cashflow.MoveInput{
+			From:        cashflow.External(),
+			To:          dest,
+			Amount:      r.Amount,
+			Reason:      "refund from " + sup.Name,
+			ReceiptKind: "supplier_refund",
+			Party:       sup.Name,
+			Ref:         &cashflow.Ref{Kind: "supplier_refund", ID: r.RefundID},
+			ActorID:     userID,
+		})
+		rec = k
+		return txErr
+	})
+	if err != nil {
+		return err
+	}
+	h.s.logAudit(c, audit.ActionPayment, "supplier", strconv.FormatInt(id, 10),
+		"refund received "+money.Display(res.Amount)+" ("+res.Method+") at the counter")
+
+	msg := "Received " + money.Display(res.Amount) + " back from " + sup.Name
 	cfg, _ := h.s.settings.Get(ctx)
 	if rec != nil && cfg != nil && cfg.AskToPrint {
 		printURL := "/cashier/money-receipts/" + strconv.FormatInt(rec.ID, 10) + "/print"
@@ -646,6 +726,11 @@ func (h *cashierUI) ReceiveAgainstOrder(c echo.Context) error {
 			return txErr
 		}
 		d = got
+		remaining, txErr := owedAfterSettlement(ctx, tx, poID)
+		if txErr != nil {
+			return txErr
+		}
+		pay.amount = clampToBalance(pay.amount, remaining)
 		if !pay.amount.IsPositive() {
 			return nil
 		}

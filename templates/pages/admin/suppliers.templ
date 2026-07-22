@@ -193,11 +193,19 @@ templ SupplierPaymentForm(d SupplierPayData) {
 							}
 						</tbody>
 					</table>
+					<!-- Paying beyond the open invoices. Used to be impossible: the extra
+					     box only appeared when the supplier had NO open invoices, so you
+					     could never hand over an advance to someone you already owed. -->
+					<div class="mt-3 pt-3 border-t">
+						<label class="block text-sm font-medium mb-1">Advance / extra (optional)</label>
+						<p class="text-xs text-slate-500 mb-2">Money paid on top of the invoices above — for goods not delivered yet. It sits as credit with this supplier and is spent automatically on their next delivery.</p>
+						<input name="advance" type="number" step="0.01" min="0" class="w-40 border rounded-lg px-3 py-2 text-right"/>
+					</div>
 				</div>
 			} else {
 				<div>
 					<label class="block text-sm font-medium mb-1">Payment Amount</label>
-					<p class="text-xs text-slate-500 mb-2">No open invoices — this payment just reduces the outstanding balance.</p>
+					<p class="text-xs text-slate-500 mb-2">No open invoices — this is an advance and is spent automatically on their next delivery.</p>
 					<input name="amount" type="number" step="0.01" min="0" required class="w-full border rounded-lg px-3 py-2"/>
 				</div>
 			}
@@ -230,6 +238,48 @@ templ SupplierPaymentForm(d SupplierPayData) {
 			</div>
 			@modalButtons()
 		</form>
+		<!-- Taking money BACK from a supplier. Only offered when they actually hold
+		     a credit; the server caps the amount at it, so a refund can never
+		     invent money by pushing the balance positive. -->
+		if d.Supplier.OutstandingBalance.IsNegative() {
+			<div class="px-6 pb-6 border-t pt-4">
+				<h4 class="text-sm font-semibold text-slate-600 mb-1">Receive a refund</h4>
+				<p class="text-xs text-slate-500 mb-3">{ d.Supplier.Name } owes you { money.Format(d.Symbol, d.Supplier.OutstandingBalance.Neg()) }. Record cash they hand back — or leave it as credit against their next delivery.</p>
+				<form class="space-y-3" x-data="{ method: 'cash' }" hx-post={ "/admin/suppliers/" + strconv.FormatInt(d.Supplier.ID, 10) + "/refund" } hx-swap="none">
+					<div class="grid grid-cols-2 gap-4">
+						<div>
+							<label class="block text-sm font-medium mb-1">Amount received</label>
+							<input name="amount" type="number" step="0.01" min="0" required
+								value={ money.Display(d.Supplier.OutstandingBalance.Neg()) }
+								class="w-full border rounded-lg px-3 py-2 text-right"/>
+						</div>
+						<div>
+							<label class="block text-sm font-medium mb-1">Method</label>
+							<select name="method" x-model="method" class="w-full border rounded-lg px-3 py-2">
+								<option value="cash">Cash</option>
+								<option value="card">Card</option>
+								<option value="online">Online</option>
+							</select>
+						</div>
+					</div>
+					<div x-show="method === 'cash'" x-cloak>
+						<label class="block text-sm font-medium mb-1">Put the cash into</label>
+						if len(d.Sources) == 0 {
+							<p class="text-sm text-amber-600">No cash locker or open till to receive into.</p>
+						} else {
+							@adminfragments.LocationPicker("dest", "— pick where it goes —", d.Sources)
+						}
+					</div>
+					<div>
+						<label class="block text-sm font-medium mb-1">Reference</label>
+						<input name="reference" class="w-full border rounded-lg px-3 py-2" placeholder="cheque / txn no"/>
+					</div>
+					<div class="flex justify-end">
+						<button type="submit" class="px-4 py-2 rounded-lg bg-emerald-600 text-white font-medium">Record refund</button>
+					</div>
+				</form>
+			</div>
+		}
 		if len(d.History) > 0 {
 			<div class="px-6 pb-6">
 				<h4 class="text-sm font-semibold text-slate-600 mb-2">Payment history</h4>

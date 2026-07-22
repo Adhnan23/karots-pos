@@ -169,6 +169,13 @@ func (a *adminUI) PurchaseReceive(c echo.Context) error {
 			return txErr
 		}
 		d = got
+		// Spend anything the supplier already holds for us before asking for more
+		// cash, and cap what is paid now at what genuinely remains.
+		remaining, txErr := owedAfterSettlement(ctx, tx, id)
+		if txErr != nil {
+			return txErr
+		}
+		pay.amount = clampToBalance(pay.amount, remaining)
 		if !pay.amount.IsPositive() {
 			return nil
 		}

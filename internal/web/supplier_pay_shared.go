@@ -59,6 +59,32 @@ func (s *Server) paySupplierTx(ctx context.Context, tx *sqlx.Tx, req payRequest,
 	return res, rec, nil
 }
 
+// owedAfterSettlement re-reads what an invoice still owes once purchases has
+// spent any supplier credit against it (advances paid up front, value from
+// returned goods — see purchases.SettleCredit).
+//
+// Callers must clamp any "paying now" amount to this: the credit may have
+// settled the invoice in part or in full, and paying past it is refused
+// (rightly), which would otherwise fail the whole receive.
+func owedAfterSettlement(ctx context.Context, tx *sqlx.Tx, purchaseID int64) (decimal.Decimal, error) {
+	pu, err := purchases.NewRepository(tx).FindByID(ctx, purchaseID)
+	if err != nil {
+		return decimal.Zero, apperr.Internal("failed to re-read the invoice", err)
+	}
+	return pu.Balance(), nil
+}
+
+// clampToBalance caps a "paying now" amount at what is genuinely still owed.
+func clampToBalance(amount, balance decimal.Decimal) decimal.Decimal {
+	if balance.IsNegative() {
+		return decimal.Zero
+	}
+	if amount.GreaterThan(balance) {
+		return balance
+	}
+	return amount
+}
+
 // parseAllocations reads the per-invoice allocation inputs a pay form rendered
 // (alloc_<id>), falling back to a plain unallocated amount for a supplier who
 // carries a balance with no open invoices. Shared so the admin and counter
@@ -83,14 +109,24 @@ func parseAllocations(c echo.Context, invoices []purchases.Purchase) (supplierpa
 		}
 		in.Allocations = append(in.Allocations, supplierpay.Alloc{PurchaseID: pu.ID, Amount: amt})
 	}
-	if len(invoices) == 0 {
-		if raw := strings.TrimSpace(c.FormValue("amount")); raw != "" {
-			amt, err := money.Parse(raw)
-			if err != nil || amt.IsNegative() {
-				return in, apperr.Validation("invalid amount")
-			}
-			in.Unallocated = amt
+	// Money paid beyond the open invoices: an advance against goods not yet
+	// delivered, or simply handing over more than is owed today. It used to be
+	// readable ONLY when the supplier had no open invoices, so paying an advance
+	// to a supplier you already owe was impossible.
+	//
+	// It carries no allocation by design — it sits on the supplier's balance as a
+	// credit until a delivery arrives to absorb it.
+	advance := strings.TrimSpace(c.FormValue("advance"))
+	if advance == "" {
+		// Older forms (and the no-open-invoices case) call the field "amount".
+		advance = strings.TrimSpace(c.FormValue("amount"))
+	}
+	if advance != "" {
+		amt, err := money.Parse(advance)
+		if err != nil || amt.IsNegative() {
+			return in, apperr.Validation("invalid amount")
 		}
+		in.Unallocated = amt
 	}
 	return in, nil
 }

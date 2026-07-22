@@ -34,6 +34,7 @@ import (
 	"karots-pos/internal/features/sales"
 	"karots-pos/internal/features/settings"
 	"karots-pos/internal/features/stock"
+	"karots-pos/internal/features/supplierpay"
 	"karots-pos/internal/features/suppliers"
 	"karots-pos/internal/features/units"
 	appmw "karots-pos/internal/middleware"
@@ -174,6 +175,11 @@ func main() {
 	// banking at close, mid-shift moves to/from a locker) through cashflow, which
 	// imports cashregister — so the hook is injected here rather than imported.
 	crSvc.WithLockerLeg(cashflow.NewService(sqlxDB, sales.NewService(sqlxDB)).TillLockerLeg)
+	// Same shape: settling a new invoice out of a supplier's advances and return
+	// credits lives in supplierpay, which imports purchases — so purchases takes
+	// it as a hook rather than importing back. Wiring it here means every path
+	// that books a payable spends the credit, with no caller left to forget.
+	purchases.WithSettleCredit(supplierpay.NewService(sqlxDB).ApplySupplierCreditTx)
 
 	// UI routes (HTMX + Templ)
 	web.RegisterUI(e, sqlxDB, cfg, authSvc)

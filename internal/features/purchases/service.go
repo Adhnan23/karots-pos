@@ -21,6 +21,33 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+// SettleCredit spends whatever a supplier already holds for us — advances paid
+// before the goods arrived, value from returned goods — against a freshly booked
+// invoice, inside the same transaction.
+//
+// It is a hook rather than a direct call because settling lives in supplierpay,
+// which imports this package; wiring it in main.go (as cashregister does for its
+// locker leg) keeps the dependency one-way. nil = off, which is exactly the old
+// behaviour.
+//
+// It hangs off CreateTx/ReceiveTx rather than off each caller so no future entry
+// point can book a payable and quietly forget to spend the credit — that gap is
+// how an invoice ends up paid twice.
+type SettleCredit func(ctx context.Context, tx *sqlx.Tx, supplierID, purchaseID int64) error
+
+var settleCredit SettleCredit
+
+// WithSettleCredit wires the settlement hook. Called once at startup.
+func WithSettleCredit(fn SettleCredit) { settleCredit = fn }
+
+// applySettlement runs the settlement hook when one is wired.
+func applySettlement(ctx context.Context, tx *sqlx.Tx, supplierID, purchaseID int64) error {
+	if settleCredit == nil {
+		return nil
+	}
+	return settleCredit(ctx, tx, supplierID, purchaseID)
+}
+
 type Service struct {
 	db   *sqlx.DB
 	repo *Repository
@@ -107,6 +134,9 @@ func CreateTx(ctx context.Context, tx *sqlx.Tx, in CreateInput, userID int64) (*
 	}
 
 	if err := applyReceivedLines(ctx, repo, stk, sup, purchaseID, in.SupplierID, lines, total, userID); err != nil {
+		return nil, err
+	}
+	if err := applySettlement(ctx, tx, in.SupplierID, purchaseID); err != nil {
 		return nil, err
 	}
 
@@ -515,6 +545,9 @@ func ReceiveTx(ctx context.Context, tx *sqlx.Tx, id int64, in ReceiveInput, user
 			return apperr.Internal("failed to update purchase", err)
 		}
 		if err := applyReceivedLines(ctx, repo, stk, sup, id, cur.SupplierID, lines, total, userID); err != nil {
+			return err
+		}
+		if err := applySettlement(ctx, tx, cur.SupplierID, id); err != nil {
 			return err
 		}
 		// Partial receipt: carry the still-unreceived quantities into a new draft PO.

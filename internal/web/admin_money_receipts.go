@@ -234,6 +234,8 @@ func receiptKindLabel(k string) string {
 		return "Intake"
 	case "supplier_payment":
 		return "Supplier payment"
+	case "supplier_refund":
+		return "Supplier refund"
 	case "customer_payment":
 		return "Customer payment"
 	case "expense":

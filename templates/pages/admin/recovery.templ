@@ -40,7 +40,7 @@ templ RecoveryForm(d RecoveryFormData) {
 			<label class="block text-xs font-semibold uppercase tracking-wide text-slate-400 mb-1">Outcome</label>
 			<div class="flex flex-col gap-1 text-sm">
 				<label class="flex items-center gap-2"><input type="radio" name="outcome" value="replacement" x-model="outcome"/> Replacement received (restock +1)</label>
-				<label class="flex items-center gap-2"><input type="radio" name="outcome" value="paid" x-model="outcome"/> Supplier paid / credited</label>
+				<label class="flex items-center gap-2"><input type="radio" name="outcome" value="paid" x-model="outcome"/> Supplier credited us</label>
 				<label class="flex items-center gap-2"><input type="radio" name="outcome" value="written_off" x-model="outcome"/> Written off (full loss)</label>
 			</div>
 		</div>
@@ -50,8 +50,15 @@ templ RecoveryForm(d RecoveryFormData) {
 				@adminfragments.SupplierPicker("supplier_id", 0, "", "Search supplier…", false)
 			</div>
 			<div>
-				<label class="block text-sm font-medium mb-1">Amount paid / credited</label>
+				<label class="block text-sm font-medium mb-1">Amount credited</label>
 				<input name="recovered_amount" inputmode="decimal" class="w-full border rounded-lg px-3 py-2" placeholder="0.00"/>
+				<!-- This books a CREDIT against the supplier; no cash moves here, and
+				     saying "paid" implied otherwise. If they hand the money over,
+				     record that on the supplier's Pay dialog as a refund — which is
+				     what puts it in a drawer. -->
+				<p class="text-xs text-slate-500 mt-1">
+					This reduces what we owe them — no cash moves here. If they hand the money over instead, record it as a <span class="font-medium">refund</span> on that supplier's Pay dialog so it lands in a drawer.
+				</p>
 			</div>
 		</div>
 		<div>

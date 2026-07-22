@@ -19,29 +19,32 @@ import (
 
 // PL is a profit & loss summary for [From, To).
 type PL struct {
-	From          time.Time        `json:"from"`
-	To            time.Time        `json:"to"`
-	SalesCount    int              `json:"sales_count"`
-	GrossRevenue  decimal.Decimal  `json:"gross_revenue"`  // sale totals before returns (excl. void)
-	Returns       decimal.Decimal  `json:"returns"`        // value of returned lines, by sale date
-	Revenue       decimal.Decimal  `json:"revenue"`        // net revenue = gross - returns
-	Received      decimal.Decimal  `json:"received"`       // tender taken AT point of sale (excludes later debt collections — see Cashflow view for true cash in)
-	COGS          decimal.Decimal  `json:"cogs"`           // cost of goods sold, net of returns
-	GrossProfit   decimal.Decimal  `json:"gross_profit"`   // revenue - COGS
-	GrossMargin   decimal.Decimal  `json:"gross_margin"`   // gross profit / revenue, percent
-	Expenses      decimal.Decimal  `json:"expenses"`       // operating expenses in range
-	Losses        decimal.Decimal  `json:"losses"`         // damage + warranty replacement cost
-	OwnUse        decimal.Decimal  `json:"own_use"`        // stock the shop consumed itself
-	StaffWelfare  decimal.Decimal  `json:"staff_welfare"`  // stock taken by staff
-	Recoveries    decimal.Decimal  `json:"recoveries"`     // value reclaimed from suppliers
-	OtherIncome   decimal.Decimal  `json:"other_income"`   // bank interest credited to lockers in range
-	NetProfit     decimal.Decimal  `json:"net_profit"`     // gross - expenses - losses - own use - staff welfare + recoveries + other income
-	Receivables   decimal.Decimal  `json:"receivables"`    // customer dues (current snapshot)
-	Payables      decimal.Decimal  `json:"payables"`       // supplier dues (current snapshot)
-	CashWithdrawn decimal.Decimal  `json:"cash_withdrawn"` // drawer withdrawals in range
-	RegisterDiff  decimal.Decimal  `json:"register_diff"`  // net over/short of sessions closed in range
-	TopProducts   []ProductRevenue `json:"top_products"`
-	ByPayment     []MethodTotal    `json:"by_payment"`
+	From         time.Time       `json:"from"`
+	To           time.Time       `json:"to"`
+	SalesCount   int             `json:"sales_count"`
+	GrossRevenue decimal.Decimal `json:"gross_revenue"` // sale totals before returns (excl. void)
+	Returns      decimal.Decimal `json:"returns"`       // value of returned lines, by sale date
+	Revenue      decimal.Decimal `json:"revenue"`       // net revenue = gross - returns
+	Received     decimal.Decimal `json:"received"`      // tender taken AT point of sale (excludes later debt collections — see Cashflow view for true cash in)
+	COGS         decimal.Decimal `json:"cogs"`          // cost of goods sold, net of returns
+	GrossProfit  decimal.Decimal `json:"gross_profit"`  // revenue - COGS
+	GrossMargin  decimal.Decimal `json:"gross_margin"`  // gross profit / revenue, percent
+	Expenses     decimal.Decimal `json:"expenses"`      // operating expenses in range
+	Losses       decimal.Decimal `json:"losses"`        // damage + warranty replacement cost
+	OwnUse       decimal.Decimal `json:"own_use"`       // stock the shop consumed itself
+	StaffWelfare decimal.Decimal `json:"staff_welfare"` // stock taken by staff
+	Recoveries   decimal.Decimal `json:"recoveries"`    // value reclaimed from suppliers
+	OtherIncome  decimal.Decimal `json:"other_income"`  // bank interest credited to lockers in range
+	NetProfit    decimal.Decimal `json:"net_profit"`    // gross - expenses - losses - own use - staff welfare + recoveries + other income
+	Receivables  decimal.Decimal `json:"receivables"`   // customer dues (current snapshot)
+	Payables     decimal.Decimal `json:"payables"`      // supplier dues (current snapshot; credits excluded)
+	// SupplierCredit is the mirror of Payables: what suppliers owe US, from
+	// returned goods or advances paid ahead of a delivery.
+	SupplierCredit decimal.Decimal  `json:"supplier_credit"`
+	CashWithdrawn  decimal.Decimal  `json:"cash_withdrawn"` // drawer withdrawals in range
+	RegisterDiff   decimal.Decimal  `json:"register_diff"`  // net over/short of sessions closed in range
+	TopProducts    []ProductRevenue `json:"top_products"`
+	ByPayment      []MethodTotal    `json:"by_payment"`
 }
 
 type ProductRevenue struct {
@@ -156,7 +159,14 @@ func (s *Service) Compute(ctx context.Context, from, to time.Time) (*PL, error) 
 		Add(pl.Recoveries).Add(pl.OtherIncome)
 
 	_ = s.db.GetContext(ctx, &pl.Receivables, `SELECT COALESCE(SUM(outstanding_balance),0) FROM customers`)
-	_ = s.db.GetContext(ctx, &pl.Payables, `SELECT COALESCE(SUM(outstanding_balance),0) FROM suppliers`)
+	// Only suppliers we actually OWE count as payables. A supplier in credit (goods
+	// returned, or an advance paid) has a negative balance, and summing it raw
+	// netted that credit against everyone else's invoices — understating the debt.
+	// The credit is a receivable, reported separately.
+	_ = s.db.GetContext(ctx, &pl.Payables,
+		`SELECT COALESCE(SUM(GREATEST(outstanding_balance,0)),0) FROM suppliers`)
+	_ = s.db.GetContext(ctx, &pl.SupplierCredit,
+		`SELECT COALESCE(SUM(GREATEST(-outstanding_balance,0)),0) FROM suppliers`)
 
 	// Cash drawer: total withdrawn and the net over/short of sessions closed in
 	// the period (negative = short).
