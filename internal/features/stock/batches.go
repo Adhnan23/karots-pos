@@ -27,6 +27,9 @@ type Batch struct {
 	// joined
 	ProductName string `db:"product_name" json:"product_name"`
 	UnitAbbr    string `db:"unit_abbr"    json:"unit_abbr"`
+	// ProductPrice is the product's current price, so a report listing lots can
+	// resolve EffectivePrice without a second lookup per row.
+	ProductPrice decimal.Decimal `db:"product_price" json:"product_price"`
 }
 
 // NewBatch is the data needed to add a lot to inventory.
@@ -306,7 +309,7 @@ func (r *Repository) ProductCost(ctx context.Context, productID int64) (decimal.
 func (r *Repository) ListBatches(ctx context.Context, productID int64) ([]Batch, error) {
 	var rows []Batch
 	err := r.q.SelectContext(ctx, &rows, `
-		SELECT b.*, p.name AS product_name, u.abbreviation AS unit_abbr
+		SELECT b.*, p.name AS product_name, p.selling_price AS product_price, u.abbreviation AS unit_abbr
 		FROM stock_batches b
 		JOIN products p ON p.id = b.product_id
 		JOIN units u    ON u.id = p.unit_id
@@ -320,7 +323,7 @@ func (r *Repository) ListBatches(ctx context.Context, productID int64) ([]Batch,
 func (r *Repository) AllLiveBatches(ctx context.Context) ([]Batch, error) {
 	var rows []Batch
 	err := r.q.SelectContext(ctx, &rows, `
-		SELECT b.*, p.name AS product_name, u.abbreviation AS unit_abbr
+		SELECT b.*, p.name AS product_name, p.selling_price AS product_price, u.abbreviation AS unit_abbr
 		FROM stock_batches b
 		JOIN products p ON p.id = b.product_id
 		JOIN units u    ON u.id = p.unit_id
@@ -334,7 +337,7 @@ func (r *Repository) AllLiveBatches(ctx context.Context) ([]Batch, error) {
 func (r *Repository) ExpiringBefore(ctx context.Context, cutoff time.Time) ([]Batch, error) {
 	var rows []Batch
 	err := r.q.SelectContext(ctx, &rows, `
-		SELECT b.*, p.name AS product_name, u.abbreviation AS unit_abbr
+		SELECT b.*, p.name AS product_name, p.selling_price AS product_price, u.abbreviation AS unit_abbr
 		FROM stock_batches b
 		JOIN products p ON p.id = b.product_id
 		JOIN units u    ON u.id = p.unit_id

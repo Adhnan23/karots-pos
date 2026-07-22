@@ -741,7 +741,7 @@ templ BatchReport(d BatchReportData) {
 		<div class="no-print">
 		<table class="w-full text-sm">
 			<thead class="text-left text-slate-500 border-b">
-				<tr><th class="py-1.5">Product</th><th class="py-1.5">Batch</th><th class="py-1.5">Expiry</th><th class="py-1.5 text-right">Remaining</th><th class="py-1.5 text-right">Cost</th><th class="py-1.5 text-right">Value</th></tr>
+				<tr><th class="py-1.5">Product</th><th class="py-1.5">Batch</th><th class="py-1.5">Expiry</th><th class="py-1.5 text-right">Remaining</th><th class="py-1.5 text-right">Cost</th><th class="py-1.5 text-right">Sells at</th><th class="py-1.5 text-right">Value</th></tr>
 			</thead>
 			<tbody>
 				for _, b := range d.Rows {
@@ -757,15 +757,21 @@ templ BatchReport(d BatchReportData) {
 						</td>
 						<td class="py-1.5 text-right">{ money.Display(b.QtyRemaining) } { b.UnitAbbr }</td>
 						<td class="py-1.5 text-right">{ money.Display(b.CostPrice) }</td>
+						<td class="py-1.5 text-right">
+							{ money.Display(b.EffectivePrice(b.ProductPrice)) }
+							if b.SellingPrice.IsPositive() {
+								<span class="ml-1 text-[11px] text-amber-600" title="This lot has its own price, so it can be picked at the till">own</span>
+							}
+						</td>
 						<td class="py-1.5 text-right">{ money.Format(d.Symbol, b.QtyRemaining.Mul(b.CostPrice)) }</td>
 					</tr>
 				}
 				if len(d.Rows) == 0 {
-					<tr><td colspan="6" class="py-6 text-center text-slate-400">No batches.</td></tr>
+					<tr><td colspan="7" class="py-6 text-center text-slate-400">No batches.</td></tr>
 				}
 			</tbody>
 			<tfoot class="border-t-2 font-semibold">
-				<tr><td class="py-2" colspan="5">Total batch value (all { strconv.Itoa(d.Total) })</td><td class="py-2 text-right">{ money.Format(d.Symbol, d.TotalValue) }</td></tr>
+				<tr><td class="py-2" colspan="6">Total batch value (all { strconv.Itoa(d.Total) })</td><td class="py-2 text-right">{ money.Format(d.Symbol, d.TotalValue) }</td></tr>
 			</tfoot>
 		</table>
 		@rptTruncNote(len(d.Rows), d.Total)

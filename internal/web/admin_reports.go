@@ -579,13 +579,20 @@ func (a *adminUI) BatchReport(c echo.Context) error {
 			if b.ExpiryDate != nil {
 				expiry = b.ExpiryDate.Format("2006-01-02")
 			}
+			// "Own price" tells the reader whether this lot carries its own price
+			// (and so can be picked at the till) or merely follows the product.
+			ownPrice := "no"
+			if b.SellingPrice.IsPositive() {
+				ownPrice = "yes"
+			}
 			out = append(out, []string{
 				b.ProductName, ptrStr(b.BatchNo), expiry, b.QtyRemaining.String(), b.UnitAbbr,
-				csvMoney(b.CostPrice), csvMoney(b.QtyRemaining.Mul(b.CostPrice)),
+				csvMoney(b.CostPrice), csvMoney(b.EffectivePrice(b.ProductPrice)), ownPrice,
+				csvMoney(b.QtyRemaining.Mul(b.CostPrice)),
 			})
 		}
 		return writeCSV(c, "batches_"+time.Now().Format("2006-01-02"),
-			[]string{"Product", "Batch", "Expiry", "Remaining", "Unit", "Cost", "Value"}, out)
+			[]string{"Product", "Batch", "Expiry", "Remaining", "Unit", "Cost", "Sells at", "Own price", "Value"}, out)
 	}
 
 	d.Page = pageParam(c)

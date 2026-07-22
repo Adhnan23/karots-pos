@@ -126,13 +126,19 @@ templ IntakePage(d IntakeData) {
 						</div>
 						<div>
 							<label class="block text-sm font-medium mb-1">Selling</label>
-							<input name="selling_price" type="number" step="0.01" min="0" x-model="pSelling" class="w-full border rounded-lg px-3 py-2"/>
+							<input name="selling_price" type="number" step="0.01" min="0" x-model="pSelling" title="Becomes the shelf price AND sticks to the stock you are adding now" class="w-full border rounded-lg px-3 py-2"/>
 						</div>
 						<div>
 							<label class="block text-sm font-medium mb-1">Wholesale</label>
 							<input name="wholesale_price" type="number" step="0.01" min="0" x-model="pWholesale" class="w-full border rounded-lg px-3 py-2"/>
 						</div>
 					</div>
+					<!-- Per-lot pricing: this field now prices the lot too, and the till
+					     will ask the cashier to choose, so say it plainly. -->
+					<p class="text-xs text-slate-500">
+						A new <span class="font-medium">Selling</span> price becomes the shelf price <em>and</em> sticks to the stock you are adding.
+						Stock already on the shelf keeps the price it was stickered with, and the till asks which one the customer is holding.
+					</p>
 					<div>
 						<label class="block text-sm font-medium mb-1">Quantity to add</label>
 						<input name="quantity" type="number" step="0.001" min="0" x-model="qty" x-on:input="syncLabelQty()" class="w-full border rounded-lg px-3 py-2"/>

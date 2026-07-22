@@ -343,7 +343,7 @@ templ PurchaseReceivePage(d PurchaseReceiveData) {
 
 			<table class="w-full text-sm mb-3">
 				<thead class="text-left text-slate-500 border-b">
-					<tr><th class="py-2">Product</th><th class="py-2 w-24 text-right">Ordered</th><th class="py-2 w-32">Received</th><th class="py-2 w-28">Cost</th><th class="py-2 w-28">Sell</th><th class="py-2 w-36">Expiry</th><th class="py-2 text-right w-28">Subtotal</th></tr>
+					<tr><th class="py-2">Product</th><th class="py-2 w-24 text-right">Ordered</th><th class="py-2 w-32">Received</th><th class="py-2 w-28">Cost</th><th class="py-2 w-28" title="Becomes the shelf price AND sticks to this delivery's stock, so goods already priced differently keep their own price at the till">Sell</th><th class="py-2 w-36">Expiry</th><th class="py-2 text-right w-28">Subtotal</th></tr>
 				</thead>
 				<tbody>
 					<template x-for="(l, i) in lines" x-bind:key="i">
@@ -384,6 +384,15 @@ templ PurchaseReceivePage(d PurchaseReceiveData) {
 				</tbody>
 			</table>
 			<button type="button" class="text-indigo-600 text-sm mb-3" x-on:click="addNewLine()">+ Add forgotten / extra item</button>
+			<!--
+				Per-lot pricing: the Sell price does two jobs now, and the cashier will
+				be asked to choose between them, so it is worth saying plainly.
+			-->
+			<p class="text-xs text-slate-500 mb-2">
+				<span class="font-medium">Sell price</span> becomes the new shelf price <em>and</em> sticks to this delivery's stock.
+				Older stock already priced differently keeps its own price, and the till asks the cashier which one the customer is holding.
+				Leave it blank to price this delivery at the current shelf price.
+			</p>
 			<p class="text-xs text-amber-600 mb-2" x-show="hasVariance()">Some received quantities differ from what was ordered — only the received quantity updates stock.</p>
 			<label class="flex items-center gap-2 text-sm mb-4" x-show="hasShortfall()">
 				<input type="checkbox" x-model="keepRemainder"/>
