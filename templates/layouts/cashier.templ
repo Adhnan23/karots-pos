@@ -22,6 +22,7 @@ func cashierPalette(role string, canSuppliers bool) []paletteEntry {
 	}
 	if middleware.MaySeeSuppliers(role, canSuppliers) {
 		out = append(out, paletteEntry{"/cashier/suppliers", "Suppliers", "Terminal"})
+		out = append(out, paletteEntry{"/cashier/expenses", "Expenses", "Terminal"})
 	}
 	for _, t := range pluginCashierTabs() {
 		out = append(out, paletteEntry{t.Href, t.Label, "Terminal"})
@@ -53,6 +54,7 @@ templ Cashier(title, userName, role, active string, showChangePin bool) {
 						@cashierTab("/cashier/warranty", "Warranty", active == "warranty")
 						if middleware.MaySeeSuppliers(role, middleware.CanHandleSuppliersCtx(ctx)) {
 							@cashierTab("/cashier/suppliers", "Suppliers", active == "suppliers")
+							@cashierTab("/cashier/expenses", "Expenses", active == "expenses")
 						}
 						for _, t := range pluginCashierTabs() {
 							@cashierTab(t.Href, t.Label, active == t.Key)
