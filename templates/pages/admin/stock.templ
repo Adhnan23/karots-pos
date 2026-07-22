@@ -246,7 +246,21 @@ templ movProductOption(value, label, selected string) {
 	}
 }
 
-// BatchesModal shows a product's live lots (FEFO order) with expiry, qty and cost.
+// batchPriceValue renders a lot's own price for the edit box, leaving it BLANK
+// when the lot has none — blank is the input's way of saying "follow the
+// product", so a zero must not be shown as "0.00" and saved back as a real price.
+func batchPriceValue(b stock.Batch) string {
+	if !b.SellingPrice.IsPositive() {
+		return ""
+	}
+	return money.Display(b.SellingPrice)
+}
+
+// BatchesModal shows a product's live lots (FEFO order) with expiry, qty, cost
+// and the price each lot rings up at. A lot's price is editable here: blank it to
+// put the lot back on the product's current price, or set it so stock already
+// stickered at the old price keeps selling at that price after a new delivery
+// moves the shelf price on.
 templ BatchesModal(p products.Product, batches []stock.Batch, symbol string) {
 	@modalShell("Batches — " + p.Name) {
 		<div class="p-6">
@@ -260,6 +274,7 @@ templ BatchesModal(p products.Product, batches []stock.Batch, symbol string) {
 							<th class="py-2 pr-3">Source</th>
 							<th class="py-2 pr-3 text-right">Remaining</th>
 							<th class="py-2 pr-3 text-right">Cost</th>
+							<th class="py-2 pr-3 text-right">Sells at</th>
 							<th class="py-2 text-right">Received</th>
 						</tr>
 					</thead>
@@ -276,6 +291,29 @@ templ BatchesModal(p products.Product, batches []stock.Batch, symbol string) {
 								<td class="py-2 pr-3 capitalize text-slate-500">{ b.Source }</td>
 								<td class="py-2 pr-3 text-right">{ money.Display(b.QtyRemaining) } { b.UnitAbbr }</td>
 								<td class="py-2 pr-3 text-right">{ money.Format(symbol, b.CostPrice) }</td>
+								<td class="py-2 pr-3 text-right">
+									<form
+										class="flex items-center justify-end gap-1"
+										hx-post={ "/admin/stock/batches/" + strconv.FormatInt(b.ID, 10) + "/price" }
+										hx-swap="none"
+									>
+										<span class="text-xs text-slate-400">{ symbol }</span>
+										<input
+											name="selling_price"
+											type="number"
+											step="0.01"
+											min="0"
+											value={ batchPriceValue(b) }
+											placeholder={ money.Display(p.SellingPrice) }
+											title="Blank = follow the product's current price"
+											class="w-24 border rounded px-2 py-1 text-right"
+										/>
+										<button type="submit" class="px-2 py-1 rounded border text-xs text-slate-600 hover:bg-slate-50">Save</button>
+									</form>
+									if !b.SellingPrice.IsPositive() {
+										<div class="text-[11px] text-slate-400 pr-1">product price</div>
+									}
+								</td>
 								<td class="py-2 text-right text-slate-500">{ b.CreatedAt.Format("2006-01-02") }</td>
 							</tr>
 						}

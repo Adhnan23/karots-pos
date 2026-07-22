@@ -37,6 +37,13 @@ type ItemInput struct {
 	// e.g. a recharge top-up amount). Ignored for normal stocked products, whose
 	// price is always recomputed server-side from the catalogue.
 	PriceOverride string `json:"price_override"`
+	// BatchID names the lot the cashier picked at the "which price?" prompt when a
+	// product's live batches disagree on price (an old bottle stickered at the old
+	// price alongside newly-received stock). The client sends only the id — the
+	// price is read from the batch here, never accepted from the client — and the
+	// sale then depletes THAT lot instead of taking FEFO. Zero means the normal
+	// path. Ignored for is_service products, which hold no stock.
+	BatchID int64 `json:"batch_id"`
 	// Serials carries one unique serial number per unit for serial-tracked
 	// products (length must equal the quantity); ignored for other products.
 	Serials []string `json:"serials"`
@@ -94,6 +101,21 @@ func normDiscountType(t string) string {
 		return "percent"
 	}
 	return "fixed"
+}
+
+// returnedLotPrice is the price to stamp on the lot that returned goods re-enter
+// stock in. It carries the sold price back ONLY for a line that was rung from a
+// picked lot — an old bottle sold at the old price goes back on the shelf at the
+// old price, and can be picked again at the till.
+//
+// Every other line returns zero, leaving the lot following the product. That is
+// deliberate: a wholesale line's unit price is a customer-type price, and
+// stamping it here would put the goods back on the shelf at the wholesale rate.
+func returnedLotPrice(it SaleItem) decimal.Decimal {
+	if it.BatchID == nil {
+		return decimal.Zero
+	}
+	return it.UnitPrice
 }
 
 // resolveBillDiscount turns the bill-level discount (a flat fixed amount, or a
@@ -220,6 +242,25 @@ func (s *Service) Create(ctx context.Context, in CreateInput, cashierID int64) (
 			}
 			discType := normDiscountType(it.DiscountType)
 
+			// The cashier picked a specific lot at the till because it matches the
+			// sticker on the package. Lock it now: it decides both the price below
+			// and which batch is depleted further down, and locking here means a
+			// concurrent sale cannot empty it between the check and the take.
+			var pickedBatch *stock.Batch
+			if it.BatchID > 0 && !p.IsService {
+				pickedBatch, err = stkRepo.LockBatch(ctx, it.BatchID, p.ID)
+				if err != nil {
+					if errors.Is(err, sql.ErrNoRows) {
+						return apperr.Validation(fmt.Sprintf("that price is no longer available for %s — scan it again", p.Name))
+					}
+					return apperr.Internal("failed to load batch", err)
+				}
+				if pickedBatch.QtyRemaining.LessThan(qty) {
+					return apperr.Conflict(fmt.Sprintf(
+						"only %s of %s left at that price", pickedBatch.QtyRemaining.String(), p.Name))
+				}
+			}
+
 			unitPrice := p.SellingPrice
 			if p.IsService && strings.TrimSpace(it.PriceOverride) != "" {
 				// Service lines (e.g. recharge) carry a per-line amount, not a
@@ -230,7 +271,15 @@ func (s *Service) Create(ctx context.Context, in CreateInput, cashierID int64) (
 				}
 				unitPrice = ov
 			} else if in.SaleType == "wholesale" && p.WholesalePrice.IsPositive() {
+				// Wholesale wins over a lot price: it is a customer-type price, not
+				// a property of the lot sitting on the shelf.
 				unitPrice = p.WholesalePrice
+			} else if pickedBatch != nil && pickedBatch.SellingPrice.IsPositive() {
+				// This lot was received at its own price, which is what the package
+				// in the customer's hand is stickered with — so that is what it
+				// rings up at, whatever the shelf price has since moved to. A lot
+				// with no price of its own keeps following the product.
+				unitPrice = pickedBatch.SellingPrice
 			}
 			lineGross := qty.Mul(unitPrice).Round(2)
 			// Per-item discount: fixed is per-unit (× qty), percent is off the line.
@@ -309,7 +358,14 @@ func (s *Service) Create(ctx context.Context, in CreateInput, cashierID int64) (
 				// Deplete batches FEFO; the weighted cost of the consumed units is the
 				// COGS snapshot for this line (more accurate than the product's current
 				// cost when batches have different costs).
-				cost, err = stkRepo.DepleteFEFO(ctx, p.ID, qty)
+				//
+				// A picked lot overrides FEFO: the customer is holding that package,
+				// so that is the one leaving the shelf. Its own cost is the COGS.
+				if pickedBatch != nil {
+					cost, err = stkRepo.DepleteBatch(ctx, pickedBatch.ID, qty)
+				} else {
+					cost, err = stkRepo.DepleteFEFO(ctx, p.ID, qty)
+				}
 				if err != nil {
 					return apperr.Internal("failed to deplete batches", err)
 				}
@@ -322,7 +378,12 @@ func (s *Service) Create(ctx context.Context, in CreateInput, cashierID int64) (
 			if s := strings.TrimSpace(it.Description); s != "" {
 				desc = &s
 			}
+			var batchID *int64
+			if pickedBatch != nil {
+				batchID = &pickedBatch.ID
+			}
 			lines = append(lines, SaleItem{
+				BatchID:       batchID,
 				ProductID:     p.ID,
 				Quantity:      qty,
 				UnitPrice:     unitPrice,
@@ -567,7 +628,8 @@ func (s *Service) Return(ctx context.Context, id int64, userID int64) (*Detail, 
 			}
 			// Restock into a return batch so on-hand and batch totals stay in sync.
 			if _, err := stkRepo.InsertBatch(ctx, stock.NewBatch{
-				ProductID: it.ProductID, Quantity: remaining, CostPrice: it.CostPrice, Source: "return",
+				ProductID: it.ProductID, Quantity: remaining, CostPrice: it.CostPrice,
+				SellingPrice: returnedLotPrice(it), Source: "return",
 			}); err != nil {
 				return apperr.Internal("failed to restock batch", err)
 			}
@@ -711,7 +773,8 @@ func (s *Service) PartialReturnTx(ctx context.Context, tx *sqlx.Tx, saleID int64
 				return apperr.Internal("failed to restock", err)
 			}
 			if _, err := stkRepo.InsertBatch(ctx, stock.NewBatch{
-				ProductID: it.ProductID, Quantity: qty, CostPrice: it.CostPrice, Source: "return",
+				ProductID: it.ProductID, Quantity: qty, CostPrice: it.CostPrice,
+				SellingPrice: returnedLotPrice(*it), Source: "return",
 			}); err != nil {
 				return apperr.Internal("failed to restock batch", err)
 			}

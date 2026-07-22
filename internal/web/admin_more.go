@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -1142,6 +1143,32 @@ func (a *adminUI) BatchesView(c echo.Context) error {
 		return err
 	}
 	return response.RenderFragment(c, adminpages.BatchesModal(*p, batches, a.symbol(ctx)))
+}
+
+// BatchPriceSet re-prices one lot from the batch modal. A blank box means "follow
+// the product's current price" and is stored as zero — the same sentinel every
+// lot starts life with.
+func (a *adminUI) BatchPriceSet(c echo.Context) error {
+	ctx := c.Request().Context()
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	price := decimal.Zero
+	if s := strings.TrimSpace(c.FormValue("selling_price")); s != "" {
+		v, perr := money.Parse(s)
+		if perr != nil || v.IsNegative() {
+			return apperr.Validation("enter a valid price, or leave it blank to follow the product")
+		}
+		price = v
+	}
+	if err := a.s.stock.SetBatchPrice(ctx, id, price); err != nil {
+		return err
+	}
+	a.s.logAudit(c, audit.ActionUpdate, "stock_batch", strconv.FormatInt(id, 10),
+		"batch price set to "+price.String())
+	c.Response().Header().Set("HX-Trigger", response.Toast("Batch price updated", "success"))
+	return c.NoContent(http.StatusOK)
 }
 
 // ============================ Reports: expiring & low-stock ============================

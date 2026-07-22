@@ -191,10 +191,14 @@ func applyReceivedLines(ctx context.Context, repo *Repository, stk *stock.Reposi
 		if err := stk.Increment(ctx, ln.ProductID, ln.Quantity); err != nil {
 			return apperr.Internal("failed to update stock", err)
 		}
-		// Create the batch (carries expiry + cost) for FEFO depletion later.
+		// Create the batch (carries expiry + cost) for FEFO depletion later. The
+		// GRN line's selling price rides along so THIS lot keeps ringing up at the
+		// price it was received at, even after a later delivery moves the shelf
+		// price on. Blank (zero) leaves the lot following the product, as before.
 		if _, err := stk.InsertBatch(ctx, stock.NewBatch{
 			ProductID: ln.ProductID, PurchaseItemID: &itemID, ExpiryDate: ln.ExpiryDate,
-			Quantity: ln.Quantity, CostPrice: ln.CostPrice, Source: "purchase",
+			Quantity: ln.Quantity, CostPrice: ln.CostPrice,
+			SellingPrice: ln.SellingPrice, Source: "purchase",
 		}); err != nil {
 			return apperr.Internal("failed to create stock batch", err)
 		}

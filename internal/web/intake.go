@@ -140,11 +140,15 @@ func (a *adminUI) IntakeRestock(c echo.Context) error {
 		}
 	}
 
+	// The entered selling price does two jobs: above it became the product's new
+	// shelf price, and here it prices the lot this restock opens — so stock
+	// already on the shelf keeps ringing up at the price it was stickered with.
 	newQty := p.StockQty.Add(add)
 	if aerr := a.s.stock.Adjust(ctx, stock.AdjustInput{
-		ProductID:   id,
-		NewQuantity: newQty.String(),
-		Note:        "stock intake restock",
+		ProductID:    id,
+		NewQuantity:  newQty.String(),
+		Note:         "stock intake restock",
+		SellingPrice: sellStr,
 	}, middleware.CurrentUserID(c)); aerr != nil {
 		return aerr
 	}

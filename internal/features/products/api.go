@@ -49,6 +49,16 @@ func (h *APIHandler) GetByBarcode(c echo.Context) error {
 	return response.OK(c, p)
 }
 
+// PriceOptions serves the till's batch price map (see Service.PriceOptions).
+// Available to any signed-in user because cashiers are exactly who needs it.
+func (h *APIHandler) PriceOptions(c echo.Context) error {
+	opts, err := h.svc.PriceOptions(c.Request().Context())
+	if err != nil {
+		return err
+	}
+	return response.OK(c, opts)
+}
+
 // GenerateBarcode returns a fresh, unused EAN-13 for the "Generate" button next
 // to barcode inputs (product form + label pages).
 func (h *APIHandler) GenerateBarcode(c echo.Context) error {
@@ -127,6 +137,7 @@ func RegisterAPI(e *echo.Echo, db *sqlx.DB, cfg *config.Config) {
 	g := e.Group("/api/products", jwt)
 	g.GET("", api.List)
 	g.GET("/:id", api.Get)
+	g.GET("/price-options", api.PriceOptions)
 	g.GET("/barcode/generate", api.GenerateBarcode)
 	g.GET("/barcode/:code", api.GetByBarcode)
 	g.POST("/:id/barcode", api.AssignBarcode)

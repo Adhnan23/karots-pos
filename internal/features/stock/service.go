@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"time"
 
 	"karots-pos/internal/apperr"
@@ -27,6 +28,11 @@ type AdjustInput struct {
 	ProductID   int64  `json:"product_id"  form:"product_id"  validate:"required,gt=0"`
 	NewQuantity string `json:"new_quantity" form:"new_quantity" validate:"required"`
 	Note        string `json:"note"        form:"note"`
+	// SellingPrice optionally prices the lot this adjustment opens (stock intake
+	// entering a restock at a new price). Blank leaves the lot following the
+	// product, which is what every caller did before per-lot pricing. Ignored
+	// when the adjustment removes stock — there is no new lot to price.
+	SellingPrice string `json:"selling_price" form:"selling_price"`
 }
 
 // Adjust sets a product's stock to an absolute quantity, recording the signed
@@ -59,8 +65,17 @@ func (s *Service) Adjust(ctx context.Context, in AdjustInput, userID int64) erro
 			if p, err := repo.productCost(ctx, in.ProductID); err == nil {
 				cost = p
 			}
+			// A blank/unparseable price is simply no price: the lot follows the
+			// product, exactly as before.
+			sell := decimal.Zero
+			if s := strings.TrimSpace(in.SellingPrice); s != "" {
+				if v, perr := money.Parse(s); perr == nil && v.IsPositive() {
+					sell = v
+				}
+			}
 			if _, err := repo.InsertBatch(ctx, NewBatch{
-				ProductID: in.ProductID, Quantity: delta, CostPrice: cost, Source: "adjust",
+				ProductID: in.ProductID, Quantity: delta, CostPrice: cost,
+				SellingPrice: sell, Source: "adjust",
 			}); err != nil {
 				return apperr.Internal("failed to open adjustment batch", err)
 			}
@@ -167,6 +182,28 @@ func (s *Service) Batches(ctx context.Context, productID int64) ([]Batch, error)
 		return nil, apperr.Internal("failed to load batches", err)
 	}
 	return rows, nil
+}
+
+// MultiPriceProducts backs the till's "which price?" prompt: only products whose
+// live lots disagree on price, with their options.
+func (s *Service) MultiPriceProducts(ctx context.Context) (map[int64][]PriceOption, error) {
+	rows, err := s.repo.MultiPriceProducts(ctx)
+	if err != nil {
+		return nil, apperr.Internal("failed to load batch prices", err)
+	}
+	return rows, nil
+}
+
+// SetBatchPrice re-prices one lot from the admin batch list; zero puts it back on
+// the product's current price.
+func (s *Service) SetBatchPrice(ctx context.Context, batchID int64, price decimal.Decimal) error {
+	if price.IsNegative() {
+		return apperr.Validation("price cannot be negative")
+	}
+	if err := s.repo.SetBatchSellingPrice(ctx, batchID, price); err != nil {
+		return apperr.Internal("failed to update batch price", err)
+	}
+	return nil
 }
 
 // AllBatches lists every batch that still has stock (the batch report).

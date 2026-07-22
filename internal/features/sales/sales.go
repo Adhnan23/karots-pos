@@ -48,6 +48,11 @@ type SaleItem struct {
 	Subtotal      decimal.Decimal `db:"subtotal"     json:"subtotal"`
 	ReturnedQty   decimal.Decimal `db:"returned_qty" json:"returned_qty"`
 	Description   *string         `db:"description"  json:"description,omitempty"`
+	// BatchID records the lot this line was rung from when the cashier picked one
+	// at the "which price?" prompt. NULL for the normal FEFO path (which may span
+	// several lots), so it answers "why was this price used" without pretending to
+	// be a complete lot trace.
+	BatchID *int64 `db:"batch_id" json:"batch_id,omitempty"`
 	// joined
 	ProductName string `db:"product_name" json:"product_name"`
 	UnitAbbr    string `db:"unit_abbr"    json:"unit_abbr"`
@@ -119,9 +124,9 @@ func (r *Repository) InsertSale(ctx context.Context, s saleRow) (int64, error) {
 
 func (r *Repository) InsertItem(ctx context.Context, saleID int64, it SaleItem) error {
 	_, err := r.q.ExecContext(ctx, `
-		INSERT INTO sale_items (sale_id, product_id, quantity, unit_price, cost_price, discount, discount_type, discount_value, subtotal, description)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-		saleID, it.ProductID, it.Quantity, it.UnitPrice, it.CostPrice, it.Discount, it.DiscountType, it.DiscountValue, it.Subtotal, it.Description)
+		INSERT INTO sale_items (sale_id, product_id, quantity, unit_price, cost_price, discount, discount_type, discount_value, subtotal, description, batch_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+		saleID, it.ProductID, it.Quantity, it.UnitPrice, it.CostPrice, it.Discount, it.DiscountType, it.DiscountValue, it.Subtotal, it.Description, it.BatchID)
 	return err
 }
 

@@ -76,6 +76,18 @@ func (s *Service) Get(ctx context.Context, id int64) (*Product, error) {
 	return p, nil
 }
 
+// PriceOptions backs the till's "which price?" prompt. It returns, for every
+// product whose live lots disagree on price, that product's options — nothing
+// else. The till loads this once at startup and refreshes it after each sale, so
+// it can decide whether to prompt however the item was added (scan, menu card,
+// search result) without a round trip per tap.
+//
+// It is empty until per-lot prices are actually entered, which is what keeps the
+// prompt invisible for shops that never use it.
+func (s *Service) PriceOptions(ctx context.Context) (map[int64][]stock.PriceOption, error) {
+	return stock.NewService(s.db).MultiPriceProducts(ctx)
+}
+
 // GetByBarcode powers the cashier scanner and price-check lookups.
 func (s *Service) GetByBarcode(ctx context.Context, barcode string) (*Product, error) {
 	p, err := s.repo.FindByBarcode(ctx, strings.TrimSpace(barcode))
