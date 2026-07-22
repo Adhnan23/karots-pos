@@ -54,20 +54,21 @@ templ CategoryRows(rows []categories.TreeNode) {
 		for _, c := range rows {
 			<div class="group border-b last:border-0" x-show={ "visible(" + jsIntArray(c.Path) + ")" } x-cloak>
 				<div class="flex items-center gap-1 pr-1 hover:bg-slate-50 rounded-lg">
-					<div class="flex-1 min-w-0 flex items-center py-2 text-sm" style={ catIndentStyle(c.Depth) }>
-						if c.HasChildren {
-							<button type="button" class="w-6 shrink-0 text-slate-400 hover:text-slate-700" x-on:click={ "toggle(" + strconv.FormatInt(c.ID, 10) + ")" }>
+					if c.HasChildren {
+						<div class="flex-1 min-w-0 flex items-center py-2 text-sm cursor-pointer select-none" style={ catIndentStyle(c.Depth) } x-on:click={ "toggle(" + strconv.FormatInt(c.ID, 10) + ")" }>
+							<span class="w-6 shrink-0 text-slate-400">
 								<span x-show={ "!expanded[" + strconv.FormatInt(c.ID, 10) + "]" }>▸</span>
 								<span x-show={ "expanded[" + strconv.FormatInt(c.ID, 10) + "]" } x-cloak>▾</span>
-							</button>
-						} else {
-							<span class="w-6 shrink-0"></span>
-						}
-						<span class="font-medium truncate">{ c.Name }</span>
-						if c.HasChildren {
+							</span>
+							<span class="font-medium truncate">{ c.Name }</span>
 							<span class="ml-2 text-xs text-slate-400" x-show={ "!expanded[" + strconv.FormatInt(c.ID, 10) + "]" }>({ strconv.Itoa(c.ChildCount) })</span>
-						}
-					</div>
+						</div>
+					} else {
+						<div class="flex-1 min-w-0 flex items-center py-2 text-sm" style={ catIndentStyle(c.Depth) }>
+							<span class="w-6 shrink-0"></span>
+							<span class="font-medium truncate">{ c.Name }</span>
+						</div>
+					}
 					<div class="shrink-0 flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
 						<button type="button" title="Add subcategory" class="px-2 py-1 rounded text-indigo-600 hover:bg-indigo-50" x-on:click={ "startCreate(" + strconv.FormatInt(c.ID, 10) + ")" }>＋</button>
 						<button type="button" title="Edit" class="px-2 py-1 rounded text-slate-500 hover:bg-slate-100" hx-get={ "/admin/categories/form/" + strconv.FormatInt(c.ID, 10) } hx-target="#modal-container" hx-swap="innerHTML">✎</button>
