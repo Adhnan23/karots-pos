@@ -130,6 +130,7 @@ type TreeNode struct {
 	Category
 	Depth       int
 	HasChildren bool
+	ChildCount  int
 	Path        []int64
 }
 
@@ -156,6 +157,7 @@ func (s *Service) Tree(ctx context.Context) ([]TreeNode, error) {
 			Category:    c,
 			Depth:       depth,
 			HasChildren: len(children[c.ID]) > 0,
+			ChildCount:  len(children[c.ID]),
 			Path:        path,
 		})
 		// Copy so sibling branches don't share/overwrite the same backing array.
