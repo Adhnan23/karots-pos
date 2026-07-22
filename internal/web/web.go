@@ -240,6 +240,13 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	sg.POST("/products", cashier.ProductQuickCreate)
 	sg.POST("/products/wanted", cashier.ProductWantedCreate)
 
+	// Expenses at the counter — same counter-operations permission as suppliers.
+	// A cashier can book a running cost (bill, bags, repairman) and pay it from
+	// their till or a cashier-allowed locker; never the full expense ledger.
+	xg := cg.Group("/expenses", middleware.RequireSupplierAccess())
+	xg.GET("", cashier.Expenses)
+	xg.POST("", cashier.ExpenseRecord)
+
 	// Admin (manager/admin)
 	ag := e.Group("/admin", jwt, lockGuard, pinGuard, middleware.RequireRole(auth.RoleAdmin, auth.RoleManager))
 	ag.GET("", admin.Dashboard)

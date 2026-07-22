@@ -1,0 +1,79 @@
+package cashierpages
+
+import (
+	"strconv"
+
+	"karots-pos/internal/features/products"
+	adminfragments "karots-pos/templates/fragments/admin"
+	"karots-pos/templates/layouts"
+)
+
+// ====================== Expenses at the counter ======================
+
+type CashierExpenseData struct {
+	CashierName   string
+	Role          string
+	ShowChangePin bool
+	Symbol        string
+	Sources       []adminfragments.LocationChoice
+	Services      []products.Product
+	Categories    []string
+}
+
+// CashierExpense is a form-only page: a cashier records a running cost paid out
+// of the drawer (a utility bill, bags, a repairman). No ledger is shown — the
+// full expense list holds salaries and rent that cashiers must not see.
+templ CashierExpense(d CashierExpenseData) {
+	@layouts.Cashier("Expenses", d.CashierName, d.Role, "expenses", d.ShowChangePin) {
+		<div class="h-full overflow-auto p-6">
+			<div class="max-w-lg mx-auto">
+				<h1 class="text-xl font-bold mb-1">Record an expense</h1>
+				<p class="text-sm text-slate-500 mb-4">A bill, a quick purchase, or paying someone for a job. The cash leaves the source you pick and a receipt is printed.</p>
+				if len(d.Sources) == 0 {
+					<p class="text-sm text-amber-600 bg-amber-50 rounded-lg p-3">No till open and no cash locker you can use. Open your till first, or ask the owner to allow a locker.</p>
+				} else {
+					<form
+						class="bg-white rounded-2xl shadow-sm p-6 space-y-4"
+						hx-post="/cashier/expenses"
+						hx-swap="none"
+						hx-on::after-request="if(event.detail.successful) this.reset()"
+					>
+						<div>
+							<label class="block text-sm font-medium mb-1">Category</label>
+							<input name="category" required list="cexpense-cats" autofocus class="w-full border rounded-lg px-3 py-2" placeholder="e.g. Electricity"/>
+							@adminfragments.CategoryDatalist("cexpense-cats", d.Categories)
+						</div>
+						<div>
+							<label class="block text-sm font-medium mb-1">Amount</label>
+							<input name="amount" type="number" step="0.01" min="0" required class="w-full border rounded-lg px-3 py-2"/>
+						</div>
+						<div>
+							<label class="block text-sm font-medium mb-1">Description <span class="text-slate-400 font-normal">(optional)</span></label>
+							<input name="description" class="w-full border rounded-lg px-3 py-2" placeholder="e.g. CEB monthly bill"/>
+						</div>
+						<div>
+							<label class="block text-sm font-medium mb-1">Paid from</label>
+							@adminfragments.LocationPicker("source", "— pick cash source —", d.Sources)
+							<p class="text-xs text-slate-500 mt-1">Paying from your drawer needs your till open.</p>
+						</div>
+						if len(d.Services) > 0 {
+							<div>
+								<label class="block text-sm font-medium mb-1">For a service <span class="text-slate-400 font-normal">(optional)</span></label>
+								<select name="service_product_id" class="w-full border rounded-lg px-3 py-2">
+									<option value="0">— not for a service —</option>
+									for _, sp := range d.Services {
+										<option value={ strconv.FormatInt(sp.ID, 10) }>{ sp.Name }</option>
+									}
+								</select>
+								<p class="text-xs text-slate-500 mt-1">e.g. paying a repairman for the photocopier — tags the cost to that service.</p>
+							</div>
+						}
+						<div class="flex justify-end pt-2">
+							<button type="submit" class="px-4 py-2 rounded-lg bg-emerald-600 text-white font-medium">Record expense</button>
+						</div>
+					</form>
+				}
+			</div>
+		</div>
+	}
+}
