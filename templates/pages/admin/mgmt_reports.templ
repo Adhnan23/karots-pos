@@ -206,6 +206,9 @@ templ FinanceReport(d FinanceReportData) {
 				@plMoney(d.Symbol, "Sale tender (paid at sale)", d.PL.Received, false)
 				@plMoney(d.Symbol, "Receivables (customer dues)", d.PL.Receivables, false)
 				@plMoney(d.Symbol, "Payables (supplier dues)", d.PL.Payables, false)
+				if d.PL.SupplierCredit.IsPositive() {
+					@plMoney(d.Symbol, "Supplier credit (they owe us)", d.PL.SupplierCredit, false)
+				}
 				@plMoney(d.Symbol, "Cash withdrawn (drawer)", d.PL.CashWithdrawn, false)
 				@plMoney(d.Symbol, "Register over/short", d.PL.RegisterDiff, false)
 			</tbody>

@@ -231,8 +231,9 @@ templ POS(d POSData) {
 					</div>
 
 					<div class="flex-1 overflow-auto p-4 space-y-2">
-						<!-- Keyed by product AND lot: one product can be two lines at two prices. -->
-						<template x-for="(it, idx) in cart" x-bind:key="it.id + ':' + (it.batch_id || 0)">
+						<!-- Keyed by a per-line id, not the product: one product can be two
+						     lines at two prices, and service lines are one-per-call. -->
+						<template x-for="(it, idx) in cart" x-bind:key="it._key">
 							<div class="border rounded-lg p-2 space-y-1.5">
 								<div class="flex items-center gap-2">
 									<div class="flex-1 min-w-0">

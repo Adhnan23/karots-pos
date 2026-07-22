@@ -148,6 +148,7 @@ func (a *adminUI) FinanceReport(c echo.Context) error {
 			{"Sale tender (paid at sale)", csvMoney(pl.Received)},
 			{"Receivables", csvMoney(pl.Receivables)},
 			{"Payables", csvMoney(pl.Payables)},
+			{"Supplier credit (they owe us)", csvMoney(pl.SupplierCredit)},
 		}
 		return writeCSV(c, "finance_"+fromStr+"_"+toStr, []string{"Line", "Amount"}, out)
 	}

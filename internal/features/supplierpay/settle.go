@@ -6,6 +6,7 @@ import (
 	"karots-pos/internal/apperr"
 	"karots-pos/internal/features/purchasereturns"
 	"karots-pos/internal/features/purchases"
+	"karots-pos/internal/features/suppliers"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/shopspring/decimal"
@@ -74,6 +75,31 @@ func (s *Service) ApplySupplierCreditTx(ctx context.Context, tx *sqlx.Tx, suppli
 		return apperr.Internal("failed to load the invoice", err)
 	}
 	left := pu.Balance()
+	if !left.IsPositive() {
+		return nil
+	}
+
+	// The ceiling is the supplier's balance, NOT the sum of the pool rows below.
+	//
+	// A pool row only knows what it was worth minus what it has been allocated to
+	// invoices — it has no idea the supplier later handed the money back. Trusting
+	// it let a refunded advance go on paying invoices: Rs 5,000 advance, Rs 2,000
+	// refunded, and the next deliveries were still marked paid out of the full
+	// Rs 5,000, so the aggregate said money was owed while every invoice read paid
+	// and dropped off the payment queue.
+	//
+	// The balance is the one figure that already accounts for refunds, because
+	// RefundTx walks it back. Reading it BEFORE this invoice was added (the receive
+	// has already added the invoice total to it) gives the credit genuinely on hand,
+	// and the pool rows are then used only to decide which rows to allocate against.
+	sup, err := suppliers.NewRepository(tx).FindByID(ctx, supplierID)
+	if err != nil {
+		return apperr.Internal("failed to load the supplier", err)
+	}
+	creditOnHand := Credit(sup.OutstandingBalance.Sub(pu.Total))
+	if left.GreaterThan(creditOnHand) {
+		left = creditOnHand
+	}
 	if !left.IsPositive() {
 		return nil
 	}

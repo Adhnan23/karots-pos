@@ -352,6 +352,11 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections) {
     // The open "which price?" prompt: the product waiting to be added and the
     // lots to choose from. The cashier reads the sticker on the package.
     pricePick: null,
+    // Monotonic id per cart line, used as the x-for key. Product id alone is not
+    // unique: service lines are deliberately one-per-call (two photocopy jobs are
+    // two lines of the same product), and a lot-priced product can legitimately be
+    // two lines at two prices. Duplicate keys make Alpine reuse the wrong node.
+    lineSeq: 0,
 
     async init() {
       await this.loadDenoms();
@@ -920,7 +925,13 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections) {
       }
     },
     async resumeHold(h) {
-      this.cart = Array.isArray(h.cart) ? h.cart : [];
+      // A held cart was serialised earlier (possibly before per-line keys existed,
+      // or by another terminal), so re-key every line on the way back in — two
+      // lines sharing a key make Alpine reuse the wrong row.
+      this.cart = (Array.isArray(h.cart) ? h.cart : []).map((it) => ({
+        ...it,
+        _key: ++this.lineSeq,
+      }));
       this.saleType = h.sale_type || "retail";
       this.customerId = h.customer_id ? String(h.customer_id) : "";
       this.discount = Number(h.discount) || 0;
@@ -971,6 +982,7 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections) {
         return;
       }
       this.cart.push({
+        _key: ++this.lineSeq,
         id: p.id,
         name: p.name,
         unit_price: lot ? Number(lot.price) : this.unitPriceFor(p),
@@ -1053,6 +1065,7 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections) {
           ? Number(detail.unitPrice)
           : amt;
       this.cart.push({
+        _key: ++this.lineSeq,
         id: detail.id,
         name: detail.name,
         unit_price: unit,
@@ -1254,6 +1267,7 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections) {
       const src = { ...it, id: it.id };
       this.cart.push({
         ...src,
+        _key: ++this.lineSeq,
         unit_price: Number(next.price),
         qty: 0,
         batch_id: next.batch_id,

@@ -103,7 +103,12 @@ func (s *Service) RefundTx(ctx context.Context, tx *sqlx.Tx, supplierID int64, i
 		return nil, apperr.Validation("refund amount must be greater than zero")
 	}
 
+	// Both repos must be bound to the CALLER's transaction. Writing the refund
+	// row through s.repo (the pooled DB) put it outside the tx: a failing cash
+	// move would roll back the balance change and the receipt while leaving a
+	// committed refund row behind, claiming money came back that never did.
 	supRepo := suppliers.NewRepository(tx)
+	refundRepo := NewRepository(tx)
 	sup, err := supRepo.FindByID(ctx, supplierID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -120,7 +125,7 @@ func (s *Service) RefundTx(ctx context.Context, tx *sqlx.Tx, supplierID int64, i
 		return nil, apperr.Conflict("that is more than the " + credit.String() + " this supplier owes you")
 	}
 
-	refundID, err := s.repo.InsertRefund(ctx, supplierID, in.Amount, method,
+	refundID, err := refundRepo.InsertRefund(ctx, supplierID, in.Amount, method,
 		strOrNil(in.Reference), strOrNil(in.Note), userID)
 	if err != nil {
 		return nil, apperr.Internal("failed to record refund", err)

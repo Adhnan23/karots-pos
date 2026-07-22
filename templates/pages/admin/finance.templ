@@ -142,6 +142,9 @@ templ FinanceCashflow(d FinanceData) {
 		<div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
 			@statCard("Receivables (customer dues)", money.Format(d.Symbol, d.PL.Receivables), "amber")
 			@statCard("Payables (supplier dues)", money.Format(d.Symbol, d.PL.Payables), "amber")
+			if d.PL.SupplierCredit.IsPositive() {
+				@statCard("Supplier credit (they owe us)", money.Format(d.Symbol, d.PL.SupplierCredit), "emerald")
+			}
 			@statCard("Expenses", money.Format(d.Symbol, d.PL.Expenses), "rose")
 		</div>
 	}

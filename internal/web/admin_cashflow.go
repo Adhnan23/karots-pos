@@ -65,12 +65,21 @@ func (a *adminUI) Cashflow(c echo.Context) error {
 	}
 	d.NetChange = d.NetIn.Sub(d.NetOut)
 
-	// Net position: cash on hand + stock at cost + customer receivables − supplier
-	// payables = an estimate of the business's net worth right now.
+	// Net position: cash on hand + stock at cost + what others owe us − what we owe
+	// = an estimate of the business's net worth right now.
+	//
+	// Suppliers sit on BOTH sides: one we owe is a payable, one holding our money
+	// (goods returned, or an advance paid ahead of a delivery) is an asset. Summing
+	// the raw balance netted the two, understating the debt — and it disagreed with
+	// the Finance page, which reports them apart.
 	_ = a.db.GetContext(ctx, &d.StockValue, `SELECT COALESCE(SUM(qty_remaining * cost_price),0) FROM stock_batches`)
 	_ = a.db.GetContext(ctx, &d.Receivables, `SELECT COALESCE(SUM(outstanding_balance),0) FROM customers`)
-	_ = a.db.GetContext(ctx, &d.Payables, `SELECT COALESCE(SUM(outstanding_balance),0) FROM suppliers`)
-	d.NetPosition = d.TotalCash.Add(d.StockValue).Add(d.Receivables).Sub(d.Payables)
+	_ = a.db.GetContext(ctx, &d.Payables,
+		`SELECT COALESCE(SUM(GREATEST(outstanding_balance,0)),0) FROM suppliers`)
+	_ = a.db.GetContext(ctx, &d.SupplierCredit,
+		`SELECT COALESCE(SUM(GREATEST(-outstanding_balance,0)),0) FROM suppliers`)
+	d.NetPosition = d.TotalCash.Add(d.StockValue).Add(d.Receivables).
+		Add(d.SupplierCredit).Sub(d.Payables)
 
 	return response.RenderPage(c, adminpages.CashflowPage(d))
 }

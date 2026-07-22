@@ -30,6 +30,9 @@ type CashflowData struct {
 	StockValue  decimal.Decimal
 	Receivables decimal.Decimal
 	Payables    decimal.Decimal
+	// SupplierCredit is the mirror of Payables: suppliers holding OUR money, from
+	// returned goods or an advance paid ahead of a delivery. An asset, not a debt.
+	SupplierCredit decimal.Decimal
 	NetPosition decimal.Decimal
 }
 
@@ -88,6 +91,12 @@ templ CashflowPage(d CashflowData) {
 					<div class="text-xs text-slate-500">+ Customer dues</div>
 					<div class="font-semibold">{ money.Format(d.Symbol, d.Receivables) }</div>
 				</div>
+				if d.SupplierCredit.IsPositive() {
+					<div>
+						<div class="text-xs text-slate-500">+ Supplier credit</div>
+						<div class="font-semibold text-emerald-700" title="Suppliers holding our money — returned goods or an advance paid">{ money.Format(d.Symbol, d.SupplierCredit) }</div>
+					</div>
+				}
 				<div>
 					<div class="text-xs text-slate-500">− Supplier dues</div>
 					<div class="font-semibold text-rose-600">{ money.Format(d.Symbol, d.Payables) }</div>
