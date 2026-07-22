@@ -17,56 +17,84 @@ templ CategoriesPage(d CategoriesData) {
 	@layouts.Admin("Categories", d.UserName, "categories-mgmt") {
 		<div class="flex items-center justify-between mb-6">
 			<h1 class="text-2xl font-bold">Categories</h1>
-			<button class="px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium"
-				hx-get="/admin/categories/form" hx-target="#modal-container" hx-swap="innerHTML">+ New Category</button>
 		</div>
-		<div class="bg-white rounded-2xl shadow-sm p-6">
-			<table class="w-full text-sm">
-				<thead class="text-left text-slate-500 border-b">
-					<tr><th class="py-2 px-3">Name</th><th class="py-2 px-3">Parent</th><th class="py-2 px-3"></th></tr>
-				</thead>
-				<tbody id="category-tbody" x-data="categoryTree()" hx-get="/admin/categories/table" hx-trigger="reload-categories from:body" hx-target="#category-tbody" hx-swap="innerHTML">
-					@CategoryRows(d.Rows)
-				</tbody>
-			</table>
+		<div class="bg-white rounded-2xl shadow-sm p-3 sm:p-4" x-data="categoryTree()">
+			<div id="category-tree" hx-get="/admin/categories/table" hx-trigger="reload-categories from:body" hx-target="#category-tree" hx-swap="innerHTML">
+				@CategoryRows(d.Rows)
+			</div>
+			<!-- Add a top-level category -->
+			<div class="mt-1 border-t pt-2">
+				<template x-if="creatingFor !== 'top'">
+					<button type="button" class="flex items-center gap-2 w-full text-left px-2 py-2 rounded-lg text-sm text-indigo-600 hover:bg-indigo-50" x-on:click="startCreate('top')">
+						<span class="text-lg leading-none">＋</span> Add top-level category
+					</button>
+				</template>
+				<template x-if="creatingFor === 'top'">
+					<div class="px-2 py-2">
+						<div class="flex items-center gap-2">
+							<input x-ref="newCat" x-model="newName" type="text" placeholder="New category name…"
+								class="flex-1 border rounded-lg px-3 py-1.5 text-sm"
+								x-on:keydown.enter.prevent="submitCreate(0)"
+								x-on:keydown.escape.prevent="cancelCreate()"/>
+							<button type="button" class="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-sm disabled:opacity-40" x-bind:disabled="createBusy" x-on:click="submitCreate(0)">Add</button>
+							<button type="button" class="px-2 py-1.5 rounded-lg border text-sm" x-on:click="cancelCreate()">Cancel</button>
+						</div>
+						<p class="text-xs text-rose-600 mt-1" x-show="createError" x-text="createError"></p>
+					</div>
+				</template>
+			</div>
 		</div>
 	}
 }
 
 templ CategoryRows(rows []categories.TreeNode) {
 	if len(rows) == 0 {
-		<tr><td colspan="3" class="py-6 text-center text-slate-500">No categories yet.</td></tr>
+		<div class="py-8 text-center text-slate-500 text-sm">No categories yet. Add your first one below.</div>
 	} else {
 		for _, c := range rows {
-			<tr class="border-b last:border-0" x-show={ "visible(" + jsIntArray(c.Path) + ")" } x-cloak>
-				if c.HasChildren {
-					<td class="py-2 px-3 font-medium cursor-pointer select-none" x-on:click={ "toggle(" + strconv.FormatInt(c.ID, 10) + ")" }>
-						<span class="inline-flex items-center">
-							<span class="text-slate-300">{ indent(c.Depth) }</span>
-							<span class="w-5 text-slate-500">
+			<div class="group border-b last:border-0" x-show={ "visible(" + jsIntArray(c.Path) + ")" } x-cloak>
+				<div class="flex items-center gap-1 pr-1 hover:bg-slate-50 rounded-lg">
+					<div class="flex-1 min-w-0 flex items-center py-2 text-sm" style={ catIndentStyle(c.Depth) }>
+						if c.HasChildren {
+							<button type="button" class="w-6 shrink-0 text-slate-400 hover:text-slate-700" x-on:click={ "toggle(" + strconv.FormatInt(c.ID, 10) + ")" }>
 								<span x-show={ "!expanded[" + strconv.FormatInt(c.ID, 10) + "]" }>▸</span>
 								<span x-show={ "expanded[" + strconv.FormatInt(c.ID, 10) + "]" } x-cloak>▾</span>
-							</span>
-							<span>{ c.Name }</span>
-						</span>
-					</td>
-				} else {
-					<td class="py-2 px-3 font-medium">
-						<span class="inline-flex items-center">
-							<span class="text-slate-300">{ indent(c.Depth) }</span>
-							<span class="inline-block w-5"></span>
-							<span>{ c.Name }</span>
-						</span>
-					</td>
-				}
-				<td class="py-2 px-3 text-slate-500">{ strOrEmpty(c.ParentName) }</td>
-				<td class="py-2 px-3 text-right whitespace-nowrap">
-					<button class="text-indigo-600 hover:underline" hx-get={ "/admin/categories/form/" + strconv.FormatInt(c.ID, 10) } hx-target="#modal-container" hx-swap="innerHTML">Edit</button>
-					<button class="text-red-600 hover:underline ml-3" hx-delete={ "/admin/categories/" + strconv.FormatInt(c.ID, 10) } hx-swap="none" hx-confirm={ "Delete category " + c.Name + "?" }>Delete</button>
-				</td>
-			</tr>
+							</button>
+						} else {
+							<span class="w-6 shrink-0"></span>
+						}
+						<span class="font-medium truncate">{ c.Name }</span>
+						if c.HasChildren {
+							<span class="ml-2 text-xs text-slate-400" x-show={ "!expanded[" + strconv.FormatInt(c.ID, 10) + "]" }>({ strconv.Itoa(c.ChildCount) })</span>
+						}
+					</div>
+					<div class="shrink-0 flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+						<button type="button" title="Add subcategory" class="px-2 py-1 rounded text-indigo-600 hover:bg-indigo-50" x-on:click={ "startCreate(" + strconv.FormatInt(c.ID, 10) + ")" }>＋</button>
+						<button type="button" title="Edit" class="px-2 py-1 rounded text-slate-500 hover:bg-slate-100" hx-get={ "/admin/categories/form/" + strconv.FormatInt(c.ID, 10) } hx-target="#modal-container" hx-swap="innerHTML">✎</button>
+						<button type="button" title="Delete" class="px-2 py-1 rounded text-rose-500 hover:bg-rose-50" hx-delete={ "/admin/categories/" + strconv.FormatInt(c.ID, 10) } hx-swap="none" hx-confirm={ "Delete category " + c.Name + "?" }>🗑</button>
+					</div>
+				</div>
+				<!-- Inline new-subcategory input for this row -->
+				<div x-show={ "creatingFor === " + strconv.FormatInt(c.ID, 10) } x-cloak class="pb-2" style={ catIndentStyle(c.Depth + 1) }>
+					<div class="flex items-center gap-2 pr-1">
+						<input x-ref="newCat" x-model="newName" type="text" placeholder="New subcategory…"
+							class="flex-1 border rounded-lg px-3 py-1.5 text-sm"
+							x-on:keydown.enter.prevent={ "submitCreate(" + strconv.FormatInt(c.ID, 10) + ")" }
+							x-on:keydown.escape.prevent="cancelCreate()"/>
+						<button type="button" class="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-sm disabled:opacity-40" x-bind:disabled="createBusy" x-on:click={ "submitCreate(" + strconv.FormatInt(c.ID, 10) + ")" }>Add</button>
+						<button type="button" class="px-2 py-1.5 rounded-lg border text-sm" x-on:click="cancelCreate()">Cancel</button>
+					</div>
+					<p class="text-xs text-rose-600 mt-1" x-show="createError" x-text="createError"></p>
+				</div>
+			</div>
 		}
 	}
+}
+
+// catIndentStyle indents a tree row by depth, matching the category picker's
+// scale so names line up regardless of leaf/parent.
+func catIndentStyle(depth int) string {
+	return "padding-left:" + strconv.FormatFloat(0.75+float64(depth)*1.1, 'f', 2, 64) + "rem"
 }
 
 templ CategoryForm(all []categories.Category, cur *categories.Category) {
