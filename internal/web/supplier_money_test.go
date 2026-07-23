@@ -36,7 +36,7 @@ func TestReceiveAndPayMovesMoney(t *testing.T) {
 	must(t, tx.GetContext(ctx, &supplierID,
 		`INSERT INTO suppliers (name) VALUES ('TEST money trail') RETURNING id`))
 	var productID int64
-	must(t, tx.GetContext(ctx, &productID, `SELECT id FROM products WHERE is_active LIMIT 1`))
+	productID = testProduct(t, ctx, tx)
 	var lockerID int64
 	must(t, tx.GetContext(ctx, &lockerID,
 		`INSERT INTO lockers (name, kind) VALUES ('TEST safe', 'safe') RETURNING id`))
@@ -132,7 +132,7 @@ func TestReceiveWithoutPayingOwesEverything(t *testing.T) {
 	must(t, tx.GetContext(ctx, &supplierID,
 		`INSERT INTO suppliers (name) VALUES ('TEST unpaid') RETURNING id`))
 	var productID int64
-	must(t, tx.GetContext(ctx, &productID, `SELECT id FROM products WHERE is_active LIMIT 1`))
+	productID = testProduct(t, ctx, tx)
 
 	detail, err := purchases.CreateTx(ctx, tx, purchases.CreateInput{
 		SupplierID: supplierID,
@@ -189,4 +189,26 @@ func seedLockerBalance(ctx context.Context, tx *sqlx.Tx, lockerID int64, amount 
 		`INSERT INTO locker_ledger (locker_id, balance_delta, kind, note)
 		 VALUES ($1, $2, 'open_balance', 'test seed')`, lockerID, amount)
 	return err
+}
+
+// testProduct creates a product for a test to buy and sell.
+//
+// These tests used to borrow whatever product happened to be in the database,
+// which quietly tied the suite to a seeded catalogue: against a freshly
+// initialised shop — exactly what a real install starts as — they failed with
+// "sql: no rows in result set" and looked like a broken money trail rather than
+// a missing fixture.
+func testProduct(t *testing.T, ctx context.Context, tx *sqlx.Tx) int64 {
+	t.Helper()
+	var categoryID, unitID, productID int64
+	must(t, tx.GetContext(ctx, &categoryID,
+		`INSERT INTO categories (name) VALUES ('TEST money category') RETURNING id`))
+	if err := tx.GetContext(ctx, &unitID, `SELECT id FROM units LIMIT 1`); err != nil {
+		must(t, tx.GetContext(ctx, &unitID,
+			`INSERT INTO units (name, abbreviation) VALUES ('TEST unit','tu') RETURNING id`))
+	}
+	must(t, tx.GetContext(ctx, &productID, `
+		INSERT INTO products (name, category_id, unit_id, cost_price, selling_price)
+		VALUES ('TEST money product', $1, $2, 100, 150) RETURNING id`, categoryID, unitID))
+	return productID
 }

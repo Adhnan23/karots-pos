@@ -3,9 +3,11 @@ package web
 import (
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"karots-pos/internal/apperr"
+	"karots-pos/internal/config"
 	"karots-pos/internal/features/auth"
 	"karots-pos/internal/features/cashregister"
 	"karots-pos/internal/features/settings"
@@ -19,7 +21,7 @@ import (
 
 // CookieConfig controls how the UI session cookie is written.
 type CookieConfig struct {
-	Secure bool
+	Secure config.CookieSecureMode
 	MaxAge time.Duration
 }
 
@@ -259,6 +261,27 @@ func (h *authUI) loginError(c echo.Context, msg string) error {
 	return authpages.LoginPage(msg, h.installID(c)).Render(c.Request().Context(), c.Response().Writer)
 }
 
+// secureFlag decides the Secure attribute for this response.
+//
+// A Secure cookie is simply discarded by the browser over plain http://, so
+// setting it on a connection that is not HTTPS does not harden anything — it
+// guarantees nobody can stay logged in. Following the request means an install
+// behind TLS gets the protection and a shop on a plain LAN still works, with no
+// setting to get wrong.
+func (h *authUI) secureFlag(c echo.Context) bool {
+	switch h.cookie.Secure {
+	case config.CookieSecureAlways:
+		return true
+	case config.CookieSecureNever:
+		return false
+	}
+	r := c.Request()
+	// X-Forwarded-Proto covers the case that matters most: TLS terminated at a
+	// reverse proxy, so the request reaches us as plain HTTP but the browser is
+	// genuinely on https.
+	return r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+}
+
 func (h *authUI) setCookie(c echo.Context, token string) {
 	c.SetCookie(&http.Cookie{
 		Name:     middleware.CookieName,
@@ -266,7 +289,7 @@ func (h *authUI) setCookie(c echo.Context, token string) {
 		Path:     "/",
 		MaxAge:   int(h.cookie.MaxAge.Seconds()),
 		HttpOnly: true,
-		Secure:   h.cookie.Secure,
+		Secure:   h.secureFlag(c),
 		SameSite: http.SameSiteLaxMode,
 	})
 }
@@ -278,7 +301,7 @@ func (h *authUI) clearCookie(c echo.Context) {
 		Path:     "/",
 		MaxAge:   -1,
 		HttpOnly: true,
-		Secure:   h.cookie.Secure,
+		Secure:   h.secureFlag(c),
 		SameSite: http.SameSiteLaxMode,
 	})
 }
