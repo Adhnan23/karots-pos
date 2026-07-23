@@ -14,3 +14,8 @@ package main
 // plugin's init() calls plugin.Register, so plugin.All()/SetupAll (and the
 // per-plugin migration loop in main.go) pick it up. Keep this file import-only
 // so the bootstrapper can rewrite it safely.
+
+import (
+	_ "karots-pos/plugins/documents"
+	_ "karots-pos/plugins/recharge"
+)

@@ -40,9 +40,16 @@ type PL struct {
 	// Shops that correct stock this way (rather than by stock-take) book all of
 	// their shrinkage here, so it has to reach the profit line.
 	StockCorrections decimal.Decimal `json:"stock_corrections"`
-	NetProfit        decimal.Decimal `json:"net_profit"` // gross - expenses - losses - own use - staff welfare - stock corrections + recoveries + other income
-	Receivables  decimal.Decimal `json:"receivables"`   // customer dues (current snapshot)
-	Payables     decimal.Decimal `json:"payables"`      // supplier dues (current snapshot; credits excluded)
+	// ZeroCostRevenue is revenue from stocked lines that were sold at no recorded
+	// cost — a product captured without a cost price, whose opening lot is
+	// therefore worth nothing. Those lines read as pure profit, so the gross
+	// margin above is overstated by however much they really cost. Reported so
+	// the number carries its own caveat instead of quietly flattering the shop.
+	ZeroCostRevenue decimal.Decimal `json:"zero_cost_revenue"`
+	ZeroCostLines   int             `json:"zero_cost_lines"`
+	NetProfit       decimal.Decimal `json:"net_profit"`  // gross - expenses - losses - own use - staff welfare - stock corrections + recoveries + other income
+	Receivables     decimal.Decimal `json:"receivables"` // customer dues (current snapshot)
+	Payables        decimal.Decimal `json:"payables"`    // supplier dues (current snapshot; credits excluded)
 	// SupplierCredit is the mirror of Payables: what suppliers owe US, from
 	// returned goods or advances paid ahead of a delivery.
 	SupplierCredit decimal.Decimal  `json:"supplier_credit"`
@@ -169,9 +176,33 @@ func (s *Service) Compute(ctx context.Context, from, to time.Time) (*PL, error) 
 		FROM stock_movements
 		WHERE type = 'adjust' AND created_at >= $1 AND created_at < $2`, from, to)
 
+	// Stocked lines that cost nothing on the books. Services are excluded: they
+	// legitimately have no stock cost.
+	_ = s.db.GetContext(ctx, &pl.ZeroCostRevenue, `
+		SELECT COALESCE(SUM(si.subtotal),0)
+		FROM sale_items si
+		JOIN sales s ON s.id = si.sale_id
+		JOIN products p ON p.id = si.product_id
+		WHERE NOT p.is_service AND COALESCE(si.cost_price,0) = 0
+		  AND s.status <> 'void' AND s.created_at >= $1 AND s.created_at < $2`, from, to)
+	_ = s.db.GetContext(ctx, &pl.ZeroCostLines, `
+		SELECT COUNT(*)
+		FROM sale_items si
+		JOIN sales s ON s.id = si.sale_id
+		JOIN products p ON p.id = si.product_id
+		WHERE NOT p.is_service AND COALESCE(si.cost_price,0) = 0
+		  AND s.status <> 'void' AND s.created_at >= $1 AND s.created_at < $2`, from, to)
+
+	_ = s.db.GetContext(ctx, &pl.RegisterDiff, `
+		SELECT COALESCE(SUM(difference),0) FROM cash_register
+		WHERE closed_at >= $1 AND closed_at < $2`, from, to)
+
+	// The till drawer coming up short is money gone, the same as any other loss —
+	// standard retail books it as "cash over/short". RegisterDiff is negative when
+	// short, so adding it subtracts the shortage and credits an overage.
 	pl.NetProfit = pl.GrossProfit.Sub(pl.Expenses).Sub(pl.Losses).
 		Sub(pl.OwnUse).Sub(pl.StaffWelfare).Sub(pl.StockCorrections).
-		Add(pl.Recoveries).Add(pl.OtherIncome)
+		Add(pl.Recoveries).Add(pl.OtherIncome).Add(pl.RegisterDiff)
 
 	_ = s.db.GetContext(ctx, &pl.Receivables, `SELECT COALESCE(SUM(outstanding_balance),0) FROM customers`)
 	// Only suppliers we actually OWE count as payables. A supplier in credit (goods
@@ -188,9 +219,6 @@ func (s *Service) Compute(ctx context.Context, from, to time.Time) (*PL, error) 
 	_ = s.db.GetContext(ctx, &pl.CashWithdrawn, `
 		SELECT COALESCE(SUM(ABS(amount)),0) FROM cash_movements
 		WHERE type = 'withdrawal' AND created_at >= $1 AND created_at < $2`, from, to)
-	_ = s.db.GetContext(ctx, &pl.RegisterDiff, `
-		SELECT COALESCE(SUM(difference),0) FROM cash_register
-		WHERE closed_at >= $1 AND closed_at < $2`, from, to)
 
 	// Top products on net (kept) quantities and value.
 	if err := s.db.SelectContext(ctx, &pl.TopProducts, `

@@ -363,6 +363,19 @@ func (s *Service) Summary(ctx context.Context, userID int64) (*Summary, error) {
 	return out, nil
 }
 
+// keepAppError preserves an error that already classified itself.
+//
+// The transaction bodies below call into cashflow and lockers, which return
+// precise failures ("locker not found"). Wrapping every one of those in a
+// blanket Internal turned a wrong pick into a 500 and showed the cashier a
+// generic "something went wrong" for a problem they could have fixed.
+func keepAppError(err error, fallback string) error {
+	if ae, ok := apperr.As(err); ok {
+		return ae
+	}
+	return apperr.Internal(fallback, err)
+}
+
 func (s *Service) Open(ctx context.Context, userID int64, in OpenInput) (*Session, error) {
 	opening, raw, ok := amountFrom(in.OpeningCash, in.Breakdown)
 	if !ok || opening.IsNegative() {
@@ -397,7 +410,7 @@ func (s *Service) Open(ctx context.Context, userID int64, in OpenInput) (*Sessio
 		if strings.Contains(strings.ToLower(err.Error()), "idx_cash_register_open_session") {
 			return nil, apperr.Conflict("you already have an open register session")
 		}
-		return nil, apperr.Internal("failed to open register", err)
+		return nil, keepAppError(err, "failed to open register")
 	}
 	if receiptID > 0 {
 		sess.ReceiptID = &receiptID
@@ -453,7 +466,7 @@ func (s *Service) Close(ctx context.Context, userID int64, in CloseInput) (*Clos
 		return nil
 	})
 	if err != nil {
-		return nil, apperr.Internal("failed to close register", err)
+		return nil, keepAppError(err, "failed to close register")
 	}
 	sess.ClosingCash = &closing
 	sess.ExpectedCash = &expected
@@ -516,7 +529,7 @@ func (s *Service) adjust(ctx context.Context, userID int64, in MovementInput, mt
 	var receiptID int64
 	if err := appdb.WithTx(ctx, s.db, func(tx *sqlx.Tx) error {
 		if merr := NewRepository(tx).AddMovement(ctx, sess.ID, userID, mtype, signed, in.Reason, nil); merr != nil {
-			return apperr.Internal("failed to record cash movement", merr)
+			return keepAppError(merr, "failed to record cash movement")
 		}
 		if s.lockerLeg != nil {
 			kind := "withdraw"

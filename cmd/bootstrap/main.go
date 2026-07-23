@@ -66,6 +66,11 @@ func run() error {
 		nameFlag    = flag.String("name", "karots-pos", "output binary base name")
 		outFlag     = flag.String("out", "dist", "output directory")
 		yes         = flag.Bool("yes", false, "assume yes / non-interactive")
+		// The developer's master key for deriving each shop's support PIN. Read
+		// from the environment rather than a flag so it never lands in a shell
+		// history or a build log. Without it every binary ever shipped shares one
+		// support credential, so the build warns loudly.
+		supportSecret = os.Getenv("POS_SUPPORT_SECRET")
 	)
 	flag.Parse()
 
@@ -130,7 +135,16 @@ func run() error {
 		bin += ".exe"
 	}
 	outBin := filepath.Join(*outFlag, bin)
-	build := exec.Command("go", "build", "-ldflags=-s -w", "-o", outBin, "./cmd/server")
+	// Bake the support secret in, so this shop's recovery PIN differs from every
+	// other shop's and can still be derived on demand with -support-pin.
+	ldflags := "-s -w"
+	if supportSecret != "" {
+		ldflags += " -X main.supportSecret=" + supportSecret
+	} else {
+		fmt.Println("! POS_SUPPORT_SECRET is not set — this build falls back to the fixed")
+		fmt.Println("  support PIN shared by every build. Set it so each shop gets its own.")
+	}
+	build := exec.Command("go", "build", "-ldflags="+ldflags, "-o", outBin, "./cmd/server")
 	build.Env = append(os.Environ(), "GOOS="+target, "GOARCH="+arch, "CGO_ENABLED=0")
 	build.Stdout, build.Stderr = os.Stdout, os.Stderr
 	fmt.Printf("→ go build %s\n", outBin)

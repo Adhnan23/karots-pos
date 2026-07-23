@@ -328,6 +328,32 @@ func (r *Repository) SetBatchSellingPrice(ctx context.Context, batchID int64, pr
 	return err
 }
 
+// RestockLot puts returned units back into the lot they were sold from, and
+// reports whether it could.
+//
+// A return used to always open a NEW lot, so a customer bringing one bottle back
+// left the shop holding three lots of the same thing where it had one. Do that a
+// few dozen times and the batch list is unreadable, FEFO order is decided by
+// which return came first, and a product whose lots all agreed on price can
+// sprout a spurious "which price?" prompt.
+//
+// Only ever restocks a lot that still exists and belongs to the product; the
+// caller falls back to opening a return lot when this returns false (an old sale
+// with no recorded lot, or one whose lot has since been archived).
+func (r *Repository) RestockLot(ctx context.Context, batchID *int64, productID int64, qty decimal.Decimal) (bool, error) {
+	if batchID == nil || *batchID <= 0 || !qty.IsPositive() {
+		return false, nil
+	}
+	res, err := r.q.ExecContext(ctx, `
+		UPDATE stock_batches SET qty_remaining = qty_remaining + $1
+		 WHERE id = $2 AND product_id = $3`, qty, *batchID, productID)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
+}
+
 // ClearBatchPrices drops the per-lot price from every live lot of a product, so
 // they follow the product's price again.
 //

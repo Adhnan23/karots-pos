@@ -41,7 +41,11 @@ type Settings struct {
 	LabelGapMM            int       `db:"label_gap_mm"      json:"label_gap_mm"`
 	LockTimeoutMinutes    int       `db:"lock_timeout_minutes" json:"lock_timeout_minutes"`
 	StockTakeEnabled      bool      `db:"stock_take_enabled"   json:"stock_take_enabled"`
-	UpdatedAt             time.Time `db:"updated_at"        json:"updated_at"`
+	// InstallID identifies this shop's install. The owner reads it to the
+	// developer, who derives the support PIN from it — it is an identifier, not a
+	// secret, so showing it is safe and is the whole point.
+	InstallID string    `db:"install_id" json:"install_id"`
+	UpdatedAt time.Time `db:"updated_at" json:"updated_at"`
 }
 
 type UpdateInput struct {

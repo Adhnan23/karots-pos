@@ -21,6 +21,11 @@ type StockTakeData struct {
 	Page       int
 	HasNext    bool
 	Saved      int // -1 = page just opened; >=0 = number of counts applied on the last save
+	// MultiPrice marks products holding two or more live lots at DIFFERENT prices.
+	// One row per product cannot express a per-lot count, so a correction here
+	// comes off the oldest lot — fine for onboarding (everything is one lot) but a
+	// guess afterwards. Those rows say so and point at Stock → Adjust.
+	MultiPrice map[int64]bool
 }
 
 // StockTakePage is the bulk opening-stock / stock-take screen. Enter a counted
@@ -94,6 +99,12 @@ templ StockTakePage(d StockTakeData) {
 								<td class="py-2 px-3">
 									<div class="font-medium">{ p.Name }</div>
 									<div class="text-xs text-slate-400">{ p.CategoryName } · { p.UnitAbbr }</div>
+									if d.MultiPrice[p.ID] {
+										<div class="mt-1 text-xs text-amber-700">
+											Holds lots at different prices — a count here comes off the oldest lot.
+											<a href="/admin/stock" class="underline">Adjust</a> instead to say which one.
+										</div>
+									}
 								</td>
 								<td class="py-2 px-3 text-right text-slate-500">{ money.Display(p.StockQty) }</td>
 								<td class="py-2 px-3 text-right">

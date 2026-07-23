@@ -626,12 +626,19 @@ func (s *Service) Return(ctx context.Context, id int64, userID int64) (*Detail, 
 			if err := stkRepo.Increment(ctx, it.ProductID, remaining); err != nil {
 				return apperr.Internal("failed to restock", err)
 			}
-			// Restock into a return batch so on-hand and batch totals stay in sync.
-			if _, err := stkRepo.InsertBatch(ctx, stock.NewBatch{
-				ProductID: it.ProductID, Quantity: remaining, CostPrice: it.CostPrice,
-				SellingPrice: returnedLotPrice(it), Source: "return",
-			}); err != nil {
-				return apperr.Internal("failed to restock batch", err)
+			// Put it back where it came from when we know; only open a return lot
+			// when we do not, so returns stop fragmenting the batch list.
+			back, berr := stkRepo.RestockLot(ctx, it.BatchID, it.ProductID, remaining)
+			if berr != nil {
+				return apperr.Internal("failed to restock batch", berr)
+			}
+			if !back {
+				if _, err := stkRepo.InsertBatch(ctx, stock.NewBatch{
+					ProductID: it.ProductID, Quantity: remaining, CostPrice: it.CostPrice,
+					SellingPrice: returnedLotPrice(it), Source: "return",
+				}); err != nil {
+					return apperr.Internal("failed to restock batch", err)
+				}
 			}
 			if err := stkRepo.InsertMovement(ctx, stock.MovementInput{
 				ProductID: it.ProductID, Type: stock.MoveReturn, Quantity: remaining,
@@ -772,11 +779,17 @@ func (s *Service) PartialReturnTx(ctx context.Context, tx *sqlx.Tx, saleID int64
 			if err := stkRepo.Increment(ctx, it.ProductID, qty); err != nil {
 				return apperr.Internal("failed to restock", err)
 			}
-			if _, err := stkRepo.InsertBatch(ctx, stock.NewBatch{
-				ProductID: it.ProductID, Quantity: qty, CostPrice: it.CostPrice,
-				SellingPrice: returnedLotPrice(*it), Source: "return",
-			}); err != nil {
-				return apperr.Internal("failed to restock batch", err)
+			back, berr := stkRepo.RestockLot(ctx, it.BatchID, it.ProductID, qty)
+			if berr != nil {
+				return apperr.Internal("failed to restock batch", berr)
+			}
+			if !back {
+				if _, err := stkRepo.InsertBatch(ctx, stock.NewBatch{
+					ProductID: it.ProductID, Quantity: qty, CostPrice: it.CostPrice,
+					SellingPrice: returnedLotPrice(*it), Source: "return",
+				}); err != nil {
+					return apperr.Internal("failed to restock batch", err)
+				}
 			}
 			if err := stkRepo.InsertMovement(ctx, stock.MovementInput{
 				ProductID: it.ProductID, Type: stock.MoveReturn, Quantity: qty,

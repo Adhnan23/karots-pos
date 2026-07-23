@@ -143,6 +143,8 @@ func (a *adminUI) FinanceReport(c echo.Context) error {
 			{"Shop own use", csvMoney(pl.OwnUse)},
 			{"Staff welfare", csvMoney(pl.StaffWelfare)},
 			{"Stock corrections (count)", csvMoney(pl.StockCorrections)},
+			{"Register over/short", csvMoney(pl.RegisterDiff)},
+			{"Revenue sold at no recorded cost", csvMoney(pl.ZeroCostRevenue)},
 			{"Supplier recoveries", csvMoney(pl.Recoveries)},
 			{"Other income (interest)", csvMoney(pl.OtherIncome)},
 			{"Net profit", csvMoney(pl.NetProfit)},

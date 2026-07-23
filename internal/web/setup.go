@@ -40,12 +40,19 @@ func (a *adminUI) setupStatus(ctx context.Context) []adminpages.SetupStep {
 	cats := count(`SELECT COUNT(*) FROM categories`)
 	prods := count(`SELECT COUNT(*) FROM products WHERE is_active = true`)
 	salesDone := count(`SELECT COUNT(*) FROM sales`)
+	// A shop trades perfectly well with no locker — the till opens on an untracked
+	// float and closes without banking anywhere. What it loses is the cash trail:
+	// the day's takings go nowhere recorded at close, and there is no safe to pay a
+	// supplier from or refund into. Owners only discovered that when a dialog had
+	// nothing to offer, so the checklist now asks for it up front.
+	lockersSet := count(`SELECT COUNT(*) FROM lockers WHERE is_active = true`)
 
 	return []adminpages.SetupStep{
 		{Label: "Name your shop", Hint: "Shop name, address & currency on the receipt", Href: "/admin/settings", Done: shopNamed},
 		{Label: "Add a staff login", Hint: "Create at least one cashier or manager account", Href: "/admin/users", Done: staff > 0},
 		{Label: "Create categories", Hint: "Organise your products into categories", Href: "/admin/categories", Done: cats > 0},
 		{Label: "Add products", Hint: "Type them in, or bulk-import from CSV", Href: "/admin/products", Done: prods > 0},
+		{Label: "Create a cash safe", Hint: "Where the day's takings are banked at close", Href: "/admin/lockers", Done: lockersSet > 0},
 		{Label: "Set up the receipt printer", Hint: "Pick a printer and run a test print", Href: "/admin/settings", Done: printerSet},
 		{Label: "Make your first sale", Hint: "Ring up a sale at the till", Href: "/cashier", Done: salesDone > 0},
 	}

@@ -6,7 +6,7 @@ import "karots-pos/templates/layouts"
 // staff) and no admin/cashier toggle — the server routes each user to their home
 // by role after the PIN is verified. Plain form POST (no HTMX) so errors
 // re-render the whole page with errMsg set.
-templ LoginPage(errMsg string) {
+templ LoginPage(errMsg, installID string) {
 	@layouts.Base("Login") {
 		<div class="min-h-full flex items-center justify-center p-6">
 			<div class="w-full max-w-md bg-white rounded-2xl shadow-sm p-8">
@@ -59,6 +59,12 @@ templ LoginPage(errMsg string) {
 						class="w-full py-3 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700"
 					>Sign in</button>
 				</form>
+				if installID != "" {
+					<!-- The shop reads this to the developer, who derives the support PIN from
+					     it. An identifier, not a secret — it is only useful to whoever holds
+					     the master key, and showing it is what makes per-shop PINs work. -->
+					<p class="mt-6 text-center text-xs text-slate-400">Install { installID }</p>
+				}
 			</div>
 		</div>
 	}

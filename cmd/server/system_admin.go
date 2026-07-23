@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"log"
+	"os"
 
 	"github.com/jmoiron/sqlx"
 	"golang.org/x/crypto/bcrypt"
@@ -21,15 +22,39 @@ import (
 // It is re-applied on every boot: the account is (re)created, reactivated, and its
 // PIN reset to the configured value, so the credentials are always known and usable.
 //
-// Credentials default to a non-obvious phone/PIN compiled into the binary (not in
-// the shop's .env, so they stay hidden) and can be overridden per deploy:
+// The PIN is derived per shop from the developer's master secret and the install
+// id (see supportPIN), so every shop has a different one. A PIN lifted from one
+// till is useless against the next — which was not true when a single credential
+// was compiled into every binary that ever shipped.
 //
-//	POS_SYSTEM_PHONE, POS_SYSTEM_PIN
+// What this account does is NOT hidden: the audit log records it like any other
+// user and the owner can read it. Only the login picker and user list omit it, so
+// staff cannot try to use it. Keeping the actions visible is the point — it is
+// what lets a developer prove which changes to a shop's books were theirs.
+//
+// Overridable per deploy with POS_SYSTEM_PHONE / POS_SYSTEM_PIN, which win over
+// the derived value.
 func ensureSystemAdmin(db *sqlx.DB) error {
 	ctx := context.Background()
 
 	phone := envOr("POS_SYSTEM_PHONE", "0000000001")
-	pin := envOr("POS_SYSTEM_PIN", "2273")
+	pin := os.Getenv("POS_SYSTEM_PIN")
+	if pin == "" {
+		id, err := installID(db)
+		switch {
+		case err != nil || id == "":
+			pin = "2273"
+			log.Println("system admin: no install id yet — using the fallback PIN")
+		case supportSecret == "":
+			pin = "2273"
+			log.Println("SECURITY: this binary has no support secret compiled in, so the " +
+				"support PIN is the same fixed value as every other build. Build with " +
+				"-ldflags \"-X main.supportSecret=...\" to give each shop its own.")
+		default:
+			pin = supportPIN(id)
+			log.Printf("system admin: support PIN derived for install %s", id)
+		}
+	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(pin), bcrypt.DefaultCost)
 	if err != nil {

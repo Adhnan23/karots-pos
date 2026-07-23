@@ -55,7 +55,15 @@ func main() {
 	initOnly := flag.Bool("init", false, "create the initial admin account for a fresh shop and exit")
 	resetFlag := flag.Bool("reset", false, "drop ALL data and re-run migrations (optionally combine with -seed/-demo)")
 	forceFlag := flag.Bool("force", false, "allow -reset against a production database")
+	supportFor := flag.String("support-pin", "", "print the support PIN for an install id (read it off the shop's login screen) and exit")
 	flag.Parse()
+
+	// Needs no database: the shop reads their Install ID down the phone and this
+	// derives the PIN for it.
+	if *supportFor != "" {
+		printSupportPIN(*supportFor)
+		return
+	}
 
 	cfg := config.Load()
 

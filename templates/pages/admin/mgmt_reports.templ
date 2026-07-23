@@ -215,6 +215,13 @@ templ FinanceReport(d FinanceReportData) {
 				@plMoney(d.Symbol, "Register over/short", d.PL.RegisterDiff, false)
 			</tbody>
 		</table>
+		if d.PL.ZeroCostLines > 0 {
+			<!-- Those lines read as pure profit. Saying so beside the number beats
+			     letting the owner act on a margin that is quietly too good. -->
+			<p class="mt-3 rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-800">
+				{ strconv.Itoa(d.PL.ZeroCostLines) } sold line(s) worth { money.Format(d.Symbol, d.PL.ZeroCostRevenue) } had no cost price recorded, so they count as all profit. Set a cost on those products to see a true margin.
+			</p>
+		}
 
 		if len(d.PL.TopProducts) > 0 {
 			<h3 class="font-semibold mt-6 mb-2">Top products</h3>

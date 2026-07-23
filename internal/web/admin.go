@@ -544,7 +544,19 @@ func (a *adminUI) stockTakeData(c echo.Context, saved int) (adminpages.StockTake
 		return adminpages.StockTakeData{}, err
 	}
 	hasNext := page*stockTakePageSize < total
+	// Products whose live lots disagree on price. A count sheet has one row per
+	// product, so there is nowhere to say "10 of the old, 2 of the new" — the
+	// correction comes off the oldest lot, which for these products is a guess
+	// that moves stock the shop may still be holding at a different price. Flag
+	// them and point at Stock → Adjust, which can name the lot.
+	multi := map[int64]bool{}
+	if opts, merr := a.s.stock.MultiPriceProducts(ctx); merr == nil {
+		for id := range opts {
+			multi[id] = true
+		}
+	}
 	return adminpages.StockTakeData{
+		MultiPrice: multi,
 		UserName:   middleware.CurrentUserName(c),
 		Symbol:     a.symbol(ctx),
 		Rows:       prods,

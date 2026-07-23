@@ -367,6 +367,13 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections) {
       await this.loadHolds();
       await this.loadLockers();
       await this.loadPriceOptions();
+      // Another terminal receiving stock changes which products have two live
+      // prices, and this map is what decides whether the till even asks. Loading
+      // it once at open meant a lane could go a whole shift never prompting for a
+      // product that had been repriced hours earlier. Refresh it quietly on a
+      // timer and whenever the lane is focused again.
+      setInterval(() => this.loadPriceOptions(), 90000);
+      window.addEventListener("focus", () => this.loadPriceOptions());
       if (!this.session) await this.loadDrawerSections("open");
       // Logout was blocked because the till is still open: jump straight to the
       // count/close dialog. If the session somehow closed already, just finish
@@ -704,6 +711,29 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections) {
     // Products whose live lots disagree on price, with their lots. Best-effort:
     // if this fails the till simply never prompts and prices at the product's
     // current price — exactly how it behaved before per-lot pricing existed.
+    // refreshPickedLots re-reads one product's live lots while its prompt is open.
+    // Best-effort: a failed lookup leaves the cached options in place rather than
+    // emptying the dialog under the cashier's hand.
+    async refreshPickedLots(productId) {
+      try {
+        const json = await apiFetch("GET", "/api/products/" + productId + "/lots", undefined, { silent: true });
+        const fresh = (json.data || []).filter((l) => Number(l.qty_remaining) > 0);
+        if (!this.pricePick || this.pricePick.product.id !== productId) return;
+        this.priceOptions[String(productId)] = fresh;
+        const distinct = new Set(fresh.map((l) => String(l.price)));
+        // If the lots now agree on one price there is nothing left to ask: take it.
+        if (fresh.length && distinct.size === 1) {
+          const product = this.pricePick.product;
+          this.pricePick = null;
+          this.addToCart(product, fresh[0]);
+          return;
+        }
+        if (fresh.length) this.pricePick.lots = fresh;
+      } catch (_) {
+        /* keep what we had */
+      }
+    },
+
     async loadPriceOptions() {
       try {
         const json = await apiFetch("GET", "/api/products/price-options", undefined, { silent: true });
@@ -969,6 +999,10 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections) {
         const lots = this.lotsFor(p.id);
         if (lots.length) {
           this.pricePick = { product: p, lots };
+          // Show the cached options straight away (a rush cannot wait on a round
+          // trip), then quietly correct them from the server so the cashier is
+          // never choosing a lot another lane has already emptied.
+          this.refreshPickedLots(p.id);
           return;
         }
       }

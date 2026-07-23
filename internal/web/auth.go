@@ -35,7 +35,18 @@ type authUI struct {
 }
 
 func (h *authUI) ShowLogin(c echo.Context) error {
-	return response.RenderPage(c, authpages.LoginPage(""))
+	return response.RenderPage(c, authpages.LoginPage("", h.installID(c)))
+}
+
+// installID reads this shop's install identifier for the login footer, so an
+// owner on the phone can read it to the developer. Best-effort: a settings read
+// that fails simply hides the line rather than blocking the login screen.
+func (h *authUI) installID(c echo.Context) string {
+	cfg, err := h.settings.Get(c.Request().Context())
+	if err != nil || cfg == nil {
+		return ""
+	}
+	return cfg.InstallID
 }
 
 // Login is a full-page form POST. Errors re-render the login page inline rather
@@ -245,7 +256,7 @@ func (h *authUI) changePINError(c echo.Context, msg string) error {
 func (h *authUI) loginError(c echo.Context, msg string) error {
 	c.Response().Header().Set(echo.HeaderContentType, echo.MIMETextHTMLCharsetUTF8)
 	c.Response().WriteHeader(http.StatusUnauthorized)
-	return authpages.LoginPage(msg).Render(c.Request().Context(), c.Response().Writer)
+	return authpages.LoginPage(msg, h.installID(c)).Render(c.Request().Context(), c.Response().Writer)
 }
 
 func (h *authUI) setCookie(c echo.Context, token string) {

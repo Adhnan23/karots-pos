@@ -42,6 +42,10 @@ role (there is no admin/cashier toggle on the login screen):
 | Manager | `0772222222` | `2222` |
 | Cashier | `0771111111` | `1111` |
 
+> These come from `-seed` and exist **only** in a development/demo database. A real
+> shop is set up with `-init`, which creates no staff accounts at all — see
+> [`-init` vs `-seed`](#-init-vs--seed).
+
 ### Reset the database
 
 The seed/demo only populate an empty database. To wipe everything and start fresh
@@ -88,15 +92,41 @@ Migrations also run automatically on every start, so `-migrate` is optional.
 
 ### `-init` vs `-seed`
 
-For a **real shop's first boot**, use `-init`: it creates a single **admin** account
-and nothing else, leaving the catalog empty and the shop identity at its neutral
-default (`My Shop`) so the owner configures everything in the UI. The admin is
-forced to choose their own PIN on first login. Defaults can be overridden:
+For a **real shop's first boot**, use `-init`. It creates **no staff accounts at
+all** — only the hidden support account (below) — and leaves the catalog empty and
+the shop identity at its neutral default (`My Shop`), so the owner configures
+everything in the UI. Sign in with the support account and create the shop's real
+users in **Admin → Users**; the Setup checklist on the admin home walks through
+the rest.
 
 ```bash
-POS_ADMIN_NAME="Jane"  POS_ADMIN_PHONE=0771112222  POS_ADMIN_PIN=4321 \
-  ./bin/karots-pos -init
+./bin/karots-pos -init
 ```
+
+### The support account
+
+Every install carries one hidden admin so a shop can never lock itself out and the
+developer can troubleshoot without asking for the owner's credentials. It is
+excluded from the login picker and the user list, and cannot be edited or
+deactivated from the UI — but everything it does is written to the **audit log the
+owner can read**, which is deliberate: it is what lets you show which changes to a
+shop's books were yours.
+
+Its PIN is derived per shop from a master secret and the shop's **Install ID**
+(shown at the bottom of the login screen), so no two shops share a credential:
+
+```bash
+# build a shop's binary with your master secret baked in
+POS_SUPPORT_SECRET='…' go run ./cmd/bootstrap -plugins recharge -name acme-pos
+
+# shop reads their Install ID down the phone → derive their PIN
+./bin/karots-pos -support-pin A1B2C3D4
+```
+
+Build **without** `POS_SUPPORT_SECRET` and every binary falls back to the same
+fixed PIN — one leak then opens every shop you ever shipped — so the server warns
+about it on each boot. `POS_SYSTEM_PHONE` / `POS_SYSTEM_PIN` still override both
+per deploy.
 
 `-seed` is the **development/demo** dataset (staff users, "Karots Super Mart"
 identity, a nested category tree, 8 stocked products, suppliers and customers) —
