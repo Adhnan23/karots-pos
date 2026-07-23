@@ -65,6 +65,10 @@ func main() {
 		return
 	}
 
+	// Pick up the .env shipped beside the binary before anything reads config, so
+	// a shop can just run the executable. Anything already exported wins.
+	config.LoadDotEnv()
+
 	cfg := config.Load()
 
 	sqlxDB, err := db.Connect(cfg.DatabaseURL)

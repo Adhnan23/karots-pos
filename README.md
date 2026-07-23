@@ -103,6 +103,23 @@ the rest.
 ./bin/karots-pos -init
 ```
 
+### Running a shipped binary
+
+Put the filled-in `.env` **next to the binary** and just run it — the server reads
+that file on startup, so nothing has to be exported:
+
+```
+/opt/karots-pos/
+  karots-pos
+  .env          ← read automatically
+```
+
+It looks beside the executable first, then in the working directory, so it does
+not matter what folder the shop launches it from. Anything already exported wins
+over the file, which keeps `POS_SYSTEM_PIN=… ./karots-pos`, systemd `Environment=`
+and Docker `-e` working as overrides. A missing `.env` is not an error — the
+server just reports whichever variable it actually needs.
+
 ### The support account
 
 Every install carries one hidden admin so a shop can never lock itself out and the
