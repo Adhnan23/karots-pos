@@ -26,8 +26,7 @@ build-windows: templ css
 #   make support-pin ID=2998EBCA
 # Runs on YOUR machine only — it needs the master secret from .env.
 support-pin:
-	@set -a && . ./.env && set +a && go run \
-	  -ldflags "-X main.supportSecret=$$POS_SUPPORT_SECRET" ./cmd/server -support-pin $(ID)
+	@set -a && . ./.env && set +a && go run ./cmd/server -support-pin $(ID)
 
 # Sources .env so POS_SUPPORT_SECRET reaches the build: without it every shop
 # binary falls back to one shared support PIN.
