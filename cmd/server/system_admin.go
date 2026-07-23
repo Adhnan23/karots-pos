@@ -5,10 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"log"
-	"os"
 
 	"github.com/jmoiron/sqlx"
-	"golang.org/x/crypto/bcrypt"
 
 	appdb "karots-pos/internal/db"
 )
@@ -38,27 +36,23 @@ func ensureSystemAdmin(db *sqlx.DB) error {
 	ctx := context.Background()
 
 	phone := envOr("POS_SYSTEM_PHONE", "0000000001")
-	pin := os.Getenv("POS_SYSTEM_PIN")
-	if pin == "" {
-		id, err := installID(db)
-		switch {
-		case err != nil || id == "":
-			pin = "2273"
-			log.Println("system admin: no install id yet — using the fallback PIN")
-		case supportSecret == "":
-			pin = "2273"
-			log.Println("SECURITY: this binary has no support secret compiled in, so the " +
-				"support PIN is the same fixed value as every other build. Build with " +
-				"-ldflags \"-X main.supportSecret=...\" to give each shop its own.")
-		default:
-			pin = supportPIN(id)
-			log.Printf("system admin: support PIN derived for install %s", id)
-		}
+
+	// Keep the id the shop can read matching the one this binary was built for,
+	// or the developer would derive a PIN that does not open it.
+	if err := adoptBakedInstallID(db); err != nil {
+		return err
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(pin), bcrypt.DefaultCost)
+	hash, source, err := supportCredential(db)
 	if err != nil {
 		return err
+	}
+	if source == "" {
+		log.Println("SECURITY: this build has no support credential of its own, so its " +
+			"support PIN is the same fixed value as every other bare build. Build shop " +
+			"binaries with `make bootstrap` (POS_SUPPORT_SECRET set) to give each shop its own.")
+	} else {
+		log.Printf("system admin: support PIN %s", source)
 	}
 
 	var id int64
@@ -68,19 +62,19 @@ func ensureSystemAdmin(db *sqlx.DB) error {
 		_, uerr := db.ExecContext(ctx,
 			`UPDATE users SET name='System', phone=$1, role='admin', pin_hash=$2,
 			        is_active=true, must_change_pin=false, is_system=true
-			 WHERE id=$3`, phone, string(hash), id)
+			 WHERE id=$3`, phone, hash, id)
 		if appdb.IsUniqueViolation(uerr) {
 			log.Printf("system admin: phone %q is already used by a staff account; leaving system phone unchanged", phone)
 			// Still keep it usable: reset everything except the phone.
 			_, uerr = db.ExecContext(ctx,
 				`UPDATE users SET role='admin', pin_hash=$1, is_active=true,
-				        must_change_pin=false, is_system=true WHERE id=$2`, string(hash), id)
+				        must_change_pin=false, is_system=true WHERE id=$2`, hash, id)
 		}
 		return uerr
 	case errors.Is(err, sql.ErrNoRows):
 		_, ierr := db.ExecContext(ctx,
 			`INSERT INTO users (name, phone, role, pin_hash, is_active, must_change_pin, is_system)
-			 VALUES ('System', $1, 'admin', $2, true, false, true)`, phone, string(hash))
+			 VALUES ('System', $1, 'admin', $2, true, false, true)`, phone, hash)
 		if appdb.IsUniqueViolation(ierr) {
 			log.Printf("system admin: phone %q is already used by a staff account; system recovery login NOT created — set POS_SYSTEM_PHONE to a free number", phone)
 			return nil

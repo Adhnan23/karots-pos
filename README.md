@@ -129,21 +129,39 @@ deactivated from the UI — but everything it does is written to the **audit log
 owner can read**, which is deliberate: it is what lets you show which changes to a
 shop's books were yours.
 
-Its PIN is derived per shop from a master secret and the shop's **Install ID**
-(shown at the bottom of the login screen), so no two shops share a credential:
+Its PIN is different in every shop, derived from your master secret and that
+shop's **Install ID** (logged to the browser console on the login page — open
+devtools to read it):
 
 ```bash
-# build a shop's binary with your master secret baked in
-POS_SUPPORT_SECRET='…' go run ./cmd/bootstrap -plugins recharge -name acme-pos
+# build a shop's binary; the master key comes from .env on YOUR machine
+make bootstrap ARGS="-plugins recharge -name acme-pos"
+    support login   0000000001 / 350428
+    install id      7380C48C
 
-# shop reads their Install ID down the phone → derive their PIN
-./bin/karots-pos -support-pin A1B2C3D4
+# months later, the shop reads their install id down the phone
+make support-pin ID=7380C48C
+    install 7380C48C → support PIN 350428
 ```
 
-Build **without** `POS_SUPPORT_SECRET` and every binary falls back to the same
-fixed PIN — one leak then opens every shop you ever shipped — so the server warns
-about it on each boot. `POS_SYSTEM_PHONE` / `POS_SYSTEM_PIN` still override both
-per deploy.
+**The master key is never compiled into a shipped binary.** The bootstrapper does
+the derivation at build time and bakes in only the install id and a bcrypt hash of
+that one shop's PIN. Open a shipped binary and you find a hash for the shop whose
+machine you are already standing at, and nothing about any other shop — an earlier
+version baked in the key itself, which `go version -m` printed in plain text.
+
+Build with a bare `go build` and there is no per-shop credential at all: the PIN
+falls back to a fixed value shared by every such build, and the server says so on
+each boot. Use `make bootstrap` for anything you ship.
+
+Two env files, deliberately different — [`.env.example`](.env.example) for your
+machine (it carries `POS_SUPPORT_SECRET`) and
+[`.env.production.example`](.env.production.example) for a shop (it must not).
+`make bootstrap` writes the production one to `dist/.env.sample`.
+
+**Back the master key up.** Lose it and no shop already in the field can have its
+PIN derived again; the only way back into one is `POS_SYSTEM_PIN` in that shop's
+own `.env`, which overrides the baked credential.
 
 `-seed` is the **development/demo** dataset (staff users, "Karots Super Mart"
 identity, a nested category tree, 8 stocked products, suppliers and customers) —

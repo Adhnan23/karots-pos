@@ -6,9 +6,11 @@ help:
 # Generate Templ components and the stylesheet, then build a fully static,
 # self-contained binary (static assets + migrations are embedded; only the
 # binary + .env are needed).
+# A plain dev build. It carries no support credential of its own — the server
+# derives one at boot from POS_SUPPORT_SECRET in .env instead. SHOP binaries are
+# built with `make bootstrap`, which bakes in that shop's PIN and never the key.
 build: templ css
-	set -a && . ./.env && set +a && CGO_ENABLED=0 go build \
-	  -ldflags="-s -w -X main.supportSecret=$$POS_SUPPORT_SECRET" -o bin/karots-pos ./cmd/server
+	CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/karots-pos ./cmd/server
 
 # Cross-compile a self-contained Windows executable. Printing uses the Windows
 # print spooler (RAW) via winspool — see internal/printing/printing_windows.go.

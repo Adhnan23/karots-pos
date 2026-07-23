@@ -33,6 +33,10 @@ import (
 	"sort"
 	"strings"
 
+	"karots-pos/internal/support"
+
+	"golang.org/x/crypto/bcrypt"
+
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -135,14 +139,30 @@ func run() error {
 		bin += ".exe"
 	}
 	outBin := filepath.Join(*outFlag, bin)
-	// Bake the support secret in, so this shop's recovery PIN differs from every
-	// other shop's and can still be derived on demand with -support-pin.
+
+	// Derive this shop's support credential HERE, and bake in only the result.
+	//
+	// The master secret must never reach the binary: Go records the whole
+	// -ldflags line in the build metadata, so `go version -m` on any shipped
+	// binary would print it and hand the holder every other shop's PIN. What goes
+	// in is the install id and a bcrypt HASH of this shop's PIN — useless against
+	// any other install, and not even reversible into this one's.
 	ldflags := "-s -w"
+	var shopInstallID, shopPIN string
 	if supportSecret != "" {
-		ldflags += " -X main.supportSecret=" + supportSecret
+		id, ierr := support.NewInstallID()
+		if ierr != nil {
+			return fmt.Errorf("generate install id: %w", ierr)
+		}
+		shopInstallID, shopPIN = id, support.DerivePIN(supportSecret, id)
+		hash, herr := bcrypt.GenerateFromPassword([]byte(shopPIN), bcrypt.DefaultCost)
+		if herr != nil {
+			return fmt.Errorf("hash support pin: %w", herr)
+		}
+		ldflags += " -X main.installIDBaked=" + id + " -X main.supportHash=" + string(hash)
 	} else {
 		fmt.Println("! POS_SUPPORT_SECRET is not set — this build falls back to the fixed")
-		fmt.Println("  support PIN shared by every build. Set it so each shop gets its own.")
+		fmt.Println("  support PIN shared by every bare build. Set it so this shop gets its own.")
 	}
 	build := exec.Command("go", "build", "-ldflags="+ldflags, "-o", outBin, "./cmd/server")
 	build.Env = append(os.Environ(), "GOOS="+target, "GOARCH="+arch, "CGO_ENABLED=0")
@@ -159,6 +179,14 @@ func run() error {
 	}
 
 	fmt.Printf("\n✓ Built %s\n✓ Wrote %s\n  Ship the binary + a filled-in .env (rename .env.sample).\n", outBin, envPath)
+	if shopInstallID != "" {
+		// Printed once, here, because it is the only moment both halves exist in
+		// one place. Losing it is not fatal — the shop can read the install id off
+		// their console and `make support-pin` recomputes the same PIN.
+		fmt.Printf("\n  support login   0000000001 / %s\n  install id      %s\n",
+			shopPIN, shopInstallID)
+		fmt.Printf("  recover later   make support-pin ID=%s\n", shopInstallID)
+	}
 	return nil
 }
 
@@ -356,42 +384,18 @@ func renderEnabledPlugins(sel []manifest) []byte {
 	return []byte(b.String())
 }
 
-// stripDevOnly removes the developer-only block from the env template before it
-// is shipped.
-//
-// .env.example doubles as the shop's .env.sample, so anything documented there
-// lands on the shop's machine. The support master key must not: the whole reason
-// each shop gets its own derived PIN is that no shop holds the key to the
-// others. Marked with:
-//
-//	# >>> DEV ONLY
-//	...
-//	# <<< DEV ONLY
-func stripDevOnly(s string) string {
-	var out []string
-	skipping := false
-	for _, line := range strings.Split(s, "\n") {
-		trimmed := strings.TrimSpace(line)
-		switch {
-		case strings.HasPrefix(trimmed, "# >>> DEV ONLY"):
-			skipping = true
-		case strings.HasPrefix(trimmed, "# <<< DEV ONLY"):
-			skipping = false
-		case !skipping:
-			out = append(out, line)
-		}
-	}
-	return strings.Join(out, "\n")
-}
-
-// mergeEnv writes the core .env.example plus each selected plugin's env.sample.
+// mergeEnv writes the shop env template plus each selected plugin's env.sample.
 func mergeEnv(dst string, sel []manifest) error {
 	var b strings.Builder
-	if core, err := os.ReadFile(".env.example"); err == nil {
-		b.WriteString(stripDevOnly(string(core)))
-		if !strings.HasSuffix(b.String(), "\n") {
-			b.WriteByte('\n')
-		}
+	// The shop's template, not the developer's: .env.example carries the master
+	// key line, and this file lands on the shop's machine.
+	core, err := os.ReadFile(".env.production.example")
+	if err != nil {
+		return fmt.Errorf("read .env.production.example: %w", err)
+	}
+	b.Write(core)
+	if !strings.HasSuffix(b.String(), "\n") {
+		b.WriteByte('\n')
 	}
 	for _, m := range sel {
 		name := m.EnvSample
