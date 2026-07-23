@@ -60,12 +60,19 @@ templ LoginPage(errMsg, installID string) {
 					>Sign in</button>
 				</form>
 				if installID != "" {
-					<!-- The shop reads this to the developer, who derives the support PIN from
-					     it. An identifier, not a secret — it is only useful to whoever holds
-					     the master key, and showing it is what makes per-shop PINs work. -->
-					<p class="mt-6 text-center text-xs text-slate-400">Install { installID }</p>
+					<!-- Logged to the browser console rather than printed on the page: the
+					     developer opens devtools to read it, and the shop is not left
+					     looking at a code nobody explained. Not a secret either way — it is
+					     useless without the master key — so the console is about keeping the
+					     login screen clean, not about hiding it. -->
+					@installIDConsole(installID)
 				}
 			</div>
 		</div>
 	}
+}
+
+// installIDConsole writes the install id to the browser console for support.
+templ installIDConsole(installID string) {
+	@templ.JSFuncCall("console.info", "POS install "+installID)
 }

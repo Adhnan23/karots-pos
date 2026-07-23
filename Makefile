@@ -7,7 +7,8 @@ help:
 # self-contained binary (static assets + migrations are embedded; only the
 # binary + .env are needed).
 build: templ css
-	CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/karots-pos ./cmd/server
+	set -a && . ./.env && set +a && CGO_ENABLED=0 go build \
+	  -ldflags="-s -w -X main.supportSecret=$$POS_SUPPORT_SECRET" -o bin/karots-pos ./cmd/server
 
 # Cross-compile a self-contained Windows executable. Printing uses the Windows
 # print spooler (RAW) via winspool — see internal/printing/printing_windows.go.
@@ -19,8 +20,10 @@ build-windows: templ css
 #   make bootstrap ARGS="-plugins recharge -os windows -name acme-pos"
 # The bootstrapper rewrites cmd/server/enabled_plugins.go, builds, then restores
 # it. Output (binary + merged .env.sample) lands in dist/.
+# Sources .env so POS_SUPPORT_SECRET reaches the build: without it every shop
+# binary falls back to one shared support PIN.
 bootstrap:
-	go run ./cmd/bootstrap $(ARGS)
+	set -a && . ./.env && set +a && go run ./cmd/bootstrap $(ARGS)
 
 templ:
 	templ generate

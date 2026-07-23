@@ -356,11 +356,39 @@ func renderEnabledPlugins(sel []manifest) []byte {
 	return []byte(b.String())
 }
 
+// stripDevOnly removes the developer-only block from the env template before it
+// is shipped.
+//
+// .env.example doubles as the shop's .env.sample, so anything documented there
+// lands on the shop's machine. The support master key must not: the whole reason
+// each shop gets its own derived PIN is that no shop holds the key to the
+// others. Marked with:
+//
+//	# >>> DEV ONLY
+//	...
+//	# <<< DEV ONLY
+func stripDevOnly(s string) string {
+	var out []string
+	skipping := false
+	for _, line := range strings.Split(s, "\n") {
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(trimmed, "# >>> DEV ONLY"):
+			skipping = true
+		case strings.HasPrefix(trimmed, "# <<< DEV ONLY"):
+			skipping = false
+		case !skipping:
+			out = append(out, line)
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
 // mergeEnv writes the core .env.example plus each selected plugin's env.sample.
 func mergeEnv(dst string, sel []manifest) error {
 	var b strings.Builder
 	if core, err := os.ReadFile(".env.example"); err == nil {
-		b.Write(core)
+		b.WriteString(stripDevOnly(string(core)))
 		if !strings.HasSuffix(b.String(), "\n") {
 			b.WriteByte('\n')
 		}
