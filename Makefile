@@ -1,7 +1,7 @@
-.PHONY: help dev watch css-watch build build-windows bootstrap run templ css test migrate seed demo reset reset-seed reset-demo db-up db-down docker-up docker-down tidy
+.PHONY: support-pin help dev watch css-watch build build-windows bootstrap run templ css test migrate seed demo reset reset-seed reset-demo db-up db-down docker-up docker-down tidy
 
 help:
-	@echo "Targets: db-up, migrate, seed, demo, reset, reset-seed, reset-demo, dev, watch, css-watch, build, build-windows, bootstrap, run, test, templ, css, docker-up, docker-down"
+	@echo "Targets: support-pin, db-up, migrate, seed, demo, reset, reset-seed, reset-demo, dev, watch, css-watch, build, build-windows, bootstrap, run, test, templ, css, docker-up, docker-down"
 
 # Generate Templ components and the stylesheet, then build a fully static,
 # self-contained binary (static assets + migrations are embedded; only the
@@ -20,6 +20,13 @@ build-windows: templ css
 #   make bootstrap ARGS="-plugins recharge -os windows -name acme-pos"
 # The bootstrapper rewrites cmd/server/enabled_plugins.go, builds, then restores
 # it. Output (binary + merged .env.sample) lands in dist/.
+# Derive a shop's support PIN from the id they read off their console:
+#   make support-pin ID=2998EBCA
+# Runs on YOUR machine only — it needs the master secret from .env.
+support-pin:
+	@set -a && . ./.env && set +a && go run \
+	  -ldflags "-X main.supportSecret=$$POS_SUPPORT_SECRET" ./cmd/server -support-pin $(ID)
+
 # Sources .env so POS_SUPPORT_SECRET reaches the build: without it every shop
 # binary falls back to one shared support PIN.
 bootstrap:
