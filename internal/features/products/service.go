@@ -363,6 +363,14 @@ func (s *Service) Update(ctx context.Context, id int64, in UpdateInput) (*Produc
 		}
 		return nil, mapWriteErr(err)
 	}
+	// "Apply this price to the stock I already have." Without it a price change
+	// only reaches stock that arrives later, and the lots on the shelf keep
+	// selling at what they were stickered at.
+	if in.RepriceStock {
+		if err := stock.NewRepository(s.db).ClearBatchPrices(ctx, id); err != nil {
+			return nil, apperr.Internal("failed to reprice stock on hand", err)
+		}
+	}
 	return s.Get(ctx, id)
 }
 

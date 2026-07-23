@@ -33,14 +33,21 @@ type payRequest struct {
 // only in which cash sources they offer and which URL the print prompt points
 // at — never in what gets written.
 //
-// Returns the payment result and, for cash, the money receipt. A nil receipt
-// means a non-cash method, not a failure.
+// Returns the payment result and the money receipt when the money came from a
+// tracked place. A nil receipt means no source was named, not a failure.
+//
+// The move used to be gated on the method being cash, which left a bank transfer
+// moving no money at all: the shop's bank is a locker with a real balance, so
+// paying a supplier from it recorded the debt as settled while the account went
+// on reporting money that had already gone. Gating on the SOURCE instead keeps
+// cash working exactly as before (it always names one) and lets a transfer say
+// where it came from.
 func (s *Server) paySupplierTx(ctx context.Context, tx *sqlx.Tx, req payRequest, userID int64) (*supplierpay.Result, *cashflow.Receipt, error) {
 	res, err := s.supplierPay.PayTx(ctx, tx, req.SupplierID, req.In, userID)
 	if err != nil {
 		return nil, nil, err
 	}
-	if res.Method != "cash" {
+	if req.Source.Kind == cashflow.KindExternal {
 		return res, nil, nil
 	}
 	rec, err := s.cashflow.MoveTx(ctx, tx, cashflow.MoveInput{
@@ -57,6 +64,20 @@ func (s *Server) paySupplierTx(ctx context.Context, tx *sqlx.Tx, req payRequest,
 		return nil, nil, err
 	}
 	return res, rec, nil
+}
+
+// parsePaymentSource reads the cash location a payment came from (or a refund
+// landed in). Cash must name one — it physically comes out of a drawer or safe.
+// Card and online may name one: a bank transfer leaves the shop's bank locker,
+// while a card settlement the owner does not track can be left blank, which
+// records the payment with no money move (the old behaviour for every non-cash
+// method).
+func parsePaymentSource(c echo.Context, method, field string) (cashflow.Location, error) {
+	raw := strings.TrimSpace(c.FormValue(field))
+	if method != "cash" && raw == "" {
+		return cashflow.External(), nil
+	}
+	return parseLocation(raw)
 }
 
 // owedAfterSettlement re-reads what an invoice still owes once purchases has
@@ -182,13 +203,15 @@ func parsePayNow(f PayFields) (payNow, error) {
 	if !ok {
 		return payNow{}, apperr.Validation("invalid payment method")
 	}
-	out := payNow{amount: amt, method: method}
-	if method == "cash" {
-		src, perr := parseLocation(f.PaySource)
+	out := payNow{amount: amt, method: method, source: cashflow.External()}
+	// Cash must say where it came from. A transfer may, so paying a delivery
+	// straight out of the bank locker actually moves the money.
+	if src := strings.TrimSpace(f.PaySource); method == "cash" || src != "" {
+		loc, perr := parseLocation(src)
 		if perr != nil {
 			return payNow{}, perr
 		}
-		out.source = src
+		out.source = loc
 	}
 	return out, nil
 }

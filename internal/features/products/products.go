@@ -69,6 +69,10 @@ type CreateInput struct {
 	// PreferredSupplierID is an optional default supplier (nil/0 = none). The form
 	// posts an empty string for "none"; bind to *int64 so 0 stays nil.
 	PreferredSupplierID *int64 `json:"preferred_supplier_id" form:"preferred_supplier_id"`
+	// RepriceStock applies a changed selling price to the stock already on the
+	// shelf, by clearing the per-lot prices so those lots follow the product
+	// again. Only meaningful on update; a new product has no lots yet.
+	RepriceStock bool `json:"reprice_stock" form:"reprice_stock"`
 }
 
 type UpdateInput = CreateInput

@@ -425,9 +425,12 @@ func (h *cashierUI) SupplierPayAtCounter(c echo.Context) error {
 	if !ok {
 		return apperr.Validation("invalid payment method")
 	}
-	var src cashflow.Location
-	if method == "cash" {
-		src, err = h.counterSource(c, c.FormValue("source"))
+	// Cash must name a source; a transfer may name one so it leaves the right
+	// account. Either way it goes through counterSource, so a cashier still can
+	// only touch their own drawer or a locker the owner opened to them.
+	src := cashflow.External()
+	if raw := strings.TrimSpace(c.FormValue("source")); method == "cash" || raw != "" {
+		src, err = h.counterSource(c, raw)
 		if err != nil {
 			return err
 		}
@@ -483,9 +486,9 @@ func (h *cashierUI) SupplierRefundAtCounter(c echo.Context) error {
 	}
 	userID := middleware.CurrentUserID(c)
 
-	var dest cashflow.Location
-	if in.Method == "cash" {
-		dest, err = h.counterSource(c, c.FormValue("dest"))
+	dest := cashflow.External()
+	if raw := strings.TrimSpace(c.FormValue("dest")); in.Method == "cash" || raw != "" {
+		dest, err = h.counterSource(c, raw)
 		if err != nil {
 			return err
 		}
@@ -499,7 +502,7 @@ func (h *cashierUI) SupplierRefundAtCounter(c echo.Context) error {
 			return txErr
 		}
 		res = r
-		if r.Method != "cash" {
+		if dest.Kind == cashflow.KindExternal {
 			return nil
 		}
 		k, txErr := h.s.cashflow.MoveTx(ctx, tx, cashflow.MoveInput{

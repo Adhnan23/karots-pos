@@ -64,6 +64,11 @@ func (s *Service) Adjust(ctx context.Context, in AdjustInput, userID int64) erro
 		if err := repo.SetQuantity(ctx, in.ProductID, target); err != nil {
 			return apperr.Internal("failed to update stock", err)
 		}
+		// The value the correction moved, so the P&L can see it. Stock written off
+		// by a count is as real a loss as breakage; leaving it unpriced let every
+		// correction pass through the books at zero, and a shop that records its
+		// shrinkage this way saw none of it.
+		moved := decimal.Zero
 		// Keep batches consistent: a positive delta opens an adjustment batch,
 		// a negative delta is depleted FEFO.
 		if delta.IsPositive() {
@@ -71,6 +76,7 @@ func (s *Service) Adjust(ctx context.Context, in AdjustInput, userID int64) erro
 			if p, err := repo.productCost(ctx, in.ProductID); err == nil {
 				cost = p
 			}
+			moved = cost.Mul(delta)
 			// A blank/unparseable price is simply no price: the lot follows the
 			// product, exactly as before.
 			sell := decimal.Zero
@@ -86,9 +92,11 @@ func (s *Service) Adjust(ctx context.Context, in AdjustInput, userID int64) erro
 				return apperr.Internal("failed to open adjustment batch", err)
 			}
 		} else {
-			if _, err := repo.depleteChosen(ctx, in.ProductID, in.BatchID, delta.Abs()); err != nil {
+			cost, err := repo.depleteChosen(ctx, in.ProductID, in.BatchID, delta.Abs())
+			if err != nil {
 				return err
 			}
+			moved = cost.Mul(delta.Abs())
 		}
 		note := nilIfEmpty(in.Note)
 		if err := repo.InsertMovement(ctx, MovementInput{
@@ -97,6 +105,9 @@ func (s *Service) Adjust(ctx context.Context, in AdjustInput, userID int64) erro
 			Quantity:  delta,
 			UserID:    userID,
 			Note:      note,
+			// Always the positive worth moved — the sign lives on Quantity, the
+			// same convention every other movement type follows.
+			Cost: moved,
 		}); err != nil {
 			return apperr.Internal("failed to record movement", err)
 		}

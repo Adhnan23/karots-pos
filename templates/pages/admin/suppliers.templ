@@ -223,13 +223,16 @@ templ SupplierPaymentForm(d SupplierPayData) {
 					<input name="reference" class="w-full border rounded-lg px-3 py-2" placeholder="cheque / txn no"/>
 				</div>
 			</div>
-			<div x-show="method === 'cash'" x-cloak>
-				<label class="block text-sm font-medium mb-1">Pay cash from</label>
+			<div x-show="method !== 'card'" x-cloak>
+				<label class="block text-sm font-medium mb-1" x-text="method === 'cash' ? 'Pay cash from' : 'Pay from (optional)'"></label>
 				if len(d.Sources) == 0 {
 					<p class="text-sm text-amber-600">No cash locker or open till to pay from. Create a cash locker first.</p>
 				} else {
 					@adminfragments.LocationPicker("source", "— pick cash source —", d.Sources)
-					<p class="text-xs text-slate-500 mt-1">Cash leaves this location and a receipt is recorded.</p>
+					<!-- A bank transfer leaves the bank locker. Naming it here is what keeps
+					     that balance honest; leaving it blank records the payment only. -->
+					<p class="text-xs text-slate-500 mt-1" x-show="method === 'cash'">Cash leaves this location and a receipt is recorded.</p>
+					<p class="text-xs text-slate-500 mt-1" x-show="method === 'online'" x-cloak>Pick the account the transfer leaves, so its balance stays right. Leave blank if you do not track it here.</p>
 				}
 			</div>
 			<div>
@@ -262,12 +265,13 @@ templ SupplierPaymentForm(d SupplierPayData) {
 							</select>
 						</div>
 					</div>
-					<div x-show="method === 'cash'" x-cloak>
-						<label class="block text-sm font-medium mb-1">Put the cash into</label>
+					<div x-show="method !== 'card'" x-cloak>
+						<label class="block text-sm font-medium mb-1" x-text="method === 'cash' ? 'Put the cash into' : 'Received into (optional)'"></label>
 						if len(d.Sources) == 0 {
 							<p class="text-sm text-amber-600">No cash locker or open till to receive into.</p>
 						} else {
 							@adminfragments.LocationPicker("dest", "— pick where it goes —", d.Sources)
+							<p class="text-xs text-slate-500 mt-1" x-show="method === 'online'" x-cloak>Pick the account the money came back into. Leave blank if you do not track it here.</p>
 						}
 					</div>
 					<div>

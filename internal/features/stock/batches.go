@@ -328,6 +328,23 @@ func (r *Repository) SetBatchSellingPrice(ctx context.Context, batchID int64, pr
 	return err
 }
 
+// ClearBatchPrices drops the per-lot price from every live lot of a product, so
+// they follow the product's price again.
+//
+// Raising a shelf price otherwise leaves the stock on hand stranded at whatever
+// it was stickered at when it arrived: the till card advertises the new price
+// while every option in the "which price?" prompt is the old one, and the shop
+// goes on selling at yesterday's price until those lots drain, with nothing on
+// screen saying so. This is the deliberate "apply it to what I already have"
+// action — it clears rather than stamps, so the lots track future price changes
+// too instead of being frozen at today's.
+func (r *Repository) ClearBatchPrices(ctx context.Context, productID int64) error {
+	_, err := r.q.ExecContext(ctx,
+		`UPDATE stock_batches SET selling_price = 0
+		  WHERE product_id = $1 AND qty_remaining > 0 AND selling_price > 0`, productID)
+	return err
+}
+
 // productCost reads a product's current cost price (used to value adjustment
 // batches when stock is increased outside a purchase).
 func (r *Repository) productCost(ctx context.Context, productID int64) (decimal.Decimal, error) {

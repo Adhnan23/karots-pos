@@ -231,6 +231,18 @@ templ ProductForm(p *products.Product, cats []categories.TreeNode, us []units.Un
 						<input name="wholesale_price" type="number" step="0.01" min="0" value={ valOf(p, fWholesale) } class="w-full border rounded-lg px-3 py-2"/>
 					</div>
 				</div>
+				if p != nil {
+					<!-- Stock already on the shelf keeps the price it arrived with, so a price
+					     change otherwise reaches only future deliveries: the till card shows the
+					     new price while every option in the "which price?" prompt is the old one. -->
+					<label class="flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2">
+						<input type="checkbox" name="reprice_stock" value="true" class="mt-1"/>
+						<span class="text-sm">
+							<span class="block font-medium">Apply the selling price to stock on hand</span>
+							<span class="block text-slate-600">Leave unticked to let the stock you already have keep the price it came in at.</span>
+						</span>
+					</label>
+				}
 				<div class="grid grid-cols-2 gap-4">
 					<div>
 						<label class="block text-sm font-medium mb-1">Tax %</label>

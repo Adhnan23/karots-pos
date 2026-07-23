@@ -324,15 +324,18 @@ templ PurchaseReceivePage(d PurchaseReceiveData) {
 			<div class="grid grid-cols-2 gap-4 mb-3" x-show="payAmount > 0" x-cloak>
 				<div>
 					<label class="block text-sm font-medium mb-1">Method</label>
-					<select x-model="payMethod" class="w-full border rounded-lg px-3 py-2">
+					<select x-model="payMethod" x-on:change="paySource = payMethod === 'cash' ? ((sources[0] && sources[0].value) || '') : ''" class="w-full border rounded-lg px-3 py-2">
 						<option value="cash">Cash</option>
 						<option value="card">Card</option>
 						<option value="online">Online</option>
 					</select>
 				</div>
-				<div x-show="payMethod === 'cash'">
-					<label class="block text-sm font-medium mb-1">Cash comes from</label>
+				<div x-show="payMethod !== 'card'">
+					<label class="block text-sm font-medium mb-1" x-text="payMethod === 'cash' ? 'Cash comes from' : 'Pay from (optional)'"></label>
 					<select x-model="paySource" class="w-full border rounded-lg px-3 py-2">
+						<!-- A transfer defaults to untracked: silently debiting whichever locker
+						     happened to be first would be worse than recording no move at all. -->
+						<option x-show="payMethod !== 'cash'" value="">— not tracked here —</option>
 						<template x-for="opt in sources" :key="opt.value">
 							<option :value="opt.value" x-text="opt.label"></option>
 						</template>

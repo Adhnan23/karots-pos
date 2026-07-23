@@ -15,8 +15,43 @@ import (
 // return, which silently clamps to 50 products, so a 600-product shop saw ~14%
 // of its real stock value presented as the total.
 //
-// Cost basis is the product's current cost_price (not per-batch cost): it is
-// what the owner typed during capture and what they expect to see back.
+// Cost basis is the LOTS the stock is actually made of, not the product's
+// current price. Valuing every unit at the newest price silently marks up stock
+// that was bought cheaper: 22 bottles bought at 780 sitting under a product
+// repriced to 1000 were reported as 4,840 more than the shop paid, and the same
+// figure computed from lots on the Net Position page disagreed by that much.
+// Anything the lots do not account for still falls back to the product price, so
+// stock recorded before lots existed keeps its old valuation rather than
+// vanishing.
+const (
+	// lotValueJoin attaches each product's live-lot totals. LATERAL so the retail
+	// side can resolve the per-lot price sentinel (0 = follow the product).
+	lotValueJoin = `
+		LEFT JOIN LATERAL (
+		    SELECT SUM(b.qty_remaining)                    AS lot_qty,
+		           SUM(b.qty_remaining * b.cost_price)     AS lot_cost,
+		           SUM(b.qty_remaining * CASE WHEN b.selling_price > 0
+		                                      THEN b.selling_price
+		                                      ELSE p.selling_price END) AS lot_retail
+		    FROM stock_batches b
+		    WHERE b.product_id = p.id AND b.qty_remaining > 0
+		) lv ON TRUE`
+
+	costValueSQL = `COALESCE(SUM(
+		COALESCE(lv.lot_cost,0)
+		+ (COALESCE(st.quantity,0) - COALESCE(lv.lot_qty,0)) * COALESCE(p.cost_price,0)),0)`
+
+	retailValueSQL = `COALESCE(SUM(
+		COALESCE(lv.lot_retail,0)
+		+ (COALESCE(st.quantity,0) - COALESCE(lv.lot_qty,0)) * COALESCE(p.selling_price,0)),0)`
+
+	// missingCostSQL counts stock that is genuinely unvalued — neither its lots
+	// nor the product carry a cost — rather than every product whose header cost
+	// happens to be blank.
+	missingCostSQL = `count(p.id) FILTER (
+		WHERE COALESCE(st.quantity,0) > 0
+		  AND COALESCE(lv.lot_cost,0) = 0 AND COALESCE(p.cost_price,0) = 0)`
+)
 
 // ValuationNode is one row of the category breakdown: a child category rolled
 // up over its whole subtree, or — when Direct is true — the products filed
@@ -110,13 +145,13 @@ func (r *Repository) ValuationChildren(ctx context.Context, categoryID *int64) (
 		       count(p.id)                                                AS skus,
 		       count(p.id) FILTER (WHERE COALESCE(st.quantity,0) > 0)     AS in_stock,
 		       COALESCE(SUM(st.quantity), 0)                              AS units,
-		       COALESCE(SUM(st.quantity * p.cost_price), 0)               AS cost_value,
-		       COALESCE(SUM(st.quantity * p.selling_price), 0)            AS retail_value
+		       `+costValueSQL+`                                           AS cost_value,
+		       `+retailValueSQL+`                                         AS retail_value
 		FROM sub s
 		JOIN categories tc ON tc.id = s.top
 		LEFT JOIN products p ON p.category_id = s.id AND p.is_active AND NOT p.is_service
 		LEFT JOIN units u    ON u.id = p.unit_id
-		LEFT JOIN stock st   ON st.product_id = p.id
+		LEFT JOIN stock st   ON st.product_id = p.id`+lotValueJoin+`
 		GROUP BY s.top, tc.name, u.abbreviation
 		ORDER BY tc.name`, categoryID); err != nil {
 		return nil, err
@@ -168,14 +203,14 @@ func (r *Repository) ValuationBranch(ctx context.Context, categoryID *int64) (Va
 		       count(p.id)                                            AS skus,
 		       count(p.id) FILTER (WHERE COALESCE(st.quantity,0) > 0) AS in_stock,
 		       COALESCE(SUM(st.quantity), 0)                          AS units,
-		       COALESCE(SUM(st.quantity * p.cost_price), 0)           AS cost_value,
-		       COALESCE(SUM(st.quantity * p.selling_price), 0)        AS retail_value,
-		       count(p.id) FILTER (WHERE COALESCE(st.quantity,0) > 0 AND COALESCE(p.cost_price,0) = 0) AS missing_cost,
+		       `+costValueSQL+`                                      AS cost_value,
+		       `+retailValueSQL+`                                    AS retail_value,
+		       `+missingCostSQL+`                                    AS missing_cost,
 		       count(p.id) FILTER (WHERE COALESCE(st.quantity,0) < 0) AS negative_qty
 		FROM sub s
 		LEFT JOIN products p ON p.category_id = s.id AND p.is_active AND NOT p.is_service
 		LEFT JOIN units u    ON u.id = p.unit_id
-		LEFT JOIN stock st   ON st.product_id = p.id
+		LEFT JOIN stock st   ON st.product_id = p.id`+lotValueJoin+`
 		GROUP BY u.abbreviation`, categoryID)
 	if err != nil {
 		return Valuation{}, err
@@ -206,11 +241,11 @@ func (r *Repository) directNode(ctx context.Context, categoryID int64, name stri
 		       count(p.id)                                            AS skus,
 		       count(p.id) FILTER (WHERE COALESCE(st.quantity,0) > 0) AS in_stock,
 		       COALESCE(SUM(st.quantity), 0)                          AS units,
-		       COALESCE(SUM(st.quantity * p.cost_price), 0)           AS cost_value,
-		       COALESCE(SUM(st.quantity * p.selling_price), 0)        AS retail_value
+		       `+costValueSQL+`                                      AS cost_value,
+		       `+retailValueSQL+`                                    AS retail_value
 		FROM products p
 		LEFT JOIN units u  ON u.id = p.unit_id
-		LEFT JOIN stock st ON st.product_id = p.id
+		LEFT JOIN stock st ON st.product_id = p.id`+lotValueJoin+`
 		WHERE p.category_id = $1 AND p.is_active AND NOT p.is_service
 		GROUP BY u.abbreviation`, categoryID, name); err != nil {
 		return nil, err

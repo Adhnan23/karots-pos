@@ -35,7 +35,12 @@ type PL struct {
 	StaffWelfare decimal.Decimal `json:"staff_welfare"` // stock taken by staff
 	Recoveries   decimal.Decimal `json:"recoveries"`    // value reclaimed from suppliers
 	OtherIncome  decimal.Decimal `json:"other_income"`  // bank interest credited to lockers in range
-	NetProfit    decimal.Decimal `json:"net_profit"`    // gross - expenses - losses - own use - staff welfare + recoveries + other income
+	// StockCorrections is the net value of stock adjustments: positive when a
+	// count wrote stock OFF, negative when it found more than the books showed.
+	// Shops that correct stock this way (rather than by stock-take) book all of
+	// their shrinkage here, so it has to reach the profit line.
+	StockCorrections decimal.Decimal `json:"stock_corrections"`
+	NetProfit        decimal.Decimal `json:"net_profit"` // gross - expenses - losses - own use - staff welfare - stock corrections + recoveries + other income
 	Receivables  decimal.Decimal `json:"receivables"`   // customer dues (current snapshot)
 	Payables     decimal.Decimal `json:"payables"`      // supplier dues (current snapshot; credits excluded)
 	// SupplierCredit is the mirror of Payables: what suppliers owe US, from
@@ -154,8 +159,18 @@ func (s *Service) Compute(ctx context.Context, from, to time.Time) (*PL, error) 
 		SELECT COALESCE(SUM(balance_delta),0) FROM locker_ledger
 		WHERE kind = 'interest' AND created_at >= $1 AND created_at < $2`, from, to)
 
+	// Stock corrections: what counting the shelves added or took away, valued at
+	// the cost of the lots involved. Kept off Losses because a correction is not
+	// breakage — it is the count disagreeing with the books, and it swings both
+	// ways. Positive here means value written OFF (quantity carries the sign, the
+	// cost column is always the positive worth moved).
+	_ = s.db.GetContext(ctx, &pl.StockCorrections, `
+		SELECT COALESCE(SUM(CASE WHEN quantity < 0 THEN cost ELSE -cost END),0)
+		FROM stock_movements
+		WHERE type = 'adjust' AND created_at >= $1 AND created_at < $2`, from, to)
+
 	pl.NetProfit = pl.GrossProfit.Sub(pl.Expenses).Sub(pl.Losses).
-		Sub(pl.OwnUse).Sub(pl.StaffWelfare).
+		Sub(pl.OwnUse).Sub(pl.StaffWelfare).Sub(pl.StockCorrections).
 		Add(pl.Recoveries).Add(pl.OtherIncome)
 
 	_ = s.db.GetContext(ctx, &pl.Receivables, `SELECT COALESCE(SUM(outstanding_balance),0) FROM customers`)

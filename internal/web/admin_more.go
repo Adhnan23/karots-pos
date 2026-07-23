@@ -193,16 +193,13 @@ func (a *adminUI) SupplierPay(c echo.Context) error {
 		name = sup.Name
 	}
 
-	// A cash payment leaves a chosen cash location (locker or till) and produces a
-	// receipt — booked atomically with the payment. Non-cash (card/online) just
-	// records the payment with no drawer impact.
+	// The payment leaves the chosen cash location (locker or till) and produces a
+	// receipt — booked atomically with the payment. Cash must say where from; a
+	// transfer may, so paying out of the bank locker actually reduces it.
 	method, _ := normSupplierMethod(in.Method)
-	var src cashflow.Location
-	if method == "cash" {
-		src, err = parseLocation(c.FormValue("source"))
-		if err != nil {
-			return err
-		}
+	src, err := parsePaymentSource(c, method, "source")
+	if err != nil {
+		return err
 	}
 
 	var res *supplierpay.Result
@@ -248,13 +245,11 @@ func (a *adminUI) SupplierRefund(c echo.Context) error {
 	}
 	userID := middleware.CurrentUserID(c)
 
-	// Cash has to land somewhere; card/online just records the refund.
-	var dest cashflow.Location
-	if in.Method == "cash" {
-		dest, err = parseLocation(c.FormValue("dest"))
-		if err != nil {
-			return err
-		}
+	// Cash has to land somewhere; a transfer back may name the bank locker it
+	// arrives in, and anything untracked is recorded without a money move.
+	dest, err := parsePaymentSource(c, in.Method, "dest")
+	if err != nil {
+		return err
 	}
 
 	var res *supplierpay.RefundResult
@@ -265,7 +260,7 @@ func (a *adminUI) SupplierRefund(c echo.Context) error {
 			return txErr
 		}
 		res = r
-		if r.Method != "cash" {
+		if dest.Kind == cashflow.KindExternal {
 			return nil
 		}
 		k, txErr := a.s.cashflow.MoveTx(ctx, tx, cashflow.MoveInput{

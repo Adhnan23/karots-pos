@@ -188,10 +188,11 @@ templ SupplierPayForm(d SupplierPayData) {
 					<input name="reference" class="w-full border rounded-lg px-3 py-2" placeholder="cheque / txn no"/>
 				</div>
 			</div>
-			<div x-show="method === 'cash'" x-cloak>
-				<label class="block text-sm font-medium mb-1">Cash comes from</label>
+			<div x-show="method !== 'card'" x-cloak>
+				<label class="block text-sm font-medium mb-1" x-text="method === 'cash' ? 'Cash comes from' : 'Pay from (optional)'"></label>
 				@adminfragments.LocationPicker("source", "— pick cash source —", d.Sources)
-				<p class="text-xs text-slate-500 mt-1">The money genuinely leaves here. Paying from your drawer needs your till open.</p>
+				<p class="text-xs text-slate-500 mt-1" x-show="method === 'cash'">The money genuinely leaves here. Paying from your drawer needs your till open.</p>
+				<p class="text-xs text-slate-500 mt-1" x-show="method === 'online'" x-cloak>Pick the account the transfer leaves, or leave blank if you do not track it here.</p>
 			</div>
 			<div>
 				<label class="block text-sm font-medium mb-1">Note</label>
@@ -226,8 +227,8 @@ templ SupplierPayForm(d SupplierPayData) {
 							</select>
 						</div>
 					</div>
-					<div x-show="method === 'cash'" x-cloak>
-						<label class="block text-sm font-medium mb-1">Put the cash into</label>
+					<div x-show="method !== 'card'" x-cloak>
+						<label class="block text-sm font-medium mb-1" x-text="method === 'cash' ? 'Put the cash into' : 'Received into (optional)'"></label>
 						@adminfragments.LocationPicker("dest", "— pick where it goes —", d.Sources)
 					</div>
 					<div class="flex justify-end">
@@ -365,20 +366,21 @@ templ SupplierReceive(d SupplierReceiveData) {
 							</div>
 							<div x-show="payAmount > 0" x-cloak>
 								<label class="block text-sm font-medium mb-1">Method</label>
-								<select x-model="payMethod" class="w-full border rounded-lg px-3 py-2">
+								<select x-model="payMethod" x-on:change="paySource = payMethod === 'cash' ? ((sources[0] && sources[0].value) || '') : ''" class="w-full border rounded-lg px-3 py-2">
 									<option value="cash">Cash</option>
 									<option value="card">Card</option>
 									<option value="online">Online</option>
 								</select>
 							</div>
-							<div x-show="payAmount > 0 && payMethod === 'cash'" x-cloak>
-								<label class="block text-sm font-medium mb-1">Cash comes from</label>
+							<div x-show="payAmount > 0 && payMethod !== 'card'" x-cloak>
+								<label class="block text-sm font-medium mb-1" x-text="payMethod === 'cash' ? 'Cash comes from' : 'Pay from (optional)'"></label>
 								<select x-model="paySource" class="w-full border rounded-lg px-3 py-2">
+									<option x-show="payMethod !== 'cash'" value="">— not tracked here —</option>
 									<template x-for="opt in sources" x-bind:key="opt.value">
 										<option x-bind:value="opt.value" x-text="opt.label"></option>
 									</template>
 								</select>
-								<p class="text-xs text-slate-500 mt-1">Your drawer must be open to pay from it.</p>
+								<p class="text-xs text-slate-500 mt-1" x-show="payMethod === 'cash'">Your drawer must be open to pay from it.</p>
 							</div>
 						</div>
 						<div class="flex items-center justify-end">
