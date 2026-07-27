@@ -11,7 +11,6 @@ import (
 	"karots-pos/internal/features/auth"
 	"karots-pos/internal/features/cashflow"
 	"karots-pos/internal/features/cashregister"
-	"karots-pos/internal/features/expenses"
 	"karots-pos/internal/features/lockers"
 	"karots-pos/internal/middleware"
 	"karots-pos/internal/money"
@@ -237,9 +236,10 @@ func (h *cashierUI) Tx(c echo.Context) error {
 
 	typ := c.FormValue("type")
 	kind, ok := txKinds[typ]
-	// Float devices handle deposit / withdrawal / topup only. wallet_in & reload flow
-	// through the sale path; billpay is now a bank-card operation (see CardTx).
-	if !ok || typ == "wallet_in" || typ == "reload" || typ == "billpay" {
+	// This form handles deposit / withdrawal only. wallet_in & reload flow through
+	// the sale path; billpay is a bank-card operation (see BankTx); topup (buying
+	// supplier float) moved to the cashier Suppliers section (see Refill).
+	if !ok || typ == "wallet_in" || typ == "reload" || typ == "billpay" || typ == "topup" {
 		return apperr.BadRequest("invalid transaction type")
 	}
 	deviceID, err := strconv.ParseInt(c.FormValue("device_id"), 10, 64)
@@ -318,23 +318,10 @@ func (h *cashierUI) Tx(c echo.Context) error {
 		}
 	}
 
-	// 2) A supplier float top-up is also a shop expense.
-	var expenseID *int64
-	if typ == "topup" {
-		desc := carrier + " float top-up"
-		exp, err := h.p.core.Expenses.Create(ctx, expenses.CreateInput{
-			Category: "Float top-up", Amount: amt.String(), Description: &desc,
-		}, uid)
-		if err != nil {
-			return err
-		}
-		expenseID = &exp.ID
-	}
-
-	// 3) Ledger.
+	// 2) Ledger (deposit / withdrawal only — topup moved to the Suppliers refill).
 	txID, err := h.p.store.RecordTransaction(ctx, TxInput{
 		SessionID: sess.ID, CarrierID: carrierID, DeviceID: deviceID, Type: typ,
-		Amount: amt, ExpenseID: expenseID, Reference: ref, Note: note, CreatedBy: uid,
+		Amount: amt, Reference: ref, Note: note, CreatedBy: uid,
 		Untracked: !tracksFloat, ServiceCharge: svc,
 	})
 	if err != nil {
@@ -342,8 +329,7 @@ func (h *cashierUI) Tx(c echo.Context) error {
 	}
 
 	msg := carrier + " " + txLabel(typ) + " recorded"
-	// 4) Cash-handling types (deposit / withdrawal) print a slip under the print
-	// policy; a top-up just books the expense with no customer slip.
+	// 3) Deposit / withdrawal print a slip under the print policy.
 	if typ == "deposit" || typ == "withdrawal" {
 		return h.printPolicy(c, "/cashier/recharge/tx/"+strconv.FormatInt(txID, 10)+"/print",
 			func(ctx context.Context) error {

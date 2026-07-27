@@ -98,6 +98,22 @@ type DrawerSection struct {
 	SaveCloseURL string // POST (form-encoded) target, before the till closes
 }
 
+// CashierSupplierAction adds a button to the cashier Suppliers page (the counter
+// supplier section). A plugin registers it so an action that belongs with
+// "paying a supplier" — e.g. buying reload float from a carrier — lives there
+// instead of on the plugin's own page, where a cashier once fired it by mistake.
+// The button hx-gets FormURL (a GET returning an HTML fragment, typically a
+// modal) into #modal-container; that fragment posts to the plugin's own
+// endpoint. Core never learns what the action does. Gated the same as the page:
+// only cashiers with supplier access (and admins/managers) ever see it, because
+// the page they're on is.
+type CashierSupplierAction struct {
+	Key     string
+	Emoji   string
+	Label   string
+	FormURL string // GET → HTML fragment (the plugin's form), loaded into #modal-container
+}
+
 // LogoutGuard reports whether a user has unfinished plugin work that must be
 // resolved before they may log out — e.g. an open recharge float session. When
 // Block is true the web layer refuses to log the user out and instead sends them
@@ -119,6 +135,7 @@ var (
 	tenderMethods    []TenderMethod
 	logoutGuards     []LogoutGuard
 	receiptTabs      []ReceiptTab
+	supplierActions  []CashierSupplierAction
 )
 
 // ReceiptTab adds a tab to the unified Receipts page on BOTH the admin and cashier
@@ -148,6 +165,9 @@ func (r *Registry) AddDrawerSection(s DrawerSection) { drawerSections = append(d
 func (r *Registry) AddTenderMethod(t TenderMethod) { tenderMethods = append(tenderMethods, t) }
 func (r *Registry) AddLogoutGuard(g LogoutGuard)   { logoutGuards = append(logoutGuards, g) }
 func (r *Registry) AddReceiptTab(t ReceiptTab)     { receiptTabs = append(receiptTabs, t) }
+func (r *Registry) AddCashierSupplierAction(a CashierSupplierAction) {
+	supplierActions = append(supplierActions, a)
+}
 
 // Getters for the template layer.
 func AdminNav() []AdminNavEntry           { return adminNav }
@@ -198,3 +218,7 @@ func DrawerSectionsJSON() string {
 func TenderMethods() []TenderMethod { return tenderMethods }
 func LogoutGuards() []LogoutGuard   { return logoutGuards }
 func ReceiptTabs() []ReceiptTab     { return receiptTabs }
+
+// CashierSupplierActions returns the plugin-contributed buttons for the cashier
+// Suppliers page.
+func CashierSupplierActions() []CashierSupplierAction { return supplierActions }

@@ -73,11 +73,11 @@ templ txForm(d ReconData) {
 			<div class="col-span-full">
 				<label class="block text-sm font-medium text-slate-600 mb-1">Type</label>
 				<input type="hidden" name="type" x-model="type"/>
-				<div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+				<div class="grid grid-cols-2 gap-2">
 					@typeCard("deposit", "Deposit to wallet", "Customer gives cash → you load their eZ Cash / mCash (cash in, float down)")
 					@typeCard("withdrawal", "Withdraw from wallet", "Customer takes cash out of their wallet (cash out, float up)")
-					@typeCard("topup", "Buy float from supplier", "Top up this device's reload balance (no drawer, books an expense)")
 				</div>
+				<p class="text-xs text-slate-400 mt-2">Buying reload float from a supplier now lives under <span class="font-medium text-slate-500">Suppliers → Buy reload float</span>, so it can be paid from a locker and isn't confused with a wallet deposit.</p>
 			</div>
 			<div class="col-span-full">
 				<label class="block text-sm font-medium text-slate-600 mb-1">Carrier</label>

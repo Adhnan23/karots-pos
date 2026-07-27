@@ -7,6 +7,7 @@ import (
 	"karots-pos/internal/features/suppliers"
 	"karots-pos/internal/money"
 	"karots-pos/internal/datetime"
+	"karots-pos/internal/plugin"
 	adminfragments "karots-pos/templates/fragments/admin"
 	"karots-pos/templates/layouts"
 )
@@ -31,11 +32,23 @@ templ Suppliers(d SuppliersData) {
 						<h1 class="text-xl font-bold mb-1">Suppliers</h1>
 						<p class="text-sm text-slate-500">Pay a supplier, take in a delivery, or note down an order — without calling the owner.</p>
 					</div>
-					<button
-						hx-get="/cashier/suppliers/new"
-						hx-target="#modal-container"
-						class="shrink-0 px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium"
-					>+ New supplier</button>
+					<div class="shrink-0 flex items-center gap-2">
+						// Plugin-contributed supplier actions (e.g. "Buy reload float") — an
+						// action that belongs with paying a supplier, kept off the plugin's own
+						// page so a cashier doesn't fire the wrong transaction there.
+						for _, a := range plugin.CashierSupplierActions() {
+							<button
+								hx-get={ a.FormURL }
+								hx-target="#modal-container"
+								class="px-4 py-2 rounded-lg border border-indigo-200 text-indigo-700 bg-indigo-50 text-sm font-medium hover:bg-indigo-100"
+							>{ a.Emoji } { a.Label }</button>
+						}
+						<button
+							hx-get="/cashier/suppliers/new"
+							hx-target="#modal-container"
+							class="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium"
+						>+ New supplier</button>
+					</div>
 				</div>
 				<input
 					name="q"

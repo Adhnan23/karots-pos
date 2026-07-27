@@ -10,6 +10,7 @@ import (
 
 	"karots-pos/internal/features/cashflow"
 	"karots-pos/internal/features/lockers"
+	"karots-pos/internal/middleware"
 	"karots-pos/internal/plugin"
 	"karots-pos/plugins/recharge/migrations"
 )
@@ -94,6 +95,10 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 	// Opening/closing float inputs shown inside the core till Open/Close dialogs.
 	reg.Cashier().GET("/recharge/drawer/open", ch.DrawerOpenFields)
 	reg.Cashier().GET("/recharge/drawer/close", ch.DrawerCloseFields)
+	// Buy reload float from a supplier, from the cashier Suppliers section. Gated by
+	// the same counter-supplier permission as the rest of that page.
+	reg.Cashier().GET("/recharge/refill", ch.RefillForm, middleware.RequireSupplierAccess())
+	reg.Cashier().POST("/recharge/refill", ch.Refill, middleware.RequireSupplierAccess())
 
 	// Two receipt tabs on the unified Receipts page (admin + cashier): bill payments
 	// and float (reload) transactions, each reprintable.
@@ -126,6 +131,13 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 		SaveCloseURL: "/cashier/recharge/close",
 	})
 	reg.AddTenderMethod(plugin.TenderMethod{Value: "wallet", Label: "Wallet (eZ Cash / mCash)"})
+
+	// "Buy reload float" sits under the cashier Suppliers section (paying a
+	// supplier), not on the Reload & Bills page where it used to be mis-fired.
+	reg.AddCashierSupplierAction(plugin.CashierSupplierAction{
+		Key: "recharge-refill", Emoji: "📲", Label: "Buy reload float",
+		FormURL: "/cashier/recharge/refill",
+	})
 
 	// Surface the Reload & Bills report in the core Reports hub too.
 	reg.AddReportCard(plugin.ReportCard{
