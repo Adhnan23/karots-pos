@@ -7,6 +7,7 @@ package escpos
 
 import (
 	"bytes"
+	"context"
 	"strconv"
 	"strings"
 	"time"
@@ -15,9 +16,33 @@ import (
 	"karots-pos/internal/features/sales"
 	"karots-pos/internal/features/settings"
 	"karots-pos/internal/money"
+	"karots-pos/internal/printing"
 
 	"github.com/shopspring/decimal"
 )
+
+// DrawerKick returns the ESC/POS pulse that opens the cash drawer wired to the
+// receipt printer (ESC p m t1 t2), or nil when the shop hasn't enabled it. m is
+// the drawer pin (0 = pin 2, 1 = pin 5); t1/t2 are on/off times in 2 ms units.
+func DrawerKick(cfg settings.Settings) []byte {
+	if !cfg.OpenCashDrawer {
+		return nil
+	}
+	m := byte(0)
+	if cfg.DrawerKickPin == 1 {
+		m = 1
+	}
+	return []byte{0x1B, 0x70, m, 0x19, 0xFA}
+}
+
+// KickDrawer sends the drawer pulse to the receipt printer, best-effort. A
+// printer that is offline, missing, or has no drawer attached is a silent no-op —
+// the caller has already committed the money transaction. No-op when disabled.
+func KickDrawer(ctx context.Context, cfg settings.Settings) {
+	if b := DrawerKick(cfg); b != nil {
+		_ = printing.Raw(ctx, cfg.ReceiptPrinter, b)
+	}
+}
 
 // ESC/POS control bytes.
 const (

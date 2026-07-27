@@ -1,6 +1,7 @@
 package escpos
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +11,20 @@ import (
 
 	"github.com/shopspring/decimal"
 )
+
+func TestDrawerKick(t *testing.T) {
+	if DrawerKick(settings.Settings{OpenCashDrawer: false}) != nil {
+		t.Fatal("disabled must return nil")
+	}
+	pin2 := DrawerKick(settings.Settings{OpenCashDrawer: true, DrawerKickPin: 0})
+	if !bytes.Equal(pin2, []byte{0x1B, 0x70, 0x00, 0x19, 0xFA}) {
+		t.Fatalf("pin2 = % x", pin2)
+	}
+	pin5 := DrawerKick(settings.Settings{OpenCashDrawer: true, DrawerKickPin: 1})
+	if !bytes.Equal(pin5, []byte{0x1B, 0x70, 0x01, 0x19, 0xFA}) {
+		t.Fatalf("pin5 = % x", pin5)
+	}
+}
 
 func sampleDetail() sales.Detail {
 	d := decimal.RequireFromString
