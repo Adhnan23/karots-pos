@@ -6,7 +6,7 @@ import "karots-pos/templates/layouts"
 // staff) and no admin/cashier toggle — the server routes each user to their home
 // by role after the PIN is verified. Plain form POST (no HTMX) so errors
 // re-render the whole page with errMsg set.
-templ LoginPage(errMsg, installID string) {
+templ LoginPage(errMsg, installID, serverTime string) {
 	@layouts.Base("Login") {
 		<div class="min-h-full flex items-center justify-center p-6">
 			<div class="w-full max-w-md bg-white rounded-2xl shadow-sm p-8">
@@ -64,15 +64,19 @@ templ LoginPage(errMsg, installID string) {
 					     developer opens devtools to read it, and the shop is not left
 					     looking at a code nobody explained. Not a secret either way — it is
 					     useless without the master key — so the console is about keeping the
-					     login screen clean, not about hiding it. -->
-					@installIDConsole(installID)
+					     login screen clean, not about hiding it. The server time rides along
+					     so a shop whose clock is wrong can still be matched: the support PIN
+					     is time-based, and the developer computes it for THIS clock. -->
+					@installIDConsole(installID, serverTime)
 				}
 			</div>
 		</div>
 	}
 }
 
-// installIDConsole writes the install id to the browser console for support.
-templ installIDConsole(installID string) {
-	@templ.JSFuncCall("console.info", "POS install "+installID)
+// installIDConsole writes the install id and the server's current time to the
+// browser console for support: the id identifies the shop, the time lets the
+// developer compute the time-based support PIN for a shop with a wrong clock.
+templ installIDConsole(installID, serverTime string) {
+	@templ.JSFuncCall("console.info", "POS install "+installID+" · server time "+serverTime)
 }

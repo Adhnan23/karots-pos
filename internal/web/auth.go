@@ -37,8 +37,13 @@ type authUI struct {
 }
 
 func (h *authUI) ShowLogin(c echo.Context) error {
-	return response.RenderPage(c, authpages.LoginPage("", h.installID(c)))
+	return response.RenderPage(c, authpages.LoginPage("", h.installID(c), serverTime()))
 }
+
+// serverTime is the server's current UTC time in a fixed format, logged to the
+// login-page console. The support PIN is time-based, so reading this lets the
+// developer compute a matching PIN even when the shop machine's clock is wrong.
+func serverTime() string { return time.Now().UTC().Format(time.RFC3339) }
 
 // installID reads this shop's install identifier for the login footer, so an
 // owner on the phone can read it to the developer. Best-effort: a settings read
@@ -258,7 +263,7 @@ func (h *authUI) changePINError(c echo.Context, msg string) error {
 func (h *authUI) loginError(c echo.Context, msg string) error {
 	c.Response().Header().Set(echo.HeaderContentType, echo.MIMETextHTMLCharsetUTF8)
 	c.Response().WriteHeader(http.StatusUnauthorized)
-	return authpages.LoginPage(msg, h.installID(c)).Render(c.Request().Context(), c.Response().Writer)
+	return authpages.LoginPage(msg, h.installID(c), serverTime()).Render(c.Request().Context(), c.Response().Writer)
 }
 
 // secureFlag decides the Secure attribute for this response.

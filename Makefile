@@ -22,8 +22,9 @@ build-windows: templ css
 #   make bootstrap ARGS="-plugins recharge -os windows -name acme-pos"
 # The bootstrapper rewrites cmd/server/enabled_plugins.go, builds, then restores
 # it. Output (binary + merged .env.sample) lands in dist/.
-# Derive a shop's support PIN from the id they read off their console:
+# Print a shop's CURRENT support PIN from the id they read off their console:
 #   make support-pin ID=2998EBCA
+# The PIN rotates hourly, so this prints the code valid right now (± an hour).
 # Runs on YOUR machine only — it needs the master secret from .env.
 support-pin:
 	@set -a && . ./.env && set +a && go run ./cmd/server -support-pin $(ID)
