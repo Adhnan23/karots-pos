@@ -94,6 +94,7 @@ func (h *cashierUI) ZReport(c echo.Context) error {
 func (h *cashierUI) POS(c echo.Context) error {
 	ctx := c.Request().Context()
 	symbol, defaultType, askToPrint := "Rs.", "retail", true
+	openDrawer := false
 	if cfg, err := h.s.settings.Get(ctx); err == nil {
 		symbol = cfg.CurrencySymbol
 		// A database that predates credit-as-a-payment may still hold 'credit'
@@ -103,6 +104,7 @@ func (h *cashierUI) POS(c echo.Context) error {
 			defaultType = cfg.DefaultSaleType
 		}
 		askToPrint = cfg.AskToPrint
+		openDrawer = cfg.OpenCashDrawer
 	}
 	return response.RenderPage(c, cashierpages.POS(cashierpages.POSData{
 		CashierName:     middleware.CurrentUserName(c),
@@ -111,7 +113,26 @@ func (h *cashierUI) POS(c echo.Context) error {
 		Symbol:          symbol,
 		DefaultSaleType: defaultType,
 		AskToPrint:      askToPrint,
+		OpenCashDrawer:  openDrawer,
 	}))
+}
+
+// OpenDrawer pops the cash drawer with no transaction (the No-Sale button). It is
+// available only when the shop enabled the drawer, and every use is audited — a
+// no-sale open is a classic theft surface, so the owner gets a trail.
+func (h *cashierUI) OpenDrawer(c echo.Context) error {
+	ctx := c.Request().Context()
+	cfg, err := h.s.settings.Get(ctx)
+	if err != nil {
+		return err
+	}
+	if cfg == nil || !cfg.OpenCashDrawer {
+		return apperr.Forbidden("cash drawer is not enabled")
+	}
+	h.s.kickDrawer(ctx)
+	h.s.logAudit(c, audit.ActionUpdate, "cash_drawer", "", "opened drawer (no sale)")
+	c.Response().Header().Set("HX-Trigger", response.Toast("Drawer opened", "success"))
+	return response.NoContent(c)
 }
 
 // Receipt renders a printable thermal bill for a single sale. ?print=1 makes it

@@ -899,6 +899,11 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections) {
       toast("Cash deposited", "success");
       this.afterDrawerMove(json.data);
     },
+    async noSale() {
+      // Pop the physical drawer with no transaction; apiFetch toasts its own error.
+      try { await apiFetch("POST", "/cashier/drawer/open"); }
+      catch (e) { /* handled by apiFetch */ }
+    },
     async addCustomer() {
       if (!this.newCustomer.name.trim()) {
         toast("Enter a customer name", "error");

@@ -174,6 +174,7 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	// Cashier (all authenticated roles)
 	cg := e.Group("/cashier", jwt, lockGuard, pinGuard)
 	cg.GET("", cashier.POS)
+	cg.POST("/drawer/open", cashier.OpenDrawer)
 	cg.POST("/quick-item", cashier.QuickItem)
 	cg.GET("/receipt/:id", cashier.Receipt)
 	cg.POST("/print/:id", cashier.PrintReceipt)

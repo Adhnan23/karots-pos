@@ -10,6 +10,7 @@ type POSData struct {
 	Symbol          string
 	DefaultSaleType string
 	AskToPrint      bool
+	OpenCashDrawer  bool
 }
 
 // POS is the cashier terminal. Almost all interactivity is driven by the pos()
@@ -392,6 +393,9 @@ templ POS(d POSData) {
 							<button x-on:click="showDeposit = true" class="flex-1 py-2 rounded-lg border text-sm text-slate-600">Deposit</button>
 							<button x-on:click="showWithdraw = true" class="flex-1 py-2 rounded-lg border text-sm text-slate-600">Withdraw</button>
 						</div>
+						if d.OpenCashDrawer {
+							<button x-on:click="noSale()" class="w-full py-2 rounded-lg border text-sm text-slate-600">Open Drawer <span class="text-slate-400">(no sale)</span></button>
+						}
 						<button x-on:click="startClose()" class="w-full py-2 rounded-lg border text-sm text-slate-600">Close Register</button>
 						<!-- Keyboard shortcut legend (desktop only) -->
 						<div class="hidden lg:flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-400 pt-1">
