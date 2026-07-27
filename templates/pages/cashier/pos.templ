@@ -134,7 +134,12 @@ templ POS(d POSData) {
 							<!-- Plugin leaf cards (amount / detail / product actions returned by a folder) -->
 							<template x-if="menuMode==='cards' && pluginLeaves.length">
 								<div class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3 mb-3">
-									<template x-for="n in pluginLeaves" x-bind:key="'ln'+(n.add_url||n.detail_url||n.name)">
+									<!-- Key on the loop index: leaves under one folder can share an
+									     add_url (e.g. every device's reload leaf posts the same endpoint,
+									     distinguished only by meta), so keying on the URL collides and
+									     Alpine renders nothing. pluginLeaves is replaced wholesale each
+									     fetch, so the index is a safe, unique key. -->
+									<template x-for="(n, i) in pluginLeaves" x-bind:key="'ln'+i">
 										<button type="button" x-on:click="openNode(n)" class="text-left p-3 rounded-xl bg-white shadow-sm hover:ring-2 hover:ring-indigo-400">
 											<div class="text-2xl leading-none" x-text="n.emoji || '▸'"></div>
 											<div class="font-medium text-sm mt-1" x-text="n.name"></div>
