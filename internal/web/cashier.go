@@ -186,6 +186,22 @@ func (s *Server) receiptImgOptions(ctx context.Context, cfg *settings.Settings) 
 	return opts
 }
 
+// kickDrawer pops the physical cash drawer, best-effort, honouring the shop
+// setting. Used by the counter money-receipt handlers and the No-Sale button.
+func (s *Server) kickDrawer(ctx context.Context) {
+	if cfg, err := s.settings.Get(ctx); err == nil && cfg != nil {
+		escpos.KickDrawer(ctx, *cfg)
+	}
+}
+
+// kickIfTill kicks only when the cash actually entered or left the physical till
+// drawer (not a locker or bank).
+func (s *Server) kickIfTill(ctx context.Context, loc cashflow.Location) {
+	if loc.Kind == cashflow.KindTill {
+		s.kickDrawer(ctx)
+	}
+}
+
 // receiptQueue is the print target for the logged-in cashier: their own
 // per-counter printer (set on their user record) when present, otherwise the
 // shop-wide printer chosen in Settings (a detected printer name, a

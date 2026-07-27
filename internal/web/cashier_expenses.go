@@ -100,6 +100,7 @@ func (h *cashierUI) ExpenseRecord(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	h.s.kickIfTill(ctx, src) // paid from the drawer → pop it
 	h.s.logAudit(c, audit.ActionCreate, "expense", strconv.FormatInt(expenseID, 10),
 		"recorded expense paid from "+rec.FromLabel+" at the counter")
 

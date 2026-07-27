@@ -448,6 +448,7 @@ func (h *cashierUI) SupplierPayAtCounter(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	h.s.kickIfTill(ctx, src) // paid from the drawer → pop it
 	h.s.logAudit(c, audit.ActionPayment, "supplier", strconv.FormatInt(id, 10),
 		"paid "+money.Display(res.Total)+" ("+res.Method+") at the counter")
 
@@ -521,6 +522,7 @@ func (h *cashierUI) SupplierRefundAtCounter(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	h.s.kickIfTill(ctx, dest) // refund cash into the drawer → pop it
 	h.s.logAudit(c, audit.ActionPayment, "supplier", strconv.FormatInt(id, 10),
 		"refund received "+money.Display(res.Amount)+" ("+res.Method+") at the counter")
 
