@@ -1,65 +1,89 @@
 package support
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
-const secret = "test-master-key"
+const secret = "test-master-secret-at-least-32-chars!!"
+
+// A frozen instant so vectors are reproducible. 2026-07-27T09:30:00Z.
+var frozen = time.Date(2026, 7, 27, 9, 30, 0, 0, time.UTC)
 
 // The support PIN exists so a developer can get into any shop without asking the
-// owner for their credentials. What it must NOT be is the same everywhere: one
-// PIN compiled into every binary means a credential lifted from any till opens
-// every shop that was ever shipped.
+// owner for their credentials. It must NOT be the same everywhere (one leak would
+// open every shop), and — the point of this scheme — it must ROTATE, so a PIN
+// someone observed cannot be reused later.
 
-func TestDerivePINDiffersPerInstall(t *testing.T) {
-	a := DerivePIN(secret, "A1B2C3D4")
-	b := DerivePIN(secret, "99887766")
-	if a == b {
-		t.Fatalf("two installs share the PIN %q — one leak would open every shop", a)
+func TestDeriveSeedIsStableAndPerInstall(t *testing.T) {
+	a1 := DeriveSeed(secret, "A1B2C3D4")
+	a2 := DeriveSeed(secret, "  a1b2c3d4 ") // case/space-insensitive via Normalise
+	if string(a1) != string(a2) {
+		t.Fatal("seed must be stable regardless of case/whitespace")
+	}
+	if len(a1) != 32 {
+		t.Fatalf("seed length = %d, want 32", len(a1))
+	}
+	if string(DeriveSeed(secret, "99887766")) == string(a1) {
+		t.Fatal("different installs must produce different seeds")
+	}
+	if string(DeriveSeed("other-master-secret-at-least-32ch!!", "A1B2C3D4")) == string(a1) {
+		t.Fatal("different master secrets must produce different seeds")
 	}
 }
 
-func TestDerivePINIsStableForAnInstall(t *testing.T) {
-	// The whole workflow is "read me your Install ID" over the phone, so the same
-	// id must derive the same PIN every time, on any machine.
-	first := DerivePIN(secret, "A1B2C3D4")
-	for range 5 {
-		if got := DerivePIN(secret, "A1B2C3D4"); got != first {
-			t.Fatalf("derivation is not stable: %q then %q", first, got)
+func TestCodeIsSixDigitsAndRotatesHourly(t *testing.T) {
+	seed := DeriveSeed(secret, "A1B2C3D4")
+	now := Code(seed, frozen)
+	if len(now) != 6 {
+		t.Fatalf("code %q is not 6 digits", now)
+	}
+	for _, r := range now {
+		if r < '0' || r > '9' {
+			t.Fatalf("code %q is not all digits", now)
 		}
 	}
-	// Case and stray spaces must not change it — an owner reading it aloud and a
-	// developer typing it back should not have to match punctuation.
-	if got := DerivePIN(secret, "  a1b2c3d4 "); got != first {
-		t.Errorf("case/whitespace changed the PIN: %q vs %q", got, first)
+	// Same hour → same code.
+	if Code(seed, frozen.Add(20*time.Minute)) != now {
+		t.Fatal("code must not change within the same hour")
+	}
+	// Next hour → (almost certainly) different code.
+	if Code(seed, frozen.Add(time.Hour)) == now {
+		t.Fatal("code must change across the hour boundary")
 	}
 }
 
-func TestDerivePINIsSixDigits(t *testing.T) {
-	// The login form accepts 4–6 numeric digits; anything else cannot be typed in.
-	for _, id := range []string{"A1B2C3D4", "00000000", "ZZZZZZZZ", "12345678"} {
-		pin := DerivePIN(secret, id)
-		if len(pin) != 6 {
-			t.Errorf("install %s gave PIN %q, want 6 digits", id, pin)
-		}
-		for _, r := range pin {
-			if r < '0' || r > '9' {
-				t.Errorf("install %s gave non-numeric PIN %q", id, pin)
-				break
-			}
-		}
+func TestValidAcceptsCurrentAndAdjacentWindows(t *testing.T) {
+	seed := DeriveSeed(secret, "A1B2C3D4")
+	// A code generated an hour ago must still validate now (skew 1).
+	prev := Code(seed, frozen.Add(-time.Hour))
+	if !Valid(seed, prev, frozen, 1) {
+		t.Fatal("previous-hour code must be accepted with skew 1")
+	}
+	next := Code(seed, frozen.Add(time.Hour))
+	if !Valid(seed, next, frozen, 1) {
+		t.Fatal("next-hour code must be accepted with skew 1")
+	}
+	if !Valid(seed, Code(seed, frozen), frozen, 1) {
+		t.Fatal("current code must be accepted")
+	}
+	// Two hours away is outside the window.
+	if Valid(seed, Code(seed, frozen.Add(-2*time.Hour)), frozen, 1) {
+		t.Fatal("two-hours-old code must be rejected with skew 1")
+	}
+	if Valid(seed, "000000", frozen, 1) && Code(seed, frozen) != "000000" {
+		t.Fatal("a wrong code must be rejected")
 	}
 }
 
-// A different master secret must produce a different PIN for the same shop, so
-// rotating the secret in a new build actually rotates the credential.
-func TestDerivePINFollowsTheMasterSecret(t *testing.T) {
-	before := DerivePIN("first-key", "A1B2C3D4")
-	after := DerivePIN("second-key", "A1B2C3D4")
-	if before == after {
-		t.Error("rotating the master secret did not change the PIN")
+// CodeForSecret is the developer-side convenience: derive the seed then the code.
+func TestCodeForSecretMatchesDeriveThenCode(t *testing.T) {
+	if CodeForSecret(secret, "A1B2C3D4", frozen) != Code(DeriveSeed(secret, "A1B2C3D4"), frozen) {
+		t.Fatal("CodeForSecret must equal Code(DeriveSeed(...))")
 	}
 }
 
-// Install ids must not collide — two shops sharing one would share a PIN.
+// Install ids must not collide — two shops sharing one would share a seed.
 func TestNewInstallIDIsUniqueAndReadable(t *testing.T) {
 	seen := map[string]bool{}
 	for range 200 {
