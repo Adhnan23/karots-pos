@@ -1,61 +1,62 @@
 package main
 
 import (
+	"crypto/hmac"
+	"encoding/hex"
 	"fmt"
 	"os"
+	"time"
 
 	"karots-pos/internal/support"
 
 	"github.com/jmoiron/sqlx"
-	"golang.org/x/crypto/bcrypt"
 )
 
-// A shipped binary carries ONLY its own shop's credential — never the master
-// secret it was derived from.
+// A shipped binary carries ONLY its own shop's SEED — HMAC(masterSecret, installID)
+// — never the master secret. The seed is one-way, so cracking one shop's binary
+// yields nothing about the master or any other shop. The support PIN is derived
+// from the seed and the current hour, so it rotates and an observed PIN expires.
 //
-// The master key used to be baked in with -ldflags, which put it in the binary
-// twice: as a plain string, and again in Go's build metadata, where
-// `go version -m karots-pos` prints the whole ldflags line in labelled, readable
-// form. Anyone holding one shop's binary could read the key and derive every
-// other shop's PIN, which defeated the entire point of per-shop PINs.
-//
-// So the bootstrapper does the derivation at build time and bakes in the install
-// id plus a bcrypt HASH of that shop's PIN. Cracking open a shipped binary now
-// yields a hash for the one shop whose machine you are already standing at, and
-// nothing whatsoever about any other shop. The master key never leaves the
-// developer's machine.
+// (The master key used to be baked in with -ldflags, which put it in the binary
+// twice — as a plain string and in Go's build metadata, where `go version -m`
+// prints the whole ldflags line in readable form. Baking only the per-shop seed
+// keeps that leak from ever mattering: one binary reveals only its own shop.)
 var (
 	installIDBaked = ""
-	supportHash    = ""
+	supportSeedHex = ""
 )
 
-// supportCredential resolves the support account's PIN hash for this boot, and
-// describes where it came from for the log.
-//
-// Order matters: an explicit override is the documented way back in if a master
-// secret is ever lost, so it has to beat everything else.
-func supportCredential(db *sqlx.DB) (hash, source string, err error) {
-	// 1. Deliberate per-deploy override.
-	if pin := os.Getenv("POS_SYSTEM_PIN"); pin != "" {
-		h, herr := bcrypt.GenerateFromPassword([]byte(pin), bcrypt.DefaultCost)
-		return string(h), "POS_SYSTEM_PIN override", herr
+// resolveSupportSeed finds this boot's per-shop seed and describes its source.
+// A shipped binary has it baked; the developer's own machine derives it from the
+// master secret in .env; a bare build has neither (validator falls back to 2273).
+func resolveSupportSeed(db *sqlx.DB) (seed []byte, source string, err error) {
+	if supportSeedHex != "" {
+		b, derr := hex.DecodeString(supportSeedHex)
+		return b, "baked in at build for install " + installIDBaked, derr
 	}
-	// 2. A shipped binary: the hash was computed at build time.
-	if supportHash != "" {
-		return supportHash, "baked in at build for install " + installIDBaked, nil
-	}
-	// 3. Running from source with the master secret to hand (the developer's own
-	//    machine, where .env carries it).
 	if secret := os.Getenv("POS_SUPPORT_SECRET"); secret != "" {
 		id, ierr := installID(db)
 		if ierr == nil && id != "" {
-			h, herr := bcrypt.GenerateFromPassword([]byte(support.DerivePIN(secret, id)), bcrypt.DefaultCost)
-			return string(h), "derived from POS_SUPPORT_SECRET for install " + id, herr
+			return support.DeriveSeed(secret, id), "derived from POS_SUPPORT_SECRET for install " + id, nil
 		}
 	}
-	// 4. Nothing to go on. Same fixed PIN as every other bare build, so say so.
-	h, herr := bcrypt.GenerateFromPassword([]byte("2273"), bcrypt.DefaultCost)
-	return string(h), "", herr
+	return nil, "", nil
+}
+
+// systemPINValidator returns the login check for the System account.
+// Resolution order: POS_SYSTEM_PIN override → hourly rotating code (±1 hour) →
+// fixed 2273 fallback when the build has no seed at all.
+func systemPINValidator(seed []byte) func(pin string, now time.Time) bool {
+	override := os.Getenv("POS_SYSTEM_PIN")
+	return func(pin string, now time.Time) bool {
+		if override != "" {
+			return hmac.Equal([]byte(pin), []byte(override))
+		}
+		if seed != nil {
+			return support.Valid(seed, pin, now, 1)
+		}
+		return hmac.Equal([]byte(pin), []byte("2273"))
+	}
 }
 
 // installID reads this shop's identifier (migration 0055 generates one).
@@ -66,9 +67,9 @@ func installID(db *sqlx.DB) (string, error) {
 }
 
 // adoptBakedInstallID makes the database agree with the id the binary was built
-// for, so the id the shop reads out is the one the developer's -support-pin
-// expects. Without this a rebuilt binary and its database could disagree, and
-// the derived PIN would simply not work with no clue as to why.
+// for, so the id the shop reads out is the one -support-pin expects. Without this
+// a rebuilt binary and its database could disagree, and the derived PIN would
+// simply not work with no clue as to why.
 func adoptBakedInstallID(db *sqlx.DB) error {
 	if installIDBaked == "" {
 		return nil
@@ -80,11 +81,11 @@ func adoptBakedInstallID(db *sqlx.DB) error {
 }
 
 // printSupportPIN answers "the shop is on the phone reading me their install id,
-// what is their PIN?".
-//
-// The master secret comes from the environment at the moment it is needed — the
-// developer's .env — and is never compiled into anything. Run this on a shop's
-// own binary and it has nothing to work with, which is the point.
+// what is their PIN right now?". The PIN rotates hourly, so it also prints how
+// long this one is valid. The master secret comes from the environment at the
+// moment it is needed — the developer's .env — and is never compiled into
+// anything. Run this on a shop's own binary and it has nothing to work with,
+// which is the point.
 func printSupportPIN(id string) {
 	secret := os.Getenv("POS_SUPPORT_SECRET")
 	if secret == "" {
@@ -92,5 +93,8 @@ func printSupportPIN(id string) {
 		fmt.Println("  make support-pin ID=" + support.Normalise(id))
 		return
 	}
-	fmt.Printf("install %s → support PIN %s\n", support.Normalise(id), support.DerivePIN(secret, id))
+	now := time.Now()
+	mins := 60 - (now.UTC().Unix()%3600)/60
+	fmt.Printf("install %s → support PIN %s  (rotates hourly; valid ~%d more min, previous/next hour also accepted)\n",
+		support.Normalise(id), support.CodeForSecret(secret, id, now), mins)
 }
