@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"errors"
 	"log"
 
 	"github.com/jmoiron/sqlx"
+	"golang.org/x/crypto/bcrypt"
 
 	appdb "karots-pos/internal/db"
 )
@@ -20,10 +22,12 @@ import (
 // It is re-applied on every boot: the account is (re)created, reactivated, and its
 // PIN reset to the configured value, so the credentials are always known and usable.
 //
-// The PIN is derived per shop from the developer's master secret and the install
-// id (see supportPIN), so every shop has a different one. A PIN lifted from one
-// till is useless against the next — which was not true when a single credential
-// was compiled into every binary that ever shipped.
+// The PIN is derived per shop and ROTATES hourly: it is not stored here at all.
+// The System account's login is decided by the time-based validator wired onto
+// the auth service in main.go (see systemPINValidator), so the pin_hash column
+// below is only an unusable placeholder that fails closed if that validator is
+// ever missing. A PIN lifted from one till is useless against the next, and is
+// useless even against the SAME shop an hour later.
 //
 // What this account does is NOT hidden: the audit log records it like any other
 // user and the owner can read it. Only the login picker and user list omit it, so
@@ -43,17 +47,18 @@ func ensureSystemAdmin(db *sqlx.DB) error {
 		return err
 	}
 
-	hash, source, err := supportCredential(db)
+	// The System account never logs in via this hash (the rotating validator
+	// decides), so store an unguessable random placeholder. If the validator is
+	// somehow not wired, login fails closed rather than accepting a known value.
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return err
+	}
+	ph, err := bcrypt.GenerateFromPassword(buf, bcrypt.DefaultCost)
 	if err != nil {
 		return err
 	}
-	if source == "" {
-		log.Println("SECURITY: this build has no support credential of its own, so its " +
-			"support PIN is the same fixed value as every other bare build. Build shop " +
-			"binaries with `make bootstrap` (POS_SUPPORT_SECRET set) to give each shop its own.")
-	} else {
-		log.Printf("system admin: support PIN %s", source)
-	}
+	hash := string(ph)
 
 	var id int64
 	err = db.GetContext(ctx, &id, `SELECT id FROM users WHERE is_system = true LIMIT 1`)

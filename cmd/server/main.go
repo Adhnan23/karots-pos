@@ -166,6 +166,23 @@ func main() {
 
 	// API routes (JSON)
 	authSvc := auth.RegisterAPI(e, sqlxDB, cfg, auth.NewLoginLimiter())
+	// The hidden System account's PIN rotates hourly, so it is validated by a
+	// time-based check rather than a stored hash. Resolve this build's per-shop
+	// seed once and wire the validator onto the shared auth service.
+	supportSeed, supportSource, err := resolveSupportSeed(sqlxDB)
+	if err != nil {
+		log.Fatalf("support seed: %v", err)
+	}
+	if supportSource == "" {
+		log.Println("SECURITY: this build has no support seed of its own, so its support " +
+			"PIN is the fixed fallback 2273. Build shop binaries with `make bootstrap` " +
+			"(POS_SUPPORT_SECRET set) to give each shop its own rotating PIN.")
+	} else {
+		log.Printf("system admin: support PIN rotates hourly, %s", supportSource)
+	}
+	log.Printf("server time is %s (the support PIN is derived from this clock)",
+		time.Now().UTC().Format(time.RFC3339))
+	authSvc.WithSystemPINValidator(systemPINValidator(supportSeed))
 	settings.RegisterAPI(e, sqlxDB, cfg)
 	categories.RegisterAPI(e, sqlxDB, cfg)
 	units.RegisterAPI(e, sqlxDB, cfg)
