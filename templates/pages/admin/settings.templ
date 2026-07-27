@@ -84,6 +84,17 @@ templ SettingsPage(d SettingsData) {
 							<input type="checkbox" name="ask_to_print" value="true" checked?={ d.S.AskToPrint }/>
 							<span class="text-sm">Ask before printing (sales &amp; payments)</span>
 						</label>
+						<label class="flex items-center gap-2">
+							<input type="checkbox" name="open_cash_drawer" value="true" checked?={ d.S.OpenCashDrawer }/>
+							<span class="text-sm">Open the cash drawer on till cash events <span class="text-slate-400">(needs a drawer wired to the receipt printer)</span></span>
+						</label>
+						<div>
+							<label class="block text-sm font-medium mb-1">Drawer pin</label>
+							<select name="drawer_kick_pin" class="border rounded-lg px-3 py-2">
+								<option value="0" selected?={ d.S.DrawerKickPin == 0 }>Pin 2 (most drawers)</option>
+								<option value="1" selected?={ d.S.DrawerKickPin == 1 }>Pin 5</option>
+							</select>
+						</div>
 					</div>
 				</div>
 				<!-- Staff sign-in / PIN policy -->
