@@ -108,8 +108,9 @@ func (h *APIHandler) List(c echo.Context) error {
 	return response.OK(c, rows)
 }
 
-func RegisterAPI(e *echo.Echo, db *sqlx.DB, cfg *config.Config) {
-	api := NewAPIHandler(NewService(db))
+func RegisterAPI(e *echo.Echo, db *sqlx.DB, cfg *config.Config) *Service {
+	svc := NewService(db)
+	api := NewAPIHandler(svc)
 	jwt := middleware.JWTAuth(cfg.JWTSecret)
 	g := e.Group("/api/sales", jwt)
 	g.POST("", api.Create)
@@ -117,4 +118,5 @@ func RegisterAPI(e *echo.Echo, db *sqlx.DB, cfg *config.Config) {
 	g.POST("/:id/return", api.Return, middleware.RequireRole("admin", "manager"))
 	g.POST("/:id/partial-return", api.PartialReturn, middleware.RequireRole("admin", "manager"))
 	g.GET("", api.List, middleware.RequireRole("admin", "manager"))
+	return svc
 }

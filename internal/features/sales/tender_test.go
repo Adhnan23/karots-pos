@@ -71,3 +71,25 @@ func TestCheckTenderRejectsChangeOnACreditSale(t *testing.T) {
 		t.Error("an over-covered credit sale was accepted")
 	}
 }
+
+func TestTenderPaidCash(t *testing.T) {
+	cases := []struct {
+		name string
+		in   []PaymentInput
+		want bool
+	}{
+		{"cash", []PaymentInput{{Method: "cash", Amount: "100"}}, true},
+		{"card only", []PaymentInput{{Method: "card", Amount: "100"}}, false},
+		{"credit only", []PaymentInput{{Method: "credit", Amount: "100"}}, false},
+		{"mixed card+cash", []PaymentInput{{Method: "card", Amount: "60"}, {Method: "cash", Amount: "40"}}, true},
+		{"cash zero amount", []PaymentInput{{Method: "cash", Amount: "0"}}, false},
+		{"empty", nil, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tenderPaidCash(tc.in); got != tc.want {
+				t.Fatalf("tenderPaidCash(%s) = %v, want %v", tc.name, got, tc.want)
+			}
+		})
+	}
+}

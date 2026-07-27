@@ -22,8 +22,31 @@ import (
 )
 
 type Service struct {
-	db   *sqlx.DB
-	repo *Repository
+	db         *sqlx.DB
+	repo       *Repository
+	drawerKick func(ctx context.Context) // optional; fires post-commit on a cash sale
+}
+
+// WithDrawerKick injects a best-effort action fired AFTER a cash-tendered sale
+// commits, to pop the physical cash drawer. nil = no drawer. Returns the service
+// for chaining.
+func (s *Service) WithDrawerKick(fn func(ctx context.Context)) *Service {
+	s.drawerKick = fn
+	return s
+}
+
+// tenderPaidCash reports whether a sale's payment split includes a positive cash
+// line — the condition for popping the physical drawer. Card/online/wallet/credit
+// move no drawer cash.
+func tenderPaidCash(ps []PaymentInput) bool {
+	for _, p := range ps {
+		if p.Method == "cash" {
+			if v, err := money.Parse(p.Amount); err == nil && v.IsPositive() {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func NewService(db *sqlx.DB) *Service { return &Service{db: db, repo: NewRepository(db)} }
@@ -557,6 +580,10 @@ func (s *Service) Create(ctx context.Context, in CreateInput, cashierID int64) (
 	})
 	if err != nil {
 		return nil, err
+	}
+	// Post-commit: pop the physical drawer when the sale actually took cash.
+	if s.drawerKick != nil && tenderPaidCash(in.Payments) {
+		s.drawerKick(ctx)
 	}
 	return detail, nil
 }

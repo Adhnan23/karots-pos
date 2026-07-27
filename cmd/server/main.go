@@ -199,7 +199,7 @@ func main() {
 	// The physical cash drawer pops on a till cash event; the kicker is shared by
 	// every service that owns one (cash register + sales).
 	drawerKicker := newDrawerKicker(settings.NewService(sqlxDB))
-	sales.RegisterAPI(e, sqlxDB, cfg)
+	sales.RegisterAPI(e, sqlxDB, cfg).WithDrawerKick(drawerKicker)
 	denominations.RegisterAPI(e, sqlxDB, cfg)
 	heldsales.RegisterAPI(e, sqlxDB, cfg)
 	crSvc := cashregister.RegisterAPI(e, sqlxDB, cfg, sales.NewService(sqlxDB), audit.NewService(sqlxDB))
