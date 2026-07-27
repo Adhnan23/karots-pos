@@ -22,6 +22,7 @@
 package main
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -32,10 +33,9 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"time"
 
 	"karots-pos/internal/support"
-
-	"golang.org/x/crypto/bcrypt"
 
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
@@ -140,13 +140,14 @@ func run() error {
 	}
 	outBin := filepath.Join(*outFlag, bin)
 
-	// Derive this shop's support credential HERE, and bake in only the result.
+	// Derive this shop's support SEED here, and bake in only that.
 	//
 	// The master secret must never reach the binary: Go records the whole
 	// -ldflags line in the build metadata, so `go version -m` on any shipped
 	// binary would print it and hand the holder every other shop's PIN. What goes
-	// in is the install id and a bcrypt HASH of this shop's PIN — useless against
-	// any other install, and not even reversible into this one's.
+	// in is the install id and the per-shop SEED (HMAC(master, id)) — one-way, so
+	// useless against any other install and not reversible into the master. The
+	// PIN itself is derived from the seed and the clock, so it rotates hourly.
 	ldflags := "-s -w"
 	var shopInstallID, shopPIN string
 	if supportSecret != "" {
@@ -154,12 +155,10 @@ func run() error {
 		if ierr != nil {
 			return fmt.Errorf("generate install id: %w", ierr)
 		}
-		shopInstallID, shopPIN = id, support.DerivePIN(supportSecret, id)
-		hash, herr := bcrypt.GenerateFromPassword([]byte(shopPIN), bcrypt.DefaultCost)
-		if herr != nil {
-			return fmt.Errorf("hash support pin: %w", herr)
-		}
-		ldflags += " -X main.installIDBaked=" + id + " -X main.supportHash=" + string(hash)
+		shopInstallID = id
+		shopPIN = support.CodeForSecret(supportSecret, id, time.Now())
+		ldflags += " -X main.installIDBaked=" + id +
+			" -X main.supportSeedHex=" + hex.EncodeToString(support.DeriveSeed(supportSecret, id))
 	} else {
 		fmt.Println("! POS_SUPPORT_SECRET is not set — this build falls back to the fixed")
 		fmt.Println("  support PIN shared by every bare build. Set it so this shop gets its own.")
@@ -183,7 +182,7 @@ func run() error {
 		// Printed once, here, because it is the only moment both halves exist in
 		// one place. Losing it is not fatal — the shop can read the install id off
 		// their console and `make support-pin` recomputes the same PIN.
-		fmt.Printf("\n  support login   0000000001 / %s\n  install id      %s\n",
+		fmt.Printf("\n  support login   0000000001 / %s   (rotates hourly)\n  install id      %s\n",
 			shopPIN, shopInstallID)
 		fmt.Printf("  recover later   make support-pin ID=%s\n", shopInstallID)
 	}
