@@ -280,11 +280,12 @@ func (r *Repository) FindByID(ctx context.Context, id int64) (*SessionRow, error
 }
 
 type Service struct {
-	db        *sqlx.DB
-	repo      *Repository
-	sales     *sales.Service
-	audit     *audit.Service // optional; nil = no audit recording
-	lockerLeg LockerLeg      // optional; nil = locker integration off
+	db         *sqlx.DB
+	repo       *Repository
+	sales      *sales.Service
+	audit      *audit.Service            // optional; nil = no audit recording
+	lockerLeg  LockerLeg                 // optional; nil = locker integration off
+	drawerKick func(ctx context.Context) // optional; fires post-commit on a till cash event
 }
 
 func NewService(db *sqlx.DB, salesSvc *sales.Service) *Service {
@@ -305,6 +306,20 @@ func (s *Service) WithAudit(a *audit.Service) *Service {
 func (s *Service) WithLockerLeg(fn LockerLeg) *Service {
 	s.lockerLeg = fn
 	return s
+}
+
+// WithDrawerKick injects a best-effort action fired AFTER a till cash event
+// commits (open, close, pay-in, withdrawal) — used to pop the physical cash
+// drawer. nil = no drawer. Returns the service for chaining.
+func (s *Service) WithDrawerKick(fn func(ctx context.Context)) *Service {
+	s.drawerKick = fn
+	return s
+}
+
+func (s *Service) kick(ctx context.Context) {
+	if s.drawerKick != nil {
+		s.drawerKick(ctx)
+	}
 }
 
 func (s *Service) recordAudit(ctx context.Context, userID int64, action, detail string) {
@@ -415,6 +430,7 @@ func (s *Service) Open(ctx context.Context, userID int64, in OpenInput) (*Sessio
 	if receiptID > 0 {
 		sess.ReceiptID = &receiptID
 	}
+	s.kick(ctx)
 	return sess, nil
 }
 
@@ -477,6 +493,7 @@ func (s *Service) Close(ctx context.Context, userID int64, in CloseInput) (*Clos
 	if receiptID > 0 {
 		res.ReceiptID = &receiptID
 	}
+	s.kick(ctx)
 	return res, nil
 }
 
@@ -558,6 +575,7 @@ func (s *Service) adjust(ctx context.Context, userID int64, in MovementInput, mt
 	if receiptID > 0 {
 		sum.ReceiptID = &receiptID
 	}
+	s.kick(ctx)
 	return sum, nil
 }
 

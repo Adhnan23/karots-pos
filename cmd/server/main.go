@@ -196,6 +196,9 @@ func main() {
 	purchasereturns.RegisterAPI(e, sqlxDB, cfg)
 	expenses.RegisterAPI(e, sqlxDB, cfg)
 	reports.RegisterAPI(e, sqlxDB, cfg)
+	// The physical cash drawer pops on a till cash event; the kicker is shared by
+	// every service that owns one (cash register + sales).
+	drawerKicker := newDrawerKicker(settings.NewService(sqlxDB))
 	sales.RegisterAPI(e, sqlxDB, cfg)
 	denominations.RegisterAPI(e, sqlxDB, cfg)
 	heldsales.RegisterAPI(e, sqlxDB, cfg)
@@ -204,6 +207,7 @@ func main() {
 	// banking at close, mid-shift moves to/from a locker) through cashflow, which
 	// imports cashregister — so the hook is injected here rather than imported.
 	crSvc.WithLockerLeg(cashflow.NewService(sqlxDB, sales.NewService(sqlxDB)).TillLockerLeg)
+	crSvc.WithDrawerKick(drawerKicker)
 	// Same shape: settling a new invoice out of a supplier's advances and return
 	// credits lives in supplierpay, which imports purchases — so purchases takes
 	// it as a hook rather than importing back. Wiring it here means every path
