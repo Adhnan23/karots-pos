@@ -844,6 +844,7 @@ func (a *adminUI) PrinterTest(c echo.Context) error {
 		c.Response().Header().Set("HX-Trigger", response.Toast("Test print failed: "+err.Error(), "error"))
 		return c.NoContent(200)
 	}
+	escpos.KickDrawer(ctx, *cfg) // one-click hardware check: prints AND pops the drawer
 	a.s.logAudit(c, audit.ActionSettings, "settings", "", "sent printer test")
 	c.Response().Header().Set("HX-Trigger", response.Toast("Test slip sent to "+cfg.ReceiptPrinter, "success"))
 	return c.NoContent(200)
