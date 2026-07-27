@@ -65,8 +65,14 @@ TOTP is time-sensitive. Mitigations:
 - **Validation accepts `window-1`, `window`, `window+1`** (±1 hour). A code read
   near the top of the hour does not expire in the developer's hand, and a modestly
   wrong shop clock still works. A code is therefore valid for ~1–2 hours.
+- **The server exposes its own current time** — a boot log line and the login-page
+  `console.info` (next to the install ID). A shop machine's clock can be reset
+  (dead CMOS battery) and be wrong by days, which ±1 hour cannot absorb. Reading
+  the server's apparent time lets the developer compute a matching PIN via the
+  app's custom-time entry (below). Time is not secret, so exposing it costs
+  nothing.
 - **`POS_SYSTEM_PIN` remains a static, clock-independent override** (resolution
-  order below) — the escape hatch if a shop's clock is wildly wrong or the
+  order below) — the final escape hatch if a shop's clock is wildly wrong or the
   developer is otherwise locked out. It ships commented out and is meant to be
   removed after use.
 
@@ -156,7 +162,9 @@ shop, so post-rotation the developer still computes the correct PIN.
   master key built them) → live PIN + countdown; master keys encrypted in the
   Android Keystore, offline-only; parameterised scheme for reuse by future
   projects. New shops are built with the newest master key; old shops keep their
-  recorded key unless rebuilt.
+  recorded key unless rebuilt. **Custom-time entry:** the app can compute the PIN
+  for a typed-in time, not only "now", so a shop whose server clock is reset can
+  still be matched (developer reads the server's apparent time from its console).
 - Asymmetric / signature-based support auth (kept 6-digit UX instead).
 - Any change to the audit-log visibility of the support account (unchanged: owner
   can read it).
