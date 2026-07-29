@@ -331,6 +331,7 @@ func (h *cashierUI) ReceiveWalkIn(c echo.Context) error {
 		"received a delivery from "+sup.Name+" at the counter")
 	if rec != nil {
 		h.s.printMoneyReceipt(ctx, rec)
+		h.s.kickIfTill(ctx, pay.source) // paid cash from the drawer → pop it
 	}
 	return response.Created(c, d)
 }
@@ -762,6 +763,7 @@ func (h *cashierUI) ReceiveAgainstOrder(c echo.Context) error {
 		"received an order at the counter")
 	if rec != nil {
 		h.s.printMoneyReceipt(ctx, rec)
+		h.s.kickIfTill(ctx, pay.source) // paid cash from the drawer → pop it
 	}
 	return response.OK(c, d)
 }

@@ -9,6 +9,7 @@ import (
 	"karots-pos/internal/apperr"
 	appdb "karots-pos/internal/db"
 	"karots-pos/internal/features/auth"
+	"karots-pos/internal/escpos"
 	"karots-pos/internal/features/cashflow"
 	"karots-pos/internal/features/cashregister"
 	"karots-pos/internal/features/lockers"
@@ -567,6 +568,12 @@ func (h *cashierUI) BankTx(c echo.Context) error {
 		return nil
 	}); err != nil {
 		return err
+	}
+
+	// Cash crossed the physical drawer either way — bill-pay takes it in, get-money
+	// pays it out — so pop it, best-effort and setting-gated.
+	if cfg, cerr := h.p.core.Settings.Get(ctx); cerr == nil && cfg != nil {
+		escpos.KickDrawer(ctx, *cfg)
 	}
 
 	// Log the customer-facing detail (balance-free) so the slip can be reprinted and

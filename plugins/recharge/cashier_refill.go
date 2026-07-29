@@ -8,6 +8,7 @@ import (
 
 	"karots-pos/internal/apperr"
 	appdb "karots-pos/internal/db"
+	"karots-pos/internal/escpos"
 	"karots-pos/internal/features/cashflow"
 	"karots-pos/internal/features/expenses"
 	"karots-pos/internal/middleware"
@@ -169,6 +170,12 @@ func (h *cashierUI) Refill(c echo.Context) error {
 	})
 	if err != nil {
 		return err
+	}
+	if from.Kind == cashflow.KindTill {
+		// Paid out of the physical drawer → pop it (best-effort, setting-gated).
+		if cfg, cerr := h.p.core.Settings.Get(ctx); cerr == nil && cfg != nil {
+			escpos.KickDrawer(ctx, *cfg)
+		}
 	}
 
 	// Follow the shop's print policy for the RL- refill slip, like the counter

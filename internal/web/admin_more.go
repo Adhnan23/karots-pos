@@ -214,6 +214,7 @@ func (a *adminUI) SupplierPay(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	a.s.kickIfTill(ctx, src) // paid from a till drawer → pop it
 	a.s.logAudit(c, audit.ActionPayment, "supplier", strconv.FormatInt(id, 10),
 		"paid "+money.Display(res.Total)+" ("+res.Method+")")
 	if rec != nil {
@@ -279,6 +280,7 @@ func (a *adminUI) SupplierRefund(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	a.s.kickIfTill(ctx, dest) // refund into a till drawer → pop it
 	a.s.logAudit(c, audit.ActionPayment, "supplier", strconv.FormatInt(id, 10),
 		"refund received "+money.Display(res.Amount)+" ("+res.Method+")")
 	if rec != nil {
@@ -571,6 +573,7 @@ func (a *adminUI) ExpenseCreate(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	a.s.kickIfTill(ctx, src) // paid from a till drawer → pop it
 	a.s.logAudit(c, audit.ActionCreate, "expense", strconv.FormatInt(expenseID, 10), "recorded expense paid from "+rec.FromLabel)
 	return a.s.afterMoneyMove(c, rec)
 }
@@ -1587,6 +1590,9 @@ func (a *adminUI) CustomerPay(c echo.Context) error {
 	})
 	if err != nil {
 		return err
+	}
+	if res.Method == "cash" {
+		a.s.kickIfTill(ctx, dest) // cash collected into a till drawer → pop it
 	}
 	cfg, _ := a.s.settings.Get(ctx)
 	if cfg != nil {

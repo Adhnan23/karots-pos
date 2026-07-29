@@ -201,6 +201,7 @@ func (a *adminUI) PurchaseReceive(c echo.Context) error {
 	a.s.logAudit(c, audit.ActionUpdate, "purchase", strconv.FormatInt(id, 10), "received purchase order")
 	if rec != nil {
 		a.s.printMoneyReceipt(ctx, rec)
+		a.s.kickIfTill(ctx, pay.source) // paid cash from a till drawer → pop it
 	}
 	return response.OK(c, d)
 }

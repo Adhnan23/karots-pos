@@ -11,6 +11,7 @@ import (
 
 	"karots-pos/internal/apperr"
 	appdb "karots-pos/internal/db"
+	"karots-pos/internal/escpos"
 	"karots-pos/internal/features/cashflow"
 	"karots-pos/internal/features/cashregister"
 	"karots-pos/internal/features/expenses"
@@ -632,6 +633,12 @@ func (a *adminUI) Refill(c echo.Context) error {
 	})
 	if err != nil {
 		return err
+	}
+	if src.Kind == cashflow.KindTill {
+		// Paid out of a physical drawer → pop it (best-effort, setting-gated).
+		if cfg, cerr := a.p.core.Settings.Get(ctx); cerr == nil && cfg != nil {
+			escpos.KickDrawer(ctx, *cfg)
+		}
 	}
 
 	balances, err := a.p.store.DeviceBalances(ctx)

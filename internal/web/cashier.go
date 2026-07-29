@@ -413,6 +413,7 @@ func (h *cashierUI) ReturnSubmit(c echo.Context) error {
 	// The return and any cash refund commit together: the refund leaves the
 	// cashier's till and produces a CR- refund receipt in the same transaction.
 	var detail *sales.Detail
+	var cashRefunded bool
 	err = appdb.WithTx(ctx, h.s.db, func(tx *sqlx.Tx) error {
 		d, cashRefund, returnID, err := h.s.sales.PartialReturnTx(ctx, tx, id, in, userID)
 		if err != nil {
@@ -420,6 +421,7 @@ func (h *cashierUI) ReturnSubmit(c echo.Context) error {
 		}
 		detail = d
 		if cashRefund.IsPositive() {
+			cashRefunded = true
 			party := ""
 			if d.Sale.CustomerName != nil {
 				party = *d.Sale.CustomerName
@@ -441,6 +443,9 @@ func (h *cashierUI) ReturnSubmit(c echo.Context) error {
 	})
 	if err != nil {
 		return err
+	}
+	if cashRefunded {
+		h.s.kickDrawer(ctx) // cash handed back out of the drawer → pop it
 	}
 	h.s.logAudit(c, audit.ActionReturn, "sale", strconv.FormatInt(id, 10), "partial return")
 	// Hand the customer the goods-return slip. Non-fatal: a printer problem must
@@ -623,6 +628,9 @@ func (h *cashierUI) CreditPay(c echo.Context) error {
 	})
 	if err != nil {
 		return err
+	}
+	if res.Method == "cash" {
+		h.s.kickDrawer(ctx) // cash collected into the drawer → pop it
 	}
 	// Hand the customer a detailed credit-payment slip (all methods). The CR-
 	// money record is still created for cash inside the tx (tracking unchanged);
