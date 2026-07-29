@@ -192,6 +192,49 @@ func (r *Repository) ListAll(ctx context.Context) ([]Product, error) {
 	return rows, err
 }
 
+// SyncRow is the lean, read-only projection served to the stock_capture app's
+// LAN catalog sync. category is the full "Parent > Child" path (matching the
+// CSV import format) so a synced item's category aligns with export/import.
+type SyncRow struct {
+	ID           int64           `db:"id"            json:"id"`
+	Name         string          `db:"name"          json:"name"`
+	NameLocal    *string         `db:"name_local"    json:"name_local,omitempty"`
+	Barcode      *string         `db:"barcode"       json:"barcode,omitempty"`
+	Category     string          `db:"category"      json:"category"`
+	Unit         string          `db:"unit"          json:"unit"`
+	SellingPrice decimal.Decimal `db:"selling_price" json:"selling_price"`
+	StockQty     decimal.Decimal `db:"stock_qty"     json:"stock_qty"`
+	IsService    bool            `db:"is_service"    json:"is_service"`
+}
+
+// SyncCatalog returns every active product with its full category path, current
+// on-hand quantity and current selling price. Read-only; no pagination — the app
+// wants one atomic snapshot per sync.
+func (r *Repository) SyncCatalog(ctx context.Context) ([]SyncRow, error) {
+	const q = `
+		WITH RECURSIVE cat_path AS (
+			SELECT id, name::text AS path FROM categories WHERE parent_id IS NULL
+			UNION ALL
+			SELECT c.id, cp.path || ' > ' || c.name
+			FROM categories c JOIN cat_path cp ON c.parent_id = cp.id
+		)
+		SELECT p.id, p.name, p.name_local, p.barcode,
+		       COALESCE(cp.path, '') AS category,
+		       u.abbreviation AS unit,
+		       p.selling_price,
+		       COALESCE(s.quantity, 0) AS stock_qty,
+		       p.is_service
+		FROM products p
+		JOIN units u ON u.id = p.unit_id
+		LEFT JOIN cat_path cp ON cp.id = p.category_id
+		LEFT JOIN stock s ON s.product_id = p.id
+		WHERE p.is_active = true
+		ORDER BY p.name, p.id`
+	var rows []SyncRow
+	err := r.db.SelectContext(ctx, &rows, q)
+	return rows, err
+}
+
 func (r *Repository) Count(ctx context.Context, q ListQuery) (int, error) {
 	var n int
 	toks, raw, fuzzy := q.searchArgs()

@@ -29,6 +29,17 @@ func (h *APIHandler) List(c echo.Context) error {
 	return response.Paged(c, rows, response.NewPageMeta(q.Page, q.Limit, total))
 }
 
+// SyncCatalog serves the read-only LAN catalog snapshot for the stock_capture
+// app: all active products with full category path, current qty and price. Any
+// signed-in user (same posture as List); the app can only read, never write.
+func (h *APIHandler) SyncCatalog(c echo.Context) error {
+	rows, err := h.svc.SyncCatalog(c.Request().Context())
+	if err != nil {
+		return err
+	}
+	return response.OK(c, rows)
+}
+
 func (h *APIHandler) Get(c echo.Context) error {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
@@ -160,4 +171,8 @@ func RegisterAPI(e *echo.Echo, db *sqlx.DB, cfg *config.Config) {
 	g.POST("", api.Create, manage)
 	g.PUT("/:id", api.Update, manage)
 	g.DELETE("/:id", api.Delete, manage)
+
+	// LAN catalog sync for the stock_capture app: a single read-only snapshot
+	// endpoint on its own path. Reuses the same JWT; the app can only read.
+	e.GET("/api/sync/catalog", api.SyncCatalog, jwt)
 }

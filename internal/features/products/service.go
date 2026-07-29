@@ -65,6 +65,15 @@ func (s *Service) ListAll(ctx context.Context) ([]Product, error) {
 	return rows, nil
 }
 
+// SyncCatalog serves the stock_capture LAN sync snapshot.
+func (s *Service) SyncCatalog(ctx context.Context) ([]SyncRow, error) {
+	rows, err := s.repo.SyncCatalog(ctx)
+	if err != nil {
+		return nil, apperr.Internal("failed to build sync catalog", err)
+	}
+	return rows, nil
+}
+
 func (s *Service) Get(ctx context.Context, id int64) (*Product, error) {
 	p, err := s.repo.FindByID(ctx, id)
 	if err != nil {
