@@ -25,6 +25,7 @@ type reportHubCard struct {
 func reportHubCards() []reportHubCard {
 	cards := []reportHubCard{
 		{"/admin/reports/sales", "Sales", "Receipts and totals over a date range"},
+		{"/admin/reports/tender", "Tender / Payments", "Cash, card, wallet & credit collected"},
 		{"/admin/reports/finance", "Finance / P&L", "Revenue, COGS, profit, dues for a period"},
 		{"/admin/reports/tax", "Tax Summary", "VAT/tax collected over a period"},
 		{"/admin/reports/returns", "Returns / Refunds", "Returned lines and refund value"},
@@ -48,6 +49,24 @@ func reportHubCards() []reportHubCard {
 	}
 	sort.SliceStable(cards, func(i, j int) bool { return cards[i].Title < cards[j].Title })
 	return cards
+}
+
+// tenderLabel gives a payment-method enum value a display name for the tender
+// report (unknown values pass through unchanged).
+func tenderLabel(method string) string {
+	switch method {
+	case "cash":
+		return "Cash"
+	case "card":
+		return "Card"
+	case "online":
+		return "Online"
+	case "credit":
+		return "Credit"
+	case "wallet":
+		return "Wallet (eZ Cash / mCash)"
+	}
+	return method
 }
 
 // jsArg JSON-encodes a string for safe embedding as a JS literal in an x-data
