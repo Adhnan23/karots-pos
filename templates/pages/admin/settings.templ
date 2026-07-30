@@ -15,124 +15,145 @@ type SettingsData struct {
 	Queues   []string // CUPS print queues detected on the host
 }
 
+// toggleRow is one on/off setting rendered as a tidy bordered row: a checkbox
+// with a bold title and a muted one-line description. Used for every boolean
+// setting on the page so they line up cleanly instead of cramming together.
+templ toggleRow(name, title, desc string, checked bool) {
+	<label class="flex items-start gap-3 rounded-xl border border-slate-200 px-4 py-3 hover:bg-slate-50 transition cursor-pointer">
+		<input type="checkbox" name={ name } value="true" checked?={ checked } class="mt-0.5 h-4 w-4 accent-indigo-600"/>
+		<span class="flex-1 min-w-0">
+			<span class="block text-sm font-medium text-slate-800">{ title }</span>
+			if desc != "" {
+				<span class="block text-xs text-slate-500 mt-0.5">{ desc }</span>
+			}
+		</span>
+	</label>
+}
+
+// sectionHead is a section title + one-line subtitle, shared by every settings block.
+templ sectionHead(title, subtitle string) {
+	<div>
+		<h2 class="text-lg font-semibold text-slate-800">{ title }</h2>
+		<p class="text-sm text-slate-500 mt-0.5">{ subtitle }</p>
+	</div>
+}
+
 templ SettingsPage(d SettingsData) {
 	@layouts.Admin("Settings", d.UserName, "settings") {
-		<h1 class="text-2xl font-bold mb-6">Shop Settings</h1>
-		<div class="bg-white rounded-2xl shadow-sm p-6">
-			<form hx-put="/admin/settings" hx-swap="none" class="space-y-4">
-				<div class="grid grid-cols-2 gap-4">
-					<div>
-						<label class="block text-sm font-medium mb-1">Shop Name</label>
-						<input name="shop_name" required value={ d.S.ShopName } class="w-full border rounded-lg px-3 py-2"/>
-					</div>
-					<div>
-						<label class="block text-sm font-medium mb-1">Shop Name (your language)</label>
-						<input name="shop_name_si" value={ strOrEmpty(d.S.ShopNameSi) } placeholder="e.g. கடை / කඩේ / مَتجر" class="w-full border rounded-lg px-3 py-2"/>
-					</div>
-				</div>
-				<div>
-					<label class="block text-sm font-medium mb-1">Address</label>
-					<input name="address" value={ strOrEmpty(d.S.Address) } class="w-full border rounded-lg px-3 py-2"/>
-				</div>
-				<div>
-					<label class="block text-sm font-medium mb-1">Logo URL (online only — for offline, upload below)</label>
-					<input name="logo_url" value={ strOrEmpty(d.S.LogoURL) } placeholder="https://… or /static/logo.png" class="w-full border rounded-lg px-3 py-2"/>
-				</div>
-				<div class="grid grid-cols-3 gap-4">
-					<div>
-						<label class="block text-sm font-medium mb-1">Phone</label>
-						<input name="phone" value={ strOrEmpty(d.S.Phone) } class="w-full border rounded-lg px-3 py-2"/>
-					</div>
-					<div>
-						<label class="block text-sm font-medium mb-1">Currency Code</label>
-						<input name="currency_code" required value={ d.S.CurrencyCode } class="w-full border rounded-lg px-3 py-2"/>
-					</div>
-					<div>
-						<label class="block text-sm font-medium mb-1">Currency Symbol</label>
-						<input name="currency_symbol" required value={ d.S.CurrencySymbol } class="w-full border rounded-lg px-3 py-2"/>
-					</div>
-				</div>
-				<div>
-					<label class="block text-sm font-medium mb-1">Receipt Footer</label>
-					<input name="receipt_footer" value={ strOrEmpty(d.S.ReceiptFooter) } class="w-full border rounded-lg px-3 py-2"/>
-				</div>
-				<div class="grid grid-cols-2 gap-4">
-					<div>
-						<label class="block text-sm font-medium mb-1">Default Sale Type</label>
-						<select name="default_sale_type" class="w-full border rounded-lg px-3 py-2">
-							@saleTypeOption("retail", d.S.DefaultSaleType)
-							@saleTypeOption("wholesale", d.S.DefaultSaleType)
-						</select>
-					</div>
-					<div>
-						<label class="block text-sm font-medium mb-1">Receipt Paper Width</label>
-						<select name="receipt_width" class="w-full border rounded-lg px-3 py-2">
-							@paperOption("80", "80mm", d.S.ReceiptWidth)
-							@paperOption("58", "58mm", d.S.ReceiptWidth)
-						</select>
-					</div>
-					<div class="flex items-end gap-4">
-						<label class="flex items-center gap-2">
-							<input type="checkbox" name="tax_registered" value="true" checked?={ d.S.TaxRegistered }/>
-							<span class="text-sm">Tax registered</span>
-						</label>
-						<label class="flex items-center gap-2">
-							<input type="checkbox" name="low_stock_alerts" value="true" checked?={ d.S.LowStockAlerts }/>
-							<span class="text-sm">Low-stock alerts</span>
-						</label>
-						<label class="flex items-center gap-2">
-							<input type="checkbox" name="ask_to_print" value="true" checked?={ d.S.AskToPrint }/>
-							<span class="text-sm">Ask before printing (sales &amp; payments)</span>
-						</label>
-						<label class="flex items-center gap-2">
-							<input type="checkbox" name="open_cash_drawer" value="true" checked?={ d.S.OpenCashDrawer }/>
-							<span class="text-sm">Open the cash drawer on till cash events <span class="text-slate-400">(needs a drawer wired to the receipt printer)</span></span>
-						</label>
+		<div class="mb-6">
+			<h1 class="text-2xl font-bold">Shop Settings</h1>
+			<p class="text-sm text-slate-500 mt-1">Everything that shapes the till, receipts, printing and staff access. Changes take effect once you press <span class="font-medium">Save Settings</span>.</p>
+		</div>
+		<div class="bg-white rounded-2xl shadow-sm p-6 lg:p-8">
+			<form hx-put="/admin/settings" hx-swap="none" class="space-y-8">
+				<!-- Shop identity -->
+				<section class="space-y-4">
+					@sectionHead("🏪 Shop identity", "Your shop's name, contact and currency — these appear on receipts.")
+					<div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
 						<div>
-							<label class="block text-sm font-medium mb-1">Drawer pin</label>
-							<select name="drawer_kick_pin" class="border rounded-lg px-3 py-2">
-								<option value="0" selected?={ d.S.DrawerKickPin == 0 }>Pin 2 (most drawers)</option>
-								<option value="1" selected?={ d.S.DrawerKickPin == 1 }>Pin 5</option>
+							<label class="block text-sm font-medium mb-1">Shop Name</label>
+							<input name="shop_name" required value={ d.S.ShopName } class="w-full border rounded-lg px-3 py-2"/>
+						</div>
+						<div>
+							<label class="block text-sm font-medium mb-1">Shop Name <span class="text-slate-400 font-normal">(your language)</span></label>
+							<input name="shop_name_si" value={ strOrEmpty(d.S.ShopNameSi) } placeholder="e.g. கடை / කඩේ / مَتجر" class="w-full border rounded-lg px-3 py-2"/>
+						</div>
+					</div>
+					<div>
+						<label class="block text-sm font-medium mb-1">Address</label>
+						<input name="address" value={ strOrEmpty(d.S.Address) } class="w-full border rounded-lg px-3 py-2"/>
+					</div>
+					<div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+						<div>
+							<label class="block text-sm font-medium mb-1">Phone</label>
+							<input name="phone" value={ strOrEmpty(d.S.Phone) } class="w-full border rounded-lg px-3 py-2"/>
+						</div>
+						<div>
+							<label class="block text-sm font-medium mb-1">Currency Code</label>
+							<input name="currency_code" required value={ d.S.CurrencyCode } class="w-full border rounded-lg px-3 py-2"/>
+						</div>
+						<div>
+							<label class="block text-sm font-medium mb-1">Currency Symbol</label>
+							<input name="currency_symbol" required value={ d.S.CurrencySymbol } class="w-full border rounded-lg px-3 py-2"/>
+						</div>
+					</div>
+					<div>
+						<label class="block text-sm font-medium mb-1">Logo URL <span class="text-slate-400 font-normal">(online only — for offline, upload below)</span></label>
+						<input name="logo_url" value={ strOrEmpty(d.S.LogoURL) } placeholder="https://… or /static/logo.png" class="w-full border rounded-lg px-3 py-2"/>
+					</div>
+				</section>
+				<!-- Sales & receipts -->
+				<section class="space-y-4 border-t pt-6">
+					@sectionHead("🧾 Sales & receipts", "Defaults for the till and what prints on the customer's receipt.")
+					<div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+						<div>
+							<label class="block text-sm font-medium mb-1">Default Sale Type</label>
+							<select name="default_sale_type" class="w-full border rounded-lg px-3 py-2">
+								@saleTypeOption("retail", d.S.DefaultSaleType)
+								@saleTypeOption("wholesale", d.S.DefaultSaleType)
+							</select>
+						</div>
+						<div>
+							<label class="block text-sm font-medium mb-1">Receipt Paper Width</label>
+							<select name="receipt_width" class="w-full border rounded-lg px-3 py-2">
+								@paperOption("80", "80mm", d.S.ReceiptWidth)
+								@paperOption("58", "58mm", d.S.ReceiptWidth)
 							</select>
 						</div>
 					</div>
-				</div>
-				<!-- Staff sign-in / PIN policy -->
-				<div class="border-t pt-5 mt-2">
-					<h2 class="text-lg font-semibold mb-1">Staff sign-in</h2>
-					<p class="text-sm text-slate-500 mb-4">By default an admin sets a staff member's PIN and they just log in. Turn these on to make staff choose their own PIN, or to stop cashiers changing theirs.</p>
-					<div class="space-y-3">
-						<label class="flex items-center gap-2">
-							<input type="checkbox" name="force_pin_change" value="true" checked?={ d.S.ForcePinChange }/>
-							<span class="text-sm">Force PIN change on first login <span class="text-slate-400">— new and admin-reset accounts must choose a new PIN before using the app</span></span>
-						</label>
-						<label class="flex items-center gap-2">
-							<input type="checkbox" name="allow_cashier_pin_change" value="true" checked?={ d.S.AllowCashierPinChange }/>
-							<span class="text-sm">Allow cashiers to change their own PIN <span class="text-slate-400">— when off, only admins/managers can change a cashier's PIN</span></span>
-						</label>
+					<div>
+						<label class="block text-sm font-medium mb-1">Receipt Footer</label>
+						<input name="receipt_footer" value={ strOrEmpty(d.S.ReceiptFooter) } class="w-full border rounded-lg px-3 py-2"/>
 					</div>
-				</div>
-				<!-- Screen lock & features -->
-				<div class="border-t pt-5 mt-2">
-					<h2 class="text-lg font-semibold mb-1">Screen lock &amp; features</h2>
-					<p class="text-sm text-slate-500 mb-4">Lock the screen without ending the shift — the till stays open, but a PIN is needed to resume. Anyone can lock from the top bar; here you set the auto-lock timer.</p>
-					<div class="space-y-3">
-						<div class="flex items-center gap-2 text-sm flex-wrap">
-							<span>Auto-lock after</span>
-							<input type="number" name="lock_timeout_minutes" min="0" max="1440" value={ strconv.Itoa(d.S.LockTimeoutMinutes) } class="w-20 border rounded-lg px-2 py-1.5 text-right"/>
-							<span>minutes of inactivity <span class="text-slate-400">(0 = off)</span></span>
-						</div>
-						<label class="flex items-center gap-2">
-							<input type="checkbox" name="stock_take_enabled" value="true" checked?={ d.S.StockTakeEnabled }/>
-							<span class="text-sm">Enable stock-take &amp; intake <span class="text-slate-400">— when off, the Stock-take and Stock Intake pages are hidden and their links stop working (they can rewrite quantities &amp; prices)</span></span>
-						</label>
+					<div class="space-y-2">
+						@toggleRow("ask_to_print", "Ask before printing (sales & payments)", "Show a Print / New-Sale prompt after each sale. Turn off to print the receipt automatically.", d.S.AskToPrint)
+						@toggleRow("tax_registered", "Tax registered", "Show tax on receipts and enable the Tax Summary report.", d.S.TaxRegistered)
 					</div>
-				</div>
+				</section>
+				<!-- Cash drawer -->
+				<section class="space-y-4 border-t pt-6">
+					@sectionHead("💵 Cash drawer", "Pop a drawer wired to the receipt printer automatically on cash events.")
+					<div class="space-y-2">
+						@toggleRow("open_cash_drawer", "Open the cash drawer on till cash events", "Needs a drawer wired to the receipt printer's port. Fires on cash sales, deposits/withdrawals, credit collected and no-sale — never on card-only sales.", d.S.OpenCashDrawer)
+					</div>
+					<div class="max-w-xs">
+						<label class="block text-sm font-medium mb-1">Drawer pin</label>
+						<select name="drawer_kick_pin" class="w-full border rounded-lg px-3 py-2">
+							<option value="0" selected?={ d.S.DrawerKickPin == 0 }>Pin 2 (most drawers)</option>
+							<option value="1" selected?={ d.S.DrawerKickPin == 1 }>Pin 5</option>
+						</select>
+						<p class="text-xs text-slate-400 mt-1">If the drawer never opens, try Pin 5.</p>
+					</div>
+				</section>
+				<!-- Inventory -->
+				<section class="space-y-4 border-t pt-6">
+					@sectionHead("📦 Inventory", "Stock alerts and whether the bulk stock tools are available.")
+					<div class="space-y-2">
+						@toggleRow("low_stock_alerts", "Low-stock alerts", "Flag products at or below their reorder level on the dashboard and reports.", d.S.LowStockAlerts)
+						@toggleRow("stock_take_enabled", "Enable stock-take & intake", "When off, the Stock-take and Stock Intake pages are hidden and their links stop working (they can rewrite quantities & prices).", d.S.StockTakeEnabled)
+					</div>
+				</section>
+				<!-- Staff sign-in -->
+				<section class="space-y-4 border-t pt-6">
+					@sectionHead("🔐 Staff sign-in", "By default an admin sets a staff member's PIN and they just log in. Turn these on to make staff choose their own PIN, or to stop cashiers changing theirs.")
+					<div class="space-y-2">
+						@toggleRow("force_pin_change", "Force PIN change on first login", "New and admin-reset accounts must choose a new PIN before using the app.", d.S.ForcePinChange)
+						@toggleRow("allow_cashier_pin_change", "Allow cashiers to change their own PIN", "When off, only admins/managers can change a cashier's PIN.", d.S.AllowCashierPinChange)
+					</div>
+				</section>
+				<!-- Screen lock -->
+				<section class="space-y-4 border-t pt-6">
+					@sectionHead("🔒 Screen lock", "Lock the screen without ending the shift — the till stays open, but a PIN is needed to resume. Anyone can lock from the top bar; here you set the auto-lock timer.")
+					<div class="flex items-center gap-2 text-sm flex-wrap">
+						<span>Auto-lock after</span>
+						<input type="number" name="lock_timeout_minutes" min="0" max="1440" value={ strconv.Itoa(d.S.LockTimeoutMinutes) } class="w-20 border rounded-lg px-2 py-1.5 text-right"/>
+						<span>minutes of inactivity <span class="text-slate-400">(0 = off)</span></span>
+					</div>
+				</section>
 				<!-- Printers & labels -->
-				<div class="border-t pt-5 mt-2">
-					<h2 class="text-lg font-semibold mb-1">Printers &amp; Labels</h2>
-					<p class="text-sm text-slate-500 mb-4">Installed printers are detected for you — <strong>you choose which one handles each job</strong> from the dropdown (or leave it on "System default"). For a printer on the network instead, type its address in the box below the dropdown. The label size here is the default — you can change it per print on the Barcode Labels page.</p>
-					<div class="grid grid-cols-2 gap-4">
+				<section class="space-y-4 border-t pt-6">
+					@sectionHead("🖨️ Printers & labels", "Installed printers are detected for you — choose which handles each job (or leave it on \"System default\"). For a network printer, type its address in the box below the dropdown. The label size here is the default — change it per print on the Barcode Labels page.")
+					<div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
 						<div>
 							<label class="block text-sm font-medium mb-1">Receipt printer</label>
 							<select name="receipt_printer" class="w-full border rounded-lg px-3 py-2">
@@ -151,7 +172,7 @@ templ SettingsPage(d SettingsData) {
 								type="button"
 								hx-post="/admin/settings/printer/test"
 								hx-swap="none"
-								class="mt-2 px-3 py-1.5 rounded-lg border text-slate-700 text-sm font-medium"
+								class="mt-2 px-3 py-1.5 rounded-lg border text-slate-700 text-sm font-medium hover:bg-slate-50"
 							>🖨 Test print</button>
 							<p class="text-xs text-slate-400 mt-1">Sends a short test slip to the <strong>saved</strong> receipt printer — save first if you just changed it.</p>
 						</div>
@@ -183,15 +204,16 @@ templ SettingsPage(d SettingsData) {
 							<input type="number" name="label_gap_mm" min="0" max="20" value={ strconv.Itoa(labelDim(d.S.LabelGapMM, 2)) } class="w-full border rounded-lg px-3 py-2"/>
 						</div>
 					</div>
-				</div>
-				<div class="pt-2">
-					<button type="submit" class="px-5 py-2.5 rounded-lg bg-indigo-600 text-white font-medium">Save Settings</button>
-				</div>
+				</section>
+				<!-- Save lives in the floating button below (always on screen) — no end-of-form
+				     button needed. Fixed (not sticky) because the layout's <main> has
+				     overflow-auto, which breaks position:sticky. -->
+				<button type="submit" class="fixed bottom-6 right-6 z-40 inline-flex items-center gap-2 px-6 py-3 rounded-full bg-indigo-600 text-white font-semibold shadow-xl ring-1 ring-black/10 hover:bg-indigo-700 transition">💾 Save Settings</button>
 			</form>
 		</div>
 		<!-- Logo (offline-friendly upload) -->
 		<div class="bg-white rounded-2xl shadow-sm p-6 mt-6">
-			<h2 class="text-lg font-semibold">Logo</h2>
+			<h2 class="text-lg font-semibold">🖼️ Logo</h2>
 			<p class="text-sm text-slate-500 mt-1 mb-4">Upload a logo to store it inside the app — it prints and previews even with no internet (recommended). A URL only works when the device is online.</p>
 			if d.S.LogoSrc() != "" {
 				<img src={ templ.SafeURL(d.S.LogoSrc()) } alt="logo preview" class="mb-4 h-20 object-contain border rounded-lg p-2 bg-slate-50"/>
@@ -220,7 +242,7 @@ templ SettingsPage(d SettingsData) {
 		</div>
 		<!-- Backup & restore -->
 		<div class="bg-white rounded-2xl shadow-sm p-6 mt-6">
-			<h2 class="text-lg font-semibold">Backup &amp; Restore</h2>
+			<h2 class="text-lg font-semibold">💾 Backup &amp; Restore</h2>
 			<p class="text-sm text-slate-500 mt-1 mb-4">Download a full copy of your data, or restore from a previous backup. Keep backups somewhere safe.</p>
 			<a href="/admin/backup" class="inline-block px-5 py-2.5 rounded-lg bg-emerald-600 text-white font-medium">⬇ Download backup</a>
 			<form
