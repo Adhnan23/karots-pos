@@ -1,14 +1,43 @@
-# 🏪 karots-pos
+<div align="center">
 
-Production-grade point-of-sale for a Sri Lankan shop: a **cashier terminal** (sell,
-scan, price/stock check) and an **admin panel** (manage catalog, inventory, sales,
-purchasing, finances, settings). Built with Go · Echo · sqlx · Goose · Templ · HTMX
-· Alpine.js · Tailwind, backed by PostgreSQL 17.
+# 🏪 Karots POS
+
+**Production-grade point-of-sale for a Sri Lankan shop** — a fast **cashier terminal**
+and a full **admin back office**, shipped as *one static binary*.
+
+![Go](https://img.shields.io/badge/Go-1.26-00ADD8?style=for-the-badge&logo=go&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-4169E1?style=for-the-badge&logo=postgresql&logoColor=white)
+![Echo](https://img.shields.io/badge/Echo-v4-00C7B7?style=for-the-badge&logo=go&logoColor=white)
+![templ](https://img.shields.io/badge/templ-typed_HTML-2D3748?style=for-the-badge)
+![HTMX](https://img.shields.io/badge/HTMX-hypermedia-3366CC?style=for-the-badge&logo=htmx&logoColor=white)
+![Alpine.js](https://img.shields.io/badge/Alpine.js-reactive-77C1D2?style=for-the-badge&logo=alpinedotjs&logoColor=white)
+![Tailwind](https://img.shields.io/badge/Tailwind-prebuilt-38BDF8?style=for-the-badge&logo=tailwindcss&logoColor=white)
+
+![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows-4B5563?style=flat-square)
+![Deploy](https://img.shields.io/badge/deploy-single%20static%20binary-16A34A?style=flat-square)
+![Printing](https://img.shields.io/badge/printing-ESC%2FPOS%20%2B%20TSPL-EA580C?style=flat-square)
+![Runtime](https://img.shields.io/badge/runtime-no%20internet%20needed-22C55E?style=flat-square)
+![Plugins](https://img.shields.io/badge/plugins-compiled%20per%20shop-8B5CF6?style=flat-square)
+
+</div>
+
+> A **cashier terminal** (sell, scan, price/stock check) and an **admin panel**
+> (catalog, inventory, sales, purchasing, finances, settings) — both built on
+> Go · Echo · sqlx · Goose · Templ · HTMX · Alpine.js · Tailwind, backed by
+> **PostgreSQL 17**.
 
 The whole app compiles to **one fully static binary** — templates, CSS/JS (a
 prebuilt Tailwind stylesheet plus vendored htmx / Alpine / JsBarcode), and DB
 migrations are all embedded via `go:embed`. To deploy you ship **just the binary +
 a `.env`** (and a Postgres).
+
+### 📑 Contents
+
+| | | |
+|---|---|---|
+| [🚀 Quick start](#quick-start-dev) | [📦 Deploy](#self-contained-binary-deploy) | [🔌 Plugins](#plugins--per-shop-builds) |
+| [🖥️ Two surfaces](#two-surfaces) | [🧾 Printing](PRINTING.md) | [🛠️ Setup guide](SETUP.md) |
+| [🏗️ Architecture](#architecture) | [🎯 Feature highlights](#feature-highlights) | [🧰 Make targets](#make-targets) |
 
 ## Quick start (dev)
 
@@ -235,9 +264,11 @@ source for bill payments and cash hand-outs:
 - **Bill-pay / get-money** — a **bank** is a core `kind="bank"` locker (created
   and topped up on the core Lockers page). Cashiers **pay a bill** (bank balance
   ↓, cash in) or **get money** (bank balance ↑, cash out), with an optional
-  service charge added to the drawer; an overdraw on bill-pay is hard-blocked.
-  The money moves through core cash-flow, so it lands in the combined Cash Flow /
-  net-position view alongside the till.
+  service charge added to the drawer; an overdraw on bill-pay is hard-blocked, and
+  the cashier only sees banks the owner marked *cashier-accessible*. **Admins** get
+  the same on a back-office page, but choose **both** sides freely (any locker kind
+  or open till on the account side *and* the cash side). Every leg moves through
+  core cash-flow, so it lands in the combined Cash Flow / net-position view.
 - **Wallet tender** — a customer can pay a normal product sale by wallet
   transfer; it credits the device reload balance and stays out of the cash drawer.
 - **Per-device reconciliation** — cashier enters each device's counted opening &
@@ -270,7 +301,7 @@ at the till (a `🖨 Photocopy` tab beside `📶 Reload`):
 | Surface | Path | Who | Does |
 |---|---|---|---|
 | **Cashier terminal** | `/cashier` | all roles | barcode scan, product search, live cart, retail/wholesale/credit checkout, **split-tender payments (cash/card/online)**, **hold/park & resume sales**, **count-by-denomination drawer open/close**, **mid-shift withdrawals**, **day-end Z-report**, thermal receipt (80mm/58mm) + **reprint**, **returns/refunds**, **damage write-off**, **credit collection**, **serial/warranty lookup & replacement**, **suppliers at the counter** (opt-in per user) |
-| **Admin panel** | `/admin` | admin, manager | dashboard + alerts, products, inventory & **FEFO batches**, sales + **partial returns**, purchasing (GRN) + **supplier returns**, suppliers, customers & credit, expenses, **finance/profit** (net of returns, with **losses & recoveries**), reports (incl. **customer dues**, **returns**, **profit-by-category**, **sales-trend**, **warranty**), **cash register sessions & denominations**, **categories (nested)**, units, **conversions**, **barcode labels**, **warranty tracking + supplier recovery**, **damage report**, users, **audit log**, settings + **backup/restore** |
+| **Admin panel** | `/admin` | admin, manager | dashboard + alerts, products, inventory & **FEFO batches**, sales + **partial returns**, purchasing (GRN) + **supplier returns**, suppliers, customers & credit, expenses, **finance/profit** (net of returns, with **losses & recoveries**), reports (incl. **tender/payments**, **top products**, **sales by cashier**, **expenses by category**, **customer/supplier dues**, **returns**, **profit-by-category**, **sales-trend**, **warranty**), **cash register sessions & denominations**, **categories (nested)**, units, **conversions**, **barcode labels**, **warranty tracking + supplier recovery**, **damage report**, users, **audit log**, settings + **backup/restore** |
 
 Both call the **same services**. The cashier UI talks to the JSON API
 (`/api/*`); the admin panel is server-rendered HTML with HTMX partials.
@@ -378,10 +409,18 @@ reports (plus dashboard badges) read straight off this ledger.
   default), and a Settings toggle can **auto-print** the receipt on sale completion
   instead of showing the Print/New-Sale prompt. See **[PRINTING.md](PRINTING.md)**.
 - **Management reports** — a Reports hub (`/admin/reports`) of filterable,
-  **print/Save-as-PDF** reports: sales, finance/P&L, cash register, purchases,
-  suppliers, inventory valuation, batches/expiry, low-stock, expiring. Each has a
-  date/section filter, a totals row, and a print-optimized layout (no PDF library
-  — the browser's print dialog saves the PDF).
+  **print / Save-as-PDF** reports, most with a **Download CSV**: sales,
+  **tender/payments** (cash/card/online/credit/wallet actually collected),
+  finance/P&L, **top products**, profit-by-category, sales-trend, returns,
+  **sales by cashier**, **expenses by category**, cash register, purchases,
+  customer/supplier dues, inventory valuation, batches/expiry, low-stock,
+  warranty & recovery, damage. Each has a date filter, a totals row, and a
+  print-optimized layout (no PDF library — the browser's print dialog saves the PDF).
+- **Cash-drawer kick** — an ESC/POS pulse pops the physical drawer on every
+  till **cash** event (cash sale, deposit/withdrawal, credit collected, till
+  bill-pay/get-money, no-sale, test print) — fired on the money event, not the
+  paper. Setting-gated (off by default) — *"Open the cash drawer on till cash
+  events"* in **Admin → Settings**; works over CUPS and the Windows spooler (RAW).
 - **Cash management** — admin-managed note/coin **denominations**; the cashier
   opens and closes the drawer by **counting pieces** (total computed), can
   **continue with the last close** or count fresh, and records **mid-shift

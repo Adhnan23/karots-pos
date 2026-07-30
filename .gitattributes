@@ -1,0 +1,9 @@
+# Generated, but committed on purpose: it is embedded into the binary via
+# go:embed (static/embed.go), so a plain `go build` needs it present and the
+# deploy ships "just the binary". `make css`/`make build` regenerate it, so it
+# churns whenever template classes change. Mark it generated + no-diff so it
+# stops cluttering reviews and blame while staying tracked.
+static/css/tailwind.css linguist-generated=true -diff
+
+# Vendored third-party JS is not our code.
+static/vendor/** linguist-vendored=true -diff

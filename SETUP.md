@@ -1,4 +1,17 @@
-# Karots POS — Setup Guide
+<div align="center">
+
+# 🛠️ Karots POS — Setup Guide
+
+![Time](https://img.shields.io/badge/setup-~30%20minutes-16A34A?style=for-the-badge)
+![Difficulty](https://img.shields.io/badge/difficulty-beginner%20friendly-22C55E?style=for-the-badge)
+![OS](https://img.shields.io/badge/OS-Linux%20(recommended)%20%7C%20Windows-4B5563?style=for-the-badge)
+![Database](https://img.shields.io/badge/needs-PostgreSQL-4169E1?style=flat-square&logo=postgresql&logoColor=white)
+
+</div>
+
+> 📖 **In-depth printing reference** (paper widths, labels, cash drawer, logos,
+> troubleshooting) lives in **[`PRINTING.md`](PRINTING.md)**. Developer/build docs
+> are in **[`README.md`](README.md)**.
 
 This guide takes you from a freshly downloaded program to a running point-of-sale
 system that prints receipts and backs itself up. You only need two things from us:
@@ -159,13 +172,20 @@ they just log in with it; to require staff to choose their own PIN on first logi
 turn on **Force PIN change on first login** in **Admin → Settings** (you can also
 stop cashiers changing their own PIN there).
 
-> 🛟 **System login (keep this to yourself).** The hidden system admin never shows
-> in the user list and can't be edited or deactivated from the app, so a shop can
-> never lock you out. It logs in like any other user (phone `0000000001`, PIN
-> `2273` by default). Override per install with the `POS_SYSTEM_PHONE` /
-> `POS_SYSTEM_PIN` environment variables — keep these out of the shop's hands. The
-> account is re-created and its PIN reset on every startup, so you can always get
-> back in.
+> 🛟 **System login (installer only — keep this to yourself).** The hidden system
+> admin never shows in the user list and can't be edited or deactivated from the
+> app, so a shop can never lock itself out. It logs in like any other user
+> (phone `0000000001`).
+>
+> Its **PIN rotates every hour**, so there's no fixed password to leak. On a
+> properly built (bootstrapped) shop binary the code is derived per-install: the
+> shop reads its **Install ID** off the login screen and reads it to you, and you
+> compute the current PIN on your machine with `make support-pin ID=<install-id>`
+> (valid for the current hour ± one). For a shop that wants a **fixed** code
+> instead, set `POS_SYSTEM_PIN` (and optionally `POS_SYSTEM_PHONE`) in its `.env` —
+> that overrides the rotating one. A plain `go build` (not `make bootstrap`) has no
+> per-shop secret and falls back to a shared PIN **`2273`**; the server prints which
+> mode it's in on every boot. Full scheme: **[`docs/support-pin-scheme.md`](docs/support-pin-scheme.md)**.
 
 > ℹ️ `-init` gives you a clean, empty shop. If you instead want sample data to try
 > the system out, use `-seed` (demo products, suppliers and customers) — but don't
@@ -316,8 +336,14 @@ size, logo and footer always come from Settings.)
 print automatically instead, turn off **Admin → Settings → "Ask to print after each
 sale"**.
 
+**Cash drawer (optional):** if a cash drawer is wired into the receipt printer's
+RJ-11 port, turn on **Admin → Settings → "Open the cash drawer on till cash
+events"** and the drawer pops automatically on cash sales, deposits/withdrawals,
+credit collected and no-sale — no extra hardware setup. Use the **Test print**
+button to confirm it's wired.
+
 > For barcode labels, sticker sizes, the receipt paper width (80mm/58mm), shop
-> logo, and detailed troubleshooting, see **`PRINTING.md`**.
+> logo, the cash drawer, and detailed troubleshooting, see **[`PRINTING.md`](PRINTING.md)**.
 
 **Quick troubleshooting:**
 - *Empty suggestions in Settings* → CUPS isn't installed, or you haven't added a queue.

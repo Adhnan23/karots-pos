@@ -1,8 +1,21 @@
-# Printing (receipts & labels)
+<div align="center">
 
-> First-time installation (including the quick printer setup) lives in **`SETUP.md`**.
-> This document is the in-depth reference: paper widths, labels/TSPL, logo
-> rasterization, and full troubleshooting.
+# 🧾 Printing — receipts, labels & the cash drawer
+
+![Receipts](https://img.shields.io/badge/receipts-ESC%2FPOS-EA580C?style=for-the-badge)
+![Labels](https://img.shields.io/badge/labels-TSPL-0EA5E9?style=for-the-badge)
+![Drawer](https://img.shields.io/badge/drawer-ESC%2FPOS%20kick-16A34A?style=for-the-badge)
+![Transport](https://img.shields.io/badge/transport-CUPS%20%7C%20winspool%20%7C%20tcp%3A9100-4B5563?style=flat-square)
+![No browser](https://img.shields.io/badge/no%20browser-server--side%20raw-22C55E?style=flat-square)
+
+</div>
+
+> 🛠️ **First-time installation** (including the quick printer setup) lives in
+> **[`SETUP.md`](SETUP.md)**. This document is the in-depth reference: paper widths,
+> labels/TSPL, the cash drawer, logo rasterization, and full troubleshooting.
+
+> **TL;DR** — receipts (**ESC/POS**) and labels (**TSPL**) render in Go and are sent
+> **raw** to the printer: no browser, no PDF, no driver. The queue must be **raw**.
 
 Receipts print **server-side as ESC/POS** straight from the Go app to the thermal
 printer. The browser is not involved — no print dialog, no PDF, no driver. This is
@@ -82,6 +95,32 @@ per-cashier rule.
 
 > Cash drawers are independent too: each cashier's till/Z-report is keyed to their
 > user account, so give every cashier their **own** login.
+
+## 💵 Cash drawer (auto-kick)
+
+Most thermal receipt printers have an **RJ-11 drawer port**: the drawer's latch is
+released by an electrical pulse the printer emits when it receives the ESC/POS
+*kick* command (`ESC p`). Karots sends that pulse itself — it does **not** ride on a
+receipt — so the drawer opens on the **money event**, even when receipt printing is
+off or the sale was card-only.
+
+- **When it fires** — every till **cash** event: a cash (or split-with-cash) sale,
+  a drawer deposit/withdrawal, **credit collected**, a till bill-pay / get-money, a
+  manual **No-Sale**, and the **Test print** button (a one-click hardware check).
+  Card/online/wallet-only sales don't kick — no cash changed hands.
+- **It's gated** — off by default. Turn it on in **Admin → Settings** with
+  *"Open the cash drawer on till cash events"*. A **Drawer pin** dropdown selects
+  *Pin 2 (most drawers)* or *Pin 5* for stubborn drawers.
+- **Best-effort** — the kick is fired *after* the money is safely recorded and never
+  fails the sale: a drawer that's unplugged or a printer that's offline just means
+  no pulse, never a lost transaction.
+- **Transport** — the pulse goes out the **same** raw path as receipts (CUPS `lp -o
+  raw`, the Windows spooler RAW datatype, or `tcp://host:9100`), to the shop's
+  receipt printer (per-cashier printer respected).
+
+> The drawer is wired to the *receipt* printer's port, so a counter that kicks the
+> drawer needs its receipt printer reachable — even if you've turned receipt
+> *printing* off. Use **Test print** to confirm the wiring.
 
 ## Barcode label printing
 
