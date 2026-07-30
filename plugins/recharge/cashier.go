@@ -501,7 +501,7 @@ func (h *cashierUI) BankTx(c echo.Context) error {
 		return apperr.Validation("choose a bank")
 	}
 	bank, err := h.p.lockers.Get(ctx, bankID)
-	if err != nil || bank == nil || !bank.IsActive || bank.Kind != lockers.KindBank {
+	if err != nil || !bankUsableByCashier(bank) {
 		return apperr.Validation("choose a valid bank")
 	}
 	amt, err := money.Parse(c.FormValue("amount"))
@@ -532,35 +532,14 @@ func (h *cashierUI) BankTx(c echo.Context) error {
 	if ref != "" {
 		biller = "Bill " + ref
 	}
-	till := cashflow.Till(uid)
-	bankLoc := cashflow.Locker(bankID)
-	ext := cashflow.External()
-	type leg struct {
-		from, to cashflow.Location
-		amount   decimal.Decimal
-		party    string
-	}
-	var legs []leg
-	switch typ {
-	case "billpay":
-		// bank down (guarded) first, then cash in (bill + service charge).
-		legs = append(legs, leg{bankLoc, ext, amt, biller})
-		legs = append(legs, leg{ext, till, amt.Add(svc), "Customer"})
-	case "getmoney":
-		// cash out (guarded) first, then bank up, then the service-charge cash-in.
-		legs = append(legs, leg{till, ext, amt, "Customer"})
-		legs = append(legs, leg{ext, bankLoc, amt, "Customer"})
-		if svc.IsPositive() {
-			legs = append(legs, leg{ext, till, svc, "Customer"})
-		}
-	}
+	legs := buildBankLegs(typ, cashflow.Locker(bankID), cashflow.Till(uid), amt, svc, biller)
 
 	// All legs in ONE transaction so a drawer/bank overdraw rolls everything back.
 	if err := appdb.WithTx(ctx, h.p.core.DB, func(tx *sqlx.Tx) error {
 		for _, l := range legs {
 			if _, err := h.p.cashflow.MoveTx(ctx, tx, cashflow.MoveInput{
-				From: l.from, To: l.to, Amount: l.amount, Reason: reason,
-				ReceiptKind: typ, Party: l.party, ActorID: uid,
+				From: l.From, To: l.To, Amount: l.Amount, Reason: reason,
+				ReceiptKind: typ, Party: l.Party, ActorID: uid,
 			}); err != nil {
 				return err
 			}
@@ -656,17 +635,20 @@ func (h *cashierUI) BillPrint(c echo.Context) error {
 	return response.NoContent(c)
 }
 
-// bankLockers returns the active core kind="bank" lockers (the shop's bank
-// accounts) with live balances, for the cashier bill-pay / get-money picker.
+// bankLockers returns the active core kind="bank" lockers the owner marked
+// cashier-accessible, with live balances, for the cashier bill-pay / get-money
+// picker. A "bank" is a plain core locker managed under Money → Cash Lockers; the
+// plugin only reads & moves them. Banks with cashier_access off are hidden — the
+// cashier literally cannot pick them (and BankTx re-checks on POST).
 func (p *Plugin) bankLockers(ctx context.Context) ([]lockers.Locker, error) {
 	all, err := p.lockers.List(ctx, true)
 	if err != nil {
 		return nil, err
 	}
 	banks := make([]lockers.Locker, 0, len(all))
-	for _, l := range all {
-		if l.Kind == lockers.KindBank {
-			banks = append(banks, l)
+	for i := range all {
+		if bankUsableByCashier(&all[i]) {
+			banks = append(banks, all[i])
 		}
 	}
 	return banks, nil
