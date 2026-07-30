@@ -528,3 +528,99 @@ templ TopProductsReport(d TopProductsData) {
 		</table>
 	}
 }
+
+// ============================ Sales by cashier ============================
+
+type CashierSalesData struct {
+	ShopName, Symbol, From, To, Preset string
+	Rows                               []reports.CashierSalesRow
+	Count                              int
+	Gross, Discount, Net               decimal.Decimal
+}
+
+templ CashierSalesReport(d CashierSalesData) {
+	@layouts.Report("Sales by Cashier", d.ShopName) {
+		@rptRangeForm("/admin/reports/sales-by-cashier", d.Preset, d.From, d.To) {
+			<a
+				class="no-print px-4 py-1.5 rounded-lg border text-sm"
+				href={ templ.SafeURL("/admin/reports/sales-by-cashier?format=csv&from=" + d.From + "&to=" + d.To) }
+			>Download CSV</a>
+		}
+		@rptPeriodLine(d.From, d.To)
+		<table class="w-full text-sm">
+			<thead class="text-left text-slate-500 border-b">
+				<tr><th class="py-1.5">Cashier</th><th class="py-1.5 text-right">Sales</th><th class="py-1.5 text-right">Gross</th><th class="py-1.5 text-right">Discount</th><th class="py-1.5 text-right">Net</th></tr>
+			</thead>
+			<tbody>
+				for _, r := range d.Rows {
+					<tr class="border-b last:border-0">
+						<td class="py-1.5 font-medium">{ r.Cashier }</td>
+						<td class="py-1.5 text-right">{ strconv.Itoa(r.Count) }</td>
+						<td class="py-1.5 text-right">{ money.Format(d.Symbol, r.Gross) }</td>
+						<td class="py-1.5 text-right">{ money.Display(r.Discount) }</td>
+						<td class="py-1.5 text-right">{ money.Format(d.Symbol, r.Net) }</td>
+					</tr>
+				}
+				if len(d.Rows) == 0 {
+					<tr><td colspan="5" class="py-6 text-center text-slate-400">No sales in this period.</td></tr>
+				}
+			</tbody>
+			<tfoot class="border-t-2 font-semibold">
+				<tr>
+					<td class="py-2">Total</td>
+					<td class="py-2 text-right">{ strconv.Itoa(d.Count) }</td>
+					<td class="py-2 text-right">{ money.Format(d.Symbol, d.Gross) }</td>
+					<td class="py-2 text-right">{ money.Display(d.Discount) }</td>
+					<td class="py-2 text-right">{ money.Format(d.Symbol, d.Net) }</td>
+				</tr>
+			</tfoot>
+		</table>
+	}
+}
+
+// ============================ Expenses by category ============================
+
+type ExpensesReportData struct {
+	ShopName, Symbol, From, To, Preset string
+	Rows                               []reports.ExpenseCatRow
+	Count                              int
+	Total                              decimal.Decimal
+}
+
+templ ExpensesReport(d ExpensesReportData) {
+	@layouts.Report("Expenses by Category", d.ShopName) {
+		@rptRangeForm("/admin/reports/expenses", d.Preset, d.From, d.To) {
+			<a
+				class="no-print px-4 py-1.5 rounded-lg border text-sm"
+				href={ templ.SafeURL("/admin/reports/expenses?format=csv&from=" + d.From + "&to=" + d.To) }
+			>Download CSV</a>
+		}
+		@rptPeriodLine(d.From, d.To)
+		<table class="w-full text-sm">
+			<thead class="text-left text-slate-500 border-b">
+				<tr><th class="py-1.5">Category</th><th class="py-1.5 text-right">Count</th><th class="py-1.5 text-right">Total</th><th class="py-1.5 text-right">Share</th></tr>
+			</thead>
+			<tbody>
+				for _, r := range d.Rows {
+					<tr class="border-b last:border-0">
+						<td class="py-1.5 font-medium">{ r.Category }</td>
+						<td class="py-1.5 text-right">{ strconv.Itoa(r.Count) }</td>
+						<td class="py-1.5 text-right">{ money.Format(d.Symbol, r.Total) }</td>
+						<td class="py-1.5 text-right text-slate-500">{ pctOf(r.Total, d.Total) }%</td>
+					</tr>
+				}
+				if len(d.Rows) == 0 {
+					<tr><td colspan="4" class="py-6 text-center text-slate-400">No expenses in this period.</td></tr>
+				}
+			</tbody>
+			<tfoot class="border-t-2 font-semibold">
+				<tr>
+					<td class="py-2">Total expenses</td>
+					<td class="py-2 text-right">{ strconv.Itoa(d.Count) }</td>
+					<td class="py-2 text-right">{ money.Format(d.Symbol, d.Total) }</td>
+					<td class="py-2"></td>
+				</tr>
+			</tfoot>
+		</table>
+	}
+}

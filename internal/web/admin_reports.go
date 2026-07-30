@@ -121,6 +121,69 @@ func (a *adminUI) SalesReport(c echo.Context) error {
 	}))
 }
 
+// CashierSalesReport ranks sales per cashier over a range (staff performance).
+func (a *adminUI) CashierSalesReport(c echo.Context) error {
+	ctx := c.Request().Context()
+	from, to, fromStr, toStr, preset, err := rangeStrings(c)
+	if err != nil {
+		return err
+	}
+	rows, err := a.s.reports.SalesByCashier(ctx, from, to)
+	if err != nil {
+		return err
+	}
+	d := adminpages.CashierSalesData{
+		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx), From: fromStr, To: toStr, Preset: preset, Rows: rows,
+	}
+	for _, r := range rows {
+		d.Count += r.Count
+		d.Gross = d.Gross.Add(r.Gross)
+		d.Discount = d.Discount.Add(r.Discount)
+		d.Net = d.Net.Add(r.Net)
+	}
+	if wantsCSV(c) {
+		out := make([][]string, 0, len(rows))
+		for _, r := range rows {
+			out = append(out, []string{
+				r.Cashier, strconv.Itoa(r.Count), csvMoney(r.Gross), csvMoney(r.Discount), csvMoney(r.Net),
+			})
+		}
+		return writeCSV(c, "sales_by_cashier_"+fromStr+"_"+toStr,
+			[]string{"Cashier", "Sales", "Gross", "Discount", "Net"}, out)
+	}
+	return response.RenderPage(c, adminpages.CashierSalesReport(d))
+}
+
+// ExpensesReport breaks operating expenses down by category over a range — the
+// detail behind the single "operating expenses" line in the P&L.
+func (a *adminUI) ExpensesReport(c echo.Context) error {
+	ctx := c.Request().Context()
+	from, to, fromStr, toStr, preset, err := rangeStrings(c)
+	if err != nil {
+		return err
+	}
+	rows, err := a.s.reports.ExpensesByCategory(ctx, from, to)
+	if err != nil {
+		return err
+	}
+	d := adminpages.ExpensesReportData{
+		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx), From: fromStr, To: toStr, Preset: preset, Rows: rows,
+	}
+	for _, r := range rows {
+		d.Count += r.Count
+		d.Total = d.Total.Add(r.Total)
+	}
+	if wantsCSV(c) {
+		out := make([][]string, 0, len(rows))
+		for _, r := range rows {
+			out = append(out, []string{r.Category, strconv.Itoa(r.Count), csvMoney(r.Total)})
+		}
+		return writeCSV(c, "expenses_by_category_"+fromStr+"_"+toStr,
+			[]string{"Category", "Count", "Total"}, out)
+	}
+	return response.RenderPage(c, adminpages.ExpensesReport(d))
+}
+
 // TopProductsReport ranks best-selling products by net revenue or net quantity
 // over a range — the multi-product ranking Product Sales (one product at a time)
 // can't give.

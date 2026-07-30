@@ -249,6 +249,57 @@ func (s *Service) Compute(ctx context.Context, from, to time.Time) (*PL, error) 
 	return pl, nil
 }
 
+// CashierSalesRow is one cashier's sales tally for the sales-by-cashier report.
+type CashierSalesRow struct {
+	Cashier  string          `db:"cashier"  json:"cashier"`
+	Count    int             `db:"count"    json:"count"`
+	Gross    decimal.Decimal `db:"gross"    json:"gross"`
+	Discount decimal.Decimal `db:"discount" json:"discount"`
+	Net      decimal.Decimal `db:"net"      json:"net"`
+}
+
+// SalesByCashier totals sales per cashier over a period (void sales excluded),
+// ranked by net takings — the staff-performance cut Cash Register (drawer
+// over/short only) doesn't give.
+func (s *Service) SalesByCashier(ctx context.Context, from, to time.Time) ([]CashierSalesRow, error) {
+	var rows []CashierSalesRow
+	if err := s.db.SelectContext(ctx, &rows, `
+		SELECT u.name AS cashier, COUNT(*) AS count,
+		       COALESCE(SUM(s.subtotal),0) AS gross,
+		       COALESCE(SUM(s.discount),0) AS discount,
+		       COALESCE(SUM(s.total),0)    AS net
+		FROM sales s JOIN users u ON u.id = s.cashier_id
+		WHERE s.status <> 'void' AND s.created_at >= $1 AND s.created_at < $2
+		GROUP BY u.name ORDER BY net DESC`, from, to); err != nil {
+		return nil, apperr.Internal("failed to compute sales by cashier", err)
+	}
+	return rows, nil
+}
+
+// ExpenseCatRow is one expense category's total for the expenses report.
+type ExpenseCatRow struct {
+	Category string          `db:"category" json:"category"`
+	Count    int             `db:"count"    json:"count"`
+	Total    decimal.Decimal `db:"total"    json:"total"`
+}
+
+// ExpensesByCategory totals recorded operating expenses per category over a
+// period (by expense_date), ranked by amount. The P&L shows only the single
+// expenses total; this is where it breaks down.
+func (s *Service) ExpensesByCategory(ctx context.Context, from, to time.Time) ([]ExpenseCatRow, error) {
+	var rows []ExpenseCatRow
+	if err := s.db.SelectContext(ctx, &rows, `
+		SELECT COALESCE(NULLIF(category,''),'(uncategorised)') AS category,
+		       COUNT(*) AS count, COALESCE(SUM(amount),0) AS total
+		FROM expenses
+		WHERE expense_date >= $1 AND expense_date < $2
+		GROUP BY COALESCE(NULLIF(category,''),'(uncategorised)')
+		ORDER BY total DESC`, from, to); err != nil {
+		return nil, apperr.Internal("failed to compute expenses by category", err)
+	}
+	return rows, nil
+}
+
 // TopProducts ranks products by net revenue or net quantity sold over a period
 // (net = after returns). orderBy is "qty" or "revenue" (default); limit is capped
 // to a sane range. order is chosen from a whitelist, so concatenating it is safe.
