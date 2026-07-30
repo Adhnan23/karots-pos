@@ -178,6 +178,21 @@ func (a *adminUI) ReturnsReport(c echo.Context) error {
 	for _, r := range rows {
 		d.TotalRefund = d.TotalRefund.Add(r.RefundValue)
 	}
+	if wantsCSV(c) {
+		out := make([][]string, 0, len(rows))
+		for _, r := range rows {
+			cust := ""
+			if r.Customer != nil {
+				cust = *r.Customer
+			}
+			out = append(out, []string{
+				r.SaleDate.Format("2006-01-02 15:04"), r.ReceiptNo, r.ProductName,
+				r.Qty.String(), csvMoney(r.RefundValue), cust,
+			})
+		}
+		return writeCSV(c, "returns_"+fromStr+"_"+toStr,
+			[]string{"Sale date", "Receipt", "Product", "Qty", "Refund", "Customer"}, out)
+	}
 	d.Rows = paginate(rows, d.Page, reportPageSize)
 	return response.RenderPage(c, adminpages.ReturnsReport(d))
 }
@@ -205,6 +220,16 @@ func (a *adminUI) ProfitByCategoryReport(c echo.Context) error {
 		d.TotalRevenue = d.TotalRevenue.Add(r.Revenue)
 		d.TotalProfit = d.TotalProfit.Add(r.Profit)
 	}
+	if wantsCSV(c) {
+		out := make([][]string, 0, len(rows))
+		for _, r := range rows {
+			out = append(out, []string{
+				r.Category, csvMoney(r.Revenue), csvMoney(r.COGS), csvMoney(r.Profit),
+			})
+		}
+		return writeCSV(c, "profit_by_category_"+fromStr+"_"+toStr,
+			[]string{"Category", "Revenue", "COGS", "Profit"}, out)
+	}
 	return response.RenderPage(c, adminpages.ProfitByCategoryReport(d))
 }
 
@@ -231,6 +256,16 @@ func (a *adminUI) SalesTrendReport(c echo.Context) error {
 		if r.Revenue.GreaterThan(d.MaxRevenue) {
 			d.MaxRevenue = r.Revenue
 		}
+	}
+	if wantsCSV(c) {
+		out := make([][]string, 0, len(rows))
+		for _, r := range rows {
+			out = append(out, []string{
+				r.Day.Format("2006-01-02"), strconv.Itoa(r.Count), csvMoney(r.Revenue), csvMoney(r.Profit),
+			})
+		}
+		return writeCSV(c, "sales_trend_"+fromStr+"_"+toStr,
+			[]string{"Date", "Sales", "Revenue", "Profit"}, out)
 	}
 	return response.RenderPage(c, adminpages.SalesTrendReport(d))
 }
@@ -317,6 +352,30 @@ func (a *adminUI) CashRegisterReport(c echo.Context) error {
 		if s.Difference != nil {
 			d.OverShort = d.OverShort.Add(*s.Difference)
 		}
+	}
+	if wantsCSV(c) {
+		out := make([][]string, 0, len(rows))
+		for _, s := range rows {
+			closedAt, expected, closing, diff := "", "", "", ""
+			if s.ClosedAt != nil {
+				closedAt = s.ClosedAt.Format("2006-01-02 15:04")
+			}
+			if s.ExpectedCash != nil {
+				expected = csvMoney(*s.ExpectedCash)
+			}
+			if s.ClosingCash != nil {
+				closing = csvMoney(*s.ClosingCash)
+			}
+			if s.Difference != nil {
+				diff = csvMoney(*s.Difference)
+			}
+			out = append(out, []string{
+				s.UserName, s.OpenedAt.Format("2006-01-02 15:04"), closedAt,
+				csvMoney(s.OpeningCash), expected, closing, diff,
+			})
+		}
+		return writeCSV(c, "cash_register_"+fromStr+"_"+toStr,
+			[]string{"Cashier", "Opened", "Closed", "Opening", "Expected", "Counted", "Over/Short"}, out)
 	}
 	d.Rows = paginate(rows, d.Page, reportPageSize)
 	return response.RenderPage(c, adminpages.CashRegisterReport(d))

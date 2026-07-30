@@ -126,6 +126,10 @@ type ReturnsReportData struct {
 templ ReturnsReport(d ReturnsReportData) {
 	@layouts.Report("Returns / Refunds", d.ShopName) {
 		@rptRangeForm("/admin/reports/returns", d.Preset, d.From, d.To) {
+			<a
+				class="no-print px-4 py-1.5 rounded-lg border text-sm"
+				href={ templ.SafeURL("/admin/reports/returns?format=csv&from=" + d.From + "&to=" + d.To) }
+			>Download CSV</a>
 		}
 		@rptPeriodLine(d.From, d.To)
 		<table class="w-full text-sm">
@@ -169,6 +173,10 @@ type CategoryProfitData struct {
 templ ProfitByCategoryReport(d CategoryProfitData) {
 	@layouts.Report("Profit by Category", d.ShopName) {
 		@rptRangeForm("/admin/reports/profit-by-category", d.Preset, d.From, d.To) {
+			<a
+				class="no-print px-4 py-1.5 rounded-lg border text-sm"
+				href={ templ.SafeURL("/admin/reports/profit-by-category?format=csv&from=" + d.From + "&to=" + d.To) }
+			>Download CSV</a>
 			<div>
 				<label class="block text-xs text-slate-500 mb-1">Categories</label>
 				<details class="relative">
@@ -235,6 +243,10 @@ type SalesTrendData struct {
 templ SalesTrendReport(d SalesTrendData) {
 	@layouts.Report("Sales Trend", d.ShopName) {
 		@rptRangeForm("/admin/reports/sales-trend", d.Preset, d.From, d.To) {
+			<a
+				class="no-print px-4 py-1.5 rounded-lg border text-sm"
+				href={ templ.SafeURL("/admin/reports/sales-trend?format=csv&group=" + d.Group + "&from=" + d.From + "&to=" + d.To) }
+			>Download CSV</a>
 			<div>
 				<label class="block text-xs text-slate-500 mb-1">Group by</label>
 				<select name="group" class="border rounded-lg px-3 py-1.5">
