@@ -139,6 +139,31 @@ none are unexpectedly locked out.
   truth, exactly as admin Refill already does).
 - No schema/migration change.
 
+## Report correctness (post-implementation check)
+
+Admin bill-pay / get-money creates the same kind of rows the cashier flow does
+(`recharge_bill_tx` + `cashflow` legs), just with no session and arbitrary piles.
+After implementation, verify every report that reads those sources still adds up
+and does not double-count the new admin rows:
+
+- **Admin Reload & Bills Report** (`adminUI.Report`): `ServiceEarned` =
+  `sumServiceCharge(float ledger) + sumBillServiceCharge(bills)` — `BillLedger`
+  has no session filter, so admin bill rows **must** be counted here; confirm an
+  admin service charge raises this figure. `Balances` / `FloatOnHand` read device
+  float only and must be **unchanged** by bill-pay (it touches no device float).
+  `TypeBars` reads the float ledger (`recharge_transactions`), which billpay/
+  getmoney never write to — confirm the admin rows do **not** leak into it (same
+  as cashier today).
+- **Admin Bills receipts tab + CSV / ledger**: admin rows appear, session-less,
+  with the right type/amount/service and a reprintable slip.
+- **Core Cash Flow** (`cashflow` overview): each leg shows with the correct sign
+  and pile; net effect = service charge into the cash side, principal is a wash
+  through External. No orphan or duplicated legs.
+- **P&L / shop earnings**: the service charge is recognised the **same way** the
+  cashier flow recognises it (whatever that is today) — the admin path must not
+  introduce a different treatment. Confirm cashier vs admin produce identical
+  accounting for an identical service charge.
+
 ## Verification
 
 1. `make build` (regenerates templ) + `go vet ./...` + `go test ./plugins/recharge/... ./internal/web/...`.
@@ -149,3 +174,6 @@ none are unexpectedly locked out.
 4. Pick an open till as the cash side → confirm the drawer kick fires (setting on).
 5. Cashier regression: a bank with `cashier_access = off` no longer appears and is
    rejected if posted; an accessible bank still works as before.
+6. Report correctness: run the checks in the section above against the dev DB — in
+   particular that admin service charge lands in `ServiceEarned` and in P&L exactly
+   as the cashier flow does, and that device float / TypeBars are untouched.
