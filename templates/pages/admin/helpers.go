@@ -32,6 +32,7 @@ func reportHubCards() []reportHubCard {
 		{"/admin/reports/profit-by-category", "Profit by Category", "Net revenue & profit per category"},
 		{"/admin/reports/sales-trend", "Daily Sales Trend", "Day-by-day net revenue & profit"},
 		{"/admin/reports/product-sales", "Product Sales", "One product's units over time vs last year"},
+		{"/admin/reports/top-products", "Top Products", "Best sellers by revenue or quantity"},
 		{"/admin/reports/warranty", "Warranty & Recovery", "Replacement cost vs supplier recovery"},
 		{"/admin/reports/cash-register", "Cash Register", "Drawer sessions with over/short"},
 		{"/admin/reports/purchases", "Purchases", "GRNs received in a period"},

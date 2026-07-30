@@ -474,3 +474,57 @@ templ TenderReport(d TenderReportData) {
 		<p class="no-print text-xs text-slate-400 mt-3">Each payment line is counted for its own amount, so a sale split across methods (e.g. part cash, part card) shows correctly under each.</p>
 	}
 }
+
+// ============================ Top products ============================
+
+type TopProductsData struct {
+	ShopName, Symbol, From, To, Preset, Order string
+	Rows                                      []reports.ProductRevenue
+	TotalQty, TotalRevenue, TotalProfit       decimal.Decimal
+}
+
+templ TopProductsReport(d TopProductsData) {
+	@layouts.Report("Top Products", d.ShopName) {
+		@rptRangeForm("/admin/reports/top-products", d.Preset, d.From, d.To) {
+			<div>
+				<label class="block text-xs text-slate-500 mb-1">Rank by</label>
+				<select name="order" class="border rounded-lg px-3 py-1.5">
+					@statusOpt("revenue", "Revenue", d.Order)
+					@statusOpt("qty", "Quantity", d.Order)
+				</select>
+			</div>
+			<a
+				class="no-print px-4 py-1.5 rounded-lg border text-sm"
+				href={ templ.SafeURL("/admin/reports/top-products?format=csv&order=" + d.Order + "&from=" + d.From + "&to=" + d.To) }
+			>Download CSV</a>
+		}
+		@rptPeriodLine(d.From, d.To)
+		<table class="w-full text-sm">
+			<thead class="text-left text-slate-500 border-b">
+				<tr><th class="py-1.5 w-8">#</th><th class="py-1.5">Product</th><th class="py-1.5 text-right">Qty sold</th><th class="py-1.5 text-right">Revenue</th><th class="py-1.5 text-right">Profit</th></tr>
+			</thead>
+			<tbody>
+				for i, r := range d.Rows {
+					<tr class="border-b last:border-0">
+						<td class="py-1.5 text-slate-400">{ strconv.Itoa(i + 1) }</td>
+						<td class="py-1.5 font-medium">{ r.ProductName }</td>
+						<td class="py-1.5 text-right">{ money.Display(r.Qty) }</td>
+						<td class="py-1.5 text-right">{ money.Format(d.Symbol, r.Revenue) }</td>
+						<td class="py-1.5 text-right">{ money.Format(d.Symbol, r.Profit) }</td>
+					</tr>
+				}
+				if len(d.Rows) == 0 {
+					<tr><td colspan="5" class="py-6 text-center text-slate-400">No sales in this period.</td></tr>
+				}
+			</tbody>
+			<tfoot class="border-t-2 font-semibold">
+				<tr>
+					<td class="py-2" colspan="2">Total (top { strconv.Itoa(len(d.Rows)) })</td>
+					<td class="py-2 text-right">{ money.Display(d.TotalQty) }</td>
+					<td class="py-2 text-right">{ money.Format(d.Symbol, d.TotalRevenue) }</td>
+					<td class="py-2 text-right">{ money.Format(d.Symbol, d.TotalProfit) }</td>
+				</tr>
+			</tfoot>
+		</table>
+	}
+}

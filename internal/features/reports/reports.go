@@ -249,6 +249,38 @@ func (s *Service) Compute(ctx context.Context, from, to time.Time) (*PL, error) 
 	return pl, nil
 }
 
+// TopProducts ranks products by net revenue or net quantity sold over a period
+// (net = after returns). orderBy is "qty" or "revenue" (default); limit is capped
+// to a sane range. order is chosen from a whitelist, so concatenating it is safe.
+func (s *Service) TopProducts(ctx context.Context, from, to time.Time, orderBy string, limit int) ([]ProductRevenue, error) {
+	order := "revenue"
+	if orderBy == "qty" {
+		order = "qty"
+	}
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	var rows []ProductRevenue
+	q := `
+		SELECT p.name AS product_name,
+		       SUM(si.quantity - si.returned_qty) AS qty,
+		       SUM( (si.subtotal / NULLIF(si.quantity,0)) * (si.quantity - si.returned_qty) ) AS revenue,
+		       SUM( (si.subtotal / NULLIF(si.quantity,0)) * (si.quantity - si.returned_qty)
+		            - (si.quantity - si.returned_qty) * si.cost_price ) AS profit
+		FROM sale_items si
+		JOIN sales s ON s.id = si.sale_id
+		JOIN products p ON p.id = si.product_id
+		WHERE s.status <> 'void' AND s.created_at >= $1 AND s.created_at < $2
+		GROUP BY p.name
+		HAVING SUM(si.quantity - si.returned_qty) > 0
+		ORDER BY ` + order + ` DESC
+		LIMIT $3`
+	if err := s.db.SelectContext(ctx, &rows, q, from, to, limit); err != nil {
+		return nil, apperr.Internal("failed to compute top products", err)
+	}
+	return rows, nil
+}
+
 // TenderRow is one payment method's tally for the tender summary.
 type TenderRow struct {
 	Method string          `db:"method" json:"method"`

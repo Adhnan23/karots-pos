@@ -121,6 +121,43 @@ func (a *adminUI) SalesReport(c echo.Context) error {
 	}))
 }
 
+// TopProductsReport ranks best-selling products by net revenue or net quantity
+// over a range — the multi-product ranking Product Sales (one product at a time)
+// can't give.
+func (a *adminUI) TopProductsReport(c echo.Context) error {
+	ctx := c.Request().Context()
+	from, to, fromStr, toStr, preset, err := rangeStrings(c)
+	if err != nil {
+		return err
+	}
+	orderBy := c.QueryParam("order")
+	if orderBy != "qty" {
+		orderBy = "revenue"
+	}
+	rows, err := a.s.reports.TopProducts(ctx, from, to, orderBy, 50)
+	if err != nil {
+		return err
+	}
+	d := adminpages.TopProductsData{
+		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx),
+		From: fromStr, To: toStr, Preset: preset, Order: orderBy, Rows: rows,
+	}
+	for _, r := range rows {
+		d.TotalQty = d.TotalQty.Add(r.Qty)
+		d.TotalRevenue = d.TotalRevenue.Add(r.Revenue)
+		d.TotalProfit = d.TotalProfit.Add(r.Profit)
+	}
+	if wantsCSV(c) {
+		out := make([][]string, 0, len(rows))
+		for _, r := range rows {
+			out = append(out, []string{r.ProductName, r.Qty.String(), csvMoney(r.Revenue), csvMoney(r.Profit)})
+		}
+		return writeCSV(c, "top_products_"+fromStr+"_"+toStr,
+			[]string{"Product", "Qty sold", "Revenue", "Profit"}, out)
+	}
+	return response.RenderPage(c, adminpages.TopProductsReport(d))
+}
+
 // TenderReport breaks sales tender down by payment method (cash / card / online /
 // credit / wallet) over a range — the "what actually came in as cash vs card"
 // view the sales-list method filter can't give (it over-counts split payments).
