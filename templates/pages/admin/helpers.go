@@ -34,7 +34,6 @@ func reportHubCards() []reportHubCard {
 		{"/admin/reports/warranty", "Warranty & Recovery", "Replacement cost vs supplier recovery"},
 		{"/admin/reports/cash-register", "Cash Register", "Drawer sessions with over/short"},
 		{"/admin/reports/purchases", "Purchases", "GRNs received in a period"},
-		{"/admin/reports/suppliers", "Suppliers", "Outstanding payables snapshot"},
 		{"/admin/reports/customer-dues", "Customer Dues", "Receivables — who owes you money"},
 		{"/admin/reports/supplier-dues", "Supplier Dues", "Payables — who you owe money"},
 		{"/admin/reports/inventory", "Inventory Valuation", "Stock on hand at cost & retail"},
@@ -42,7 +41,6 @@ func reportHubCards() []reportHubCard {
 		{"/admin/reports/recipe-variance", "Recipe Variance", "Expected vs actual ingredient use"},
 		{"/admin/reports/service-profit", "Service Profit", "Income, ingredients & costs per service"},
 		{"/admin/reports/low-stock", "Low Stock", "Items at or below reorder level"},
-		{"/admin/reports/expiring", "Expiring Stock", "Batches expiring soon"},
 		{"/admin/damage", "Damage Report", "Damaged/written-off stock & recovery"},
 	}
 	for _, rc := range layouts.PluginReportCards() {

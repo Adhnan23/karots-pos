@@ -369,40 +369,6 @@ templ PurchasesReport(d PurchasesReportData) {
 	}
 }
 
-// ============================ Suppliers report ============================
-
-type SuppliersReportData struct {
-	ShopName, Symbol string
-	Rows             []suppliers.Supplier
-	TotalPayable     decimal.Decimal
-}
-
-templ SuppliersReport(d SuppliersReportData) {
-	@layouts.Report("Suppliers — Outstanding Payables", d.ShopName) {
-		<table class="w-full text-sm">
-			<thead class="text-left text-slate-500 border-b">
-				<tr><th class="py-1.5">Supplier</th><th class="py-1.5">Contact</th><th class="py-1.5">Phone</th><th class="py-1.5 text-right">Outstanding</th></tr>
-			</thead>
-			<tbody>
-				for _, s := range d.Rows {
-					<tr class="border-b last:border-0">
-						<td class="py-1.5 font-medium">{ s.Name }</td>
-						<td class="py-1.5 text-slate-500">{ strOrEmpty(s.ContactPerson) }</td>
-						<td class="py-1.5 text-slate-500">{ strOrEmpty(s.Phone) }</td>
-						<td class="py-1.5 text-right">{ money.Format(d.Symbol, s.OutstandingBalance) }</td>
-					</tr>
-				}
-				if len(d.Rows) == 0 {
-					<tr><td colspan="4" class="py-6 text-center text-slate-400">No suppliers.</td></tr>
-				}
-			</tbody>
-			<tfoot class="border-t-2 font-semibold">
-				<tr><td class="py-2" colspan="3">Total payable</td><td class="py-2 text-right">{ money.Format(d.Symbol, d.TotalPayable) }</td></tr>
-			</tfoot>
-		</table>
-	}
-}
-
 // ============================ Customer dues ============================
 
 type CustomerDuesData struct {

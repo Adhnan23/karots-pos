@@ -372,19 +372,6 @@ func (a *adminUI) PurchasesReport(c echo.Context) error {
 	return response.RenderPage(c, adminpages.PurchasesReport(d))
 }
 
-func (a *adminUI) SuppliersReport(c echo.Context) error {
-	ctx := c.Request().Context()
-	rows, err := a.s.suppliers.List(ctx, "")
-	if err != nil {
-		return err
-	}
-	d := adminpages.SuppliersReportData{ShopName: a.shopName(ctx), Symbol: a.symbol(ctx), Rows: rows}
-	for _, s := range rows {
-		d.TotalPayable = d.TotalPayable.Add(s.OutstandingBalance)
-	}
-	return response.RenderPage(c, adminpages.SuppliersReport(d))
-}
-
 func (a *adminUI) CustomerDuesReport(c echo.Context) error {
 	ctx := c.Request().Context()
 	rows, err := a.s.customers.Owing(ctx)

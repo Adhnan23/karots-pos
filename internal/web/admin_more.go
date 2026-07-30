@@ -1270,27 +1270,7 @@ func (a *adminUI) BatchPriceSet(c echo.Context) error {
 	return c.NoContent(http.StatusOK)
 }
 
-// ============================ Reports: expiring & low-stock ============================
-
-func (a *adminUI) ExpiringReport(c echo.Context) error {
-	ctx := c.Request().Context()
-	days := 30
-	if v := c.QueryParam("days"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
-			days = n
-		}
-	}
-	rows, err := a.s.stock.Expiring(ctx, days)
-	if err != nil {
-		return err
-	}
-	return response.RenderPage(c, adminpages.ExpiringPage(adminpages.ExpiringData{
-		UserName: middleware.CurrentUserName(c),
-		Symbol:   a.symbol(ctx),
-		Days:     days,
-		Rows:     rows,
-	}))
-}
+// ============================ Reports: low-stock ============================
 
 func (a *adminUI) LowStockReport(c echo.Context) error {
 	ctx := c.Request().Context()

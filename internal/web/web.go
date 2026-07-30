@@ -437,12 +437,10 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	ag.GET("/reports/tax", admin.TaxReport)
 	ag.GET("/reports/cash-register", admin.CashRegisterReport)
 	ag.GET("/reports/purchases", admin.PurchasesReport)
-	ag.GET("/reports/suppliers", admin.SuppliersReport)
 	ag.GET("/reports/customer-dues", admin.CustomerDuesReport)
 	ag.GET("/reports/supplier-dues", admin.SupplierDuesReport)
 	ag.GET("/reports/inventory", admin.InventoryReport)
 	ag.GET("/reports/batches", admin.BatchReport)
-	ag.GET("/reports/expiring", admin.ExpiringReport)
 	ag.GET("/reports/low-stock", admin.LowStockReport)
 
 	// Categories management
