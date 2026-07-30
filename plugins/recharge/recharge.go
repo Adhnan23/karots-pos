@@ -68,6 +68,8 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 	reg.Admin().GET("/recharge/receipts/recharge", a.ReceiptsFloat)
 	reg.Admin().GET("/recharge/devices/balances", a.Devices)
 	reg.Admin().POST("/recharge/refill", a.Refill)
+	reg.Admin().GET("/recharge/bills", a.Bills)
+	reg.Admin().POST("/recharge/bank-tx", a.BankTx)
 
 	ch := &cashierUI{p: p}
 	reg.Cashier().GET("/recharge/carriers", ch.Carriers)
@@ -187,5 +189,13 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 		Label:        "Float refills",
 		Key:          "recharge-refills",
 		Desc:         "Refill device float from a supplier + refill history",
+	})
+	reg.AddAdminNav(plugin.AdminNavEntry{
+		SectionLabel: "Reload & Bills",
+		Icon:         "📶",
+		Href:         "/admin/recharge/bills",
+		Label:        "Bill payment & cash",
+		Key:          "recharge-bills",
+		Desc:         "Pay a bill or hand out cash from any locker or till",
 	})
 }

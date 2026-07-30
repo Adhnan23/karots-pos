@@ -1,0 +1,78 @@
+package recharge
+
+import adminfragments "karots-pos/templates/fragments/admin"
+import "karots-pos/templates/layouts"
+
+// AdminBillsPage is the back-office bill-payment / get-money recorder. Unlike the
+// cashier form (bank-only, cash → own till), the admin picks BOTH sides from any
+// storage pile (locker of any kind, or an open till). The form posts to
+// /admin/recharge/bank-tx and drives the UI over HX-Trigger (toast or the shared
+// Print/Skip prompt), then resets — it does not swap the page.
+templ AdminBillsPage(userName, symbol string, choices []adminfragments.LocationChoice) {
+	@layouts.Admin("Bill payment & cash", userName, "recharge-bills") {
+		<div class="mb-6">
+			<h1 class="text-2xl font-bold">🧾 Bill payment &amp; cash</h1>
+			<p class="text-sm text-slate-500">Pay a customer's bill from any account, or hand out cash — choosing exactly which pile each side touches. Every leg is recorded in the shop's cash flow with a receipt.</p>
+		</div>
+		if len(choices) == 0 {
+			<div class="bg-amber-50 text-amber-700 rounded-xl p-4 text-sm">No cash locations yet. Add a locker under Money → Cash Lockers, or open a till.</div>
+		} else {
+			<div class="bg-white rounded-2xl shadow-sm p-6 max-w-2xl" x-data="{ type:'billpay' }">
+				<form
+					hx-post="/admin/recharge/bank-tx"
+					hx-swap="none"
+					hx-on::after-request="if(event.detail.successful) this.reset()"
+					class="grid grid-cols-1 sm:grid-cols-2 gap-4"
+				>
+					<div class="sm:col-span-2">
+						<label class="block text-sm font-medium text-slate-600 mb-1">Type</label>
+						<input type="hidden" name="type" x-model="type"/>
+						<div class="grid grid-cols-2 gap-2">
+							<button type="button" x-on:click="type='billpay'" x-bind:class="type==='billpay' ? 'ring-2 ring-emerald-500 bg-emerald-50' : 'border border-slate-200'" class="px-3 py-2.5 rounded-lg text-left">
+								<div class="font-medium text-sm">Pay a bill</div>
+								<div class="text-xs text-slate-400">Account pays the biller (down) → cash comes in (up)</div>
+							</button>
+							<button type="button" x-on:click="type='getmoney'" x-bind:class="type==='getmoney' ? 'ring-2 ring-emerald-500 bg-emerald-50' : 'border border-slate-200'" class="px-3 py-2.5 rounded-lg text-left">
+								<div class="font-medium text-sm">Give cash out</div>
+								<div class="text-xs text-slate-400">Cash goes out (down) → account receives it (up)</div>
+							</button>
+						</div>
+					</div>
+					<div class="sm:col-span-2">
+						<label class="block text-sm font-medium text-slate-600 mb-1">
+							<span x-show="type==='billpay'">Pay biller from (account / bank)</span>
+							<span x-show="type==='getmoney'">Money lands in (account / bank)</span>
+						</label>
+						@adminfragments.LocationPicker("account", "Choose an account…", choices)
+					</div>
+					<div class="sm:col-span-2">
+						<label class="block text-sm font-medium text-slate-600 mb-1">
+							<span x-show="type==='billpay'">Cash received into</span>
+							<span x-show="type==='getmoney'">Cash paid out from</span>
+						</label>
+						@adminfragments.LocationPicker("cash", "Choose a cash pile…", choices)
+					</div>
+					<div>
+						<label class="block text-sm font-medium text-slate-600 mb-1">Amount</label>
+						<input type="number" name="amount" min="0" step="0.01" required placeholder="0.00" class="w-full border rounded-lg px-3 py-2.5 text-right"/>
+					</div>
+					<div>
+						<label class="block text-sm font-medium text-slate-600 mb-1">Service charge (optional)</label>
+						<input type="number" name="service_charge" min="0" step="0.01" placeholder="0.00" class="w-full border rounded-lg px-3 py-2.5 text-right"/>
+					</div>
+					<div>
+						<label class="block text-sm font-medium text-slate-600 mb-1">Reference (optional)</label>
+						<input type="text" name="reference" placeholder="bill / txn no." class="w-full border rounded-lg px-3 py-2.5"/>
+					</div>
+					<div>
+						<label class="block text-sm font-medium text-slate-600 mb-1">Note (optional)</label>
+						<input type="text" name="note" placeholder="" class="w-full border rounded-lg px-3 py-2.5"/>
+					</div>
+					<div class="sm:col-span-2 flex justify-end">
+						<button type="submit" class="py-2.5 px-6 rounded-lg bg-emerald-600 text-white font-semibold hover:bg-emerald-700">Record</button>
+					</div>
+				</form>
+			</div>
+		}
+	}
+}
