@@ -86,3 +86,17 @@ func RequireSupplierAccess() echo.MiddlewareFunc {
 		}
 	}
 }
+
+// RequireManageCredit gates the till credit-limit endpoint. Must run after
+// JWTAuth, which is what puts the role and flag in scope.
+func RequireManageCredit() echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			role, _ := c.Get(ctxRole).(string)
+			if !MayManageCredit(role, CanManageCredit(c)) {
+				return apperr.Forbidden("you're not set up to change credit limits — ask the owner")
+			}
+			return next(c)
+		}
+	}
+}

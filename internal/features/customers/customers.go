@@ -204,6 +204,20 @@ func (r *Repository) Reactivate(ctx context.Context, id int64) error {
 	return err
 }
 
+// SetCreditLimit updates only a customer's credit limit (the till's inline
+// raise). Unlike Update it never touches name/phone/address.
+func (r *Repository) SetCreditLimit(ctx context.Context, id int64, limit decimal.Decimal) error {
+	res, err := r.q.ExecContext(ctx,
+		`UPDATE customers SET credit_limit = $1 WHERE id = $2 AND is_active = true`, limit, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
 func (r *Repository) Update(ctx context.Context, id int64, name string, phone, address *string, limit decimal.Decimal) error {
 	res, err := r.q.ExecContext(ctx,
 		`UPDATE customers SET name=$1, phone=$2, address=$3, credit_limit=$4 WHERE id=$5 AND is_active=true`,
@@ -288,6 +302,22 @@ func parseOpening(s string) (decimal.Decimal, error) {
 		return decimal.Zero, apperr.Validation("opening balance must be a non-negative amount")
 	}
 	return v, nil
+}
+
+// SetCreditLimit validates and applies a new credit limit (till inline edit).
+func (s *Service) SetCreditLimit(ctx context.Context, id int64, limit string) error {
+	v, err := money.Parse(limit)
+	if err != nil || v.IsNegative() {
+		return apperr.Validation("credit limit must be a non-negative amount")
+	}
+	err = s.repo.SetCreditLimit(ctx, id, v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return apperr.NotFound("customer")
+	}
+	if err != nil {
+		return apperr.Internal("failed to update credit limit", err)
+	}
+	return nil
 }
 
 func (s *Service) Update(ctx context.Context, id int64, in UpdateInput) error {
@@ -698,6 +728,31 @@ func (h *APIHandler) Update(c echo.Context) error {
 	return response.NoContent(c)
 }
 
+// CreditLimitInput is the narrow till payload for an inline limit change.
+type CreditLimitInput struct {
+	CreditLimit string `json:"credit_limit" validate:"required"`
+}
+
+// SetLimit updates only a customer's credit limit — the till's inline raise.
+// Gated by RequireManageCredit; the admin PUT stays admin/manager-only.
+func (h *APIHandler) SetLimit(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	var in CreditLimitInput
+	if err := c.Bind(&in); err != nil {
+		return apperr.BadRequest("invalid request body")
+	}
+	if err := c.Validate(&in); err != nil {
+		return err
+	}
+	if err := h.svc.SetCreditLimit(c.Request().Context(), id, in.CreditLimit); err != nil {
+		return err
+	}
+	return response.NoContent(c)
+}
+
 func (h *APIHandler) Payment(c echo.Context) error {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
@@ -723,5 +778,6 @@ func RegisterAPI(e *echo.Echo, db *sqlx.DB, cfg *config.Config) {
 	g.GET("/:id", api.Get)
 	g.POST("", api.Create, middleware.RequireRole("admin", "manager", "cashier"))
 	g.PUT("/:id", api.Update, middleware.RequireRole("admin", "manager"))
+	g.PATCH("/:id/credit-limit", api.SetLimit, middleware.RequireManageCredit())
 	g.POST("/:id/payment", api.Payment, middleware.RequireRole("admin", "manager", "cashier"))
 }
