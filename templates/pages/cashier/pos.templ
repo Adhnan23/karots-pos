@@ -424,7 +424,8 @@ templ POS(d POSData) {
 						<button x-on:click="startClose()" class="w-full py-2 rounded-lg border text-sm text-slate-600">Close Register</button>
 						<!-- Keyboard shortcut legend (desktop only) -->
 						<div class="hidden lg:flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-400 pt-1">
-							<span><kbd>F2</kbd> Search</span>
+							<span><kbd>F1</kbd> Menu</span>
+								<span><kbd>F2</kbd> Search</span>
 							<span><kbd>F3</kbd> Scan</span>
 							<span><kbd>F9</kbd> Discount</span>
 							<span><kbd>F4</kbd> Hold</span>
@@ -751,6 +752,19 @@ templ POS(d POSData) {
 			<!-- Found-at-till: selling more than the count shows. The item is on the
 			     counter; the count was short. Confirm once, then the server corrects
 			     the count up and sells (on hand ends at 0, never negative). -->
+			<div x-show="consumablePrompt" x-cloak x-on:keydown.escape.window="cancelConsumable()" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+				<div class="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 space-y-3">
+					<h3 class="text-lg font-semibold text-amber-700">A material reads zero</h3>
+					<p class="text-sm text-slate-600">
+						The count shows none of a material this job needs (e.g. paper), but you have it on hand.
+					</p>
+					<p class="text-xs text-slate-500">Proceed? The stock count is corrected up to match, so on-hand ends at zero — not negative.</p>
+					<div class="flex gap-2 pt-1">
+						<button type="button" x-on:click="cancelConsumable()" class="flex-1 px-4 py-2.5 rounded-lg border font-semibold">Go back</button>
+						<button type="button" x-on:click="approveConsumable()" class="flex-1 px-4 py-2.5 rounded-lg bg-amber-600 text-white font-semibold">Proceed</button>
+					</div>
+				</div>
+			</div>
 			<div x-show="oversellPrompt" x-cloak x-on:keydown.escape.window="cancelOversell()" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
 				<div class="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 space-y-3">
 					<h3 class="text-lg font-semibold text-amber-700">More than what's in stock</h3>

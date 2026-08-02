@@ -110,6 +110,7 @@ async function apiFetch(method, url, body, options) {
     }
     const err = new Error(msg);
     err.status = res.status;
+    err.code = json && json.error && json.error.code;
     throw err;
   }
   return json;
@@ -1629,6 +1630,23 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
     cancelOversell() {
       this.oversellPrompt = null;
     },
+    // --- consumable found-at-till (a job's material reads short) ---
+    // Reactive, unlike the product oversell prompt: a service line carries MAX
+    // stock and its consumables are hidden inside `components`, so a short paper
+    // count is only knowable once the server tries. The sale POST comes back with
+    // a CONSUMABLE_SHORT code; we confirm, then flag every service line that
+    // carries components and retry.
+    consumablePrompt: null,
+    approveConsumable() {
+      for (const it of this.cart) {
+        if (Array.isArray(it.components) && it.components.length) it.allow_oversell = true;
+      }
+      this.consumablePrompt = null;
+      this.checkout(false); // re-enter; tender re-validates, then posts with the flags set
+    },
+    cancelConsumable() {
+      this.consumablePrompt = null;
+    },
     // The selected customer's remaining credit (limit − outstanding), or null
     // when no customer is chosen. Advisory only — the server is authoritative.
     availableCredit() {
@@ -1776,7 +1794,7 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
               reference: p.reference ? String(p.reference) : null,
             })),
         };
-        const json = await apiFetch("POST", "/api/sales", payload);
+        const json = await apiFetch("POST", "/api/sales", payload, { silent: true });
         await this.attributeWallet(json.data.sale.id);
         await this.attributeReloads(json.data.sale.id);
         await this.recordDocJobs(json.data.sale.id);
@@ -1792,8 +1810,21 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
         // Lots just moved: one may now be empty (and stop being a choice), so the
         // next customer must be offered the current picture, not a stale one.
         await this.loadPriceOptions();
-      } catch (_) {
-        /* toast already shown */
+      } catch (e) {
+        // A job's material read short. Offer a found-at-till confirm, but only
+        // while some service-with-components line hasn't been approved yet — once
+        // all are flagged, a repeat CONSUMABLE_SHORT is a real error, so fall
+        // through to the toast and never loop.
+        if (e && e.code === "CONSUMABLE_SHORT") {
+          const pending = this.cart.some(
+            (it) => Array.isArray(it.components) && it.components.length && !it.allow_oversell
+          );
+          if (pending) {
+            this.consumablePrompt = true;
+            return; // finally still runs (busy=false); the prompt drives the retry
+          }
+        }
+        toast((e && e.message) || "Sale failed", "error");
       } finally {
         this.busy = false;
       }
@@ -1813,6 +1844,7 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
       this.showLimitEdit = false;
       this.creditLimitEdit = "";
       this.oversellPrompt = null;
+      this.consumablePrompt = null;
     },
   };
 }
