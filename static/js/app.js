@@ -520,6 +520,10 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
             this.newSale();
           }
           return;
+        case "F1":
+          e.preventDefault(); // stop the browser help panel opening
+          this.reset();
+          return;
         case "F2":
           e.preventDefault();
           this.focusEl("searchInput");
@@ -684,6 +688,18 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
       if (top && top.url) return this.fetchNodes(top.url);
       if (top) return this.openGroup(top.id, true);
       return this.loadGroupsTop();
+    },
+    // Reset the catalog back to the top menu and refocus the scanner — a
+    // one-press "start over" for browsing. NAVIGATION ONLY: the cart, customer,
+    // payments, and discount are deliberately untouched (use newSale() for that),
+    // so an accidental press never loses an in-progress sale.
+    reset() {
+      this.search = "";
+      this.amountNode = null;
+      this.detailHtml = "";
+      this.menuMode = "cards";
+      this.loadGroupsTop();
+      this.focusEl("scanInput");
     },
     async loadCustomers() {
       try {
