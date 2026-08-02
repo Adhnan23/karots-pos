@@ -25,12 +25,20 @@ func (s *Service) Children(ctx context.Context, parentID *int64) ([]Group, error
 	return rows, nil
 }
 
-func (s *Service) Tree(ctx context.Context) ([]Group, error) {
-	rows, err := s.repo.Tree(ctx)
+func (s *Service) Tree(ctx context.Context, includeInactive bool) ([]Group, error) {
+	rows, err := s.repo.Tree(ctx, includeInactive)
 	if err != nil {
 		return nil, apperr.Internal("failed to load group tree", err)
 	}
 	return rows, nil
+}
+
+// Reactivate re-enables a disabled group.
+func (s *Service) Reactivate(ctx context.Context, id int64) error {
+	if err := s.repo.Reactivate(ctx, id); err != nil {
+		return apperr.Internal("failed to reactivate group", err)
+	}
+	return nil
 }
 
 func (s *Service) Get(ctx context.Context, id int64) (*Group, error) {

@@ -22,10 +22,13 @@ templ ProductTable(rows []products.Product, symbol string) {
 }
 
 templ ProductRow(p products.Product, symbol string) {
-	<tr class="border-b last:border-0 hover:bg-slate-50">
+	<tr class={ "border-b last:border-0 hover:bg-slate-50", templ.KV("opacity-50", !p.IsActive) }>
 		<td class="py-2 px-3">
 			<div class="font-medium">
 				{ p.Name }
+				if !p.IsActive {
+					<span class="ml-2 px-2 py-0.5 rounded-full text-xs bg-slate-200 text-slate-600 align-middle">disabled</span>
+				}
 				if p.NeedsReview {
 					<a href="/admin/products/review" class="ml-2 px-2 py-0.5 rounded-full text-xs bg-amber-100 text-amber-700 align-middle">needs review</a>
 				}
@@ -54,18 +57,27 @@ templ ProductRow(p products.Product, symbol string) {
 			}
 		</td>
 		<td class="py-2 px-3 text-right whitespace-nowrap">
-			<button
-				class="text-indigo-600 hover:underline text-sm"
-				hx-get={ "/admin/products/form/" + strconv.FormatInt(p.ID, 10) }
-				hx-target="#modal-container"
-				hx-swap="innerHTML"
-			>Edit</button>
-			<button
-				class="text-red-600 hover:underline text-sm ml-3"
-				hx-delete={ "/admin/products/" + strconv.FormatInt(p.ID, 10) }
-				hx-swap="none"
-				hx-confirm={ "Delete " + p.Name + "?" }
-			>Delete</button>
+			if p.IsActive {
+				<button
+					class="text-indigo-600 hover:underline text-sm"
+					hx-get={ "/admin/products/form/" + strconv.FormatInt(p.ID, 10) }
+					hx-target="#modal-container"
+					hx-swap="innerHTML"
+				>Edit</button>
+				<button
+					class="text-red-600 hover:underline text-sm ml-3"
+					hx-delete={ "/admin/products/" + strconv.FormatInt(p.ID, 10) }
+					hx-swap="none"
+					hx-confirm={ "Disable " + p.Name + "?" }
+				>Disable</button>
+			} else {
+				<button
+					class="text-emerald-600 hover:underline text-sm"
+					hx-post={ "/admin/products/" + strconv.FormatInt(p.ID, 10) + "/activate" }
+					hx-swap="none"
+					hx-confirm={ "Re-enable " + p.Name + "?" }
+				>Reactivate</button>
+			}
 		</td>
 	</tr>
 }

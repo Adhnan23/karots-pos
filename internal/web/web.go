@@ -275,6 +275,7 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	ag.PUT("/groups/:id", admin.GroupUpdate)
 	ag.DELETE("/groups/:id", admin.GroupDelete)
 	ag.POST("/groups/:id/move", admin.GroupMove)
+	ag.POST("/groups/:id/activate", admin.GroupReactivate)
 	ag.GET("/groups/:id/items", admin.GroupItems)
 	ag.POST("/groups/:id/items", admin.GroupItemAdd)
 	ag.DELETE("/groups/:id/items/:productId", admin.GroupItemRemove)
@@ -290,6 +291,7 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	ag.POST("/products/:id/recipe", admin.ProductRecipeSave)
 	ag.PUT("/products/:id", admin.ProductUpdate)
 	ag.DELETE("/products/:id", admin.ProductDelete)
+	ag.POST("/products/:id/activate", admin.ProductReactivate)
 	ag.GET("/products/import", admin.ProductImportModal)
 	ag.GET("/products/import/template", admin.ProductImportTemplate)
 	ag.GET("/products/export", admin.ProductExportCSV)
@@ -501,6 +503,7 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	ag.POST("/conversions/:id/run", admin.ConversionRun)
 	ag.PUT("/conversions/:id", admin.ConversionUpdate)
 	ag.DELETE("/conversions/:id", admin.ConversionDelete)
+	ag.POST("/conversions/:id/activate", admin.ConversionReactivate)
 
 	// Staff users (admin only)
 	ag.GET("/users", admin.Users, middleware.RequireRole(auth.RoleAdmin))

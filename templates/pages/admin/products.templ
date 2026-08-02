@@ -18,6 +18,7 @@ type ProductsData struct {
 	HasNext    bool
 	Search     string
 	CategoryID string
+	Inactive   bool
 }
 
 templ ProductsPage(d ProductsData) {
@@ -46,7 +47,7 @@ templ ProductsPage(d ProductsData) {
 				id="product-filter-form"
 				class="flex flex-wrap gap-3 mb-4"
 				hx-get="/admin/products/table"
-				hx-trigger="input changed delay:300ms from:input[name='search'], change from:select, category-changed from:body, reload-products from:body"
+				hx-trigger="input changed delay:300ms from:input[name='search'], change from:select, change from:input[name='inactive'], category-changed from:body, reload-products from:body"
 				hx-target="#product-list"
 				hx-swap="innerHTML"
 			>
@@ -60,6 +61,7 @@ templ ProductsPage(d ProductsData) {
 				<div class="w-56">
 					@adminfragments.CategoryPicker(d.Categories, "category_id", d.CategoryID, true, "All categories", true, false)
 				</div>
+				@adminfragments.ShowDisabledToggle(d.Inactive)
 			</form>
 			<div id="product-list">
 				@ProductList(d)

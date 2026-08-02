@@ -980,7 +980,8 @@ func (a *adminUI) LabelsSend(c echo.Context) error { return a.s.sendLabel(c) }
 func (a *adminUI) Conversions(c echo.Context) error {
 	ctx := c.Request().Context()
 	search := c.QueryParam("search")
-	rows, err := a.s.conversions.List(ctx, search)
+	inactive := showDisabled(c)
+	rows, err := a.conversionRows(ctx, search, inactive)
 	if err != nil {
 		return err
 	}
@@ -988,15 +989,34 @@ func (a *adminUI) Conversions(c echo.Context) error {
 		UserName: middleware.CurrentUserName(c),
 		Rows:     rows,
 		Search:   search,
+		Inactive: inactive,
 	}))
 }
 
 func (a *adminUI) ConversionsTable(c echo.Context) error {
-	rows, err := a.s.conversions.List(c.Request().Context(), c.QueryParam("search"))
+	rows, err := a.conversionRows(c.Request().Context(), c.QueryParam("search"), showDisabled(c))
 	if err != nil {
 		return err
 	}
 	return response.RenderFragment(c, adminpages.ConversionRows(rows))
+}
+
+func (a *adminUI) conversionRows(ctx context.Context, search string, inactive bool) ([]conversions.Conversion, error) {
+	if inactive {
+		return a.s.conversions.ListAll(ctx, search)
+	}
+	return a.s.conversions.List(ctx, search)
+}
+
+func (a *adminUI) ConversionReactivate(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	if err := a.s.conversions.Reactivate(c.Request().Context(), id); err != nil {
+		return err
+	}
+	return htmxReload(c, "Conversion re-enabled", "reload-conversions")
 }
 
 // ConversionEditForm opens the recipe editor. Only the ratio and note are

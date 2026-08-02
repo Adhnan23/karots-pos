@@ -131,8 +131,25 @@ func (r *Repository) Create(ctx context.Context, in CreateInput, ratio decimal.D
 	return id, err
 }
 
+// ListAll returns active + disabled conversions (disabled last), for the admin
+// list with "Show disabled" on so they can be reactivated.
+func (r *Repository) ListAll(ctx context.Context, search string) ([]Conversion, error) {
+	var rows []Conversion
+	err := r.q.SelectContext(ctx, &rows, selectConversion+`
+		WHERE ($1::text IS NULL
+		       OR fp.name ILIKE '%' || $1 || '%'
+		       OR tp.name ILIKE '%' || $1 || '%')
+		ORDER BY cv.is_active DESC, fp.name`, nullIfBlank(search))
+	return rows, err
+}
+
 func (r *Repository) Delete(ctx context.Context, id int64) error {
 	_, err := r.q.ExecContext(ctx, `UPDATE product_conversions SET is_active = false WHERE id = $1`, id)
+	return err
+}
+
+func (r *Repository) Reactivate(ctx context.Context, id int64) error {
+	_, err := r.q.ExecContext(ctx, `UPDATE product_conversions SET is_active = true WHERE id = $1`, id)
 	return err
 }
 
@@ -156,6 +173,23 @@ func (s *Service) List(ctx context.Context, search string) ([]Conversion, error)
 		return nil, apperr.Internal("failed to list conversions", err)
 	}
 	return rows, nil
+}
+
+// ListAll includes disabled conversions (for the admin "Show disabled" toggle).
+func (s *Service) ListAll(ctx context.Context, search string) ([]Conversion, error) {
+	rows, err := s.repo.ListAll(ctx, search)
+	if err != nil {
+		return nil, apperr.Internal("failed to list conversions", err)
+	}
+	return rows, nil
+}
+
+// Reactivate re-enables a disabled conversion.
+func (s *Service) Reactivate(ctx context.Context, id int64) error {
+	if err := s.repo.Reactivate(ctx, id); err != nil {
+		return apperr.Internal("failed to reactivate conversion", err)
+	}
+	return nil
 }
 
 // Update edits a conversion's ratio and note.

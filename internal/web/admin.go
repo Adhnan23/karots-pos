@@ -139,7 +139,8 @@ func (a *adminUI) productsData(c echo.Context) (adminpages.ProductsData, error) 
 	search := c.QueryParam("search")
 	catParam := c.QueryParam("category_id")
 
-	q := products.ListQuery{Search: search, Page: page, Limit: productPageSize}
+	inactive := showDisabled(c)
+	q := products.ListQuery{Search: search, Page: page, Limit: productPageSize, IncludeInactive: inactive}
 	if catParam != "" {
 		if id, err := strconv.ParseInt(catParam, 10, 64); err == nil {
 			q.CategoryID = &id
@@ -163,6 +164,7 @@ func (a *adminUI) productsData(c echo.Context) (adminpages.ProductsData, error) 
 		HasNext:    hasNext,
 		Search:     search,
 		CategoryID: catParam,
+		Inactive:   inactive,
 	}, nil
 }
 
@@ -349,6 +351,18 @@ func (a *adminUI) ProductDelete(c echo.Context) error {
 	}
 	a.s.logAudit(c, audit.ActionDelete, "product", strconv.FormatInt(id, 10), "")
 	return htmxReload(c, "Product deleted", "reload-products")
+}
+
+func (a *adminUI) ProductReactivate(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	if err := a.s.products.Reactivate(c.Request().Context(), id); err != nil {
+		return err
+	}
+	a.s.logAudit(c, audit.ActionUpdate, "product", strconv.FormatInt(id, 10), "reactivated")
+	return htmxReload(c, "Product re-enabled", "reload-products")
 }
 
 // --- stock ---

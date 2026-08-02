@@ -13,6 +13,7 @@ type GroupsData struct {
 	UserName string
 	Symbol   string
 	Tree     []productgroups.Group
+	Inactive bool
 }
 
 // groupRow is one tree node flattened with its nesting depth for rendering.
@@ -53,12 +54,18 @@ templ GroupsPage(d GroupsData) {
 	@layouts.Admin("Cashier Menu", d.UserName, "groups") {
 		<div class="flex items-center justify-between mb-2">
 			<h1 class="text-2xl font-bold">Cashier Menu</h1>
-			<button
-				class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-sm font-medium"
-				hx-get="/admin/groups/form"
-				hx-target="#modal-container"
-				hx-swap="innerHTML"
-			>+ New group</button>
+			<div class="flex items-center gap-3">
+				<label class="flex items-center gap-2 text-sm text-slate-600 select-none">
+					<input type="checkbox" name="inactive" value="1" checked?={ d.Inactive } hx-get="/admin/groups/tree" hx-target="#group-tree" hx-swap="innerHTML" hx-trigger="change" class="w-4 h-4"/>
+					Show disabled
+				</label>
+				<button
+					class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-sm font-medium"
+					hx-get="/admin/groups/form"
+					hx-target="#modal-container"
+					hx-swap="innerHTML"
+				>+ New group</button>
+			</div>
 		</div>
 		<p class="text-sm text-slate-500 mb-4 max-w-2xl">
 			These groups are what cashiers see on the till instead of a flat product list.
@@ -66,7 +73,7 @@ templ GroupsPage(d GroupsData) {
 			button. Products not linked to any group are still found via till search.
 		</p>
 		<div class="grid lg:grid-cols-2 gap-6">
-			<div id="group-tree" hx-get="/admin/groups/tree" hx-trigger="reload-groups from:body" hx-swap="innerHTML">
+			<div id="group-tree" hx-get="/admin/groups/tree" hx-trigger="reload-groups from:body" hx-include="[name='inactive']" hx-swap="innerHTML">
 				@GroupTree(d.Tree)
 			</div>
 			<div id="group-detail" class="bg-white rounded-2xl shadow-sm p-4 text-sm text-slate-400">
@@ -83,7 +90,7 @@ templ GroupTree(tree []productgroups.Group) {
 			<div class="py-8 text-center text-slate-400">No groups yet — create your first one.</div>
 		} else {
 			for _, r := range flattenGroups(tree) {
-				<div class="flex items-center gap-1 py-1 border-b last:border-0">
+				<div class={ "flex items-center gap-1 py-1 border-b last:border-0", templ.KV("opacity-50", !r.G.IsActive) }>
 					for i := 0; i < r.Depth; i++ {
 						<span class="inline-block w-5"></span>
 					}
@@ -97,19 +104,28 @@ templ GroupTree(tree []productgroups.Group) {
 							<span class="mr-1">{ *r.G.Emoji }</span>
 						}
 						<span class="font-medium">{ r.G.Name }</span>
+						if !r.G.IsActive {
+							<span class="ml-1 px-2 py-0.5 rounded-full text-xs bg-slate-200 text-slate-600">disabled</span>
+						}
 						<span class="ml-1 text-xs text-slate-400">({ strconv.Itoa(r.G.ItemCount) })</span>
 					</button>
-					<button class="px-2 text-xs text-slate-500 hover:text-indigo-600" title="Add sub-group"
-						hx-get={ "/admin/groups/form?parent=" + strconv.FormatInt(r.G.ID, 10) } hx-target="#modal-container" hx-swap="innerHTML">+ Sub</button>
-					<button class="px-1 text-xs text-slate-400 hover:text-slate-700" title="Move up"
-						hx-post={ "/admin/groups/" + strconv.FormatInt(r.G.ID, 10) + "/move?dir=up" } hx-swap="none">▲</button>
-					<button class="px-1 text-xs text-slate-400 hover:text-slate-700" title="Move down"
-						hx-post={ "/admin/groups/" + strconv.FormatInt(r.G.ID, 10) + "/move?dir=down" } hx-swap="none">▼</button>
-					<button class="px-2 text-xs text-indigo-600 hover:underline"
-						hx-get={ "/admin/groups/form/" + strconv.FormatInt(r.G.ID, 10) } hx-target="#modal-container" hx-swap="innerHTML">Edit</button>
-					<button class="px-2 text-xs text-red-600 hover:underline"
-						hx-delete={ "/admin/groups/" + strconv.FormatInt(r.G.ID, 10) } hx-swap="none"
-						hx-confirm={ "Delete \"" + r.G.Name + "\" and its sub-groups? Products are not deleted." }>Delete</button>
+					if r.G.IsActive {
+						<button class="px-2 text-xs text-slate-500 hover:text-indigo-600" title="Add sub-group"
+							hx-get={ "/admin/groups/form?parent=" + strconv.FormatInt(r.G.ID, 10) } hx-target="#modal-container" hx-swap="innerHTML">+ Sub</button>
+						<button class="px-1 text-xs text-slate-400 hover:text-slate-700" title="Move up"
+							hx-post={ "/admin/groups/" + strconv.FormatInt(r.G.ID, 10) + "/move?dir=up" } hx-swap="none">▲</button>
+						<button class="px-1 text-xs text-slate-400 hover:text-slate-700" title="Move down"
+							hx-post={ "/admin/groups/" + strconv.FormatInt(r.G.ID, 10) + "/move?dir=down" } hx-swap="none">▼</button>
+						<button class="px-2 text-xs text-indigo-600 hover:underline"
+							hx-get={ "/admin/groups/form/" + strconv.FormatInt(r.G.ID, 10) } hx-target="#modal-container" hx-swap="innerHTML">Edit</button>
+						<button class="px-2 text-xs text-red-600 hover:underline"
+							hx-delete={ "/admin/groups/" + strconv.FormatInt(r.G.ID, 10) } hx-swap="none"
+							hx-confirm={ "Disable \"" + r.G.Name + "\" and its sub-groups? Products are not deleted." }>Disable</button>
+					} else {
+						<button class="px-2 text-xs text-emerald-600 hover:underline"
+							hx-post={ "/admin/groups/" + strconv.FormatInt(r.G.ID, 10) + "/activate" } hx-swap="none"
+							hx-confirm={ "Re-enable \"" + r.G.Name + "\"?" }>Reactivate</button>
+					}
 				</div>
 			}
 		}

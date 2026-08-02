@@ -89,6 +89,9 @@ type ListQuery struct {
 	// something — a cashier menu card, for instance — otherwise a service can be
 	// created but never put in front of a cashier.
 	IncludeServices bool `query:"include_services" form:"include_services"`
+	// IncludeInactive shows disabled products too (the admin "Show disabled"
+	// toggle). Off by default, so every existing caller keeps seeing active only.
+	IncludeInactive bool `query:"include_inactive" form:"include_inactive"`
 	// Fuzzy enables typo-tolerant matching. Not a query param: the service sets
 	// it only for the rescue pass after a strict search came back empty.
 	Fuzzy bool `query:"-" form:"-"`
@@ -159,13 +162,13 @@ func (r *Repository) List(ctx context.Context, q ListQuery) ([]Product, error) {
 	toks, raw, fuzzy := q.searchArgs()
 	var rows []Product
 	err := r.db.SelectContext(ctx, &rows, subcatsCTE+selectProduct+`
-		WHERE p.is_active = true AND (p.is_service = false OR $8)
+		WHERE (p.is_active = true OR $9) AND (p.is_service = false OR $8)
 		  AND `+searchClause+`
 		  AND ($4::bigint IS NULL OR p.category_id IN (SELECT id FROM subcats))
 		  AND ($5 = false OR COALESCE(s.quantity,0) <= p.reorder_level)
 		ORDER BY `+searchRank+` p.name, p.id
 		LIMIT $6 OFFSET $7`,
-		toks, raw, fuzzy, q.CategoryID, q.LowStock, q.Limit, q.offset(), q.IncludeServices)
+		toks, raw, fuzzy, q.CategoryID, q.LowStock, q.Limit, q.offset(), q.IncludeServices, q.IncludeInactive)
 	return rows, err
 }
 
@@ -241,11 +244,11 @@ func (r *Repository) Count(ctx context.Context, q ListQuery) (int, error) {
 	err := r.db.GetContext(ctx, &n, subcatsCTE+`
 		SELECT COUNT(*) FROM products p
 		LEFT JOIN stock s ON s.product_id = p.id
-		WHERE p.is_active = true AND (p.is_service = false OR $6)
+		WHERE (p.is_active = true OR $7) AND (p.is_service = false OR $6)
 		  AND `+searchClause+`
 		  AND ($4::bigint IS NULL OR p.category_id IN (SELECT id FROM subcats))
 		  AND ($5 = false OR COALESCE(s.quantity,0) <= p.reorder_level)`,
-		toks, raw, fuzzy, q.CategoryID, q.LowStock, q.IncludeServices)
+		toks, raw, fuzzy, q.CategoryID, q.LowStock, q.IncludeServices, q.IncludeInactive)
 	return n, err
 }
 
@@ -351,6 +354,11 @@ func (r *Repository) Update(ctx context.Context, id int64, w writeRow) error {
 
 func (r *Repository) SoftDelete(ctx context.Context, id int64) error {
 	_, err := r.db.ExecContext(ctx, `UPDATE products SET is_active = false WHERE id = $1`, id)
+	return err
+}
+
+func (r *Repository) Reactivate(ctx context.Context, id int64) error {
+	_, err := r.db.ExecContext(ctx, `UPDATE products SET is_active = true WHERE id = $1`, id)
 	return err
 }
 

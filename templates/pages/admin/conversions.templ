@@ -13,6 +13,7 @@ type ConversionsData struct {
 	UserName string
 	Rows     []conversions.Conversion
 	Search   string
+	Inactive bool
 }
 
 templ ConversionsPage(d ConversionsData) {
@@ -38,6 +39,10 @@ templ ConversionsPage(d ConversionsData) {
 				if d.Search != "" {
 					<a class="px-4 py-1.5 rounded-lg border text-sm" href="/admin/conversions">Clear</a>
 				}
+				<label class="flex items-center gap-2 text-sm text-slate-600 select-none ml-1">
+					<input type="checkbox" name="inactive" value="1" checked?={ d.Inactive } onchange="this.form.submit()" class="w-4 h-4"/>
+					Show disabled
+				</label>
 			</form>
 			<table class="w-full text-sm">
 				<thead class="text-left text-slate-500 border-b">
@@ -63,8 +68,13 @@ templ ConversionRows(rows []conversions.Conversion) {
 		<tr><td colspan="6" class="py-6 text-center text-slate-500">No conversions match.</td></tr>
 	} else {
 		for _, cv := range rows {
-			<tr class="border-b last:border-0">
-				<td class="py-2 px-3 font-medium">{ cv.FromName } <span class="text-slate-400">({ cv.FromUnitAbbr })</span></td>
+			<tr class={ "border-b last:border-0", templ.KV("opacity-50", !cv.IsActive) }>
+				<td class="py-2 px-3 font-medium">
+					{ cv.FromName } <span class="text-slate-400">({ cv.FromUnitAbbr })</span>
+					if !cv.IsActive {
+						<span class="ml-2 px-2 py-0.5 rounded-full text-xs bg-slate-200 text-slate-600">disabled</span>
+					}
+				</td>
 				<td class="py-2 px-3 text-right">
 					if cv.Runnable() {
 						{ money.Display(cv.FromStock) }
@@ -76,13 +86,17 @@ templ ConversionRows(rows []conversions.Conversion) {
 				<td class="py-2 px-3 text-right text-slate-500">{ money.Display(cv.ToStock) }</td>
 				<td class="py-2 px-3 text-center">1 → { cv.Ratio.String() }</td>
 				<td class="py-2 px-3 text-right whitespace-nowrap">
-					if cv.Runnable() {
-						<button class="text-emerald-600 hover:underline" hx-get={ "/admin/conversions/run/" + strconv.FormatInt(cv.ID, 10) } hx-target="#modal-container" hx-swap="innerHTML">Run</button>
+					if cv.IsActive {
+						if cv.Runnable() {
+							<button class="text-emerald-600 hover:underline" hx-get={ "/admin/conversions/run/" + strconv.FormatInt(cv.ID, 10) } hx-target="#modal-container" hx-swap="innerHTML">Run</button>
+						} else {
+							<span class="text-slate-300" title="No stock of the source product">Run</span>
+						}
+						<button class="text-indigo-600 hover:underline ml-3" hx-get={ "/admin/conversions/" + strconv.FormatInt(cv.ID, 10) + "/edit" } hx-target="#modal-container" hx-swap="innerHTML">Edit</button>
+						<button class="text-red-600 hover:underline ml-3" hx-delete={ "/admin/conversions/" + strconv.FormatInt(cv.ID, 10) } hx-swap="none" hx-confirm="Disable this conversion?">Disable</button>
 					} else {
-						<span class="text-slate-300" title="No stock of the source product">Run</span>
+						<button class="text-emerald-600 hover:underline" hx-post={ "/admin/conversions/" + strconv.FormatInt(cv.ID, 10) + "/activate" } hx-swap="none" hx-confirm="Re-enable this conversion?">Reactivate</button>
 					}
-					<button class="text-indigo-600 hover:underline ml-3" hx-get={ "/admin/conversions/" + strconv.FormatInt(cv.ID, 10) + "/edit" } hx-target="#modal-container" hx-swap="innerHTML">Edit</button>
-					<button class="text-red-600 hover:underline ml-3" hx-delete={ "/admin/conversions/" + strconv.FormatInt(cv.ID, 10) } hx-swap="none" hx-confirm="Remove this conversion?">Delete</button>
 				</td>
 			</tr>
 		}

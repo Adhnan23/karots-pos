@@ -19,7 +19,8 @@ import (
 // Groups renders the admin "Cashier Menu" page: the group tree + a detail panel.
 func (a *adminUI) Groups(c echo.Context) error {
 	ctx := c.Request().Context()
-	tree, err := a.s.groups.Tree(ctx)
+	inactive := showDisabled(c)
+	tree, err := a.s.groups.Tree(ctx, inactive)
 	if err != nil {
 		return err
 	}
@@ -27,23 +28,35 @@ func (a *adminUI) Groups(c echo.Context) error {
 		UserName: middleware.CurrentUserName(c),
 		Symbol:   a.symbol(ctx),
 		Tree:     tree,
+		Inactive: inactive,
 	}))
 }
 
 // GroupsTree is the HTMX-refreshed tree fragment.
 func (a *adminUI) GroupsTree(c echo.Context) error {
-	tree, err := a.s.groups.Tree(c.Request().Context())
+	tree, err := a.s.groups.Tree(c.Request().Context(), showDisabled(c))
 	if err != nil {
 		return err
 	}
 	return response.RenderFragment(c, adminpages.GroupTree(tree))
 }
 
+func (a *adminUI) GroupReactivate(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	if err := a.s.groups.Reactivate(c.Request().Context(), id); err != nil {
+		return err
+	}
+	return htmxReload(c, "Group re-enabled", "reload-groups")
+}
+
 // GroupForm returns the create/edit modal. ?parent=<id> pre-selects a parent for
 // a new sub-group; /form/:id loads an existing group for editing.
 func (a *adminUI) GroupForm(c echo.Context) error {
 	ctx := c.Request().Context()
-	tree, err := a.s.groups.Tree(ctx)
+	tree, err := a.s.groups.Tree(ctx, false) // parent options: active groups only
 	if err != nil {
 		return err
 	}

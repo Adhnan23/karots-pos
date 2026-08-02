@@ -414,6 +414,14 @@ func (s *Service) Delete(ctx context.Context, id int64) error {
 	return nil
 }
 
+// Reactivate re-enables a disabled product.
+func (s *Service) Reactivate(ctx context.Context, id int64) error {
+	if err := s.repo.Reactivate(ctx, id); err != nil {
+		return apperr.Internal("failed to reactivate product", err)
+	}
+	return nil
+}
+
 func toWriteRow(in CreateInput) (writeRow, error) {
 	cost, err := money.Parse(in.CostPrice)
 	if err != nil {

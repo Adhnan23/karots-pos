@@ -78,13 +78,20 @@ func (r *Repository) Children(ctx context.Context, parentID *int64) ([]Group, er
 	return rows, err
 }
 
-// Tree returns every active group (any level) for the admin page, stably ordered.
-func (r *Repository) Tree(ctx context.Context) ([]Group, error) {
+// Tree returns groups (any level) for the admin page, stably ordered. When
+// includeInactive is true it also returns disabled groups (the "Show disabled"
+// toggle), so they can be re-enabled.
+func (r *Repository) Tree(ctx context.Context, includeInactive bool) ([]Group, error) {
 	var rows []Group
 	err := r.db.SelectContext(ctx, &rows, groupSelect+`
-		WHERE g.is_active
-		ORDER BY g.sort_order, g.name, g.id`)
+		WHERE (g.is_active OR $1)
+		ORDER BY g.sort_order, g.name, g.id`, includeInactive)
 	return rows, err
+}
+
+func (r *Repository) Reactivate(ctx context.Context, id int64) error {
+	_, err := r.db.ExecContext(ctx, `UPDATE product_groups SET is_active = true WHERE id = $1`, id)
+	return err
 }
 
 func (r *Repository) Get(ctx context.Context, id int64) (*Group, error) {
