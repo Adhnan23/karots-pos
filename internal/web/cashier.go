@@ -114,7 +114,10 @@ func (h *cashierUI) POS(c echo.Context) error {
 		DefaultSaleType: defaultType,
 		AskToPrint:      askToPrint,
 		OpenCashDrawer:  openDrawer,
-		CanManageCredit: middleware.CanManageCredit(c),
+		// Role-inclusive, like the server gates and the Suppliers tab: an admin or
+		// manager (and the system admin) always sees these; a cashier only with
+		// the flag. Gating on the raw flag hid the controls from admins.
+		CanManageCredit: middleware.MayManageCredit(middleware.CurrentRole(c), middleware.CanManageCredit(c)),
 	}))
 }
 
