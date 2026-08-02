@@ -32,6 +32,7 @@ type Product struct {
 	WarrantyMonths      int             `db:"warranty_months"       json:"warranty_months"`
 	IsActive            bool            `db:"is_active"             json:"is_active"`
 	IsService           bool            `db:"is_service"            json:"is_service"`
+	PassThrough         bool            `db:"pass_through"          json:"pass_through"`
 	NeedsReview         bool            `db:"needs_review"          json:"needs_review"`
 	PreferredSupplierID *int64          `db:"preferred_supplier_id" json:"preferred_supplier_id,omitempty"`
 	CreatedBy           *int64          `db:"created_by"            json:"created_by,omitempty"`
