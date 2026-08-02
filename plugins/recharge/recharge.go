@@ -6,13 +6,17 @@
 package recharge
 
 import (
+	"context"
 	"io/fs"
+	"time"
 
 	"karots-pos/internal/features/cashflow"
 	"karots-pos/internal/features/lockers"
 	"karots-pos/internal/middleware"
 	"karots-pos/internal/plugin"
 	"karots-pos/plugins/recharge/migrations"
+
+	"github.com/shopspring/decimal"
 )
 
 func init() { plugin.Register(&Plugin{}) }
@@ -146,6 +150,16 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 		Href:  "/admin/recharge/report",
 		Label: "📶 Reload & Bills",
 		Desc:  "Float on hand, service charge earned & movement by type",
+	})
+
+	// Real recharge earning into the core P&L: reload face value is excluded from
+	// revenue (carrier products are pass_through), so the shop's margin — service
+	// charge + realized carrier float commission — is contributed here instead.
+	reg.AddPLIncome(plugin.PLIncome{
+		Label: "Reload & Bills earnings",
+		Amount: func(ctx context.Context, from, to time.Time) (decimal.Decimal, error) {
+			return p.store.RangeEarnings(ctx, from, to)
+		},
 	})
 
 	// The first entry defines the section's sidebar target — the hub page, which

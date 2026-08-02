@@ -5,6 +5,9 @@ import (
 	"database/sql"
 	"errors"
 	"strings"
+	"time"
+
+	appdb "karots-pos/internal/db"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/shopspring/decimal"
@@ -40,6 +43,16 @@ func (s *Store) CreateCarrier(ctx context.Context, name string, productID int64)
 	var id int64
 	err := s.db.GetContext(ctx, &id,
 		`INSERT INTO recharge_carriers (name, product_id) VALUES ($1, $2) RETURNING id`, name, productID)
+	if err != nil {
+		return 0, err
+	}
+	// A carrier's sale product is resold airtime — money passing through, not the
+	// shop's margin. Flag it so the core P&L excludes its face value; the shop's
+	// real earning (service charge + float commission) is reported via RangeEarnings.
+	if _, uerr := s.db.ExecContext(ctx,
+		`UPDATE products SET pass_through = true WHERE id = $1`, productID); uerr != nil {
+		return 0, uerr
+	}
 	return id, err
 }
 
@@ -273,4 +286,42 @@ func (s *Store) serviceDefaults(ctx context.Context) (catID, unitID int64, err e
 		err = s.db.GetContext(ctx, &catID, `INSERT INTO categories (name) VALUES ('Recharge') RETURNING id`)
 	}
 	return catID, unitID, err
+}
+
+// RangeEarnings is the shop's real recharge earning for [from,to): the service
+// charge collected (on reloads/deposits/withdrawals + bill payments) plus the
+// realized carrier float commission. Commission is realized-on-close only — the
+// positive float variance of device sessions closed in the range (counted
+// closing − opening − net float movement during the session). Reload face value
+// is NOT counted here (it's excluded from core revenue via pass_through).
+func (s *Store) RangeEarnings(ctx context.Context, from, to time.Time) (decimal.Decimal, error) {
+	return rangeEarnings(ctx, s.db, from, to)
+}
+
+func rangeEarnings(ctx context.Context, q appdb.Queryer, from, to time.Time) (decimal.Decimal, error) {
+	var svc, billSvc, bonus decimal.Decimal
+	if err := q.GetContext(ctx, &svc, `
+		SELECT COALESCE(SUM(service_charge),0) FROM recharge_transactions
+		WHERE created_at >= $1 AND created_at < $2`, from, to); err != nil {
+		return decimal.Zero, err
+	}
+	if err := q.GetContext(ctx, &billSvc, `
+		SELECT COALESCE(SUM(service_charge),0) FROM recharge_bill_tx
+		WHERE created_at >= $1 AND created_at < $2`, from, to); err != nil {
+		return decimal.Zero, err
+	}
+	// Realized float commission: per device session closed in range, the counted
+	// closing minus (opening + net float movement) — the carrier bonus that made
+	// the float end higher than the activity alone explains.
+	if err := q.GetContext(ctx, &bonus, `
+		SELECT COALESCE(SUM(ds.closing - ds.opening - COALESCE(td.delta,0)),0)
+		FROM recharge_device_sessions ds
+		LEFT JOIN (
+			SELECT session_id, device_id, SUM(float_delta) AS delta
+			FROM recharge_transactions GROUP BY session_id, device_id
+		) td ON td.session_id = ds.session_id AND td.device_id = ds.device_id
+		WHERE ds.closing IS NOT NULL AND ds.closed_at >= $1 AND ds.closed_at < $2`, from, to); err != nil {
+		return decimal.Zero, err
+	}
+	return svc.Add(billSvc).Add(bonus), nil
 }
