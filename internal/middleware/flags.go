@@ -15,6 +15,10 @@ type UserFlags struct {
 	// place orders from the till. Meaningless for admins and managers, who may
 	// always do so.
 	CanHandleSuppliers bool
+	// CanManageCredit lets a cashier override a customer's credit limit for one
+	// sale and raise a stored credit limit from the till. Meaningless for admins
+	// and managers, who may always do so.
+	CanManageCredit bool
 }
 
 // ctxKey is unexported so nothing outside this package can collide with it.
@@ -27,6 +31,8 @@ type ctxKey struct{ name string }
 var ctxFlagsKey = ctxKey{"user_flags"}
 
 const ctxCanSuppliers = "can_handle_suppliers"
+
+const ctxCanManageCredit = "can_manage_credit"
 
 // CanHandleSuppliers reports the flag for the current request. Admins and
 // managers are NOT covered here — this is the raw per-user flag.
@@ -45,6 +51,25 @@ func CanHandleSuppliersCtx(ctx context.Context) bool {
 // may only with the flag. Used by both the route gate and the nav tab, so the
 // tab can never appear on a page the gate would refuse.
 func MaySeeSuppliers(role string, flag bool) bool {
+	return role == "admin" || role == "manager" || flag
+}
+
+// CanManageCredit reports the raw per-user flag for the current request. Admins
+// and managers are NOT covered here — this is the raw per-user flag.
+func CanManageCredit(c echo.Context) bool {
+	b, _ := c.Get(ctxCanManageCredit).(bool)
+	return b
+}
+
+// CanManageCreditCtx is CanManageCredit for a bare context, for templates.
+func CanManageCreditCtx(ctx context.Context) bool {
+	f, _ := ctx.Value(ctxFlagsKey).(UserFlags)
+	return f.CanManageCredit
+}
+
+// MayManageCredit is the full rule: an admin or manager always may; a cashier
+// may only with the flag.
+func MayManageCredit(role string, flag bool) bool {
 	return role == "admin" || role == "manager" || flag
 }
 

@@ -128,12 +128,16 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 		var row struct {
 			Active             bool `db:"is_active"`
 			CanHandleSuppliers bool `db:"can_handle_suppliers"`
+			CanManageCredit    bool `db:"can_manage_credit"`
 		}
 		if err := db.GetContext(ctx, &row,
-			`SELECT is_active, can_handle_suppliers FROM users WHERE id = $1`, userID); err != nil {
+			`SELECT is_active, can_handle_suppliers, can_manage_credit FROM users WHERE id = $1`, userID); err != nil {
 			return middleware.UserFlags{}, false
 		}
-		return middleware.UserFlags{CanHandleSuppliers: row.CanHandleSuppliers}, row.Active
+		return middleware.UserFlags{
+			CanHandleSuppliers: row.CanHandleSuppliers,
+			CanManageCredit:    row.CanManageCredit,
+		}, row.Active
 	})
 	jwt := middleware.JWTAuth(cfg.JWTSecret)
 	// pinGuard forces users carrying a server-assigned PIN to change it before

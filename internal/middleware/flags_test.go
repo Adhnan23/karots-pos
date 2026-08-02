@@ -62,3 +62,39 @@ func TestCanHandleSuppliersCtx(t *testing.T) {
 		t.Fatal("the stashed flag was not read back")
 	}
 }
+
+// TestMayManageCredit pins who may override/raise credit limits: admins and
+// managers always; a cashier only with the per-user flag.
+func TestMayManageCredit(t *testing.T) {
+	cases := []struct {
+		name    string
+		role    string
+		flag    bool
+		allowed bool
+	}{
+		{"admin without flag", "admin", false, true},
+		{"manager without flag", "manager", false, true},
+		{"plain cashier", "cashier", false, false},
+		{"trusted cashier", "cashier", true, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := MayManageCredit(tc.role, tc.flag); got != tc.allowed {
+				t.Fatalf("MayManageCredit(%q, %v) = %v, want %v", tc.role, tc.flag, got, tc.allowed)
+			}
+		})
+	}
+}
+
+// TestCanManageCreditCtx proves the credit flag survives into the request
+// context, which is what the till reads to show the credit controls.
+func TestCanManageCreditCtx(t *testing.T) {
+	base := context.Background()
+	if CanManageCreditCtx(base) {
+		t.Fatal("a bare context must not grant credit management")
+	}
+	withFlag := context.WithValue(base, ctxFlagsKey, UserFlags{CanManageCredit: true})
+	if !CanManageCreditCtx(withFlag) {
+		t.Fatal("the stashed flag was not read back")
+	}
+}

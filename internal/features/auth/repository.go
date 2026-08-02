@@ -52,12 +52,12 @@ func (r *Repository) ListAll(ctx context.Context) ([]User, error) {
 
 // Create inserts a new user. mustChange arms the forced PIN-change flag — the
 // caller decides based on the shop's "force PIN change" setting.
-func (r *Repository) Create(ctx context.Context, name string, phone *string, role, pinHash, receiptPrinter string, mustChange, canSuppliers bool) (*User, error) {
+func (r *Repository) Create(ctx context.Context, name string, phone *string, role, pinHash, receiptPrinter string, mustChange, canSuppliers, canCredit bool) (*User, error) {
 	var u User
 	err := r.db.GetContext(ctx, &u,
-		`INSERT INTO users (name, phone, role, pin_hash, must_change_pin, receipt_printer, can_handle_suppliers)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7)
-		 RETURNING *`, name, phone, role, pinHash, mustChange, receiptPrinter, canSuppliers)
+		`INSERT INTO users (name, phone, role, pin_hash, must_change_pin, receipt_printer, can_handle_suppliers, can_manage_credit)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		 RETURNING *`, name, phone, role, pinHash, mustChange, receiptPrinter, canSuppliers, canCredit)
 	if err != nil {
 		return nil, err
 	}
@@ -66,11 +66,11 @@ func (r *Repository) Create(ctx context.Context, name string, phone *string, rol
 
 // Update edits a profile. The is_system guard means the hidden system admin can
 // never be edited through the admin UI (0 rows → NotFound).
-func (r *Repository) Update(ctx context.Context, id int64, name string, phone *string, role, receiptPrinter string, canSuppliers bool) error {
+func (r *Repository) Update(ctx context.Context, id int64, name string, phone *string, role, receiptPrinter string, canSuppliers, canCredit bool) error {
 	res, err := r.db.ExecContext(ctx,
-		`UPDATE users SET name = $1, phone = $2, role = $3, receipt_printer = $4, can_handle_suppliers = $5
-		 WHERE id = $6 AND is_system = false`,
-		name, phone, role, receiptPrinter, canSuppliers, id)
+		`UPDATE users SET name = $1, phone = $2, role = $3, receipt_printer = $4, can_handle_suppliers = $5, can_manage_credit = $6
+		 WHERE id = $7 AND is_system = false`,
+		name, phone, role, receiptPrinter, canSuppliers, canCredit, id)
 	if err != nil {
 		return err
 	}

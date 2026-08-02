@@ -26,6 +26,8 @@ type User struct {
 	// place orders from the till. Off by default; admins and managers may do so
 	// regardless of this flag.
 	CanHandleSuppliers bool  `db:"can_handle_suppliers" json:"can_handle_suppliers"`
+	// CanManageCredit lets a cashier override/raise credit limits at the till.
+	CanManageCredit bool  `db:"can_manage_credit" json:"can_manage_credit"`
 	CreatedAt     time.Time `db:"created_at" json:"created_at"`
 }
 
@@ -63,6 +65,8 @@ type CreateUserInput struct {
 	// otherwise. Read as a string, not a bool, so an unticked box means false
 	// rather than a bind error.
 	CanHandleSuppliers string `json:"can_handle_suppliers" form:"can_handle_suppliers" validate:"omitempty"`
+	// CanManageCredit arrives as an HTML checkbox — see CanHandleSuppliers.
+	CanManageCredit string `json:"can_manage_credit" form:"can_manage_credit" validate:"omitempty"`
 }
 
 // UpdateUserInput edits a user's profile/role and optionally resets the PIN
@@ -76,6 +80,9 @@ type UpdateUserInput struct {
 	// CanHandleSuppliers arrives as an HTML checkbox — see CreateUserInput. An
 	// absent value revokes, which is what a browser sends for an unticked box.
 	CanHandleSuppliers string `json:"can_handle_suppliers" form:"can_handle_suppliers" validate:"omitempty"`
+	// CanManageCredit arrives as an HTML checkbox — see CreateUserInput. An absent
+	// value revokes, which is what a browser sends for an unticked box.
+	CanManageCredit string `json:"can_manage_credit" form:"can_manage_credit" validate:"omitempty"`
 }
 
 // checkboxOn reads an HTML checkbox value. Browsers omit unticked boxes and

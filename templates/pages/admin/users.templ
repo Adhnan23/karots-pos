@@ -113,6 +113,20 @@ templ UserForm(u *auth.User) {
 					</span>
 				</label>
 			</div>
+			<div>
+				<label class="flex items-start gap-3">
+					<input
+						type="checkbox"
+						name="can_manage_credit"
+						checked?={ u != nil && u.CanManageCredit }
+						class="mt-1 w-4 h-4"
+					/>
+					<span>
+						<span class="text-sm font-medium">Manage credit at till</span>
+						<span class="block text-xs text-slate-500">Lets this person approve a credit sale that goes over a customer's limit and raise a customer's credit limit from the till. Leave off for anyone who only sells.</span>
+					</span>
+				</label>
+			</div>
 			@modalButtons()
 		</form>
 	}
