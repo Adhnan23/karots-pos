@@ -741,6 +741,28 @@ templ POS(d POSData) {
 					</template>
 				</div>
 			</div>
+
+			<!-- Found-at-till: selling more than the count shows. The item is on the
+			     counter; the count was short. Confirm once, then the server corrects
+			     the count up and sells (on hand ends at 0, never negative). -->
+			<div x-show="oversellPrompt" x-cloak x-on:keydown.escape.window="cancelOversell()" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+				<div class="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 space-y-3">
+					<h3 class="text-lg font-semibold text-amber-700">More than what's in stock</h3>
+					<p class="text-sm text-slate-600">
+						The count shows only
+						<span class="font-medium" x-text="oversellPrompt && (oversellPrompt.stock + ' in stock')"></span>
+						for
+						<span class="font-medium" x-text="oversellPrompt && oversellPrompt.name"></span>,
+						but you're selling
+						<span class="font-medium" x-text="oversellPrompt && oversellPrompt.qty"></span>.
+					</p>
+					<p class="text-xs text-slate-500">Sell it anyway? The stock count is corrected up to match, so on-hand ends at zero — not negative.</p>
+					<div class="flex gap-2 pt-1">
+						<button type="button" x-on:click="cancelOversell()" class="flex-1 px-4 py-2.5 rounded-lg border font-semibold">Go back</button>
+						<button type="button" x-on:click="approveOversell()" class="flex-1 px-4 py-2.5 rounded-lg bg-amber-600 text-white font-semibold">Sell anyway</button>
+					</div>
+				</div>
+			</div>
 		</div>
 	}
 }

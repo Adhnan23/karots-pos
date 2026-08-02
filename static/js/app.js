@@ -1030,21 +1030,14 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
           return;
         }
       }
-      // Selling an item the count shows as out of stock: the customer is holding
-      // one that was never counted. Confirm once, then the line carries the flag
-      // so the server corrects the count up (found-at-till) instead of refusing.
-      if (!p.is_service && Number(p.stock_qty) <= 0 && !(opts && opts.oversellOK)) {
-        if (!confirm(`Stock shows 0 for ${p.name} — sell anyway?`)) return;
-        opts = Object.assign({}, opts, { oversellOK: true });
-      }
-      const oversell = !!(opts && opts.oversellOK);
+      // Overselling (a 0-stock item, or a qty above what's on hand) is confirmed
+      // once at checkout via a styled prompt — see checkout(). Nothing to gate here.
       // One product can now be two lines at two prices, so a line is identified
       // by product AND lot — merging on product alone would silently re-price.
       const lotId = lot ? lot.batch_id : 0;
       const existing = this.cart.find((x) => x.id === p.id && (x.batch_id || 0) === lotId);
       if (existing) {
         existing.qty = Number(existing.qty) + 1;
-        existing.allow_oversell = existing.allow_oversell || oversell;
         this.clampQty(existing);
         return;
       }
@@ -1061,8 +1054,9 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
         batch_id: lotId,
         batch_remaining: lot ? Number(lot.qty_remaining) : 0,
         batch_label: lot ? this.lotLabel(lot) : "",
-        // Confirmed sale of a 0-stock item: the server corrects the count up.
-        allow_oversell: oversell,
+        // Set at checkout when the cashier confirms selling more than the count
+        // shows; the server then corrects the count up (found-at-till).
+        allow_oversell: false,
         // Weight/volume units (kg, g, ltr, ml) accept fractional quantities;
         // everything else is whole-only.
         allowDecimal: !!p.unit_allow_decimal,
@@ -1608,6 +1602,17 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
     cancelCreditPrompt() {
       this.creditPrompt = null;
     },
+    // --- found-at-till (sell more than the count shows) confirmation ---
+    oversellPrompt: null,
+    approveOversell() {
+      const it = this.cart.find((x) => x._key === this.oversellPrompt.key);
+      if (it) it.allow_oversell = true;
+      this.oversellPrompt = null;
+      this.checkout(false); // re-enter: pick up the next short line, or proceed
+    },
+    cancelOversell() {
+      this.oversellPrompt = null;
+    },
     // The selected customer's remaining credit (limit − outstanding), or null
     // when no customer is chosen. Advisory only — the server is authoritative.
     availableCredit() {
@@ -1639,18 +1644,27 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
 
     async checkout(confirmed) {
       if (this.cart.length === 0 || this.busy) return;
-      // Found-at-till: any line selling MORE than the count shows needs a one-time
-      // OK, then it carries the flag so the server corrects the count up instead
-      // of refusing. Covers both a 0-stock item and raising the qty above what's
-      // on hand (e.g. 2 in stock, selling 3). Service lines carry MAX stock, so
-      // they never trip. allow_oversell guards against re-prompting on re-entry.
-      for (const it of this.cart) {
-        if (it.allow_oversell) continue;
-        const stock = Number(it.stock);
-        if (Number.isFinite(stock) && Number(it.qty) > stock + 1e-9) {
-          if (!confirm(`Stock shows ${stock} for ${it.name} — sell ${it.qty} anyway?`)) return;
-          it.allow_oversell = true;
-        }
+      // Found-at-till: a line selling MORE than the count shows needs a one-time
+      // OK via a styled in-app prompt (not the browser's confirm()). Handled one
+      // line at a time — approving re-enters checkout — until every short line
+      // carries the flag, so the server corrects the count up instead of
+      // refusing. Covers both a 0-stock item and raising the qty above what's on
+      // hand (e.g. 2 in stock, selling 3). Service lines carry MAX stock, so they
+      // never trip.
+      const short = this.cart.find(
+        (it) =>
+          !it.allow_oversell &&
+          Number.isFinite(Number(it.stock)) &&
+          Number(it.qty) > Number(it.stock) + 1e-9
+      );
+      if (short) {
+        this.oversellPrompt = {
+          key: short._key,
+          name: short.name,
+          stock: Number(short.stock),
+          qty: Number(short.qty),
+        };
+        return;
       }
       // Raise the prompt rather than posting a tender that does not add up.
       // `confirmed` is set by the prompt's own buttons so it cannot loop.
@@ -1782,6 +1796,7 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
       this._overLimitApproved = false;
       this.showLimitEdit = false;
       this.creditLimitEdit = "";
+      this.oversellPrompt = null;
     },
   };
 }
