@@ -47,6 +47,12 @@ func Conflict(msg string) *AppError {
 	return &AppError{Code: "CONFLICT", Message: msg, Status: 409}
 }
 
+// ConflictCode is Conflict with a caller-chosen machine-readable code, so a
+// client can react to a specific 409 without string-matching the message.
+func ConflictCode(code, msg string) *AppError {
+	return &AppError{Code: code, Message: msg, Status: 409}
+}
+
 func Unauthorized(msg string) *AppError {
 	if msg == "" {
 		msg = "authentication required"

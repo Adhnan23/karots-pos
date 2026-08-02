@@ -361,7 +361,35 @@ func (s *Service) Create(ctx context.Context, in CreateInput, cashierID int64) (
 						return apperr.Internal("failed to update stock", err)
 					}
 					if !ok {
-						return apperr.Conflict("insufficient stock for a consumable used by " + p.Name)
+						// The consumable count is short. Without an override, refuse —
+						// but with a machine-readable code so the till can offer a
+						// found-at-till confirm (the paper is on the shelf; the count
+						// was just wrong), mirroring the product path below.
+						if !it.AllowOversell {
+							return apperr.ConflictCode("CONSUMABLE_SHORT",
+								"insufficient stock for a consumable used by "+p.Name)
+						}
+						onHand, err := stkRepo.GetQuantity(ctx, comp.ProductID)
+						if err != nil {
+							return apperr.Internal("failed to read stock", err)
+						}
+						compCost, err := stkRepo.ProductCost(ctx, comp.ProductID)
+						if err != nil {
+							return apperr.Internal("failed to read cost", err)
+						}
+						// Correct the count up to cover this line (batchID 0 —
+						// consumables aren't lot-picked at the till), then the guarded
+						// decrement must succeed, so on-hand lands at 0, never negative.
+						if err := stkRepo.FoundAtTill(ctx, comp.ProductID, 0, cq.Sub(onHand), compCost, cashierID); err != nil {
+							return apperr.Internal("failed to correct stock", err)
+						}
+						ok, err = stkRepo.DecrementGuarded(ctx, comp.ProductID, cq)
+						if err != nil {
+							return apperr.Internal("failed to update stock", err)
+						}
+						if !ok {
+							return apperr.Internal("stock correction did not cover the consumable", nil)
+						}
 					}
 					ccost, err := stkRepo.DepleteFEFO(ctx, comp.ProductID, cq)
 					if err != nil {
