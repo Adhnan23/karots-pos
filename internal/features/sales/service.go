@@ -114,6 +114,10 @@ type CreateInput struct {
 	Notes        *string        `json:"notes"`
 	Items        []ItemInput    `json:"items"    validate:"required,min=1,dive"`
 	Payments     []PaymentInput `json:"payments" validate:"dive"`
+	// AllowOverLimit permits an account line past the customer's credit limit.
+	// The web layer sets this only for a user with can_manage_credit — the
+	// service trusts it as already-authorised.
+	AllowOverLimit bool `json:"allow_over_limit"`
 }
 
 var hundred = decimal.NewFromInt(100)
@@ -454,7 +458,7 @@ func (s *Service) Create(ctx context.Context, in CreateInput, cashierID int64) (
 			cust = c
 			available = c.AvailableCredit()
 		}
-		if err := CheckTender(tender, total, in.CustomerID != nil, available); err != nil {
+		if err := CheckTender(tender, total, in.CustomerID != nil, available, in.AllowOverLimit); err != nil {
 			return err
 		}
 

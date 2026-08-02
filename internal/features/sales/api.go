@@ -25,6 +25,11 @@ func (h *APIHandler) Create(c echo.Context) error {
 	if err := c.Validate(&in); err != nil {
 		return err
 	}
+	// The over-limit approval is honoured only for a user the role/flag permits;
+	// never trust the client alone.
+	if in.AllowOverLimit && !middleware.MayManageCredit(middleware.CurrentRole(c), middleware.CanManageCredit(c)) {
+		in.AllowOverLimit = false
+	}
 	detail, err := h.svc.Create(c.Request().Context(), in, middleware.CurrentUserID(c))
 	if err != nil {
 		return err

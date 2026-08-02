@@ -43,7 +43,7 @@ func SplitTender(methods []string, amounts []decimal.Decimal) Tender {
 // the debt was invisible in the receipts list. The till resolves a shortfall
 // through its confirmation prompt and posts an explicit on-account line, so
 // this is the backstop rather than the cashier's experience of it.
-func CheckTender(t Tender, total decimal.Decimal, hasCustomer bool, availableCredit decimal.Decimal) error {
+func CheckTender(t Tender, total decimal.Decimal, hasCustomer bool, availableCredit decimal.Decimal, allowOverLimit bool) error {
 	covered := t.Paid.Add(t.OnAccount)
 	if covered.LessThan(total) {
 		return apperr.Validation(money.Display(total.Sub(covered)) +
@@ -60,7 +60,7 @@ func CheckTender(t Tender, total decimal.Decimal, hasCustomer bool, availableCre
 	if covered.GreaterThan(total) {
 		return apperr.Validation("this sale is over-paid — reduce the amount on account")
 	}
-	if t.OnAccount.GreaterThan(availableCredit) {
+	if !allowOverLimit && t.OnAccount.GreaterThan(availableCredit) {
 		return apperr.Conflict("credit limit exceeded (available " +
 			money.Display(availableCredit) + ")")
 	}
