@@ -17,6 +17,7 @@ type SuppliersData struct {
 	Symbol   string
 	Search   string
 	Owing    bool
+	Inactive bool
 	Rows     []suppliers.Supplier
 }
 
@@ -36,7 +37,7 @@ templ SuppliersPage(d SuppliersData) {
 			<form
 				class="flex flex-wrap items-center gap-3 mb-4"
 				hx-get="/admin/suppliers/table"
-				hx-trigger="input changed delay:300ms from:input[name='search'], change from:input[name='owing'], reload-suppliers from:body"
+				hx-trigger="input changed delay:300ms from:input[name='search'], change from:input[name='owing'], change from:input[name='inactive'], reload-suppliers from:body"
 				hx-target="#supplier-tbody"
 				hx-swap="innerHTML"
 			>
@@ -50,6 +51,7 @@ templ SuppliersPage(d SuppliersData) {
 				<label class="inline-flex items-center gap-2 text-sm text-slate-600">
 					<input type="checkbox" name="owing" value="1" checked?={ d.Owing }/> Only payable
 				</label>
+				@adminfragments.ShowDisabledToggle(d.Inactive)
 			</form>
 			<table class="w-full text-sm">
 				<thead class="text-left text-slate-500 border-b">
@@ -75,8 +77,13 @@ templ SupplierRows(rows []suppliers.Supplier, symbol string) {
 		<tr><td colspan="6" class="py-6 text-center text-slate-500">No suppliers yet.</td></tr>
 	} else {
 		for _, s := range rows {
-			<tr class="border-b last:border-0">
-				<td class="py-2 px-3 font-medium">{ s.Name }</td>
+			<tr class={ "border-b last:border-0", templ.KV("opacity-50", !s.IsActive) }>
+				<td class="py-2 px-3 font-medium">
+					{ s.Name }
+					if !s.IsActive {
+						<span class="ml-2 px-2 py-0.5 rounded-full text-xs bg-slate-200 text-slate-600">disabled</span>
+					}
+				</td>
 				<td class="py-2 px-3">{ strOrEmpty(s.ContactPerson) }</td>
 				<td class="py-2 px-3">{ strOrEmpty(s.Phone) }</td>
 				<td class="py-2 px-3 text-center">{ strconv.Itoa(s.CreditDays) }</td>
@@ -88,9 +95,13 @@ templ SupplierRows(rows []suppliers.Supplier, symbol string) {
 					}
 				</td>
 				<td class="py-2 px-3 text-right whitespace-nowrap">
-					<button class="text-indigo-600 hover:underline" hx-get={ "/admin/suppliers/form/" + strconv.FormatInt(s.ID, 10) } hx-target="#modal-container" hx-swap="innerHTML">Edit</button>
-					<button class="text-emerald-600 hover:underline ml-3" hx-get={ "/admin/suppliers/pay/" + strconv.FormatInt(s.ID, 10) } hx-target="#modal-container" hx-swap="innerHTML">Pay</button>
-					<button class="text-red-600 hover:underline ml-3" hx-delete={ "/admin/suppliers/" + strconv.FormatInt(s.ID, 10) } hx-swap="none" hx-confirm={ "Remove supplier " + s.Name + "?" }>Delete</button>
+					if s.IsActive {
+						<button class="text-indigo-600 hover:underline" hx-get={ "/admin/suppliers/form/" + strconv.FormatInt(s.ID, 10) } hx-target="#modal-container" hx-swap="innerHTML">Edit</button>
+						<button class="text-emerald-600 hover:underline ml-3" hx-get={ "/admin/suppliers/pay/" + strconv.FormatInt(s.ID, 10) } hx-target="#modal-container" hx-swap="innerHTML">Pay</button>
+						<button class="text-red-600 hover:underline ml-3" hx-delete={ "/admin/suppliers/" + strconv.FormatInt(s.ID, 10) } hx-swap="none" hx-confirm={ "Disable supplier " + s.Name + "?" }>Disable</button>
+					} else {
+						<button class="text-emerald-600 hover:underline" hx-post={ "/admin/suppliers/" + strconv.FormatInt(s.ID, 10) + "/activate" } hx-swap="none" hx-confirm={ "Re-enable " + s.Name + "?" }>Reactivate</button>
+					}
 				</td>
 			</tr>
 		}

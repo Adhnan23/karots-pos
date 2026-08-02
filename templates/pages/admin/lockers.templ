@@ -15,6 +15,7 @@ type LockersData struct {
 	Symbol   string
 	Rows     []lockers.Locker
 	Total    decimal.Decimal
+	Inactive bool
 }
 
 templ LockersPage(d LockersData) {
@@ -24,7 +25,13 @@ templ LockersPage(d LockersData) {
 				<h1 class="text-2xl font-bold">Cash Lockers</h1>
 				<p class="text-sm text-slate-500">Money held outside the cashier drawers — a safe, a bank account, the owner's pocket.</p>
 			</div>
-			<div class="flex gap-2">
+			<div class="flex items-center gap-3">
+				<form method="get">
+					<label class="flex items-center gap-2 text-sm text-slate-600 select-none">
+						<input type="checkbox" name="inactive" value="1" checked?={ d.Inactive } onchange="this.form.submit()" class="w-4 h-4"/>
+						Show disabled
+					</label>
+				</form>
 				if len(d.Rows) >= 2 {
 					<button class="px-4 py-2 rounded-lg bg-white border font-medium text-slate-700"
 						hx-get="/admin/lockers/transfer/form" hx-target="#modal-container" hx-swap="innerHTML">⇄ Transfer</button>

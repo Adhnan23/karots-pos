@@ -132,8 +132,29 @@ func (r *Repository) Update(ctx context.Context, id int64, in UpdateInput) error
 	return nil
 }
 
+// ListAll returns active + disabled suppliers (disabled last), for the admin list
+// with "Show disabled" on so they can be reactivated.
+func (r *Repository) ListAll(ctx context.Context, search string) ([]Supplier, error) {
+	var rows []Supplier
+	var s *string
+	if strings.TrimSpace(search) != "" {
+		s = &search
+	}
+	err := r.q.SelectContext(ctx, &rows, `
+		SELECT * FROM suppliers
+		WHERE ($1::text IS NULL OR name ILIKE '%' || $1 || '%'
+		       OR contact_person ILIKE '%' || $1 || '%' OR phone ILIKE '%' || $1 || '%')
+		ORDER BY is_active DESC, name`, s)
+	return rows, err
+}
+
 func (r *Repository) Deactivate(ctx context.Context, id int64) error {
 	_, err := r.q.ExecContext(ctx, `UPDATE suppliers SET is_active=false WHERE id=$1`, id)
+	return err
+}
+
+func (r *Repository) Reactivate(ctx context.Context, id int64) error {
+	_, err := r.q.ExecContext(ctx, `UPDATE suppliers SET is_active=true WHERE id=$1`, id)
 	return err
 }
 
@@ -158,6 +179,23 @@ func (s *Service) List(ctx context.Context, search string) ([]Supplier, error) {
 		return nil, apperr.Internal("failed to list suppliers", err)
 	}
 	return rows, nil
+}
+
+// ListAll includes disabled suppliers (for the admin list with "Show disabled").
+func (s *Service) ListAll(ctx context.Context, search string) ([]Supplier, error) {
+	rows, err := s.repo.ListAll(ctx, search)
+	if err != nil {
+		return nil, apperr.Internal("failed to list suppliers", err)
+	}
+	return rows, nil
+}
+
+// Reactivate re-enables a disabled supplier.
+func (s *Service) Reactivate(ctx context.Context, id int64) error {
+	if err := s.repo.Reactivate(ctx, id); err != nil {
+		return apperr.Internal("failed to reactivate supplier", err)
+	}
+	return nil
 }
 
 // Owing lists suppliers with an outstanding payable (for the dues report).

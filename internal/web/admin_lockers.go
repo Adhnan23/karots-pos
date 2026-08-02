@@ -25,7 +25,8 @@ import (
 // Lockers lists every locker with its live balance plus the combined total.
 func (a *adminUI) Lockers(c echo.Context) error {
 	ctx := c.Request().Context()
-	rows, err := a.s.lockers.List(ctx, false)
+	inactive := showDisabled(c)
+	rows, err := a.s.lockers.List(ctx, !inactive) // activeOnly = hide disabled
 	if err != nil {
 		return err
 	}
@@ -40,6 +41,7 @@ func (a *adminUI) Lockers(c echo.Context) error {
 		Symbol:   a.symbol(ctx),
 		Rows:     rows,
 		Total:    total,
+		Inactive: inactive,
 	}))
 }
 

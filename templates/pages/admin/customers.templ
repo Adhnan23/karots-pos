@@ -13,6 +13,7 @@ type CustomersData struct {
 	UserName string
 	Symbol   string
 	Search   string
+	Inactive bool
 	Rows     []customers.Customer
 }
 
@@ -38,9 +39,9 @@ templ CustomersPage(d CustomersData) {
 		</div>
 		<div class="bg-white rounded-2xl shadow-sm p-6">
 			<form
-				class="flex flex-wrap gap-3 mb-4"
+				class="flex flex-wrap items-center gap-3 mb-4"
 				hx-get="/admin/customers/table"
-				hx-trigger="input changed delay:300ms from:input[name='search'], reload-customers from:body"
+				hx-trigger="input changed delay:300ms from:input[name='search'], change from:input[name='inactive'], reload-customers from:body"
 				hx-target="#customer-tbody"
 				hx-swap="innerHTML"
 			>
@@ -51,6 +52,7 @@ templ CustomersPage(d CustomersData) {
 					placeholder="Search by name or phone…"
 					class="flex-1 min-w-[14rem] max-w-sm border rounded-lg px-3 py-2"
 				/>
+				@adminfragments.ShowDisabledToggle(d.Inactive)
 			</form>
 			<table class="w-full text-sm">
 				<thead class="text-left text-slate-500 border-b">

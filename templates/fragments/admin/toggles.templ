@@ -1,0 +1,14 @@
+package adminfragments
+
+// ShowDisabledToggle is the shared "Show disabled" checkbox used on the admin
+// list pages (customers, suppliers, lockers, users, products, …). It carries the
+// name `inactive`, so the enclosing search <form> serialises it into the table's
+// hx-get; the parent form must add `change from:input[name='inactive']` to its
+// hx-trigger so ticking it reloads the table. Off by default → disabled rows are
+// hidden; ticked → they appear (greyed, with an Enable action).
+templ ShowDisabledToggle(checked bool) {
+	<label class="flex items-center gap-2 text-sm text-slate-600 select-none">
+		<input type="checkbox" name="inactive" value="1" checked?={ checked } class="w-4 h-4"/>
+		Show disabled
+	</label>
+}

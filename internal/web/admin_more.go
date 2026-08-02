@@ -41,32 +41,47 @@ func (a *adminUI) Suppliers(c echo.Context) error {
 	ctx := c.Request().Context()
 	search := c.QueryParam("search")
 	owing := c.QueryParam("owing") == "1"
-	rows, err := a.s.suppliers.List(ctx, search)
+	inactive := showDisabled(c)
+	rows, err := a.supplierRows(ctx, search, owing, inactive)
 	if err != nil {
 		return err
-	}
-	if owing {
-		rows = suppliersOwing(rows)
 	}
 	return response.RenderPage(c, adminpages.SuppliersPage(adminpages.SuppliersData{
 		UserName: middleware.CurrentUserName(c),
 		Symbol:   a.symbol(ctx),
 		Search:   search,
 		Owing:    owing,
+		Inactive: inactive,
 		Rows:     rows,
 	}))
 }
 
 func (a *adminUI) SuppliersTable(c echo.Context) error {
 	ctx := c.Request().Context()
-	rows, err := a.s.suppliers.List(ctx, c.QueryParam("search"))
+	rows, err := a.supplierRows(ctx, c.QueryParam("search"), c.QueryParam("owing") == "1", showDisabled(c))
 	if err != nil {
 		return err
 	}
-	if c.QueryParam("owing") == "1" {
+	return response.RenderFragment(c, adminpages.SupplierRows(rows, a.symbol(ctx)))
+}
+
+// supplierRows lists active suppliers, or active + disabled when showing disabled,
+// optionally narrowed to those with an outstanding payable.
+func (a *adminUI) supplierRows(ctx context.Context, search string, owing, inactive bool) ([]suppliers.Supplier, error) {
+	var rows []suppliers.Supplier
+	var err error
+	if inactive {
+		rows, err = a.s.suppliers.ListAll(ctx, search)
+	} else {
+		rows, err = a.s.suppliers.List(ctx, search)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if owing {
 		rows = suppliersOwing(rows)
 	}
-	return response.RenderFragment(c, adminpages.SupplierRows(rows, a.symbol(ctx)))
+	return rows, nil
 }
 
 // suppliersOwing keeps only suppliers with an outstanding payable balance.
@@ -168,6 +183,18 @@ func (a *adminUI) SupplierDelete(c echo.Context) error {
 	}
 	a.s.logAudit(c, audit.ActionDelete, "supplier", strconv.FormatInt(id, 10), "")
 	return htmxReload(c, "Supplier removed", "reload-suppliers")
+}
+
+func (a *adminUI) SupplierReactivate(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	if err := a.s.suppliers.Reactivate(c.Request().Context(), id); err != nil {
+		return err
+	}
+	a.s.logAudit(c, audit.ActionUpdate, "supplier", strconv.FormatInt(id, 10), "reactivated")
+	return htmxReload(c, "Supplier re-enabled", "reload-suppliers")
 }
 
 func (a *adminUI) SupplierPay(c echo.Context) error {
@@ -1350,18 +1377,39 @@ func (a *adminUI) reorderDemand(ctx context.Context, rows []products.Product) ma
 
 func (a *adminUI) Users(c echo.Context) error {
 	ctx := c.Request().Context()
-	rows, err := a.s.auth.ListUsers(ctx)
+	inactive := showDisabled(c)
+	rows, err := a.userRows(ctx, inactive)
 	if err != nil {
 		return err
 	}
 	return response.RenderPage(c, adminpages.UsersPage(adminpages.UsersData{
 		UserName: middleware.CurrentUserName(c),
 		Rows:     rows,
+		Inactive: inactive,
 	}))
 }
 
+// userRows lists staff, dropping disabled ones unless showing disabled. The user
+// table is small, so filtering in Go avoids churning the auth service signature.
+func (a *adminUI) userRows(ctx context.Context, inactive bool) ([]auth.User, error) {
+	rows, err := a.s.auth.ListUsers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if inactive {
+		return rows, nil
+	}
+	out := rows[:0]
+	for _, u := range rows {
+		if u.IsActive {
+			out = append(out, u)
+		}
+	}
+	return out, nil
+}
+
 func (a *adminUI) UsersTable(c echo.Context) error {
-	rows, err := a.s.auth.ListUsers(c.Request().Context())
+	rows, err := a.userRows(c.Request().Context(), showDisabled(c))
 	if err != nil {
 		return err
 	}

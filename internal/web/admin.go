@@ -709,10 +709,19 @@ func (a *adminUI) Sales(c echo.Context) error {
 
 // --- customers ---
 
+// showDisabled reports whether an admin list should include disabled (inactive)
+// rows. Off by default (disabled rows hidden); the "Show disabled" toggle sends
+// inactive=1. Shared by every filterable admin list.
+func showDisabled(c echo.Context) bool {
+	v := c.QueryParam("inactive")
+	return v == "1" || v == "on" || strings.EqualFold(v, "true")
+}
+
 func (a *adminUI) Customers(c echo.Context) error {
 	ctx := c.Request().Context()
 	search := c.QueryParam("search")
-	rows, err := a.s.customers.ListAll(ctx, search)
+	inactive := showDisabled(c)
+	rows, err := a.customerRows(ctx, search, inactive)
 	if err != nil {
 		return err
 	}
@@ -720,17 +729,26 @@ func (a *adminUI) Customers(c echo.Context) error {
 		UserName: middleware.CurrentUserName(c),
 		Symbol:   a.symbol(ctx),
 		Search:   search,
+		Inactive: inactive,
 		Rows:     rows,
 	}))
 }
 
 func (a *adminUI) CustomersTable(c echo.Context) error {
 	ctx := c.Request().Context()
-	rows, err := a.s.customers.ListAll(ctx, c.QueryParam("search"))
+	rows, err := a.customerRows(ctx, c.QueryParam("search"), showDisabled(c))
 	if err != nil {
 		return err
 	}
 	return response.RenderFragment(c, adminpages.CustomerRows(rows, a.symbol(ctx)))
+}
+
+// customerRows lists active customers, or active + disabled when showing disabled.
+func (a *adminUI) customerRows(ctx context.Context, search string, inactive bool) ([]customers.Customer, error) {
+	if inactive {
+		return a.s.customers.ListAll(ctx, search)
+	}
+	return a.s.customers.List(ctx, search)
 }
 
 func (a *adminUI) CustomerForm(c echo.Context) error {
