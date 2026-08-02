@@ -114,6 +114,7 @@ func (h *cashierUI) POS(c echo.Context) error {
 		DefaultSaleType: defaultType,
 		AskToPrint:      askToPrint,
 		OpenCashDrawer:  openDrawer,
+		CanManageCredit: middleware.CanManageCredit(c),
 	}))
 }
 

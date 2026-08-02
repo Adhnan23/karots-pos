@@ -95,6 +95,10 @@ async function apiFetch(method, url, body, options) {
   } catch (_) {
     /* no body */
   }
+  if (res.ok && options && options.returnStatus) {
+    // Callers that need to distinguish 200 (reused) from 201 (created) opt in.
+    return { json, data: json && json.data, status: res.status };
+  }
   if (!res.ok) {
     const msg = (json && json.error && json.error.message) || "Request failed";
     // `silent` lets a caller handle a specific status (e.g. 404) itself without a
@@ -262,9 +266,18 @@ function printPromptHost() {
 
 // pos: the cashier terminal. Cart math here is a live preview only — the server
 // recomputes every amount authoritatively when the sale is posted.
-function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections) {
+function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canManageCredit) {
   return {
     sym: symbol,
+    // Whether this cashier may approve an over-limit credit sale and raise a
+    // customer's credit limit from the till (server re-checks; UI just shows it).
+    canManageCredit: !!canManageCredit,
+    // Set true when a flagged cashier approves a single over-limit sale; sent as
+    // allow_over_limit and reset after each sale.
+    _overLimitApproved: false,
+    // Inline credit-limit edit (customer panel).
+    showLimitEdit: false,
+    creditLimitEdit: "",
     // When false, completing a sale auto-prints the receipt and resets straight
     // to a new sale instead of showing the Print / New Sale prompt.
     askToPrint: askToPrint !== false,
@@ -909,16 +922,22 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections) {
         toast("Enter a customer name", "error");
         return;
       }
-      const json = await apiFetch("POST", "/api/customers", {
+      // Phone is required — it's the key that stops duplicate credit accounts.
+      if (!this.newCustomer.phone.trim()) {
+        toast("Enter a phone number", "error");
+        return;
+      }
+      // 200 = an existing customer was reused (phone matched); 201 = newly created.
+      const res = await apiFetch("POST", "/api/customers", {
         name: this.newCustomer.name.trim(),
-        phone: this.newCustomer.phone.trim() || null,
+        phone: this.newCustomer.phone.trim(),
         credit_limit: String(this.newCustomer.credit_limit || "0"),
-      });
+      }, { returnStatus: true });
       await this.loadCustomers();
-      this.customerId = String(json.data.id); // select the new customer
+      this.customerId = String(res.data.id); // select the (new or existing) customer
       this.showAddCustomer = false;
       this.newCustomer = { name: "", phone: "", credit_limit: "" };
-      toast("Customer added", "success");
+      toast(res.status === 200 ? "Customer already exists — using them" : "Customer added", "success");
     },
 
     // --- hold / park sale ---
@@ -1011,12 +1030,21 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections) {
           return;
         }
       }
+      // Selling an item the count shows as out of stock: the customer is holding
+      // one that was never counted. Confirm once, then the line carries the flag
+      // so the server corrects the count up (found-at-till) instead of refusing.
+      if (!p.is_service && Number(p.stock_qty) <= 0 && !(opts && opts.oversellOK)) {
+        if (!confirm(`Stock shows 0 for ${p.name} — sell anyway?`)) return;
+        opts = Object.assign({}, opts, { oversellOK: true });
+      }
+      const oversell = !!(opts && opts.oversellOK);
       // One product can now be two lines at two prices, so a line is identified
       // by product AND lot — merging on product alone would silently re-price.
       const lotId = lot ? lot.batch_id : 0;
       const existing = this.cart.find((x) => x.id === p.id && (x.batch_id || 0) === lotId);
       if (existing) {
         existing.qty = Number(existing.qty) + 1;
+        existing.allow_oversell = existing.allow_oversell || oversell;
         this.clampQty(existing);
         return;
       }
@@ -1033,6 +1061,8 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections) {
         batch_id: lotId,
         batch_remaining: lot ? Number(lot.qty_remaining) : 0,
         batch_label: lot ? this.lotLabel(lot) : "",
+        // Confirmed sale of a 0-stock item: the server corrects the count up.
+        allow_oversell: oversell,
         // Weight/volume units (kg, g, ltr, ml) accept fractional quantities;
         // everything else is whole-only.
         allowDecimal: !!p.unit_allow_decimal,
@@ -1578,6 +1608,34 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections) {
     cancelCreditPrompt() {
       this.creditPrompt = null;
     },
+    // The selected customer's remaining credit (limit − outstanding), or null
+    // when no customer is chosen. Advisory only — the server is authoritative.
+    availableCredit() {
+      if (!this.customerId) return null;
+      const c = this.customers.find((x) => String(x.id) === String(this.customerId));
+      if (!c) return null;
+      return (Number(c.credit_limit) || 0) - (Number(c.outstanding_balance) || 0);
+    },
+    // A flagged cashier approved this one over-limit sale.
+    approveOverLimit() {
+      this._overLimitApproved = true;
+      this.creditPrompt = null;
+      this.checkout(true);
+    },
+    // Raise (or set) the selected customer's stored credit limit from the till.
+    async saveCreditLimit() {
+      if (!this.customerId) return;
+      const v = String(this.creditLimitEdit || "").trim();
+      if (v === "" || Number(v) < 0) {
+        toast("Enter a valid credit limit", "error");
+        return;
+      }
+      await apiFetch("PATCH", `/api/customers/${this.customerId}/credit-limit`, { credit_limit: v });
+      await this.loadCustomers();
+      this.showLimitEdit = false;
+      this.creditLimitEdit = "";
+      toast("Credit limit updated", "success");
+    },
 
     async checkout(confirmed) {
       if (this.cart.length === 0 || this.busy) return;
@@ -1589,6 +1647,22 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections) {
         );
         if (issue) {
           this.creditPrompt = issue;
+          return;
+        }
+      }
+      // Over-limit gate: an on-account line beyond the customer's available
+      // credit. A flagged cashier is offered a one-tap approval; anyone else
+      // falls through and the server's CheckTender rejects it (the backstop).
+      if (!this._overLimitApproved) {
+        const onAcct = this.accountTotal();
+        const avail = this.availableCredit();
+        if (onAcct > 0.005 && avail !== null && onAcct > avail + 0.005 && this.canManageCredit) {
+          this.creditPrompt = {
+            kind: "overlimit",
+            amount: Number(onAcct.toFixed(2)),
+            over: Number((onAcct - avail).toFixed(2)),
+            hasCustomer: !!this.customerId,
+          };
           return;
         }
       }
@@ -1627,9 +1701,14 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections) {
           customer_id: this.customerId ? Number(this.customerId) : null,
           discount: String(this.discount || 0),
           discount_type: this.discountType,
+          // Approve an over-limit account line (server re-checks the flag).
+          allow_over_limit: !!this._overLimitApproved,
           items: this.cart.map((it) => ({
             product_id: it.id,
             quantity: String(it.qty),
+            // Sell an item the count showed short (the customer is holding it):
+            // the server corrects the count up before depleting.
+            allow_oversell: !!it.allow_oversell,
             discount: String(it.discount || 0),
             discount_type: it.discountType || "fixed",
             // Service lines (plugin recharge) carry a per-line amount; ignored by
@@ -1687,6 +1766,9 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections) {
       this.payments = [{ method: "", amount: 0, reference: "", deviceId: "" }];
       this.customerId = "";
       this.receipt = null;
+      this._overLimitApproved = false;
+      this.showLimitEdit = false;
+      this.creditLimitEdit = "";
     },
   };
 }
