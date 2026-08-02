@@ -8,6 +8,7 @@ import (
 
 	"karots-pos/internal/apperr"
 	"karots-pos/internal/config"
+	appdb "karots-pos/internal/db"
 	"karots-pos/internal/middleware"
 	"karots-pos/internal/response"
 
@@ -71,7 +72,9 @@ type MethodTotal struct {
 	Total  decimal.Decimal `db:"total"  json:"total"`
 }
 
-type Service struct{ db *sqlx.DB }
+// db is a Queryer (satisfied by *sqlx.DB and *sqlx.Tx) so reports are read-only
+// and can run inside a rolled-back test transaction.
+type Service struct{ db appdb.Queryer }
 
 func NewService(db *sqlx.DB) *Service { return &Service{db: db} }
 
@@ -99,12 +102,27 @@ func (s *Service) Compute(ctx context.Context, from, to time.Time) (*PL, error) 
 	pl.GrossRevenue = head.Gross
 	pl.Received = head.Paid
 
+	// Pass-through lines (resold airtime, bill face value) are money passing
+	// through, not the shop's margin — subtract their face value from revenue. A
+	// plugin flags such products; core only honors the flag.
+	var passThrough decimal.Decimal
+	if err := s.db.GetContext(ctx, &passThrough, `
+		SELECT COALESCE(SUM(si.subtotal),0)
+		FROM sale_items si JOIN sales s ON s.id = si.sale_id
+		JOIN products p ON p.id = si.product_id
+		WHERE p.pass_through AND s.status <> 'void' AND s.created_at >= $1 AND s.created_at < $2`,
+		from, to); err != nil {
+		return nil, apperr.Internal("failed to compute pass-through", err)
+	}
+	pl.GrossRevenue = pl.GrossRevenue.Sub(passThrough)
+
 	// Returns: value of returned lines (valued per unit as line net / qty, matching
 	// the refund actually given), for sales in this period.
 	if err := s.db.GetContext(ctx, &pl.Returns, `
 		SELECT COALESCE(SUM( (si.subtotal / NULLIF(si.quantity,0)) * si.returned_qty ),0)
 		FROM sale_items si JOIN sales s ON s.id = si.sale_id
-		WHERE s.status <> 'void' AND s.created_at >= $1 AND s.created_at < $2`,
+		JOIN products p ON p.id = si.product_id
+		WHERE NOT p.pass_through AND s.status <> 'void' AND s.created_at >= $1 AND s.created_at < $2`,
 		from, to); err != nil {
 		return nil, apperr.Internal("failed to compute returns", err)
 	}
@@ -114,7 +132,8 @@ func (s *Service) Compute(ctx context.Context, from, to time.Time) (*PL, error) 
 	if err := s.db.GetContext(ctx, &pl.COGS, `
 		SELECT COALESCE(SUM( (si.quantity - si.returned_qty) * si.cost_price ),0)
 		FROM sale_items si JOIN sales s ON s.id = si.sale_id
-		WHERE s.status <> 'void' AND s.created_at >= $1 AND s.created_at < $2`,
+		JOIN products p ON p.id = si.product_id
+		WHERE NOT p.pass_through AND s.status <> 'void' AND s.created_at >= $1 AND s.created_at < $2`,
 		from, to); err != nil {
 		return nil, apperr.Internal("failed to compute COGS", err)
 	}
@@ -230,7 +249,7 @@ func (s *Service) Compute(ctx context.Context, from, to time.Time) (*PL, error) 
 		FROM sale_items si
 		JOIN sales s ON s.id = si.sale_id
 		JOIN products p ON p.id = si.product_id
-		WHERE s.status <> 'void' AND s.created_at >= $1 AND s.created_at < $2
+		WHERE NOT p.pass_through AND s.status <> 'void' AND s.created_at >= $1 AND s.created_at < $2
 		GROUP BY p.name
 		HAVING SUM(si.quantity - si.returned_qty) > 0
 		ORDER BY revenue DESC
@@ -265,10 +284,15 @@ func (s *Service) SalesByCashier(ctx context.Context, from, to time.Time) ([]Cas
 	var rows []CashierSalesRow
 	if err := s.db.SelectContext(ctx, &rows, `
 		SELECT u.name AS cashier, COUNT(*) AS count,
-		       COALESCE(SUM(s.subtotal),0) AS gross,
+		       COALESCE(SUM(s.subtotal),0) - COALESCE(SUM(pt.amt),0) AS gross,
 		       COALESCE(SUM(s.discount),0) AS discount,
-		       COALESCE(SUM(s.total),0)    AS net
+		       COALESCE(SUM(s.total),0)    - COALESCE(SUM(pt.amt),0) AS net
 		FROM sales s JOIN users u ON u.id = s.cashier_id
+		LEFT JOIN (
+			SELECT si.sale_id, SUM(si.subtotal) AS amt
+			FROM sale_items si JOIN products p ON p.id = si.product_id
+			WHERE p.pass_through GROUP BY si.sale_id
+		) pt ON pt.sale_id = s.id
 		WHERE s.status <> 'void' AND s.created_at >= $1 AND s.created_at < $2
 		GROUP BY u.name ORDER BY net DESC`, from, to); err != nil {
 		return nil, apperr.Internal("failed to compute sales by cashier", err)
@@ -321,7 +345,7 @@ func (s *Service) TopProducts(ctx context.Context, from, to time.Time, orderBy s
 		FROM sale_items si
 		JOIN sales s ON s.id = si.sale_id
 		JOIN products p ON p.id = si.product_id
-		WHERE s.status <> 'void' AND s.created_at >= $1 AND s.created_at < $2
+		WHERE NOT p.pass_through AND s.status <> 'void' AND s.created_at >= $1 AND s.created_at < $2
 		GROUP BY p.name
 		HAVING SUM(si.quantity - si.returned_qty) > 0
 		ORDER BY ` + order + ` DESC
@@ -417,7 +441,7 @@ func (s *Service) ProfitByCategory(ctx context.Context, from, to time.Time, cats
 		JOIN sales s     ON s.id = si.sale_id
 		JOIN products p  ON p.id = si.product_id
 		JOIN categories cat ON cat.id = p.category_id
-		WHERE s.status <> 'void' AND s.created_at >= $1 AND s.created_at < $2
+		WHERE NOT p.pass_through AND s.status <> 'void' AND s.created_at >= $1 AND s.created_at < $2
 		  AND ($3::text[] IS NULL OR cardinality($3::text[]) = 0 OR cat.name = ANY($3::text[]))
 		GROUP BY cat.name
 		HAVING SUM(si.quantity - si.returned_qty) > 0
