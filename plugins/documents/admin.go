@@ -33,11 +33,13 @@ type HubData struct {
 	Symbol   string
 	Services []ServiceVM
 	Products []products.Product // stock products for the consumable picker
+	Inactive bool
 }
 
 func (a *adminUI) Hub(c echo.Context) error {
 	ctx := c.Request().Context()
-	svcs, err := a.p.store.Services(ctx, true)
+	inactive := docShowDisabled(c)
+	svcs, err := a.p.store.Services(ctx, !inactive) // activeOnly = hide disabled
 	if err != nil {
 		return err
 	}
@@ -56,7 +58,23 @@ func (a *adminUI) Hub(c echo.Context) error {
 		Symbol:   a.symbol(ctx),
 		Services: vms,
 		Products: prods,
+		Inactive: inactive,
 	}))
+}
+
+// docShowDisabled reports whether the services list should include disabled ones.
+func docShowDisabled(c echo.Context) bool {
+	v := c.QueryParam("inactive")
+	return v == "1" || v == "on" || v == "true"
+}
+
+func (a *adminUI) ServiceReactivate(c echo.Context) error {
+	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err := a.p.store.ReactivateService(c.Request().Context(), id); err != nil {
+		return err
+	}
+	c.Response().Header().Set("HX-Refresh", "true")
+	return c.NoContent(200)
 }
 
 func (a *adminUI) ServiceCreate(c echo.Context) error {

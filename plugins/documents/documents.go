@@ -29,6 +29,7 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 	reg.Admin().GET("/documents", a.Hub)
 	reg.Admin().POST("/documents/services", a.ServiceCreate)
 	reg.Admin().POST("/documents/services/:id/delete", a.ServiceDelete)
+	reg.Admin().POST("/documents/services/:id/activate", a.ServiceReactivate)
 	reg.Admin().POST("/documents/services/:id/price", a.PriceAdd)
 	reg.Admin().POST("/documents/price/:id/delete", a.PriceDelete)
 	reg.Admin().POST("/documents/services/:id/consumable", a.ConsumableAdd)

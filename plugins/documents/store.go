@@ -116,6 +116,11 @@ func (s *Store) DeactivateService(ctx context.Context, id int64) error {
 	return err
 }
 
+func (s *Store) ReactivateService(ctx context.Context, id int64) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE doc_service SET is_active=true WHERE id=$1`, id)
+	return err
+}
+
 // ---- prices ----
 
 func (s *Store) AddPrice(ctx context.Context, p Price) error {
