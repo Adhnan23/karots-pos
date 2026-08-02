@@ -745,7 +745,7 @@ func (a *adminUI) CustomerCreate(c echo.Context) error {
 	if err := c.Validate(&in); err != nil {
 		return err
 	}
-	if _, err := a.s.customers.Create(c.Request().Context(), in); err != nil {
+	if _, _, err := a.s.customers.Create(c.Request().Context(), in); err != nil {
 		return err
 	}
 	return htmxDone(c, "Customer created", "reload-customers")

@@ -44,7 +44,7 @@ func (c Customer) AvailableCredit() decimal.Decimal {
 
 type CreateInput struct {
 	Name        string  `json:"name"           form:"name"           validate:"required,min=2,max=100"`
-	Phone       *string `json:"phone"          form:"phone"          validate:"omitempty,max=15"`
+	Phone       *string `json:"phone"          form:"phone"          validate:"required,min=4,max=15"`
 	Address     *string `json:"address"        form:"address"`
 	CreditLimit string  `json:"credit_limit"   form:"credit_limit"`
 	// OpeningBalance is the amount this customer already owed at onboarding. It is
@@ -275,20 +275,40 @@ func (s *Service) Get(ctx context.Context, id int64) (*Customer, error) {
 	return c, nil
 }
 
-func (s *Service) Create(ctx context.Context, in CreateInput) (*Customer, error) {
+// normalizePhone trims and strips spaces/dashes so "077-123 4567" and
+// "0771234567" are treated as the same customer.
+func normalizePhone(p string) string {
+	r := strings.NewReplacer(" ", "", "-", "")
+	return r.Replace(strings.TrimSpace(p))
+}
+
+// Create makes a customer, or — when the phone already belongs to an active
+// customer — reuses that one instead of creating a duplicate. The returned bool
+// is true when an existing customer was reused. Phone is required: it is the key
+// that stops the counter from spawning duplicate credit accounts.
+func (s *Service) Create(ctx context.Context, in CreateInput) (*Customer, bool, error) {
 	limit, err := money.Parse(in.CreditLimit)
 	if err != nil || limit.IsNegative() {
-		return nil, apperr.Validation("credit limit must be a non-negative amount")
+		return nil, false, apperr.Validation("credit limit must be a non-negative amount")
 	}
 	opening, err := parseOpening(in.OpeningBalance)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	c, err := s.repo.Create(ctx, strings.TrimSpace(in.Name), in.Phone, in.Address, limit, opening)
+	if in.Phone == nil || strings.TrimSpace(*in.Phone) == "" {
+		return nil, false, apperr.Validation("a phone number is required")
+	}
+	phone := normalizePhone(*in.Phone)
+	if existing, ferr := s.repo.FindByPhone(ctx, phone); ferr == nil {
+		return existing, true, nil // reuse — do not create a duplicate
+	} else if !errors.Is(ferr, sql.ErrNoRows) {
+		return nil, false, apperr.Internal("failed to check for an existing customer", ferr)
+	}
+	c, err := s.repo.Create(ctx, strings.TrimSpace(in.Name), &phone, in.Address, limit, opening)
 	if err != nil {
-		return nil, apperr.Internal("failed to create customer", err)
+		return nil, false, apperr.Internal("failed to create customer", err)
 	}
-	return c, nil
+	return c, false, nil
 }
 
 // parseOpening parses an optional opening-balance string (blank → 0), rejecting
@@ -703,9 +723,14 @@ func (h *APIHandler) Create(c echo.Context) error {
 	if err := c.Validate(&in); err != nil {
 		return err
 	}
-	cust, err := h.svc.Create(c.Request().Context(), in)
+	cust, existed, err := h.svc.Create(c.Request().Context(), in)
 	if err != nil {
 		return err
+	}
+	// 200 when we reused an existing customer (phone matched), 201 when a new one
+	// was created — the till uses this to tell the cashier "already exists".
+	if existed {
+		return response.OK(c, cust)
 	}
 	return response.Created(c, cust)
 }

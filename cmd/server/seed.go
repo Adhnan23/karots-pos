@@ -190,7 +190,7 @@ func seed(db *sqlx.DB) error {
 		{Name: "Sunil Fernando", Phone: strptr("0712221110"), CreditLimit: "0"},
 	}
 	for _, c := range custItems {
-		if _, err := custSvc.Create(ctx, c); err != nil {
+		if _, _, err := custSvc.Create(ctx, c); err != nil {
 			return fmt.Errorf("seed customer %s: %w", c.Name, err)
 		}
 	}
