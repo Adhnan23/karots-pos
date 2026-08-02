@@ -262,6 +262,7 @@ func (a *adminUI) FinanceReport(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	income := pluginIncomeLines(ctx, from, to)
 	if wantsCSV(c) {
 		out := [][]string{
 			{"Gross revenue", csvMoney(pl.GrossRevenue)},
@@ -278,16 +279,24 @@ func (a *adminUI) FinanceReport(c echo.Context) error {
 			{"Revenue sold at no recorded cost", csvMoney(pl.ZeroCostRevenue)},
 			{"Supplier recoveries", csvMoney(pl.Recoveries)},
 			{"Other income (interest)", csvMoney(pl.OtherIncome)},
-			{"Net profit", csvMoney(pl.NetProfit)},
-			{"Sale tender (paid at sale)", csvMoney(pl.Received)},
-			{"Receivables", csvMoney(pl.Receivables)},
-			{"Payables", csvMoney(pl.Payables)},
-			{"Supplier credit (they owe us)", csvMoney(pl.SupplierCredit)},
 		}
+		net := pl.NetProfit
+		for _, l := range income {
+			out = append(out, []string{l.Label, csvMoney(l.Amount)})
+			net = net.Add(l.Amount)
+		}
+		out = append(out,
+			[]string{"Net profit", csvMoney(net)},
+			[]string{"Sale tender (paid at sale)", csvMoney(pl.Received)},
+			[]string{"Receivables", csvMoney(pl.Receivables)},
+			[]string{"Payables", csvMoney(pl.Payables)},
+			[]string{"Supplier credit (they owe us)", csvMoney(pl.SupplierCredit)},
+		)
 		return writeCSV(c, "finance_"+fromStr+"_"+toStr, []string{"Line", "Amount"}, out)
 	}
 	return response.RenderPage(c, adminpages.FinanceReport(adminpages.FinanceReportData{
 		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx), From: fromStr, To: toStr, Preset: preset, PL: *pl,
+		PluginIncome: income,
 	}))
 }
 

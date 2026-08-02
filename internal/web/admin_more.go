@@ -25,6 +25,7 @@ import (
 	"karots-pos/internal/features/units"
 	"karots-pos/internal/middleware"
 	"karots-pos/internal/money"
+	"karots-pos/internal/plugin"
 	"karots-pos/internal/printing"
 	"karots-pos/internal/response"
 	"karots-pos/internal/tspl"
@@ -620,14 +621,31 @@ func (a *adminUI) financeData(c echo.Context, tab string) (adminpages.FinanceDat
 		return adminpages.FinanceData{}, err
 	}
 	return adminpages.FinanceData{
-		UserName: middleware.CurrentUserName(c),
-		Symbol:   a.symbol(ctx),
-		From:     fromStr,
-		To:       toStr,
-		Preset:   preset,
-		Tab:      tab,
-		PL:       *pl,
+		UserName:     middleware.CurrentUserName(c),
+		Symbol:       a.symbol(ctx),
+		From:         fromStr,
+		To:           toStr,
+		Preset:       preset,
+		Tab:          tab,
+		PL:           *pl,
+		PluginIncome: pluginIncomeLines(ctx, from, to),
 	}, nil
+}
+
+// pluginIncomeLines collects non-zero income contributed by plugins for the
+// range (e.g. recharge earnings). A failing or zero source is skipped so it can
+// never blank the P&L. The web layer owns this bridge — core reports stay
+// plugin-free.
+func pluginIncomeLines(ctx context.Context, from, to time.Time) []adminpages.PLIncomeLine {
+	var out []adminpages.PLIncomeLine
+	for _, s := range plugin.PLIncomes() {
+		amt, err := s.Amount(ctx, from, to)
+		if err != nil || amt.IsZero() {
+			continue
+		}
+		out = append(out, adminpages.PLIncomeLine{Label: s.Label, Amount: amt})
+	}
+	return out
 }
 
 // Finance is the hub Overview: headline KPIs + a revenue/profit trend line and a

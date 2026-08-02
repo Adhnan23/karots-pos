@@ -177,6 +177,17 @@ templ statusOpt(val, label, cur string) {
 type FinanceReportData struct {
 	ShopName, Symbol, From, To, Preset string
 	PL                         reports.PL
+	// PluginIncome are plugin-contributed income lines (e.g. recharge earnings).
+	PluginIncome []PLIncomeLine
+}
+
+// NetWithPlugin is core net profit plus plugin-contributed income.
+func (d FinanceReportData) NetWithPlugin() decimal.Decimal {
+	t := d.PL.NetProfit
+	for _, l := range d.PluginIncome {
+		t = t.Add(l.Amount)
+	}
+	return t
 }
 
 templ FinanceReport(d FinanceReportData) {
@@ -204,7 +215,10 @@ templ FinanceReport(d FinanceReportData) {
 				@plMoney(d.Symbol, "Stock corrections (count)", d.PL.StockCorrections, true)
 					@plMoney(d.Symbol, "Other income (interest)", d.PL.OtherIncome, false)
 					@plMoney(d.Symbol, "Supplier recoveries", d.PL.Recoveries, false)
-				@plMoney(d.Symbol, "Net profit", d.PL.NetProfit, false)
+				for _, l := range d.PluginIncome {
+					@plMoney(d.Symbol, l.Label, l.Amount, false)
+				}
+				@plMoney(d.Symbol, "Net profit", d.NetWithPlugin(), false)
 				@plMoney(d.Symbol, "Sale tender (paid at sale)", d.PL.Received, false)
 				@plMoney(d.Symbol, "Receivables (customer dues)", d.PL.Receivables, false)
 				@plMoney(d.Symbol, "Payables (supplier dues)", d.PL.Payables, false)

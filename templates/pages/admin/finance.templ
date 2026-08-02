@@ -5,7 +5,15 @@ import (
 	"karots-pos/internal/money"
 	"karots-pos/templates/layouts"
 	"karots-pos/templates/shared"
+
+	"github.com/shopspring/decimal"
 )
+
+// PLIncomeLine is one plugin-contributed P&L income line (label + range total).
+type PLIncomeLine struct {
+	Label  string
+	Amount decimal.Decimal
+}
 
 // FinanceData drives the Finance & Profit hub (Overview / Profit / Cash flow).
 // Tab is the active sub-page key; Trend feeds the overview line chart and Cats
@@ -20,6 +28,24 @@ type FinanceData struct {
 	PL       reports.PL
 	Trend    []reports.DayRow
 	Cats     []reports.CategoryProfit
+	// PluginIncome are income lines contributed by plugins (e.g. recharge earnings)
+	// for the range, folded into the displayed net profit.
+	PluginIncome []PLIncomeLine
+}
+
+// PluginIncomeTotal sums the plugin-contributed income lines.
+func (d FinanceData) PluginIncomeTotal() decimal.Decimal {
+	t := decimal.Zero
+	for _, l := range d.PluginIncome {
+		t = t.Add(l.Amount)
+	}
+	return t
+}
+
+// NetWithPlugin is the core net profit plus plugin-contributed income — the true
+// bottom line once recharge earnings (and any other plugin income) are counted.
+func (d FinanceData) NetWithPlugin() decimal.Decimal {
+	return d.PL.NetProfit.Add(d.PluginIncomeTotal())
 }
 
 // financeShell is the common chrome: heading, sub-page tabs and the shared
@@ -64,7 +90,7 @@ templ FinanceOverview(d FinanceData) {
 		<div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
 			@statCard("Net Revenue", money.Format(d.Symbol, d.PL.Revenue), "indigo")
 			@statCard("Gross Profit", money.Format(d.Symbol, d.PL.GrossProfit), "emerald")
-			@statCard("Net Profit", money.Format(d.Symbol, d.PL.NetProfit), profitColor(d.PL.NetProfit.IsNegative()))
+			@statCard("Net Profit", money.Format(d.Symbol, d.NetWithPlugin()), profitColor(d.NetWithPlugin().IsNegative()))
 			@statCard("Cash Received", money.Format(d.Symbol, d.PL.Received), "slate")
 		</div>
 		<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -97,7 +123,10 @@ templ FinanceProfit(d FinanceData) {
 			@statCard("Stock Losses", money.Format(d.Symbol, d.PL.Losses), "rose")
 			@statCard("Recoveries", money.Format(d.Symbol, d.PL.Recoveries), "emerald")
 			@statCard("Other Income (interest)", money.Format(d.Symbol, d.PL.OtherIncome), "emerald")
-			@statCard("Net Profit", money.Format(d.Symbol, d.PL.NetProfit), profitColor(d.PL.NetProfit.IsNegative()))
+			for _, l := range d.PluginIncome {
+				@statCard(l.Label, money.Format(d.Symbol, l.Amount), "emerald")
+			}
+			@statCard("Net Profit", money.Format(d.Symbol, d.NetWithPlugin()), profitColor(d.NetWithPlugin().IsNegative()))
 		</div>
 		<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
 			@shared.ChartCard("Profit by category") {
