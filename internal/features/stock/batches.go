@@ -89,6 +89,37 @@ func (r *Repository) InsertBatch(ctx context.Context, b NewBatch) (int64, error)
 	return id, err
 }
 
+// FoundAtTill raises on-hand by qty because the goods physically existed but the
+// count was short. It is the honest alternative to letting stock go negative: it
+// tops up the named lot (or opens a "found" lot when batchID is 0), bumps the
+// fast stock mirror, and records a positive adjust movement the owner can see.
+func (r *Repository) FoundAtTill(ctx context.Context, productID, batchID int64, qty, cost decimal.Decimal, userID int64) error {
+	if err := r.Increment(ctx, productID, qty); err != nil {
+		return err
+	}
+	if batchID > 0 {
+		if _, err := r.q.ExecContext(ctx,
+			`UPDATE stock_batches SET qty_remaining = qty_remaining + $1 WHERE id = $2`, qty, batchID); err != nil {
+			return err
+		}
+	} else {
+		if _, err := r.InsertBatch(ctx, NewBatch{
+			ProductID: productID, Quantity: qty, CostPrice: cost, Source: "found",
+		}); err != nil {
+			return err
+		}
+	}
+	note := "found at till — count corrected before sale"
+	return r.InsertMovement(ctx, MovementInput{
+		ProductID: productID,
+		Type:      MoveAdjust,
+		Quantity:  qty, // positive: stock coming in
+		UserID:    userID,
+		Note:      &note,
+		Cost:      cost.Mul(qty),
+	})
+}
+
 // consumedLot is one batch's contribution to a depletion: how much was taken
 // and what that batch says it cost.
 type consumedLot struct {

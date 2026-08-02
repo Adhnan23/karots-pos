@@ -67,6 +67,11 @@ type ItemInput struct {
 	// sale then depletes THAT lot instead of taking FEFO. Zero means the normal
 	// path. Ignored for is_service products, which hold no stock.
 	BatchID int64 `json:"batch_id"`
+	// AllowOversell lets this line sell more than the count shows: the customer is
+	// holding stock that was never counted. The server corrects the count up
+	// (FoundAtTill) before depleting, so on-hand lands at 0, never negative.
+	// Confirm-gated at the till; ignored for is_service products.
+	AllowOversell bool `json:"allow_oversell"`
 	// Serials carries one unique serial number per unit for serial-tracked
 	// products (length must equal the quantity); ignored for other products.
 	Serials []string `json:"serials"`
@@ -380,7 +385,31 @@ func (s *Service) Create(ctx context.Context, in CreateInput, cashierID int64) (
 					return apperr.Internal("failed to update stock", err)
 				}
 				if !ok {
-					return apperr.Conflict(fmt.Sprintf("insufficient stock for %s", p.Name))
+					if !it.AllowOversell {
+						return apperr.Conflict(fmt.Sprintf("insufficient stock for %s", p.Name))
+					}
+					// The goods exist; the count was short. Correct up to cover the
+					// line (topping up the picked lot, or opening a found lot), then
+					// the guarded decrement must now succeed.
+					onHand, err := stkRepo.GetQuantity(ctx, p.ID)
+					if err != nil {
+						return apperr.Internal("failed to read stock", err)
+					}
+					short := qty.Sub(onHand)
+					batchID := int64(0)
+					if pickedBatch != nil {
+						batchID = pickedBatch.ID
+					}
+					if err := stkRepo.FoundAtTill(ctx, p.ID, batchID, short, p.CostPrice, cashierID); err != nil {
+						return apperr.Internal("failed to correct stock", err)
+					}
+					ok, err = stkRepo.DecrementGuarded(ctx, p.ID, qty)
+					if err != nil {
+						return apperr.Internal("failed to update stock", err)
+					}
+					if !ok {
+						return apperr.Internal("stock correction did not cover the sale", nil)
+					}
 				}
 				// Deplete batches FEFO; the weighted cost of the consumed units is the
 				// COGS snapshot for this line (more accurate than the product's current
