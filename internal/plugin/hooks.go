@@ -3,8 +3,10 @@ package plugin
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/a-h/templ"
+	"github.com/shopspring/decimal"
 )
 
 // Additive UI hooks. A plugin's Setup registers these; the template layer reads
@@ -136,6 +138,7 @@ var (
 	logoutGuards     []LogoutGuard
 	receiptTabs      []ReceiptTab
 	supplierActions  []CashierSupplierAction
+	plIncomes        []PLIncome
 )
 
 // ReceiptTab adds a tab to the unified Receipts page on BOTH the admin and cashier
@@ -148,6 +151,18 @@ type ReceiptTab struct {
 	Label       string
 	CashierHref string
 	AdminHref   string
+}
+
+// PLIncome lets a plugin contribute an income line to the core Profit & Loss.
+// Amount is summed for the [from,to) range and folded into the P&L by the web
+// layer (which owns both reports and plugins, so core reports stay plugin-free).
+// Keep Amount cheap — one query — and defensive: return (0, err) rather than
+// failing the whole P&L. Used e.g. by recharge for service charge + realized
+// float commission, whose reload face value is excluded from core revenue via
+// the pass_through product flag.
+type PLIncome struct {
+	Label  string
+	Amount func(ctx context.Context, from, to time.Time) (decimal.Decimal, error)
 }
 
 // Hook registration — plugins call these from Setup.
@@ -168,6 +183,7 @@ func (r *Registry) AddReceiptTab(t ReceiptTab)     { receiptTabs = append(receip
 func (r *Registry) AddCashierSupplierAction(a CashierSupplierAction) {
 	supplierActions = append(supplierActions, a)
 }
+func (r *Registry) AddPLIncome(s PLIncome) { plIncomes = append(plIncomes, s) }
 
 // Getters for the template layer.
 func AdminNav() []AdminNavEntry           { return adminNav }
@@ -177,6 +193,7 @@ func DashboardCards() []DashboardCard     { return dashboardCards }
 func PaletteEntries() []PaletteEntry      { return paletteEntries }
 func ReportCards() []ReportCard           { return reportCards }
 func PosActions() []PosAction             { return posActions }
+func PLIncomes() []PLIncome               { return plIncomes }
 func CashierMenuRoots() []CashierMenuRoot { return cashierMenuRoots }
 func DrawerSections() []DrawerSection      { return drawerSections }
 
