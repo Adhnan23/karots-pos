@@ -1639,6 +1639,19 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
 
     async checkout(confirmed) {
       if (this.cart.length === 0 || this.busy) return;
+      // Found-at-till: any line selling MORE than the count shows needs a one-time
+      // OK, then it carries the flag so the server corrects the count up instead
+      // of refusing. Covers both a 0-stock item and raising the qty above what's
+      // on hand (e.g. 2 in stock, selling 3). Service lines carry MAX stock, so
+      // they never trip. allow_oversell guards against re-prompting on re-entry.
+      for (const it of this.cart) {
+        if (it.allow_oversell) continue;
+        const stock = Number(it.stock);
+        if (Number.isFinite(stock) && Number(it.qty) > stock + 1e-9) {
+          if (!confirm(`Stock shows ${stock} for ${it.name} — sell ${it.qty} anyway?`)) return;
+          it.allow_oversell = true;
+        }
+      }
       // Raise the prompt rather than posting a tender that does not add up.
       // `confirmed` is set by the prompt's own buttons so it cannot loop.
       if (!confirmed) {
