@@ -652,7 +652,7 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
         this.amountValue = "";
         this.amountError = "";
         this.menuMode = "amount";
-        this.$nextTick(() => this.$refs.amtInput && this.$refs.amtInput.focus());
+        this.focusAmount();
         return;
       }
       if (node.action === "detail") {
@@ -670,6 +670,21 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
         this.$refs.detailBox &&
         window.Alpine.initTree(this.$refs.detailBox)
       );
+    },
+    // The amount step lives inside a `<template x-if="menuMode==='amount'">`, so
+    // its input is inserted a frame or two after menuMode flips — a single
+    // $nextTick fires before the ref exists and the focus is silently dropped.
+    // Retry across a few animation frames until the input mounts, so selecting a
+    // reload device (carrier → device → amount) lands the caret in the box.
+    focusAmount(tries = 8) {
+      const el =
+        this.$refs.amtInput ||
+        (this.$root && this.$root.querySelector('[x-ref="amtInput"]'));
+      if (el) {
+        el.focus();
+        return;
+      }
+      if (tries > 0) requestAnimationFrame(() => this.focusAmount(tries - 1));
     },
     async confirmAmount() {
       if (this.busy) return;
