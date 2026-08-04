@@ -31,7 +31,7 @@ templ POS(d POSData) {
 		>
 			<!-- Register closed overlay: count the opening float by denomination -->
 			<div x-show="!session" x-cloak class="absolute inset-0 bg-slate-100/95 z-30 flex items-center justify-center p-4 overflow-auto">
-				<div class="bg-white rounded-2xl shadow p-6 w-full max-w-md max-h-full overflow-auto">
+				<div class="bg-white rounded-2xl shadow p-6 w-full max-h-full overflow-auto" :class="drawerSections.length ? 'max-w-3xl' : 'max-w-md'">
 					<h2 class="text-xl font-bold mb-1">Open Register</h2>
 					<p class="text-sm text-slate-500 mb-3">Count the cash in the drawer — how many of each note and coin.</p>
 
@@ -43,38 +43,43 @@ templ POS(d POSData) {
 						<button type="button" x-on:click="clearCounts('openCounts')" class="px-3 py-1.5 rounded-lg border text-slate-600">Count fresh</button>
 					</div>
 
-					<div class="space-y-1.5 max-h-72 overflow-auto pr-1">
-						<template x-for="d in denoms" x-bind:key="d.id">
-							<div class="flex items-center gap-3">
-								<div class="w-24 text-sm" x-text="sym + ' ' + money(d.value)"></div>
-								<span class="text-slate-400">×</span>
-								<input type="number" min="0" step="1" x-model.number="openCounts[d.value]" class="w-20 border rounded px-2 py-1 text-right"/>
-								<div class="flex-1 text-right text-sm text-slate-600" x-text="sym + ' ' + money((Number(openCounts[d.value])||0) * Number(d.value))"></div>
-							</div>
-						</template>
-						<template x-if="denoms.length === 0">
-							<p class="text-sm text-slate-400 py-2">No denominations set up. Ask an admin to add notes/coins.</p>
-						</template>
-					</div>
-
-					<div class="flex justify-between items-center border-t mt-3 pt-3">
-						<span class="font-medium">Opening cash</span>
-						<span class="text-xl font-bold" x-text="sym + ' ' + money(countTotal(openCounts))"></span>
-					</div>
-					<template x-if="lockers.length">
-						<div class="mt-3">
-							<label class="block text-sm text-slate-600 mb-1">Take cash from</label>
-							<select x-model="openLockerId" class="w-full border rounded-lg px-3 py-2">
-								<option value="">— don't draw from a locker —</option>
-								<template x-for="lk in lockers" :key="lk.id">
-									<option :value="lk.id" x-text="lk.name + ' (' + sym + ' ' + money(lk.balance) + ')'"></option>
+					<!-- Cash count and the plugin float sit side by side once a plugin
+					     contributes a float section, so neither is pushed below the fold. -->
+					<div class="grid gap-5 mt-3" :class="drawerSections.length ? 'lg:grid-cols-2' : 'grid-cols-1'">
+						<div>
+							<div class="space-y-1.5 max-h-[55vh] overflow-auto pr-1">
+								<template x-for="d in denoms" x-bind:key="d.id">
+									<div class="flex items-center gap-3">
+										<div class="w-24 text-sm" x-text="sym + ' ' + money(d.value)"></div>
+										<span class="text-slate-400">×</span>
+										<input type="number" min="0" step="1" x-model.number="openCounts[d.value]" class="w-20 border rounded px-2 py-1 text-right"/>
+										<div class="flex-1 text-right text-sm text-slate-600" x-text="sym + ' ' + money((Number(openCounts[d.value])||0) * Number(d.value))"></div>
+									</div>
 								</template>
-							</select>
+								<template x-if="denoms.length === 0">
+									<p class="text-sm text-slate-400 py-2">No denominations set up. Ask an admin to add notes/coins.</p>
+								</template>
+							</div>
+							<div class="flex justify-between items-center border-t mt-3 pt-3">
+								<span class="font-medium">Opening cash</span>
+								<span class="text-xl font-bold" x-text="sym + ' ' + money(countTotal(openCounts))"></span>
+							</div>
+							<template x-if="lockers.length">
+								<div class="mt-3">
+									<label class="block text-sm text-slate-600 mb-1">Take cash from</label>
+									<select x-model="openLockerId" class="w-full border rounded-lg px-3 py-2">
+										<option value="">— don't draw from a locker —</option>
+										<template x-for="lk in lockers" :key="lk.id">
+											<option :value="lk.id" x-text="lk.name + ' (' + sym + ' ' + money(lk.balance) + ')'"></option>
+										</template>
+									</select>
+								</div>
+							</template>
 						</div>
-					</template>
-					<!-- Plugin drawer sections (e.g. recharge float opening) — a separate
-					     concern from the cash float above, so rendered as its own block. -->
-					<div x-ref="openSections" class="space-y-3 mt-4"></div>
+						<!-- Plugin drawer sections (e.g. recharge float opening) — its own
+						     column beside the cash count when present, else absent. -->
+						<div x-ref="openSections" class="space-y-3"></div>
+					</div>
 					<button x-on:click="openRegister()" class="w-full mt-3 py-2.5 rounded-lg bg-indigo-600 text-white font-medium">Open Register</button>
 				</div>
 			</div>
@@ -618,7 +623,7 @@ templ POS(d POSData) {
 
 			<!-- Close register modal: count the drawer, then show reconciliation -->
 			<div x-show="showClose" x-cloak class="fixed inset-0 bg-black/40 z-40 flex items-center justify-center p-4 overflow-auto">
-				<div class="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-full overflow-auto p-6">
+				<div class="bg-white rounded-2xl shadow-xl w-full max-h-full overflow-auto p-6" :class="closeResult ? 'max-w-md' : (drawerSections.length ? 'max-w-3xl' : 'max-w-md')">
 					<template x-if="!closeResult">
 						<div>
 							<div x-show="logoutMode" class="mb-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm px-3 py-2">
@@ -626,34 +631,40 @@ templ POS(d POSData) {
 							</div>
 							<h3 class="text-lg font-semibold mb-1">Close Register</h3>
 							<p class="text-sm text-slate-500 mb-3">Count the drawer to close the session.</p>
-							<div class="space-y-1.5 max-h-72 overflow-auto pr-1">
-								<template x-for="d in denoms" x-bind:key="d.id">
-									<div class="flex items-center gap-3">
-										<div class="w-24 text-sm" x-text="sym + ' ' + money(d.value)"></div>
-										<span class="text-slate-400">×</span>
-										<input type="number" min="0" step="1" x-model.number="closeCounts[d.value]" class="w-20 border rounded px-2 py-1 text-right"/>
-										<div class="flex-1 text-right text-sm text-slate-600" x-text="sym + ' ' + money((Number(closeCounts[d.value])||0) * Number(d.value))"></div>
-									</div>
-								</template>
-							</div>
-							<div class="flex justify-between items-center border-t mt-3 pt-3">
-								<span class="font-medium">Counted</span>
-								<span class="text-xl font-bold" x-text="sym + ' ' + money(countTotal(closeCounts))"></span>
-							</div>
-							<template x-if="lockers.length">
-								<div class="mt-3">
-									<label class="block text-sm text-slate-600 mb-1">Bank cash into</label>
-									<select x-model="closeLockerId" class="w-full border rounded-lg px-3 py-2">
-										<option value="">— leave cash in drawer —</option>
-										<template x-for="lk in lockers" :key="lk.id">
-											<option :value="lk.id" x-text="lk.name + ' (' + sym + ' ' + money(lk.balance) + ')'"></option>
+							<!-- Cash count and the plugin float sit side by side once a plugin
+							     contributes a float section, so neither is pushed below the fold. -->
+							<div class="grid gap-5 mt-3" :class="drawerSections.length ? 'lg:grid-cols-2' : 'grid-cols-1'">
+								<div>
+									<div class="space-y-1.5 max-h-[55vh] overflow-auto pr-1">
+										<template x-for="d in denoms" x-bind:key="d.id">
+											<div class="flex items-center gap-3">
+												<div class="w-24 text-sm" x-text="sym + ' ' + money(d.value)"></div>
+												<span class="text-slate-400">×</span>
+												<input type="number" min="0" step="1" x-model.number="closeCounts[d.value]" class="w-20 border rounded px-2 py-1 text-right"/>
+												<div class="flex-1 text-right text-sm text-slate-600" x-text="sym + ' ' + money((Number(closeCounts[d.value])||0) * Number(d.value))"></div>
+											</div>
 										</template>
-									</select>
+									</div>
+									<div class="flex justify-between items-center border-t mt-3 pt-3">
+										<span class="font-medium">Counted</span>
+										<span class="text-xl font-bold" x-text="sym + ' ' + money(countTotal(closeCounts))"></span>
+									</div>
+									<template x-if="lockers.length">
+										<div class="mt-3">
+											<label class="block text-sm text-slate-600 mb-1">Bank cash into</label>
+											<select x-model="closeLockerId" class="w-full border rounded-lg px-3 py-2">
+												<option value="">— leave cash in drawer —</option>
+												<template x-for="lk in lockers" :key="lk.id">
+													<option :value="lk.id" x-text="lk.name + ' (' + sym + ' ' + money(lk.balance) + ')'"></option>
+												</template>
+											</select>
+										</div>
+									</template>
 								</div>
-							</template>
-							<!-- Plugin drawer sections (e.g. recharge float closing) — separate
-							     from the cash count above, so rendered as its own block. -->
-							<div x-ref="closeSections" class="space-y-3 mt-4"></div>
+								<!-- Plugin drawer sections (e.g. recharge float closing) — its own
+								     column beside the drawer count when present, else absent. -->
+								<div x-ref="closeSections" class="space-y-3"></div>
+							</div>
 							<div class="flex gap-2 mt-3">
 								<button x-on:click="showClose = false" class="flex-1 py-2 rounded-lg border">Cancel</button>
 								<button x-on:click="submitClose()" class="flex-1 py-2 rounded-lg bg-slate-800 text-white font-medium">Close &amp; Reconcile</button>
