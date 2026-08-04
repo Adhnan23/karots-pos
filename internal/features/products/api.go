@@ -70,6 +70,16 @@ func (h *APIHandler) PriceOptions(c echo.Context) error {
 	return response.OK(c, opts)
 }
 
+// QuickPicks serves the till's dynamic top-menu shortcut rows (frequent + recent
+// sellers). Any signed-in user, because cashiers are exactly who taps them.
+func (h *APIHandler) QuickPicks(c echo.Context) error {
+	picks, err := h.svc.QuickPicks(c.Request().Context())
+	if err != nil {
+		return err
+	}
+	return response.OK(c, picks)
+}
+
 // Lots serves one product's live lots for the lot pickers on stock-removal
 // screens. Any signed-in user: cashiers write off damage too, and the payload
 // carries no cost price.
@@ -164,6 +174,7 @@ func RegisterAPI(e *echo.Echo, db *sqlx.DB, cfg *config.Config) {
 	g.GET("", api.List)
 	g.GET("/:id", api.Get)
 	g.GET("/price-options", api.PriceOptions)
+	g.GET("/quick-picks", api.QuickPicks)
 	g.GET("/:id/lots", api.Lots)
 	g.GET("/barcode/generate", api.GenerateBarcode)
 	g.GET("/barcode/:code", api.GetByBarcode)

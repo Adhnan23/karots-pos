@@ -363,6 +363,9 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
     // after each sale, so adding an item never costs an extra round trip. Empty
     // for shops that never price per lot — which is why nothing changes for them.
     priceOptions: {},
+    // Dynamic top-menu "Frequently sold" grid: in-stock best-sellers of the last
+    // 30 days. Empty until the shop has sales history.
+    quickFrequent: [],
     // The open "which price?" prompt: the product waiting to be added and the
     // lots to choose from. The cashier reads the sticker on the package.
     pricePick: null,
@@ -381,6 +384,7 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
       await this.loadHolds();
       await this.loadLockers();
       await this.loadPriceOptions();
+      await this.loadQuickPicks();
       // Another terminal receiving stock changes which products have two live
       // prices, and this map is what decides whether the till even asks. Loading
       // it once at open meant a lane could go a whole shift never prompting for a
@@ -827,6 +831,16 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
         this.priceOptions = json.data || {};
       } catch (_) {
         this.priceOptions = {};
+      }
+    },
+    // Load the till's dynamic shortcut rows. Best-effort: an empty result just
+    // hides the rows and the menu looks exactly as before.
+    async loadQuickPicks() {
+      try {
+        const json = await apiFetch("GET", "/api/products/quick-picks", undefined, { silent: true });
+        this.quickFrequent = json.data || [];
+      } catch (_) {
+        this.quickFrequent = [];
       }
     },
     // lotsFor returns the price choices for a product, but only when they are a
@@ -1878,6 +1892,8 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
         // Lots just moved: one may now be empty (and stop being a choice), so the
         // next customer must be offered the current picture, not a stale one.
         await this.loadPriceOptions();
+        // This sale just changed what's frequent/recent — refresh the shortcuts.
+        await this.loadQuickPicks();
       } catch (e) {
         // A job's material read short. Offer a found-at-till confirm, but only
         // while some service-with-components line hasn't been approved yet — once

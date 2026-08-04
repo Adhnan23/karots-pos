@@ -173,6 +173,55 @@ func (r *Repository) List(ctx context.Context, q ListQuery) ([]Product, error) {
 	return rows, err
 }
 
+// FrequentProducts backs the till's dynamic "Frequently sold" shortcut grid on
+// the top menu: full product cards ranked by net quantity sold (after returns)
+// since `since`. It excludes services, pass-through products (reload face value
+// can't be tap-added), disabled products, and anything currently out of stock —
+// so the grid only ever offers real, sellable stock a cashier can tap.
+func (r *Repository) FrequentProducts(ctx context.Context, since time.Time, limit int) ([]Product, error) {
+	var ids []int64
+	if err := r.db.SelectContext(ctx, &ids, `
+		SELECT si.product_id
+		FROM sale_items si
+		JOIN sales s    ON s.id = si.sale_id
+		JOIN products p ON p.id = si.product_id
+		LEFT JOIN stock st ON st.product_id = p.id
+		WHERE s.status <> 'void' AND s.created_at >= $1
+		  AND p.is_active AND NOT p.is_service AND NOT p.pass_through
+		  AND COALESCE(st.quantity, 0) > 0
+		GROUP BY si.product_id
+		HAVING SUM(si.quantity - si.returned_qty) > 0
+		ORDER BY SUM(si.quantity - si.returned_qty) DESC, MAX(s.created_at) DESC
+		LIMIT $2`, since, limit); err != nil {
+		return nil, err
+	}
+	return r.byIDsOrdered(ctx, ids)
+}
+
+// byIDsOrdered loads full product cards for the given ids and returns them in the
+// same order as `ids` (a single SELECT ... = ANY, re-sorted in Go — Postgres does
+// not preserve IN-list order).
+func (r *Repository) byIDsOrdered(ctx context.Context, ids []int64) ([]Product, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var rows []Product
+	if err := r.db.SelectContext(ctx, &rows, selectProduct+` WHERE p.id = ANY($1)`, pq.Array(ids)); err != nil {
+		return nil, err
+	}
+	byID := make(map[int64]Product, len(rows))
+	for _, p := range rows {
+		byID[p.ID] = p
+	}
+	out := make([]Product, 0, len(ids))
+	for _, id := range ids {
+		if p, ok := byID[id]; ok {
+			out = append(out, p)
+		}
+	}
+	return out, nil
+}
+
 // searchRank puts the most likely hit first when the user is searching: an exact
 // barcode, then names that START with what was typed (so "pen" leads with "Pen
 // Box", not "Atlas Chooty Blue Pen"), then everything else alphabetically. With

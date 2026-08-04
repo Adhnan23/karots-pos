@@ -7,6 +7,7 @@ import (
 	"errors"
 	"math/big"
 	"strings"
+	"time"
 
 	"karots-pos/internal/apperr"
 	appdb "karots-pos/internal/db"
@@ -95,6 +96,16 @@ func (s *Service) Get(ctx context.Context, id int64) (*Product, error) {
 // prompt invisible for shops that never use it.
 func (s *Service) PriceOptions(ctx context.Context) (map[int64][]stock.PriceOption, error) {
 	return stock.NewService(s.db).MultiPriceProducts(ctx)
+}
+
+// QuickPicks backs the till's top-menu "Frequently sold" grid: the best-sellers
+// of the last 30 days, in stock. The till loads this at open and after each sale.
+func (s *Service) QuickPicks(ctx context.Context) ([]Product, error) {
+	rows, err := s.repo.FrequentProducts(ctx, time.Now().AddDate(0, 0, -30), 16)
+	if err != nil {
+		return nil, apperr.Internal("failed to load quick picks", err)
+	}
+	return rows, nil
 }
 
 // LotsFor lists one product's live lots for a "which lot is this?" picker on the
