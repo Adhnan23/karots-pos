@@ -397,6 +397,22 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
         if (this.session) this.startClose();
         else window.location.assign("/logout");
       }
+      // Keep the newest line in view: a long cart scrolls, and a freshly scanned
+      // item added below the fold would otherwise land off-screen. Only follow
+      // growth — removing a line must not yank the list around. Covers every way
+      // a line is added (scan, menu, search, plugin service, lot split).
+      this.$watch("cart.length", (now, was) => {
+        if (now > was) this.scrollCartEnd();
+      });
+    },
+
+    // scrollCartEnd pins the cart list to its last line after Alpine has
+    // rendered the new row. No-op until the list ref exists.
+    scrollCartEnd() {
+      this.$nextTick(() => {
+        const el = this.$refs.cartList;
+        if (el) el.scrollTop = el.scrollHeight;
+      });
     },
 
     // Cash lockers available as a float source (drawer open / pay-in) or
