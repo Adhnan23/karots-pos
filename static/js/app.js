@@ -319,7 +319,7 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
     discountType: "fixed", // bill-level discount: "fixed" (Rs) or "percent" (%)
     // Split tender: one or more payment lines (cash / card / online / wallet).
     // No method is pre-selected — the cashier picks one per sale (see selectMethod).
-    payments: [{ method: "", amount: 0, reference: "", deviceId: "" }],
+    payments: [{ method: "", amount: "", reference: "", deviceId: "" }],
     walletDevices: [], // recharge plugin tender: devices a wallet payment can credit (with live balance)
     busy: false,
     session: null,
@@ -335,10 +335,10 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
     // succeeds, send them on to /logout instead of back to the POS.
     logoutMode: false,
     showWithdraw: false,
-    withdrawAmount: 0,
+    withdrawAmount: "",
     withdrawReason: "",
     showDeposit: false,
-    depositAmount: 0,
+    depositAmount: "",
     depositReason: "",
     // Cash lockers (vault/safe) the drawer can draw float from / bank cash to.
     lockers: [],
@@ -918,7 +918,7 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
         counter_locker_id: Number(this.withdrawLockerId) || 0,
       });
       this.showWithdraw = false;
-      this.withdrawAmount = 0;
+      this.withdrawAmount = "";
       this.withdrawReason = "";
       this.withdrawLockerId = "";
       await this.loadSummary();
@@ -937,7 +937,7 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
         counter_locker_id: Number(this.depositLockerId) || 0,
       });
       this.showDeposit = false;
-      this.depositAmount = 0;
+      this.depositAmount = "";
       this.depositReason = "";
       this.depositLockerId = "";
       await this.loadSummary();
@@ -1023,7 +1023,7 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
       this.customerId = h.customer_id ? String(h.customer_id) : "";
       this.discount = Number(h.discount) || 0;
       this.discountType = h.discount_type || "fixed";
-      this.payments = [{ method: "", amount: 0, reference: "", deviceId: "" }];
+      this.payments = [{ method: "", amount: "", reference: "", deviceId: "" }];
       this.receipt = null;
       this.showHolds = false;
       await this.deleteHold(h.id, true);
@@ -1452,12 +1452,12 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
       }
     },
     addPayment() {
-      this.payments.push({ method: "", amount: 0, reference: "", deviceId: "" });
+      this.payments.push({ method: "", amount: "", reference: "", deviceId: "" });
     },
     removePayment(idx) {
       this.payments.splice(idx, 1);
       if (this.payments.length === 0) {
-        this.payments.push({ method: "", amount: 0, reference: "", deviceId: "" });
+        this.payments.push({ method: "", amount: "", reference: "", deviceId: "" });
       }
     },
     // Lazily load the devices a wallet (eZ Cash / mCash) payment can credit, each
@@ -1853,7 +1853,7 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
       this.cart = [];
       this.discount = 0;
       this.discountType = "fixed";
-      this.payments = [{ method: "", amount: 0, reference: "", deviceId: "" }];
+      this.payments = [{ method: "", amount: "", reference: "", deviceId: "" }];
       this.customerId = "";
       this.receipt = null;
       this._overLimitApproved = false;
