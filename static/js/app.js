@@ -315,11 +315,11 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
     customerId: "",
     custSearch: "", // searchable customer chooser (filters the loaded list)
     custOpen: false,
-    discount: 0,
+    discount: "",
     discountType: "fixed", // bill-level discount: "fixed" (Rs) or "percent" (%)
     // Split tender: one or more payment lines (cash / card / online / wallet).
     // No method is pre-selected — the cashier picks one per sale (see selectMethod).
-    payments: [{ method: "", amount: "", reference: "", deviceId: "" }],
+    payments: [{ method: "cash", amount: "", reference: "", deviceId: "" }],
     walletDevices: [], // recharge plugin tender: devices a wallet payment can credit (with live balance)
     busy: false,
     session: null,
@@ -404,6 +404,20 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
       this.$watch("cart.length", (now, was) => {
         if (now > was) this.scrollCartEnd();
       });
+      // A focused number input changes its value on scroll-wheel — a silent way
+      // to mis-enter money or quantities (click the amount box, scroll to see the
+      // cart, and the number ticks). Blur it on wheel so the page scrolls and the
+      // value is left alone. Document-level so it also covers plugin fragments.
+      document.addEventListener(
+        "wheel",
+        (e) => {
+          const el = e.target;
+          if (el && el.tagName === "INPUT" && el.type === "number" && el === document.activeElement) {
+            el.blur();
+          }
+        },
+        { passive: true }
+      );
     },
 
     // scrollCartEnd pins the cart list to its last line after Alpine has
@@ -559,8 +573,20 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
           return;
         case "F10":
           e.preventDefault();
-          if (!this.anyModalOpen()) this.checkout();
+          // F10 drops the caret in the amount box; Enter there completes the
+          // sale. So the whole pay flow is keyboard-only: F10 → type tendered → Enter.
+          if (!this.anyModalOpen()) this.focusPayment();
           return;
+      }
+    },
+    // Focus the first (or first empty) payment amount input. Uses a data-attr,
+    // not a ref, because the amount input is inside an x-for over payments.
+    focusPayment() {
+      const inputs = [...this.$root.querySelectorAll("[data-pay-amount]")];
+      const el = inputs.find((i) => !i.value) || inputs[0];
+      if (el) {
+        el.focus();
+        if (el.select) el.select();
       }
     },
     // Touch-friendly qty steppers for cart lines.
@@ -1038,7 +1064,7 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
       this.customerId = h.customer_id ? String(h.customer_id) : "";
       this.discount = Number(h.discount) || 0;
       this.discountType = h.discount_type || "fixed";
-      this.payments = [{ method: "", amount: "", reference: "", deviceId: "" }];
+      this.payments = [{ method: "cash", amount: "", reference: "", deviceId: "" }];
       this.receipt = null;
       this.showHolds = false;
       await this.deleteHold(h.id, true);
@@ -1110,7 +1136,7 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
         allowDecimal: !!p.unit_allow_decimal,
         // Per-item discount: defaults to 0; the cashier sets it per line at the
         // counter. Fixed is PER UNIT (× qty); percent is off the line.
-        discount: 0,
+        discount: "",
         discountType: "fixed",
         // Serial-tracked products need a unique serial per unit captured below.
         track_serial: !!p.track_serial,
@@ -1184,7 +1210,7 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
         qty: qty,
         stock: Number.MAX_SAFE_INTEGER,
         allowDecimal: false,
-        discount: 0,
+        discount: "",
         discountType: "fixed",
         track_serial: false,
         warranty_months: 0,
@@ -1472,7 +1498,7 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
     removePayment(idx) {
       this.payments.splice(idx, 1);
       if (this.payments.length === 0) {
-        this.payments.push({ method: "", amount: "", reference: "", deviceId: "" });
+        this.payments.push({ method: "cash", amount: "", reference: "", deviceId: "" });
       }
     },
     // Lazily load the devices a wallet (eZ Cash / mCash) payment can credit, each
@@ -1709,6 +1735,17 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
 
     async checkout(confirmed) {
       if (this.cart.length === 0 || this.busy) return;
+      // A single blank cash line means "exact cash": fill it with the balance so
+      // the cashier can just hit Complete. They can still type a larger tendered
+      // amount (to see change) or switch method before completing.
+      if (
+        this.payments.length === 1 &&
+        this.payments[0].method === "cash" &&
+        (this.payments[0].amount === "" || Number(this.payments[0].amount) === 0)
+      ) {
+        const due = this.total();
+        if (due > 0) this.payments[0].amount = Number(due.toFixed(2));
+      }
       // Found-at-till: a line selling MORE than the count shows needs a one-time
       // OK via a styled in-app prompt (not the browser's confirm()). Handled one
       // line at a time — approving re-enters checkout — until every short line
@@ -1866,9 +1903,9 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
     },
     newSale() {
       this.cart = [];
-      this.discount = 0;
+      this.discount = "";
       this.discountType = "fixed";
-      this.payments = [{ method: "", amount: "", reference: "", deviceId: "" }];
+      this.payments = [{ method: "cash", amount: "", reference: "", deviceId: "" }];
       this.customerId = "";
       this.receipt = null;
       this._overLimitApproved = false;

@@ -50,7 +50,7 @@ templ JobFragment(svc Service) {
 					<label x-show="hasDouble()" class="flex items-center gap-2 text-sm"><input type="checkbox" x-model="double" x-on:change="refresh(); focusQty()"/> Double-side</label>
 					<div class="flex items-center gap-2">
 						<label class="text-xs font-medium text-slate-500">Qty</label>
-						<input type="number" min="1" step="1" x-ref="qtyInput" x-model="qty" x-on:input="refresh()" class="w-24 border rounded-lg px-3 py-2 text-right"/>
+						<input type="number" min="1" step="1" x-ref="qtyInput" x-model="qty" x-on:input="refresh()" x-on:keydown.enter.prevent="addMetered()" class="w-24 border rounded-lg px-3 py-2 text-right"/>
 					</div>
 				</div>
 				<div class="flex items-center justify-between border-t pt-3">
@@ -65,7 +65,7 @@ templ JobFragment(svc Service) {
 			<div x-show="svc.kind==='custom'" class="space-y-3">
 				<div>
 					<label class="block text-xs font-medium text-slate-500 mb-1">Price</label>
-					<input type="number" min="0" step="0.01" x-model="price" placeholder="0.00" class="w-full border rounded-lg px-3 py-2.5 text-right"/>
+					<input type="number" min="0" step="0.01" x-model="price" x-on:keydown.enter.prevent="addCustom()" placeholder="0.00" class="w-full border rounded-lg px-3 py-2.5 text-right"/>
 				</div>
 				<div class="flex justify-end border-t pt-3">
 					<button type="button" x-on:click="addCustom()" x-bind:disabled="!(Number(price)>0)" class="px-4 py-2.5 rounded-lg bg-emerald-600 text-white font-semibold disabled:opacity-40">Add to cart</button>
