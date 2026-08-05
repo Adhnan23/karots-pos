@@ -108,6 +108,58 @@ html.dark body.bg-slate-100 { background-color: #0b1120 !important; color: #e2e8
 
 .dark kbd { background: #1e293b; border-color: #475569; color: #cbd5e1; }
 
+/* ---------------- Dark mode: accent colours ----------------
+   The base dark block above only remaps the slate/white surfaces. Every accent
+   utility (indigo prices, emerald/amber/rose badges, red warnings) kept its
+   light value, so dark accent TEXT went near-invisible on the dark surfaces and
+   the pale -50/-100 badge BACKGROUNDS glowed as bright patches. Here we lighten
+   accent text and swap pale tints for translucent dark tints of the same hue, so
+   a badge still reads as "amber" / "emerald" but sits in the dark theme.
+   Solid action buttons (bg-*-600/700, white text) are intentionally left alone —
+   they already read well on dark. */
+
+/* Accent TEXT — lighten to the ~400 shade for contrast on dark surfaces. */
+.dark .text-indigo-700,
+.dark .text-indigo-600,
+.dark .text-indigo-500 { color: #a5b4fc !important; }
+.dark .text-emerald-800,
+.dark .text-emerald-700,
+.dark .text-emerald-600 { color: #34d399 !important; }
+.dark .text-rose-700,
+.dark .text-rose-600,
+.dark .text-rose-500 { color: #fb7185 !important; }
+.dark .text-red-700,
+.dark .text-red-600,
+.dark .text-red-500 { color: #f87171 !important; }
+.dark .text-amber-950,
+.dark .text-amber-900,
+.dark .text-amber-800,
+.dark .text-amber-700,
+.dark .text-amber-600 { color: #fcd34d !important; }
+.dark .text-orange-700 { color: #fb923c !important; }
+
+/* Pale accent BACKGROUNDS (-50/-100) — translucent dark tint of the same hue,
+   so they blend into the near-black page instead of glowing. */
+.dark .bg-indigo-50  { background-color: rgba(99,102,241,0.10) !important; }
+.dark .bg-indigo-100 { background-color: rgba(99,102,241,0.18) !important; }
+.dark .bg-emerald-50  { background-color: rgba(16,185,129,0.10) !important; }
+.dark .bg-emerald-100 { background-color: rgba(16,185,129,0.18) !important; }
+.dark .bg-amber-50  { background-color: rgba(245,158,11,0.10) !important; }
+.dark .bg-amber-100 { background-color: rgba(245,158,11,0.18) !important; }
+.dark .bg-rose-50  { background-color: rgba(244,63,94,0.10) !important; }
+.dark .bg-rose-100 { background-color: rgba(244,63,94,0.18) !important; }
+.dark .bg-red-50 { background-color: rgba(239,68,68,0.12) !important; }
+.dark .bg-orange-100 { background-color: rgba(249,115,22,0.18) !important; }
+
+/* Pale accent BORDERS — translucent tint so outlines stay visible but not harsh. */
+.dark .border-amber-200,
+.dark .border-amber-300,
+.dark .border-amber-400 { border-color: rgba(245,158,11,0.40) !important; }
+.dark .border-indigo-200,
+.dark .border-indigo-300 { border-color: rgba(99,102,241,0.40) !important; }
+.dark .border-emerald-200,
+.dark .border-emerald-300 { border-color: rgba(16,185,129,0.40) !important; }
+
 /* ---------------- Thermal receipt (80mm / 58mm) ---------------- */
 .receipt-body {
   background: #f1f5f9;
