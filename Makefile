@@ -1,4 +1,4 @@
-.PHONY: support-pin help dev watch css-watch build build-windows bootstrap run templ css test migrate seed demo reset reset-seed reset-demo db-up db-down docker-up docker-down tidy
+.PHONY: support-pin help dev watch css-watch build build-windows verify-portable bootstrap run templ css test migrate seed demo reset reset-seed reset-demo db-up db-down docker-up docker-down tidy
 
 help:
 	@echo "Targets: support-pin, db-up, migrate, seed, demo, reset, reset-seed, reset-demo, dev, watch, css-watch, build, build-windows, bootstrap, run, test, templ, css, docker-up, docker-down"
@@ -9,13 +9,28 @@ help:
 # A plain dev build. It carries no support credential of its own — the server
 # derives one at boot from POS_SUPPORT_SECRET in .env instead. SHOP binaries are
 # built with `make bootstrap`, which bakes in that shop's PIN and never the key.
+# CGO_ENABLED=0  → fully static, no libc dependency, so it runs on ANY Linux
+#                  regardless of the build machine's (usually newer) glibc.
+# GOAMD64=v1     → baseline x86-64 instruction set, so it runs on OLD CPUs too
+#                  (e.g. a 2nd/3rd-gen i3). Pinned explicitly so the result never
+#                  depends on the build machine having GOAMD64=v2/v3 in its env.
+# Together these are what make one binary "run everywhere". Verify with
+# `make verify-portable` before shipping.
 build: templ css
-	CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/karots-pos ./cmd/server
+	CGO_ENABLED=0 GOAMD64=v1 go build -ldflags="-s -w" -o bin/karots-pos ./cmd/server
 
 # Cross-compile a self-contained Windows executable. Printing uses the Windows
 # print spooler (RAW) via winspool — see internal/printing/printing_windows.go.
 build-windows: templ css
-	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/karots-pos.exe ./cmd/server
+	GOOS=windows GOARCH=amd64 GOAMD64=v1 CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/karots-pos.exe ./cmd/server
+
+# Fail unless bin/karots-pos is fully static — the property that lets it run on
+# any Linux/glibc. A dynamically-linked binary dies on older machines with a
+# "GLIBC_… not found" error, so run this after `make build` before you ship it.
+verify-portable:
+	@file bin/karots-pos | grep -q "statically linked" \
+	  && echo "OK: bin/karots-pos is statically linked (portable)" \
+	  || { echo "FAIL: bin/karots-pos is NOT static — rebuild with 'make build' (CGO_ENABLED=0)"; exit 1; }
 
 # Build a per-shop binary with a chosen plugin set compiled in. Interactive by
 # default; pass ARGS for non-interactive, e.g.

@@ -47,6 +47,33 @@ you get stuck setting up the database, contact us and we'll do it for you.
 
 ---
 
+## 0. Automated install (Linux — recommended)
+
+On a **fresh Linux PC** you don't have to do the steps below by hand. Put the
+program (`karots-pos`) and **`install.sh`** next to each other (e.g. in
+`~/Downloads`) and run:
+
+```bash
+sudo ./install.sh
+```
+
+It works on **Debian/Ubuntu/Xubuntu/Mint, Fedora, Arch/CachyOS and openSUSE**, and
+is safe to re-run. In one go it: installs PostgreSQL + CUPS + Chromium, creates the
+`pos_db` database, moves the binary to `/opt/karots-pos`, writes a production `.env`
+(with a generated DB password, JWT secret and a `backups/` folder), runs the
+one-time `-init`, installs a **systemd service** (auto-starts on boot), and sets up
+a **Chromium kiosk** that opens the till full-screen at login. Nothing else to
+install — no Go, no Node.
+
+After it finishes, jump to **first login** in §3, and set up your printer in §6
+(a raw CUPS queue). The rest of this guide is the manual equivalent, per step.
+
+> The binary must be a **static** build (`make build` — `CGO_ENABLED=0 GOAMD64=v1`)
+> so it runs on any distro and any x86-64 CPU. `install.sh` warns if you hand it a
+> dynamically-linked one. Verify your build with `make verify-portable`.
+
+---
+
 ## 1. Settings (environment variables)
 
 These control how the program runs. Required ones must be set or the program won't

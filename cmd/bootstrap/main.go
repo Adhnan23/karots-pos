@@ -164,7 +164,13 @@ func run() error {
 		fmt.Println("  support PIN shared by every bare build. Set it so this shop gets its own.")
 	}
 	build := exec.Command("go", "build", "-ldflags="+ldflags, "-o", outBin, "./cmd/server")
+	// CGO_ENABLED=0 → fully static (no glibc dependency; runs on any Linux).
+	// GOAMD64=v1 (amd64 only) → baseline instruction set, so it also runs on old
+	// CPUs and never depends on this build machine having GOAMD64=v2/v3 set.
 	build.Env = append(os.Environ(), "GOOS="+target, "GOARCH="+arch, "CGO_ENABLED=0")
+	if arch == "amd64" {
+		build.Env = append(build.Env, "GOAMD64=v1")
+	}
 	build.Stdout, build.Stderr = os.Stdout, os.Stderr
 	fmt.Printf("→ go build %s\n", outBin)
 	if err := build.Run(); err != nil {
