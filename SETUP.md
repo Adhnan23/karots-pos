@@ -433,6 +433,20 @@ rsync -az /var/lib/karots-pos/backups/ backupuser@BACKUP-HOST:/home/backupuser/p
 
 ## 8. Windows
 
+> **Windows 10 or 11 only.** Windows 7/8/8.1 are **not** supported — Go 1.21+
+> (this build uses 1.26) requires Windows 10 / Server 2016+, and so do current
+> PostgreSQL and Chromium. The `.exe` will not start on Windows 7.
+
+> **Automated install (recommended):** put `karots-pos.exe` and **`install.ps1`**
+> next to each other and run, from an **elevated** PowerShell:
+> ```powershell
+> powershell -ExecutionPolicy Bypass -File install.ps1
+> ```
+> It installs PostgreSQL + Chromium (winget), creates `pos_db`, copies the exe to
+> `C:\karots-pos` with a generated `.env` + `backups\`, runs `-init`, registers a
+> boot Scheduled Task, and sets up a Chromium kiosk. The manual steps below are the
+> equivalent if you'd rather do it by hand.
+
 The program runs on Windows, **including receipt and barcode-label printing** — it
 talks to the Windows print spooler directly (RAW mode), so it works the same as on
 Linux. Network printers (`tcp://IP:9100`) also work identically.
