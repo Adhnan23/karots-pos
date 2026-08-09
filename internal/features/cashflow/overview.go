@@ -135,7 +135,7 @@ func (s *Service) UnifiedLedger(ctx context.Context, from, to time.Time, limit i
 			FROM cash_movements cm
 			JOIN users u ON u.id = cm.user_id
 			WHERE cm.created_at >= $1 AND cm.created_at < $2
-			  AND cm.type IN ('withdrawal','pay_in','credit_payment','refund')
+			  AND cm.type IN ('withdrawal','pay_in','credit_payment','refund','expense')
 		) x
 		ORDER BY created_at DESC
 		LIMIT $3`, from, to, limit)

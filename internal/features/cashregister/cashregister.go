@@ -42,6 +42,10 @@ const (
 	MovePayIn         = "pay_in"
 	MoveRefund        = "refund"
 	MoveClosing       = "closing"
+	// MoveExpense is a counter expense paid from the drawer. It is an outflow like
+	// a withdrawal for all drawer/close math; it exists so the ledger can show it
+	// as "Expense" instead of lumping it in with manual withdrawals.
+	MoveExpense = "expense"
 )
 
 type Session struct {
@@ -232,7 +236,7 @@ func (r *Repository) AdjustmentTotal(ctx context.Context, sessionID int64) (deci
 	var total decimal.Decimal
 	err := r.q.GetContext(ctx, &total,
 		`SELECT COALESCE(SUM(amount),0) FROM cash_movements
-		 WHERE session_id = $1 AND type IN ('withdrawal','pay_in','credit_payment','refund')`, sessionID)
+		 WHERE session_id = $1 AND type IN ('withdrawal','pay_in','credit_payment','refund','expense')`, sessionID)
 	return total, err
 }
 
@@ -370,7 +374,7 @@ func (s *Service) Summary(ctx context.Context, userID int64) (*Summary, error) {
 		switch m.Type {
 		case MovePayIn, MoveCreditPayment:
 			out.PayIns = out.PayIns.Add(m.Amount)
-		case MoveWithdrawal, MoveRefund:
+		case MoveWithdrawal, MoveRefund, MoveExpense:
 			out.Withdrawals = out.Withdrawals.Add(m.Amount.Abs())
 		}
 	}

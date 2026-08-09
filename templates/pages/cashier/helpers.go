@@ -23,6 +23,8 @@ func zMoveLabel(t string) string {
 		return "Credit collected"
 	case "withdrawal":
 		return "Withdrawal"
+	case "expense":
+		return "Expense"
 	case "pay_in":
 		return "Deposit"
 	case "refund":

@@ -56,6 +56,8 @@ templ Dashboard(d DashboardData) {
 			@statCard("Customer Dues", money.Format(d.Symbol, d.OutstandingDue), "rose")
 		</div>
 
+		@OpenTillCard()
+
 		if cards := plugin.DashboardCards(); len(cards) > 0 {
 			<div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-8">
 				for _, c := range cards {
@@ -94,6 +96,41 @@ templ Dashboard(d DashboardData) {
 			}
 		</div>
 	}
+}
+
+// OpenTillCard is the sell action on the dashboard: opening a cashier session on
+// an admin account is unusual (it's the counter's job and starts a drawer on the
+// admin), so it lives here as a card — off the sidebar where it was mis-clicked —
+// behind a red in-app confirmation.
+templ OpenTillCard() {
+	<div x-data="{ warn: false }" class="mb-8">
+		<div class="bg-white rounded-2xl shadow-sm p-6 flex items-center justify-between gap-4">
+			<div>
+				<h2 class="text-lg font-semibold">Sell at the counter</h2>
+				<p class="text-sm text-slate-500">Opens a cashier session (the till) on your account.</p>
+			</div>
+			<button type="button" x-on:click="warn = true" class="px-4 py-2.5 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700">🧾 Open Cashier Till</button>
+		</div>
+		<!-- Red confirmation: admins don't usually run the till. -->
+		<div x-show="warn" x-cloak class="fixed inset-0 bg-black/40 flex items-center justify-center z-40 p-4" x-on:keydown.escape.window="warn = false">
+			<div class="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
+				<div class="px-6 py-4 bg-rose-600 text-white">
+					<h3 class="text-lg font-semibold">⚠️ Open the cashier till?</h3>
+				</div>
+				<div class="px-6 py-4 space-y-3">
+					<p class="text-sm text-slate-700">
+						Running the till is normally the cashier's job. This starts a cashier
+						session (a cash drawer) on <b>your</b> account and takes you to the sell screen.
+					</p>
+					<p class="text-sm text-slate-500">Only continue if you really mean to sell at the counter.</p>
+					<div class="flex justify-end gap-3 pt-1">
+						<button type="button" x-on:click="warn = false" class="px-4 py-2 rounded-lg border">Cancel</button>
+						<a href="/cashier" class="px-4 py-2 rounded-lg bg-rose-600 text-white font-medium">Continue anyway →</a>
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
 }
 
 templ statCard(label, value, color string) {

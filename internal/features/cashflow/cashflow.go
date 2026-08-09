@@ -290,6 +290,11 @@ func (s *Service) writeLeg(ctx context.Context, crepo *cashregister.Repository, 
 		amt := in.Amount
 		if isSource {
 			mtype = cashregister.MoveWithdrawal
+			// An expense paid from the drawer records as its own type so the ledger
+			// distinguishes a bill from the owner taking cash. Outflow either way.
+			if in.ReceiptKind == "expense" {
+				mtype = cashregister.MoveExpense
+			}
 			amt = in.Amount.Neg()
 		}
 		if err := crepo.AddMovement(ctx, sess.ID, self.ID, mtype, amt, in.Reason, nil); err != nil {

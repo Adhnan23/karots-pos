@@ -125,7 +125,6 @@ templ Admin(title, userName, active string) {
 						<span x-text="dark ? '☀️' : '🌙'"></span>
 						<span x-text="dark ? 'Light mode' : 'Dark mode'">Dark mode</span>
 					</button>
-					<a href="/cashier" class="block px-3 py-2 rounded-lg hover:bg-slate-800">Open Cashier →</a>
 					<a href="/account/pin" class="block px-3 py-2 rounded-lg hover:bg-slate-800">Change PIN</a>
 					<form method="post" action="/lock">
 						<button type="submit" title="Lock screen (stays signed in)" class="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-800">🔒 Lock screen</button>
