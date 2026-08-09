@@ -92,6 +92,7 @@ templ CustomerRows(rows []customers.Customer, symbol string) {
 				<td class="py-2 px-3 text-right whitespace-nowrap">
 					if c.IsActive {
 						<button class="text-indigo-600 hover:underline" hx-get={ "/admin/customers/form/" + strconv.FormatInt(c.ID, 10) } hx-target="#modal-container" hx-swap="innerHTML">Edit</button>
+						<button class="text-slate-600 hover:underline ml-3" hx-get={ "/admin/customers/opening/" + strconv.FormatInt(c.ID, 10) } hx-target="#modal-container" hx-swap="innerHTML">Opening</button>
 						<a class="text-slate-600 hover:underline ml-3" href={ templ.SafeURL("/admin/customers/" + strconv.FormatInt(c.ID, 10) + "/statement") } target="_blank">Statement</a>
 						if c.OutstandingBalance.IsPositive() {
 							<button class="text-emerald-600 hover:underline ml-3" hx-get={ "/admin/customers/pay/" + strconv.FormatInt(c.ID, 10) } hx-target="#modal-container" hx-swap="innerHTML">Pay</button>

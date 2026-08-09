@@ -142,6 +142,38 @@ func (a *adminUI) SupplierPayForm(c echo.Context) error {
 	}))
 }
 
+// SupplierOpeningForm renders the modal to correct a supplier's editable opening
+// (old pre-system debt), showing the locked transactional part for context.
+func (a *adminUI) SupplierOpeningForm(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	ctx := c.Request().Context()
+	s, err := a.s.suppliers.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	return response.RenderFragment(c, adminpages.OpeningAdjustForm(adminpages.OpeningAdjustData{
+		ID: s.ID, Name: s.Name, Kind: "suppliers", Noun: "supplier",
+		Symbol: a.symbol(ctx), Outstanding: s.OutstandingBalance, Linked: s.LinkedBalance(), Opening: s.OpeningUnlinked,
+	}))
+}
+
+func (a *adminUI) SupplierOpeningAdjust(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	before, after, err := a.s.suppliers.AdjustOpening(c.Request().Context(), id, c.FormValue("opening"))
+	if err != nil {
+		return err
+	}
+	a.s.logAudit(c, audit.ActionUpdate, "supplier", strconv.FormatInt(id, 10),
+		openingAuditDetail(before.OpeningUnlinked, after.OpeningUnlinked, c.FormValue("note")))
+	return htmxDone(c, "Opening balance updated", "reload-suppliers")
+}
+
 func (a *adminUI) SupplierCreate(c echo.Context) error {
 	var in suppliers.CreateInput
 	if err := c.Bind(&in); err != nil {
@@ -1581,6 +1613,48 @@ func (a *adminUI) CustomerPayForm(c echo.Context) error {
 		Symbol:   a.symbol(ctx),
 		Dests:    dests,
 	}))
+}
+
+// CustomerOpeningForm renders the modal to correct a customer's editable opening
+// (old pre-system debt), showing the locked transactional part for context.
+func (a *adminUI) CustomerOpeningForm(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	ctx := c.Request().Context()
+	cust, err := a.s.customers.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	return response.RenderFragment(c, adminpages.OpeningAdjustForm(adminpages.OpeningAdjustData{
+		ID: cust.ID, Name: cust.Name, Kind: "customers", Noun: "customer",
+		Symbol: a.symbol(ctx), Outstanding: cust.OutstandingBalance, Linked: cust.LinkedBalance(), Opening: cust.OpeningUnlinked,
+	}))
+}
+
+func (a *adminUI) CustomerOpeningAdjust(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	before, after, err := a.s.customers.AdjustOpening(c.Request().Context(), id, c.FormValue("opening"))
+	if err != nil {
+		return err
+	}
+	a.s.logAudit(c, audit.ActionUpdate, "customer", strconv.FormatInt(id, 10),
+		openingAuditDetail(before.OpeningUnlinked, after.OpeningUnlinked, c.FormValue("note")))
+	return htmxDone(c, "Opening balance updated", "reload-customers")
+}
+
+// openingAuditDetail formats the before/after opening figures (plus an optional
+// note) for the audit trail of an opening-balance correction.
+func openingAuditDetail(before, after decimal.Decimal, note string) string {
+	d := "opening " + before.StringFixed(2) + " -> " + after.StringFixed(2)
+	if n := strings.TrimSpace(note); n != "" {
+		d += "; note: " + n
+	}
+	return d
 }
 
 func (a *adminUI) CustomerUpdate(c echo.Context) error {

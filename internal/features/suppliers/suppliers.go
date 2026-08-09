@@ -30,8 +30,16 @@ type Supplier struct {
 	CreditDays         int             `db:"credit_days"         json:"credit_days"`
 	OutstandingBalance decimal.Decimal `db:"outstanding_balance" json:"outstanding_balance"`
 	OpeningBalance     decimal.Decimal `db:"opening_balance"     json:"opening_balance"`
+	OpeningUnlinked    decimal.Decimal `db:"opening_unlinked"    json:"opening_unlinked"`
 	IsActive           bool            `db:"is_active"           json:"is_active"`
 	CreatedAt          time.Time       `db:"created_at"          json:"created_at"`
+}
+
+// LinkedBalance is the transactional (document-backed) part of what we owe this
+// supplier: the outstanding payable minus the still-unpaid old (opening) debt.
+// This is read-only in the UI; only the opening part is editable.
+func (s Supplier) LinkedBalance() decimal.Decimal {
+	return s.OutstandingBalance.Sub(s.OpeningUnlinked)
 }
 
 type CreateInput struct {
@@ -110,8 +118,8 @@ func (r *Repository) FindByName(ctx context.Context, name string) (*Supplier, er
 func (r *Repository) Create(ctx context.Context, in CreateInput, opening decimal.Decimal) (*Supplier, error) {
 	var s Supplier
 	err := r.q.GetContext(ctx, &s, `
-		INSERT INTO suppliers (name, contact_person, phone, address, credit_days, opening_balance, outstanding_balance)
-		VALUES ($1,$2,$3,$4,$5,$6,$6) RETURNING *`,
+		INSERT INTO suppliers (name, contact_person, phone, address, credit_days, opening_balance, outstanding_balance, opening_unlinked)
+		VALUES ($1,$2,$3,$4,$5,$6,$6,$6) RETURNING *`,
 		in.Name, in.ContactPerson, in.Phone, in.Address, in.CreditDays, opening)
 	if err != nil {
 		return nil, err
@@ -159,11 +167,36 @@ func (r *Repository) Reactivate(ctx context.Context, id int64) error {
 }
 
 // AddBalance changes a supplier's payable (used inside the purchase tx; pass a
-// negative delta when paying the supplier).
+// negative delta when paying the supplier). A payment settles the transactional
+// (linked) part first; any overflow erodes the still-unpaid opening debt, so
+// opening_unlinked is clamped to never exceed the new outstanding balance.
 func (r *Repository) AddBalance(ctx context.Context, id int64, delta decimal.Decimal) error {
-	_, err := r.q.ExecContext(ctx,
-		`UPDATE suppliers SET outstanding_balance = outstanding_balance + $1 WHERE id=$2`, delta, id)
+	_, err := r.q.ExecContext(ctx, `
+		UPDATE suppliers
+		SET outstanding_balance = outstanding_balance + $1,
+		    opening_unlinked = LEAST(opening_unlinked, GREATEST(outstanding_balance + $1, 0))
+		WHERE id=$2`, delta, id)
 	return err
+}
+
+// AdjustOpening sets the still-unpaid opening (old pre-system debt) to newOpening
+// and shifts both the outstanding payable and the gross opening figure by the same
+// delta, so the transactional (linked) part is left untouched. newOpening must be
+// non-negative.
+func (r *Repository) AdjustOpening(ctx context.Context, id int64, newOpening decimal.Decimal) error {
+	res, err := r.q.ExecContext(ctx, `
+		UPDATE suppliers SET
+			outstanding_balance = outstanding_balance + ($1 - opening_unlinked),
+			opening_balance     = opening_balance     + ($1 - opening_unlinked),
+			opening_unlinked    = $1
+		WHERE id=$2`, newOpening, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 type Service struct {
@@ -329,6 +362,34 @@ func (s *Service) Delete(ctx context.Context, id int64) error {
 		return apperr.Internal("failed to remove supplier", err)
 	}
 	return nil
+}
+
+// AdjustOpening corrects the editable opening (old pre-system debt) for a
+// supplier. It returns the supplier as it was before the change (for the audit
+// trail) and the refreshed supplier. The transactional (linked) part is never
+// touched — only the opening and, by the same delta, the outstanding payable.
+func (s *Service) AdjustOpening(ctx context.Context, id int64, newOpeningStr string) (before, after *Supplier, err error) {
+	// The opening (old pre-system balance) may be negative here: a supplier we were
+	// in credit with before go-live (an advance/overpayment they still owe us).
+	newOpening, perr := money.Parse(newOpeningStr)
+	if perr != nil {
+		return nil, nil, apperr.Validation("opening balance must be a valid amount")
+	}
+	before, err = s.Get(ctx, id)
+	if err != nil {
+		return nil, nil, err
+	}
+	if aerr := s.repo.AdjustOpening(ctx, id, newOpening); aerr != nil {
+		if errors.Is(aerr, sql.ErrNoRows) {
+			return nil, nil, apperr.NotFound("supplier")
+		}
+		return nil, nil, apperr.Internal("failed to adjust opening balance", aerr)
+	}
+	after, err = s.Get(ctx, id)
+	if err != nil {
+		return nil, nil, err
+	}
+	return before, after, nil
 }
 
 type APIHandler struct{ svc *Service }

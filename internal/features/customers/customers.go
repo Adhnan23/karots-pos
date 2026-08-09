@@ -32,6 +32,7 @@ type Customer struct {
 	CreditLimit        decimal.Decimal `db:"credit_limit"        json:"credit_limit"`
 	OutstandingBalance decimal.Decimal `db:"outstanding_balance" json:"outstanding_balance"`
 	OpeningBalance     decimal.Decimal `db:"opening_balance"     json:"opening_balance"`
+	OpeningUnlinked    decimal.Decimal `db:"opening_unlinked"    json:"opening_unlinked"`
 	LoyaltyPoints      int             `db:"loyalty_points"      json:"loyalty_points"`
 	IsActive           bool            `db:"is_active"           json:"is_active"`
 	CreatedAt          time.Time       `db:"created_at"          json:"created_at"`
@@ -40,6 +41,13 @@ type Customer struct {
 // AvailableCredit is how much more this customer may borrow.
 func (c Customer) AvailableCredit() decimal.Decimal {
 	return c.CreditLimit.Sub(c.OutstandingBalance)
+}
+
+// LinkedBalance is the transactional (document-backed) part of what this customer
+// owes: the outstanding balance minus the still-unpaid old (opening) debt. Read-only
+// in the UI; only the opening part is editable.
+func (c Customer) LinkedBalance() decimal.Decimal {
+	return c.OutstandingBalance.Sub(c.OpeningUnlinked)
 }
 
 type CreateInput struct {
@@ -147,8 +155,8 @@ func (r *Repository) FindByPhone(ctx context.Context, phone string) (*Customer, 
 func (r *Repository) Create(ctx context.Context, name string, phone, address *string, limit, opening decimal.Decimal) (*Customer, error) {
 	var c Customer
 	err := r.q.GetContext(ctx, &c, `
-		INSERT INTO customers (name, phone, address, credit_limit, opening_balance, outstanding_balance)
-		VALUES ($1,$2,$3,$4,$5,$5) RETURNING *`, name, phone, address, limit, opening)
+		INSERT INTO customers (name, phone, address, credit_limit, opening_balance, outstanding_balance, opening_unlinked)
+		VALUES ($1,$2,$3,$4,$5,$5,$5) RETURNING *`, name, phone, address, limit, opening)
 	if err != nil {
 		return nil, err
 	}
@@ -156,12 +164,36 @@ func (r *Repository) Create(ctx context.Context, name string, phone, address *st
 }
 
 // AddBalance increments outstanding balance (used inside the sale tx for the
-// credit portion). Pass a negative delta for repayments.
+// credit portion). Pass a negative delta for repayments. A repayment settles the
+// transactional (linked) part first; any overflow erodes the still-unpaid opening
+// debt, so opening_unlinked is clamped to never exceed the new outstanding balance.
 func (r *Repository) AddBalance(ctx context.Context, id int64, delta decimal.Decimal) error {
-	_, err := r.q.ExecContext(ctx,
-		`UPDATE customers SET outstanding_balance = outstanding_balance + $1 WHERE id = $2`,
-		delta, id)
+	_, err := r.q.ExecContext(ctx, `
+		UPDATE customers
+		SET outstanding_balance = outstanding_balance + $1,
+		    opening_unlinked = LEAST(opening_unlinked, GREATEST(outstanding_balance + $1, 0))
+		WHERE id = $2`, delta, id)
 	return err
+}
+
+// AdjustOpening sets the still-unpaid opening (old pre-system debt) to newOpening
+// and shifts both the outstanding balance and the gross opening figure by the same
+// delta, so the transactional (linked) part is left untouched. newOpening must be
+// non-negative.
+func (r *Repository) AdjustOpening(ctx context.Context, id int64, newOpening decimal.Decimal) error {
+	res, err := r.q.ExecContext(ctx, `
+		UPDATE customers SET
+			outstanding_balance = outstanding_balance + ($1 - opening_unlinked),
+			opening_balance     = opening_balance     + ($1 - opening_unlinked),
+			opening_unlinked    = $1
+		WHERE id = $2 AND is_active = true`, newOpening, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 // InsertPayment logs a credit repayment and returns its id. createdBy of 0
@@ -353,6 +385,34 @@ func (s *Service) Update(ctx context.Context, id int64, in UpdateInput) error {
 		return apperr.Internal("failed to update customer", err)
 	}
 	return nil
+}
+
+// AdjustOpening corrects the editable opening (old pre-system debt) for a
+// customer. It returns the customer as it was before the change (for the audit
+// trail) and the refreshed customer. The transactional (linked) part is never
+// touched — only the opening and, by the same delta, the outstanding balance.
+func (s *Service) AdjustOpening(ctx context.Context, id int64, newOpeningStr string) (before, after *Customer, err error) {
+	// The opening (old pre-system balance) may be negative here: a customer who was
+	// in credit before go-live (a pre-system advance/deposit we still owe them).
+	newOpening, perr := money.Parse(newOpeningStr)
+	if perr != nil {
+		return nil, nil, apperr.Validation("opening balance must be a valid amount")
+	}
+	before, err = s.Get(ctx, id)
+	if err != nil {
+		return nil, nil, err
+	}
+	if aerr := s.repo.AdjustOpening(ctx, id, newOpening); aerr != nil {
+		if errors.Is(aerr, sql.ErrNoRows) {
+			return nil, nil, apperr.NotFound("customer")
+		}
+		return nil, nil, apperr.Internal("failed to adjust opening balance", aerr)
+	}
+	after, err = s.Get(ctx, id)
+	if err != nil {
+		return nil, nil, err
+	}
+	return before, after, nil
 }
 
 // ImportRow is one resolved row of a bulk customer import (fields already parsed
@@ -723,6 +783,9 @@ func (h *APIHandler) Create(c echo.Context) error {
 	if err := c.Validate(&in); err != nil {
 		return err
 	}
+	// The till (cashier) may never seed an opening / old-debt balance — that is an
+	// admin-only figure. Force it to zero regardless of what the client sent.
+	in.OpeningBalance = ""
 	cust, existed, err := h.svc.Create(c.Request().Context(), in)
 	if err != nil {
 		return err

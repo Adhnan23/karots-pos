@@ -1,5 +1,14 @@
 package adminpages
 
+import (
+	"fmt"
+	"strconv"
+
+	"karots-pos/internal/money"
+
+	"github.com/shopspring/decimal"
+)
+
 // modalShell is the reusable modal chrome (backdrop + card + header). The form
 // body is passed as children.
 templ modalShell(title string) {
@@ -19,4 +28,69 @@ templ modalButtons() {
 		<button type="button" class="px-4 py-2 rounded-lg border" x-on:click="$dispatch('close-modal')">Cancel</button>
 		<button type="submit" class="px-4 py-2 rounded-lg bg-indigo-600 text-white">Save</button>
 	</div>
+}
+
+// OpeningAdjustData drives the shared "Adjust opening balance" modal for both
+// customers and suppliers. Kind is the URL path segment ("customers"/"suppliers")
+// and Noun is used in copy.
+type OpeningAdjustData struct {
+	ID          int64
+	Name        string
+	Kind        string
+	Noun        string
+	Symbol      string
+	Outstanding decimal.Decimal
+	Linked      decimal.Decimal // outstanding − opening_unlinked (may be negative = advance/credit)
+	Opening     decimal.Decimal // the editable still-unpaid old debt
+}
+
+// openingXData seeds the Alpine state so "New total outstanding" updates live as
+// the admin edits the open figure.
+func openingXData(d OpeningAdjustData) string {
+	return fmt.Sprintf("{ open: %s, linked: %s, sym: %q }",
+		d.Opening.StringFixed(2), d.Linked.StringFixed(2), d.Symbol)
+}
+
+// OpeningAdjustForm lets an admin correct the pre-system "old debt" (opening)
+// while the transactional part stays locked and read-only.
+templ OpeningAdjustForm(d OpeningAdjustData) {
+	@modalShell("Adjust opening balance") {
+		<form
+			class="p-6 space-y-4"
+			x-data={ openingXData(d) }
+			hx-post={ "/admin/" + d.Kind + "/" + strconv.FormatInt(d.ID, 10) + "/opening" }
+			hx-swap="none"
+		>
+			<p class="text-sm text-slate-600 font-medium">{ d.Name }</p>
+			<div class="rounded-lg bg-slate-50 border divide-y text-sm">
+				<div class="flex justify-between px-3 py-2">
+					<span class="text-slate-500">Total outstanding</span>
+					<span class="font-semibold">{ money.Format(d.Symbol, d.Outstanding) }</span>
+				</div>
+				<div class="flex justify-between px-3 py-2">
+					<span class="text-slate-500">Locked (from transactions)</span>
+					<span>{ money.Format(d.Symbol, d.Linked) }</span>
+				</div>
+			</div>
+			<div>
+				<label class="block text-sm font-medium mb-1">
+					Open / old debt
+					<span class="text-slate-400 font-normal">(from before this system — editable)</span>
+				</label>
+				<input name="opening" type="number" step="0.01" x-model="open" class="w-full border rounded-lg px-3 py-2"/>
+			</div>
+			<div class="flex justify-between text-sm px-1">
+				<span class="text-slate-500">New total outstanding</span>
+				<span class="font-semibold" x-text="sym + ' ' + (linked + (parseFloat(open)||0)).toFixed(2)"></span>
+			</div>
+			<div>
+				<label class="block text-sm font-medium mb-1">Note <span class="text-slate-400 font-normal">(optional)</span></label>
+				<input name="note" placeholder="e.g. forgot an old invoice" class="w-full border rounded-lg px-3 py-2"/>
+			</div>
+			<p class="text-xs text-slate-500">
+				Only the old-debt figure changes; the locked transactional part stays the same. Cashiers can never set this.
+			</p>
+			@modalButtons()
+		</form>
+	}
 }
