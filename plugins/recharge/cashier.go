@@ -8,6 +8,7 @@ import (
 
 	"karots-pos/internal/apperr"
 	appdb "karots-pos/internal/db"
+	"karots-pos/internal/features/audit"
 	"karots-pos/internal/features/auth"
 	"karots-pos/internal/escpos"
 	"karots-pos/internal/features/cashflow"
@@ -688,6 +689,92 @@ func (h *cashierUI) Reload(c echo.Context) error {
 		return err
 	}
 	return c.JSON(http.StatusOK, map[string]any{"ok": true})
+}
+
+// ReverseReloadForm renders the reload-reversal modal: the reload's amount/device
+// plus the Failed vs Wrong-number choice.
+func (h *cashierUI) ReverseReloadForm(c echo.Context) error {
+	ctx := c.Request().Context()
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		return apperr.BadRequest("invalid reload id")
+	}
+	t, err := h.p.store.TxByID(ctx, id)
+	if err != nil {
+		return apperr.NotFound("reload")
+	}
+	if t.Type != "reload" {
+		return apperr.BadRequest("only reloads can be reversed")
+	}
+	if t.Reversed {
+		return apperr.Conflict("this reload was already reversed")
+	}
+	return response.RenderFragment(c, ReverseReloadModal(h.symbol(ctx), t))
+}
+
+// ReverseReload refunds the customer and reverses the float. Failed → float
+// returns; wrong-number → float stays gone (the loss is already carried by the
+// un-recovered refill expense). Requires an open drawer (the refund is
+// drawer-guarded). The original sale is never touched — this posts compensating
+// moves only.
+func (h *cashierUI) ReverseReload(c echo.Context) error {
+	ctx := c.Request().Context()
+	uid := middleware.CurrentUserID(c)
+	if _, err := h.requireSession(c); err != nil {
+		return err
+	}
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		return apperr.BadRequest("invalid reload id")
+	}
+	mode := c.FormValue("mode") // "failed" | "wrong_number"
+	if mode != "failed" && mode != "wrong_number" {
+		return apperr.Validation("choose what happened")
+	}
+	orig, err := h.p.store.TxByID(ctx, id)
+	if err != nil {
+		return apperr.NotFound("reload")
+	}
+	if orig.Type != "reload" {
+		return apperr.BadRequest("only reloads can be reversed")
+	}
+	// Pre-guard BEFORE moving any cash, so a double-submit can't leave an orphan
+	// refund withdrawal when the DB reversal would reject it.
+	if orig.Reversed {
+		return apperr.Conflict("this reload was already reversed")
+	}
+	reason := orig.Carrier + " reload reversal #" + strconv.FormatInt(id, 10)
+	// 1) Refund the customer from the drawer (guards against the drawer balance).
+	if _, err := h.p.core.CashRegister.Withdraw(ctx, uid, cashregister.MovementInput{
+		Amount: orig.Amount.String(), Reason: reason,
+	}); err != nil {
+		return err
+	}
+	// 2) Reverse the float in one DB tx.
+	if err := appdb.WithTx(ctx, h.p.core.DB, func(tx *sqlx.Tx) error {
+		_, rerr := h.p.store.reverseReloadTx(ctx, tx, id, mode, uid)
+		return rerr
+	}); err != nil {
+		return err
+	}
+	h.p.core.Audit.Record(ctx, uid, audit.ActionUpdate, "recharge_reload",
+		strconv.FormatInt(id, 10), "reversed ("+mode+")")
+
+	// Refresh the Reload receipts panel so the row shows "reversed".
+	f, preset, fromStr, toStr, err := receiptsRange(c)
+	if err != nil {
+		return err
+	}
+	rows, err := h.p.store.Ledger(ctx, f)
+	if err != nil {
+		return err
+	}
+	vm := ReceiptsTabVM{
+		Symbol: h.symbol(ctx), Preset: preset, From: fromStr, To: toStr,
+		Action:      "/cashier/recharge/receipts/recharge",
+		ReprintBase: "/cashier/recharge/tx/", ViewBase: "/cashier/recharge/tx/",
+	}
+	return response.RenderFragment(c, FloatReceiptsTab(vm, rows))
 }
 
 // Wallet credits a device's float when a product sale was paid by a wallet

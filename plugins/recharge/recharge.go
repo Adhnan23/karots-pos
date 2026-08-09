@@ -91,6 +91,8 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 	reg.Cashier().GET("/recharge/receipts/bill", ch.ReceiptsBill)
 	reg.Cashier().GET("/recharge/receipts/recharge", ch.ReceiptsFloat)
 	reg.Cashier().POST("/recharge/reload", ch.Reload)
+	reg.Cashier().GET("/recharge/reload/:id/reverse", ch.ReverseReloadForm)
+	reg.Cashier().POST("/recharge/reload/:id/reverse", ch.ReverseReload)
 	reg.Cashier().POST("/recharge/wallet", ch.Wallet)
 	reg.Cashier().GET("/recharge/menu", ch.MenuRoot)
 	reg.Cashier().GET("/recharge/menu/reload/carriers", ch.MenuReloadCarriers)

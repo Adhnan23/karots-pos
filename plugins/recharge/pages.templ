@@ -839,9 +839,16 @@ templ FloatReceiptsTab(vm ReceiptsTabVM, rows []TxRow) {
 							<td class="px-4 py-2 text-right tabular-nums">{ money.Format(vm.Symbol, r.ServiceCharge) }</td>
 							<td class="px-4 py-2 text-slate-500">{ r.Operator }</td>
 							<td class="px-4 py-2 text-right whitespace-nowrap">
-								if r.Type == "reload" || r.Type == "wallet_in" {
+								if r.Type == "reload" {
 									// Sold through the till — its receipt is the sale (S-) receipt, so
-									// there's no separate reload slip to view or reprint here.
+									// there's no separate reload slip here, but a mistaken reload can be
+									// reversed (refund + float back / float lost).
+									if r.Reversed {
+										<span class="px-2 py-1 rounded-full bg-slate-100 text-slate-500 text-xs font-medium">reversed</span>
+									} else {
+										<button type="button" hx-get={ "/cashier/recharge/reload/" + strconv.FormatInt(r.ID, 10) + "/reverse" } hx-target="#modal-container" hx-swap="innerHTML" class="px-3 py-1 rounded-lg bg-rose-600 text-white text-xs font-medium">↩ Reverse</button>
+									}
+								} else if r.Type == "wallet_in" {
 									<span class="text-slate-400 text-xs">on sale receipt</span>
 								} else {
 									<button type="button" hx-post={ vm.ReprintBase + strconv.FormatInt(r.ID, 10) + "/print" } hx-swap="none" class="px-3 py-1 rounded-lg bg-indigo-600 text-white text-xs font-medium">🧾 Reprint</button>
@@ -857,6 +864,35 @@ templ FloatReceiptsTab(vm ReceiptsTabVM, rows []TxRow) {
 			</table>
 		</div>
 	</div>
+}
+
+// ReverseReloadModal asks what happened to a mistaken reload. "Failed" refunds
+// the cash and returns the float; "Wrong number" refunds the cash but the float
+// is gone (a loss). Posts to the reverse endpoint, refreshes the Reload receipts
+// panel, and closes on success.
+templ ReverseReloadModal(symbol string, t TxRow) {
+	@rechargeModal("Reverse reload") {
+		<form class="px-6 py-4 space-y-4"
+			hx-post={ "/cashier/recharge/reload/" + strconv.FormatInt(t.ID, 10) + "/reverse" }
+			hx-target="#receipts-recharge-float" hx-swap="innerHTML"
+			x-on:htmx:after-request="if ($event.detail.successful) $dispatch('close-modal')">
+			<p class="text-sm text-slate-500">
+				{ t.Carrier } { t.Device } — <span class="font-semibold text-slate-700">{ money.Format(symbol, t.Amount) }</span>
+			</p>
+			<label class="flex items-start gap-2 p-3 rounded-lg border cursor-pointer hover:bg-slate-50">
+				<input type="radio" name="mode" value="failed" checked class="mt-1"/>
+				<span><span class="font-medium">Failed / didn't go through</span><br/><span class="text-xs text-slate-500">Refund the cash and return the float to the device.</span></span>
+			</label>
+			<label class="flex items-start gap-2 p-3 rounded-lg border cursor-pointer hover:bg-slate-50">
+				<input type="radio" name="mode" value="wrong_number" class="mt-1"/>
+				<span><span class="font-medium">Wrong number (delivered)</span><br/><span class="text-xs text-slate-500">Refund the cash — the float is gone and booked as a loss.</span></span>
+			</label>
+			<div class="flex justify-end gap-3 pt-2">
+				<button type="button" class="px-4 py-2 rounded-lg border" x-on:click="$dispatch('close-modal')">Cancel</button>
+				<button type="submit" class="px-4 py-2 rounded-lg bg-rose-600 text-white">Reverse &amp; refund</button>
+			</div>
+		</form>
+	}
 }
 
 // ============================ Edit dialogs ============================

@@ -586,6 +586,7 @@ type TxRow struct {
 	FloatDelta    decimal.Decimal `db:"float_delta"`
 	Reference     *string         `db:"reference"`
 	Operator      string          `db:"operator"`
+	Reversed      bool            `db:"reversed"`
 }
 
 // LedgerFilter narrows the admin ledger query (zero values = no filter).
@@ -605,7 +606,7 @@ func (s *Store) TxByID(ctx context.Context, id int64) (TxRow, error) {
 	err := s.db.GetContext(ctx, &t, `
 		SELECT t.id, t.created_at, c.name AS carrier, COALESCE(d.label,'—') AS device, t.type,
 		       t.amount, t.service_charge, t.cash_delta, t.float_delta, t.reference,
-		       COALESCE(u.name,'') AS operator
+		       COALESCE(u.name,'') AS operator, t.reversed_at IS NOT NULL AS reversed
 		FROM recharge_transactions t
 		JOIN recharge_carriers c ON c.id = t.carrier_id
 		LEFT JOIN recharge_devices d ON d.id = t.device_id
@@ -619,7 +620,7 @@ func (s *Store) Ledger(ctx context.Context, f LedgerFilter) ([]TxRow, error) {
 	q := `
 		SELECT t.id, t.created_at, c.name AS carrier, COALESCE(d.label,'—') AS device, t.type,
 		       t.amount, t.service_charge, t.cash_delta, t.float_delta, t.reference,
-		       COALESCE(u.name,'') AS operator
+		       COALESCE(u.name,'') AS operator, t.reversed_at IS NOT NULL AS reversed
 		FROM recharge_transactions t
 		JOIN recharge_carriers c ON c.id = t.carrier_id
 		LEFT JOIN recharge_devices d ON d.id = t.device_id
