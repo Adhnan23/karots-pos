@@ -12,6 +12,8 @@ import (
 	"errors"
 	"time"
 
+	appdb "karots-pos/internal/db"
+
 	"github.com/jmoiron/sqlx"
 	"github.com/shopspring/decimal"
 )
@@ -62,6 +64,9 @@ type Job struct {
 	LabourWorkerID *int64          `db:"labour_worker_id" json:"labour_worker_id"`
 	LabourAmount   decimal.Decimal `db:"labour_amount"    json:"labour_amount"`
 	LabourPayoutID *int64          `db:"labour_payout_id" json:"labour_payout_id"`
+	Kind           string          `db:"kind"             json:"kind"` // sale | own_use
+	ReversedAt     *time.Time      `db:"reversed_at"      json:"reversed_at"`
+	CreatedAt      time.Time       `db:"created_at"       json:"created_at"`
 }
 
 // serviceDefaults resolves a category id (ensuring a "Documents" category exists)
@@ -209,13 +214,61 @@ func (s *Store) ConsumablesFor(ctx context.Context, serviceID int64, size string
 // InsertJob records a completed job's analytics row. Labour is left at zero here:
 // the cashier only sets the price, and the admin settles labour per job later.
 func (s *Store) InsertJob(ctx context.Context, j Job) error {
+	if j.Kind == "" {
+		j.Kind = "sale"
+	}
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO doc_job (sale_id, service_id, description, qty, unit_price, line_total,
-		                     consumable_cost)
-		VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+		                     consumable_cost, kind)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
 		j.SaleID, j.ServiceID, j.Description, j.Qty, j.UnitPrice, j.LineTotal,
-		j.ConsumableCost)
+		j.ConsumableCost, j.Kind)
 	return err
+}
+
+// JobFilter narrows the receipts job list (zero values = no filter).
+type JobFilter struct {
+	From, To *time.Time
+	Limit    int
+}
+
+// RecentJobs lists sale jobs (kind='sale') newest first for the receipts tab.
+func (s *Store) RecentJobs(ctx context.Context, f JobFilter) ([]Job, error) {
+	lim := f.Limit
+	if lim <= 0 {
+		lim = 100
+	}
+	var rows []Job
+	err := s.db.SelectContext(ctx, &rows, `
+		SELECT * FROM doc_job
+		WHERE kind = 'sale'
+		  AND ($1::timestamptz IS NULL OR created_at >= $1)
+		  AND ($2::timestamptz IS NULL OR created_at <  $2)
+		ORDER BY id DESC LIMIT $3`, f.From, f.To, lim)
+	return rows, err
+}
+
+// JobByID loads one job row.
+func (s *Store) JobByID(ctx context.Context, id int64) (*Job, error) {
+	var j Job
+	if err := s.db.GetContext(ctx, &j, `SELECT * FROM doc_job WHERE id=$1`, id); err != nil {
+		return nil, err
+	}
+	return &j, nil
+}
+
+// MarkJobReversedTx stamps a sale job reversed, guarding against a double reversal
+// (a second call, or a non-sale job, affects no rows and errors).
+func (s *Store) MarkJobReversedTx(ctx context.Context, q appdb.Queryer, id int64) error {
+	res, err := q.ExecContext(ctx,
+		`UPDATE doc_job SET reversed_at = NOW() WHERE id=$1 AND reversed_at IS NULL AND kind='sale'`, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return errors.New("job not found or already reversed")
+	}
+	return nil
 }
 
 // ConsumableCost estimates a product's unit cost (for the plugin's profit report;
