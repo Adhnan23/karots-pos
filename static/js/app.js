@@ -267,9 +267,14 @@ function printPromptHost() {
 
 // pos: the cashier terminal. Cart math here is a live preview only — the server
 // recomputes every amount authoritatively when the sale is posted.
-function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canManageCredit) {
+function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canManageCredit, allowUntrackedCash, defaultLockerId) {
   return {
     sym: symbol,
+    // Cash-locker policy (Admin → Settings). When allowUntrackedCash is false the
+    // cash-OUT dialogs (withdraw/close) hide the "untracked" option and require a
+    // locker. defaultLockerId pre-selects a locker in every money-move dialog.
+    allowUntrackedCash: allowUntrackedCash === undefined ? true : !!allowUntrackedCash,
+    defaultLockerId: Number(defaultLockerId) || 0,
     // Whether this cashier may approve an over-limit credit sale and raise a
     // customer's credit limit from the till (server re-checks; UI just shows it).
     canManageCredit: !!canManageCredit,
@@ -443,6 +448,26 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
       } catch (e) {
         this.lockers = [];
       }
+      this.applyLockerDefaults();
+    },
+
+    // The pre-selected locker for a money-move dialog. kind "in" (open/deposit) or
+    // "out" (withdraw/close). Prefers the shop default when this cashier can reach
+    // it; for cash-OUT with untracked disabled it falls back to the first locker so
+    // the picker is never left on an option the server would reject.
+    lockerDefaultValue(kind) {
+      const def = String(this.defaultLockerId || "");
+      if (def && this.lockers.some((l) => String(l.id) === def)) return def;
+      if (kind === "out" && !this.allowUntrackedCash && this.lockers.length) {
+        return String(this.lockers[0].id);
+      }
+      return ""; // untracked
+    },
+    applyLockerDefaults() {
+      this.openLockerId = this.lockerDefaultValue("in");
+      this.depositLockerId = this.lockerDefaultValue("in");
+      this.withdrawLockerId = this.lockerDefaultValue("out");
+      this.closeLockerId = this.lockerDefaultValue("out");
     },
 
     // Load each plugin drawer section's input fragment into the Open ('open') or
@@ -940,6 +965,10 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
       this.loadDrawerSections("close");
     },
     async submitClose() {
+      if (!this.allowUntrackedCash && !(Number(this.closeLockerId) > 0) && this.countTotal(this.closeCounts) > 0) {
+        toast(this.lockers.length ? "Choose a locker to bank the cash into" : "No locker set up — ask an admin to add one first", "error");
+        return;
+      }
       if (!(await this.saveDrawerSections("close"))) return;
       const json = await apiFetch("POST", "/api/cash-register/close", {
         breakdown: this.buildBreakdown(this.closeCounts),
@@ -965,6 +994,10 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
       const available = Number(this.summary?.expected);
       if (!Number.isNaN(available) && Number(this.withdrawAmount) > available) {
         toast("Can't withdraw more than what's in the drawer", "error");
+        return;
+      }
+      if (!this.allowUntrackedCash && !(Number(this.withdrawLockerId) > 0)) {
+        toast(this.lockers.length ? "Choose a locker to withdraw into" : "No locker set up — ask an admin to add one first", "error");
         return;
       }
       const json = await apiFetch("POST", "/api/cash-register/withdraw", {

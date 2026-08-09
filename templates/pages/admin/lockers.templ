@@ -11,11 +11,12 @@ import (
 )
 
 type LockersData struct {
-	UserName string
-	Symbol   string
-	Rows     []lockers.Locker
-	Total    decimal.Decimal
-	Inactive bool
+	UserName        string
+	Symbol          string
+	Rows            []lockers.Locker
+	Total           decimal.Decimal
+	Inactive        bool
+	DefaultLockerID *int64 // the locker chosen as the till default (Settings), if any
 }
 
 templ LockersPage(d LockersData) {
@@ -65,6 +66,9 @@ templ LockersPage(d LockersData) {
 							<tr class={ "border-b last:border-0", templ.KV("opacity-50", !l.IsActive) }>
 								<td class="py-2 px-3 font-medium">
 									{ l.Name }
+									if d.DefaultLockerID != nil && *d.DefaultLockerID == l.ID {
+										<span class="ml-2 text-xs px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">default</span>
+									}
 									if !l.IsActive {
 										<span class="ml-2 text-xs px-2 py-0.5 rounded-full bg-slate-200 text-slate-600">archived</span>
 									}

@@ -439,6 +439,9 @@ func (s *Service) Close(ctx context.Context, userID int64, in CloseInput) (*Clos
 	if !ok || closing.IsNegative() {
 		return nil, apperr.Validation("closing cash must be a non-negative amount")
 	}
+	if in.DestLockerID == 0 && closing.IsPositive() && !s.untrackedCashOutAllowed(ctx) {
+		return nil, apperr.Validation("banking to a locker is required — choose a locker to close the cash into")
+	}
 	sess, err := s.repo.FindOpen(ctx, userID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -499,7 +502,22 @@ func (s *Service) Close(ctx context.Context, userID int64, in CloseInput) (*Clos
 
 // Withdraw records cash taken out of the drawer mid-shift (e.g. banked, paid to
 // a supplier). Stored as a negative movement so it lowers expected cash.
+// untrackedCashOutAllowed reports whether a till may move cash OUT of the drawer
+// without naming a locker (the money leg then goes to External — untracked). Reads
+// the shop policy directly; fails OPEN on a read error so a transient settings
+// hiccup can never block a money move. Cash-IN (open / deposit) never consults it.
+func (s *Service) untrackedCashOutAllowed(ctx context.Context) bool {
+	var allow bool
+	if err := s.db.GetContext(ctx, &allow, `SELECT allow_untracked_cash FROM settings WHERE id = 1`); err != nil {
+		return true
+	}
+	return allow
+}
+
 func (s *Service) Withdraw(ctx context.Context, userID int64, in MovementInput) (*Summary, error) {
+	if in.CounterLockerID == 0 && !s.untrackedCashOutAllowed(ctx) {
+		return nil, apperr.Validation("untracked withdrawals are disabled — choose a locker to move the cash into")
+	}
 	return s.adjust(ctx, userID, in, MoveWithdrawal, true, "withdrawal")
 }
 

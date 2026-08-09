@@ -815,10 +815,14 @@ func (a *adminUI) Settings(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	// Active lockers drive the "default locker" picker; best-effort (a failed load
+	// just leaves the picker empty with the "create a locker first" hint).
+	lockerRows, _ := a.s.lockers.List(ctx, true)
 	return response.RenderPage(c, adminpages.SettingsPage(adminpages.SettingsData{
 		UserName: middleware.CurrentUserName(c),
 		S:        *cfg,
 		Queues:   printing.Queues(ctx),
+		Lockers:  lockerRows,
 	}))
 }
 

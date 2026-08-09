@@ -43,6 +43,12 @@ type Settings struct {
 	StockTakeEnabled      bool      `db:"stock_take_enabled"   json:"stock_take_enabled"`
 	OpenCashDrawer        bool      `db:"open_cash_drawer"  json:"open_cash_drawer"`
 	DrawerKickPin         int       `db:"drawer_kick_pin"   json:"drawer_kick_pin"`
+	// AllowUntrackedCash lets a till move cash without naming a locker (the money
+	// leg then goes to External — untracked). When false, cash-OUT (withdraw /
+	// close) must pick a locker; cash-IN (open / deposit) is never blocked.
+	AllowUntrackedCash bool `db:"allow_untracked_cash" json:"allow_untracked_cash"`
+	// DefaultLockerID pre-selects a locker in every till money-move. NULL = none.
+	DefaultLockerID *int64 `db:"default_locker_id" json:"default_locker_id,omitempty"`
 	// InstallID identifies this shop's install. The owner reads it to the
 	// developer, who derives the support PIN from it — it is an identifier, not a
 	// secret, so showing it is safe and is the whole point.
@@ -81,6 +87,9 @@ type UpdateInput struct {
 	StockTakeEnabled  bool   `json:"stock_take_enabled"   form:"stock_take_enabled"`
 	OpenCashDrawer    bool   `json:"open_cash_drawer"     form:"open_cash_drawer"`
 	DrawerKickPin     int    `json:"drawer_kick_pin"      form:"drawer_kick_pin" validate:"omitempty,oneof=0 1"`
+	AllowUntrackedCash bool  `json:"allow_untracked_cash" form:"allow_untracked_cash"`
+	// DefaultLockerID: 0 (blank select) means "no default" and is stored as NULL.
+	DefaultLockerID   int64  `json:"default_locker_id"    form:"default_locker_id"`
 }
 
 // LogoSrc returns the logo to use: the uploaded, self-contained image (works
@@ -101,6 +110,14 @@ func nilIfEmptyStr(s *string) *string {
 		return nil
 	}
 	return s
+}
+
+// nilIfZero maps a 0 id (the blank "— none —" select option) to a NULL FK.
+func nilIfZero(id int64) *int64 {
+	if id == 0 {
+		return nil
+	}
+	return &id
 }
 
 type Repository struct{ db db.Queryer }
@@ -140,7 +157,8 @@ func (r *Repository) Update(ctx context.Context, in UpdateInput) error {
 			ask_to_print=$19,
 			force_pin_change=$20, allow_cashier_pin_change=$21,
 			lock_timeout_minutes=$22, stock_take_enabled=$23,
-			open_cash_drawer=$24, drawer_kick_pin=$25
+			open_cash_drawer=$24, drawer_kick_pin=$25,
+			allow_untracked_cash=$26, default_locker_id=$27
 		WHERE id = 1`,
 		in.ShopName, in.ShopNameSi, in.Address, in.Phone,
 		in.CurrencyCode, in.CurrencySymbol, in.ReceiptFooter,
@@ -150,7 +168,8 @@ func (r *Repository) Update(ctx context.Context, in UpdateInput) error {
 		in.AskToPrint,
 		in.ForcePinChange, in.AllowCashierPinChange,
 		in.LockTimeoutMinutes, in.StockTakeEnabled,
-		in.OpenCashDrawer, in.DrawerKickPin)
+		in.OpenCashDrawer, in.DrawerKickPin,
+		in.AllowUntrackedCash, nilIfZero(in.DefaultLockerID))
 	return err
 }
 

@@ -36,12 +36,17 @@ func (a *adminUI) Lockers(c echo.Context) error {
 			total = total.Add(l.Balance)
 		}
 	}
+	var defaultLockerID *int64
+	if cfg, cerr := a.s.settings.Get(ctx); cerr == nil {
+		defaultLockerID = cfg.DefaultLockerID
+	}
 	return response.RenderPage(c, adminpages.LockersPage(adminpages.LockersData{
-		UserName: middleware.CurrentUserName(c),
-		Symbol:   a.symbol(ctx),
-		Rows:     rows,
-		Total:    total,
-		Inactive: inactive,
+		UserName:        middleware.CurrentUserName(c),
+		Symbol:          a.symbol(ctx),
+		Rows:            rows,
+		Total:           total,
+		Inactive:        inactive,
+		DefaultLockerID: defaultLockerID,
 	}))
 }
 

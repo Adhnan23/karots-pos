@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"strings"
 
+	"karots-pos/internal/features/lockers"
 	"karots-pos/internal/features/settings"
 	"karots-pos/internal/plugin"
 	"karots-pos/templates/layouts"
@@ -12,7 +13,8 @@ import (
 type SettingsData struct {
 	UserName string
 	S        settings.Settings
-	Queues   []string // CUPS print queues detected on the host
+	Queues   []string          // CUPS print queues detected on the host
+	Lockers  []lockers.Locker  // active lockers, for the default-locker picker
 }
 
 // toggleRow is one on/off setting rendered as a tidy bordered row: a checkbox
@@ -123,6 +125,32 @@ templ SettingsPage(d SettingsData) {
 							<option value="1" selected?={ d.S.DrawerKickPin == 1 }>Pin 5</option>
 						</select>
 						<p class="text-xs text-slate-400 mt-1">If the drawer never opens, try Pin 5.</p>
+					</div>
+				</section>
+				<!-- Cashier cash movements -->
+				<section class="space-y-4 border-t pt-6">
+					@sectionHead("🔐 Cashier cash movements", "How the till tracks cash going in and out of the drawer.")
+					<div class="space-y-2">
+						@toggleRow("allow_untracked_cash", "Allow untracked cash movements", "When off, withdrawing or closing the till must bank the cash into a locker. Money IN (opening float & deposits) is never blocked, so the till can't be locked out.", d.S.AllowUntrackedCash)
+					</div>
+					<div class="max-w-xs">
+						<label class="block text-sm font-medium mb-1">Default locker</label>
+						if len(d.Lockers) == 0 {
+							<select name="default_locker_id" disabled class="w-full border rounded-lg px-3 py-2 bg-slate-100 text-slate-400">
+								<option>— create a locker first —</option>
+							</select>
+							<p class="text-xs text-slate-400 mt-1">
+								Add a cash locker on the <a href="/admin/lockers" class="text-indigo-600 hover:underline">Cash Lockers</a> page, then pick it here.
+							</p>
+						} else {
+							<select name="default_locker_id" class="w-full border rounded-lg px-3 py-2">
+								<option value="0">— none (cashier chooses) —</option>
+								for _, lk := range d.Lockers {
+									<option value={ strconv.FormatInt(lk.ID, 10) } selected?={ d.S.DefaultLockerID != nil && *d.S.DefaultLockerID == lk.ID }>{ lk.Name }</option>
+								}
+							</select>
+							<p class="text-xs text-slate-400 mt-1">Pre-selected in every till money-move dialog (open, deposit, withdraw, close).</p>
+						}
 					</div>
 				</section>
 				<!-- Inventory -->

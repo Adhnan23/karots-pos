@@ -18,13 +18,14 @@ import (
 // steps are already done and where to go to finish each one. It is best-effort —
 // a failed sub-query just leaves that step "not done" rather than erroring the page.
 func (a *adminUI) setupStatus(ctx context.Context) []adminpages.SetupStep {
-	shopNamed, printerSet := false, false
+	shopNamed, printerSet, defaultLockerSet := false, false, false
 	if cfg, err := a.s.settings.Get(ctx); err == nil {
 		// "My Shop" is the migration default, not a real name — keep the step
 		// open until the owner actually renames the shop.
 		name := strings.TrimSpace(cfg.ShopName)
 		shopNamed = name != "" && !strings.EqualFold(name, "My Shop")
 		printerSet = strings.TrimSpace(cfg.ReceiptPrinter) != ""
+		defaultLockerSet = cfg.DefaultLockerID != nil
 	}
 
 	count := func(query string, args ...any) int {
@@ -44,15 +45,15 @@ func (a *adminUI) setupStatus(ctx context.Context) []adminpages.SetupStep {
 	// float and closes without banking anywhere. What it loses is the cash trail:
 	// the day's takings go nowhere recorded at close, and there is no safe to pay a
 	// supplier from or refund into. Owners only discovered that when a dialog had
-	// nothing to offer, so the checklist now asks for it up front.
-	lockersSet := count(`SELECT COUNT(*) FROM lockers WHERE is_active = true`)
+	// nothing to offer, so the checklist asks for it up front — and now for the
+	// default locker too, so the till pre-selects it instead of "untracked".
 
 	return []adminpages.SetupStep{
 		{Label: "Name your shop", Hint: "Shop name, address & currency on the receipt", Href: "/admin/settings", Done: shopNamed},
 		{Label: "Add a staff login", Hint: "Create at least one cashier or manager account", Href: "/admin/users", Done: staff > 0},
 		{Label: "Create categories", Hint: "Organise your products into categories", Href: "/admin/categories", Done: cats > 0},
 		{Label: "Add products", Hint: "Type them in, or bulk-import from CSV", Href: "/admin/products", Done: prods > 0},
-		{Label: "Create a cash safe", Hint: "Where the day's takings are banked at close", Href: "/admin/lockers", Done: lockersSet > 0},
+		{Label: "Set up a cash safe", Hint: "Create a locker for banking, then set it as the default in Settings", Href: "/admin/lockers", Done: defaultLockerSet},
 		{Label: "Set up the receipt printer", Hint: "Pick a printer and run a test print", Href: "/admin/settings", Done: printerSet},
 		{Label: "Make your first sale", Hint: "Ring up a sale at the till", Href: "/cashier", Done: salesDone > 0},
 	}
