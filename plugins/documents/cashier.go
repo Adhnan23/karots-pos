@@ -1,19 +1,115 @@
 package documents
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"karots-pos/internal/apperr"
+	appdb "karots-pos/internal/db"
+	"karots-pos/internal/features/audit"
+	"karots-pos/internal/features/cashregister"
+	"karots-pos/internal/features/expenses"
 	"karots-pos/internal/features/recipes"
+	"karots-pos/internal/middleware"
 	"karots-pos/internal/response"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/labstack/echo/v4"
 	"github.com/shopspring/decimal"
 )
 
 type cashierUI struct{ p *Plugin }
+
+// symbol resolves the shop currency symbol for the cashier fragments.
+func (h *cashierUI) symbol(ctx context.Context) string {
+	if cfg, err := h.p.core.Settings.Get(ctx); err == nil && cfg != nil {
+		return cfg.CurrencySymbol
+	}
+	return "Rs."
+}
+
+// Receipts renders the Print & Copy receipts panel (recent sale jobs, each
+// reversible by a cashier).
+func (h *cashierUI) Receipts(c echo.Context) error {
+	ctx := c.Request().Context()
+	jobs, err := h.p.store.RecentJobs(ctx, JobFilter{Limit: 100})
+	if err != nil {
+		return err
+	}
+	return response.RenderFragment(c, JobReceiptsTab(h.symbol(ctx), jobs, true))
+}
+
+// ReverseJobForm renders the confirm dialog for reversing a mistaken job.
+func (h *cashierUI) ReverseJobForm(c echo.Context) error {
+	ctx := c.Request().Context()
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		return apperr.BadRequest("invalid job id")
+	}
+	j, err := h.p.store.JobByID(ctx, id)
+	if err != nil {
+		return apperr.NotFound("job")
+	}
+	if j.Kind != "sale" || j.ReversedAt != nil {
+		return apperr.Conflict("this job can't be reversed")
+	}
+	return response.RenderFragment(c, ReverseJobModal(h.symbol(ctx), *j))
+}
+
+// ReverseJob refunds the customer and books the wasted paper as a loss. The paper
+// was already consumed as COGS on the sale, so stock is NOT touched (the sheets
+// are gone). The refund is a drawer withdrawal; a matching expense contras the
+// sale revenue, leaving the paper cost as the loss. The original sale is untouched.
+func (h *cashierUI) ReverseJob(c echo.Context) error {
+	ctx := c.Request().Context()
+	uid := middleware.CurrentUserID(c)
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		return apperr.BadRequest("invalid job id")
+	}
+	j, err := h.p.store.JobByID(ctx, id)
+	if err != nil {
+		return apperr.NotFound("job")
+	}
+	if j.Kind != "sale" || j.ReversedAt != nil {
+		return apperr.Conflict("this job can't be reversed")
+	}
+	reason := "Print & Copy reversal #" + strconv.FormatInt(id, 10)
+	desc := j.Description
+	// 1) Refund the customer from the drawer (guards against the drawer balance).
+	if _, err := h.p.core.CashRegister.Withdraw(ctx, uid, cashregister.MovementInput{
+		Amount: j.LineTotal.String(), Reason: reason,
+	}); err != nil {
+		return err
+	}
+	// 2) Contra the sale revenue with an expense; the already-consumed paper COGS
+	//    remains as the loss.
+	if _, err := h.p.core.Expenses.Create(ctx, expenses.CreateInput{
+		Category:    "Print & Copy — mistaken job",
+		Amount:      j.LineTotal.StringFixed(2),
+		Description: &desc,
+		ExpenseDate: time.Now().Format("2006-01-02"),
+	}, uid); err != nil {
+		return err
+	}
+	// 3) Mark the job reversed (blocks a double reversal).
+	if err := appdb.WithTx(ctx, h.p.core.DB, func(tx *sqlx.Tx) error {
+		return h.p.store.MarkJobReversedTx(ctx, tx, id)
+	}); err != nil {
+		return err
+	}
+	h.p.core.Audit.Record(ctx, uid, audit.ActionReturn, "documents_job",
+		strconv.FormatInt(id, 10), "reversed (mistaken job)")
+
+	jobs, err := h.p.store.RecentJobs(ctx, JobFilter{Limit: 100})
+	if err != nil {
+		return err
+	}
+	return response.RenderFragment(c, JobReceiptsTab(h.symbol(ctx), jobs, true))
+}
 
 // menuNode is one entry in the cashier menu-node protocol: a folder drills
 // further in via ChildrenURL, an "amount" leaf opens an inline amount step

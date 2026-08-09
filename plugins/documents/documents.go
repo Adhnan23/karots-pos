@@ -46,6 +46,17 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 	reg.Cashier().POST("/documents/record", ch.Record)
 	reg.Cashier().GET("/documents/menu", ch.MenuRoot)
 	reg.Cashier().GET("/documents/job", ch.JobFragment)
+	reg.Cashier().GET("/documents/receipts", ch.Receipts)
+	reg.Cashier().GET("/documents/job/:id/reverse", ch.ReverseJobForm)
+	reg.Cashier().POST("/documents/job/:id/reverse", ch.ReverseJob)
+	reg.Admin().GET("/documents/receipts", a.Receipts)
+
+	// A receipts panel on the unified Receipts page (cashier + admin): recent
+	// print/copy jobs, each reversible by a cashier (refund + paper booked as loss).
+	reg.AddReceiptTab(plugin.ReceiptTab{
+		Key: "documents", Label: "Print & Copy",
+		CashierHref: "/cashier/documents/receipts", AdminHref: "/admin/documents/receipts",
+	})
 
 	reg.AddCashierMenuRoot(plugin.CashierMenuRoot{
 		Key: "documents", Emoji: "🖨", Label: "Print & Copy", ChildrenURL: "/cashier/documents/menu",

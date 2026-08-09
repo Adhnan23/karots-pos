@@ -4,6 +4,7 @@ import "karots-pos/templates/layouts"
 import "karots-pos/internal/money"
 import "karots-pos/internal/features/products"
 import "karots-pos/internal/features/cashregister"
+import "karots-pos/internal/datetime"
 import "strconv"
 
 // HubPage is the Print & Copy management screen: services (with their
@@ -508,4 +509,82 @@ func optLabel(color, double bool) string {
 		return c + " 2-side"
 	}
 	return c + " 1-side"
+}
+
+// docJobNo formats a job's receipt number for the receipts panel.
+func docJobNo(id int64) string { return "PC-" + strconv.FormatInt(id, 10) }
+
+// JobReceiptsTab is the Print & Copy receipts panel (cashier + admin). Each sold
+// job can be reversed by a cashier: the customer is refunded and the already-used
+// paper is booked as a loss. canReverse is false on the admin shell (read-only).
+templ JobReceiptsTab(symbol string, jobs []Job, canReverse bool) {
+	<div>
+		<div class="bg-white rounded-2xl shadow-sm overflow-hidden">
+			<table class="w-full text-sm">
+				<thead class="text-left text-slate-500 border-b bg-slate-50">
+					<tr>
+						<th class="px-4 py-2">Job</th>
+						<th class="px-4 py-2">Date</th>
+						<th class="px-4 py-2">Description</th>
+						<th class="px-4 py-2 text-right">Qty</th>
+						<th class="px-4 py-2 text-right">Amount</th>
+						<th class="px-4 py-2 text-right">Action</th>
+					</tr>
+				</thead>
+				<tbody>
+					for _, j := range jobs {
+						<tr class="border-b last:border-0">
+							<td class="px-4 py-2 font-medium">{ docJobNo(j.ID) }</td>
+							<td class="px-4 py-2 text-slate-500 whitespace-nowrap">{ datetime.DateTime(j.CreatedAt) }</td>
+							<td class="px-4 py-2">{ j.Description }</td>
+							<td class="px-4 py-2 text-right tabular-nums">{ j.Qty.String() }</td>
+							<td class="px-4 py-2 text-right tabular-nums">{ money.Format(symbol, j.LineTotal) }</td>
+							<td class="px-4 py-2 text-right whitespace-nowrap">
+								if j.ReversedAt != nil {
+									<span class="px-2 py-1 rounded-full bg-slate-100 text-slate-500 text-xs font-medium">reversed</span>
+								} else if canReverse {
+									<button type="button" hx-get={ "/cashier/documents/job/" + strconv.FormatInt(j.ID, 10) + "/reverse" } hx-target="#modal-container" hx-swap="innerHTML" class="px-3 py-1 rounded-lg bg-rose-600 text-white text-xs font-medium">↩ Reverse</button>
+								} else {
+									<span class="text-slate-300 text-xs">—</span>
+								}
+							</td>
+						</tr>
+					}
+					if len(jobs) == 0 {
+						<tr><td colspan="6" class="px-4 py-8 text-center text-slate-400">No print/copy jobs yet.</td></tr>
+					}
+				</tbody>
+			</table>
+		</div>
+	</div>
+}
+
+// ReverseJobModal confirms reversing a mistaken print/copy job: the customer is
+// refunded and the wasted paper is booked as a loss (it can't be reused). Posts
+// to the reverse endpoint, refreshes the panel, and closes on success.
+templ ReverseJobModal(symbol string, j Job) {
+	<div class="fixed inset-0 bg-black/40 flex items-center justify-center z-40 p-4" x-data>
+		<div class="bg-white rounded-2xl shadow-xl w-full max-w-md">
+			<div class="flex items-center justify-between px-6 py-4 border-b">
+				<h3 class="text-lg font-semibold">Reverse print/copy job</h3>
+				<button class="text-slate-400 hover:text-slate-600" x-on:click="$dispatch('close-modal')">✕</button>
+			</div>
+			<form class="px-6 py-4 space-y-4"
+				hx-post={ "/cashier/documents/job/" + strconv.FormatInt(j.ID, 10) + "/reverse" }
+				hx-target="#receipts-documents" hx-swap="innerHTML"
+				x-on:htmx:after-request="if ($event.detail.successful) $dispatch('close-modal')">
+				<p class="text-sm text-slate-600">
+					{ j.Description } — <span class="font-semibold text-slate-800">{ money.Format(symbol, j.LineTotal) }</span>
+				</p>
+				<p class="text-xs text-slate-500">
+					The customer is refunded { money.Format(symbol, j.LineTotal) }. The paper is already
+					used and can't be reused, so it's booked as a loss (not returned to stock).
+				</p>
+				<div class="flex justify-end gap-3 pt-2">
+					<button type="button" class="px-4 py-2 rounded-lg border" x-on:click="$dispatch('close-modal')">Cancel</button>
+					<button type="submit" class="px-4 py-2 rounded-lg bg-rose-600 text-white">Reverse &amp; refund</button>
+				</div>
+			</form>
+		</div>
+	</div>
 }

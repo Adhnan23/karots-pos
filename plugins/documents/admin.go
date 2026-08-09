@@ -319,6 +319,17 @@ func (a *adminUI) DismissJob(c echo.Context) error {
 	return c.NoContent(200)
 }
 
+// Receipts renders the Print & Copy receipts panel on the admin shell, read-only
+// (reversing a job is the cashier's counter action).
+func (a *adminUI) Receipts(c echo.Context) error {
+	ctx := c.Request().Context()
+	jobs, err := a.p.store.RecentJobs(ctx, JobFilter{Limit: 100})
+	if err != nil {
+		return err
+	}
+	return response.RenderFragment(c, JobReceiptsTab(a.symbol(ctx), jobs, false))
+}
+
 func (a *adminUI) symbol(ctx context.Context) string {
 	if cfg, err := a.p.core.Settings.Get(ctx); err == nil && cfg != nil {
 		return cfg.CurrencySymbol
