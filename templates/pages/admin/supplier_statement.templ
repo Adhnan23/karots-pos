@@ -1,0 +1,78 @@
+package adminpages
+
+import (
+	"karots-pos/internal/features/suppliers"
+	"karots-pos/internal/money"
+	"karots-pos/templates/layouts"
+)
+
+type SupplierStatementData struct {
+	ShopName, Symbol string
+	Stmt             suppliers.Statement
+}
+
+templ SupplierStatement(d SupplierStatementData) {
+	@layouts.Report("Supplier Statement", d.ShopName) {
+		<div class="mb-4">
+			<h2 class="text-lg font-bold">{ d.Stmt.Supplier.Name }</h2>
+			if d.Stmt.Supplier.Phone != nil && *d.Stmt.Supplier.Phone != "" {
+				<div class="text-sm text-slate-500">{ *d.Stmt.Supplier.Phone }</div>
+			}
+			<div class="text-sm mt-1">
+				Payable balance:
+				if d.Stmt.Supplier.OutstandingBalance.IsNegative() {
+					<span class="font-semibold">{ money.Format(d.Symbol, d.Stmt.Supplier.OutstandingBalance.Neg()) } (they owe you)</span>
+				} else {
+					<span class="font-semibold">{ money.Format(d.Symbol, d.Stmt.Supplier.OutstandingBalance) }</span>
+				}
+			</div>
+		</div>
+		<table class="w-full text-sm">
+			<thead class="text-left text-slate-500 border-b">
+				<tr>
+					<th class="py-1.5">Date</th>
+					<th class="py-1.5">Type</th>
+					<th class="py-1.5">Reference</th>
+					<th class="py-1.5 text-right">Debit</th>
+					<th class="py-1.5 text-right">Credit</th>
+					<th class="py-1.5 text-right">Balance</th>
+				</tr>
+			</thead>
+			<tbody>
+				for _, e := range d.Stmt.Entries {
+					<tr class="border-b last:border-0">
+						<td class="py-1.5 text-slate-500">{ e.Date.Format("2006-01-02 15:04") }</td>
+						<td class="py-1.5">{ e.Kind }</td>
+						<td class="py-1.5">{ e.Ref }</td>
+						<td class="py-1.5 text-right">
+							if e.Debit.IsPositive() {
+								{ money.Display(e.Debit) }
+							}
+						</td>
+						<td class="py-1.5 text-right">
+							if e.Credit.IsPositive() {
+								{ money.Display(e.Credit) }
+							}
+						</td>
+						<td class="py-1.5 text-right font-medium">{ money.Format(d.Symbol, e.Balance) }</td>
+					</tr>
+				}
+				if len(d.Stmt.Entries) == 0 {
+					<tr><td colspan="6" class="py-6 text-center text-slate-400">No purchase activity for this supplier.</td></tr>
+				}
+			</tbody>
+			<tfoot class="border-t-2 font-semibold">
+				<tr>
+					<td class="py-2" colspan="3">Totals</td>
+					<td class="py-2 text-right">{ money.Display(d.Stmt.TotalDebit) }</td>
+					<td class="py-2 text-right">{ money.Display(d.Stmt.TotalCredit) }</td>
+					<td class="py-2 text-right">{ money.Format(d.Symbol, d.Stmt.Supplier.OutstandingBalance) }</td>
+				</tr>
+			</tfoot>
+		</table>
+		<p class="text-xs text-slate-400 mt-3 no-print">
+			Payments and returns are itemised from when their logging began; the payable
+			balance shown is always authoritative.
+		</p>
+	}
+}

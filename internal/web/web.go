@@ -355,6 +355,7 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	ag.GET("/suppliers/form/:id", admin.SupplierForm)
 	ag.GET("/suppliers/opening/:id", admin.SupplierOpeningForm)
 	ag.POST("/suppliers/:id/opening", admin.SupplierOpeningAdjust)
+	ag.GET("/suppliers/:id/statement", admin.SupplierStatement)
 	ag.GET("/suppliers/pay/:id", admin.SupplierPayForm)
 	ag.POST("/suppliers", admin.SupplierCreate)
 	ag.PUT("/suppliers/:id", admin.SupplierUpdate)

@@ -160,6 +160,22 @@ func (a *adminUI) SupplierOpeningForm(c echo.Context) error {
 	}))
 }
 
+// SupplierStatement renders a printable payable ledger for one supplier.
+func (a *adminUI) SupplierStatement(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	ctx := c.Request().Context()
+	st, err := a.s.suppliers.Statement(ctx, id)
+	if err != nil {
+		return err
+	}
+	return response.RenderPage(c, adminpages.SupplierStatement(adminpages.SupplierStatementData{
+		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx), Stmt: *st,
+	}))
+}
+
 func (a *adminUI) SupplierOpeningAdjust(c echo.Context) error {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
