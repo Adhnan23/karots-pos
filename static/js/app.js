@@ -819,6 +819,23 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
       this.customerId = c ? String(c.id) : "";
       this.custOpen = false;
       this.custSearch = "";
+      this.syncDefaultTender();
+    },
+    // With a registered customer on the sale, don't pre-select cash: credit
+    // customers usually pay part or go on account, and a forgotten cash default
+    // with a blank amount would silently complete as paid-in-full via the "exact
+    // cash" shortcut in checkout(). Leaving the method unpicked forces a
+    // deliberate choice; a blank, method-less line then routes to the on-account
+    // prompt instead. Walk-in sales keep cash as the default. Only rewrites the
+    // untouched single default line — never a typed amount or a deliberate
+    // card/online/wallet/credit choice.
+    syncDefaultTender() {
+      if (this.payments.length !== 1) return;
+      const p = this.payments[0];
+      if ((Number(p.amount) || 0) !== 0) return;
+      if (p.reference || p.deviceId) return;
+      if (p.method !== "" && p.method !== "cash") return;
+      p.method = this.customerId ? "" : "cash";
     },
     async loadUnits() {
       try {
@@ -1061,6 +1078,7 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
       }, { returnStatus: true });
       await this.loadCustomers();
       this.customerId = String(res.data.id); // select the (new or existing) customer
+      this.syncDefaultTender();
       this.showAddCustomer = false;
       this.newCustomer = { name: "", phone: "", credit_limit: "" };
       toast(res.status === 200 ? "Customer already exists — using them" : "Customer added", "success");
@@ -1117,6 +1135,7 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
       this.discount = Number(h.discount) || 0;
       this.discountType = h.discount_type || "fixed";
       this.payments = [{ method: "cash", amount: "", reference: "", deviceId: "" }];
+      this.syncDefaultTender(); // a held sale with a customer shouldn't default to cash
       this.receipt = null;
       this.showHolds = false;
       await this.deleteHold(h.id, true);
