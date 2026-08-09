@@ -252,8 +252,8 @@ templ POS(d POSData) {
 						<button type="button" x-on:click="showHolds = true" class="py-2 rounded-lg border text-sm text-slate-600 hover:bg-slate-50">
 							Held (<span x-text="holds.length"></span>)
 						</button>
-						<button type="button" x-on:click="showDeposit = true" class="py-2 rounded-lg border text-sm text-slate-600 hover:bg-slate-50">Deposit</button>
-						<button type="button" x-on:click="showWithdraw = true" class="py-2 rounded-lg border text-sm text-slate-600 hover:bg-slate-50">Withdraw</button>
+						<button type="button" x-on:click="showDeposit = true; preselectLocker('depositLockerId','in')" class="py-2 rounded-lg border text-sm text-slate-600 hover:bg-slate-50">Deposit</button>
+						<button type="button" x-on:click="showWithdraw = true; preselectLocker('withdrawLockerId','out')" class="py-2 rounded-lg border text-sm text-slate-600 hover:bg-slate-50">Withdraw</button>
 						if d.OpenCashDrawer {
 							<button type="button" x-on:click="noSale()" title="Open the cash drawer without a sale" class="py-2 rounded-lg border text-sm text-slate-600 hover:bg-slate-50">Open Drawer</button>
 						}
@@ -641,18 +641,21 @@ templ POS(d POSData) {
 						<div class="mb-4">
 							<label class="block text-sm font-medium mb-1">Into locker</label>
 							<select x-model="withdrawLockerId" class="w-full border rounded-lg px-3 py-2">
-								<template x-if="allowUntrackedCash">
-									<option value="">— not into a locker —</option>
-								</template>
 								<template x-for="lk in lockers" :key="lk.id">
 									<option :value="lk.id" x-text="lk.name + ' (' + sym + ' ' + money(lk.balance) + ')'"></option>
+								</template>
+								<template x-if="allowUntrackedCash">
+									<option value="">— not into a locker —</option>
 								</template>
 							</select>
 						</div>
 					</template>
+					<template x-if="!allowUntrackedCash && !lockers.length">
+						<p class="text-sm text-rose-600 mb-4">No cash locker set up. Ask an admin to add one before withdrawing (untracked withdrawals are turned off).</p>
+					</template>
 					<div class="flex gap-2">
 						<button x-on:click="showWithdraw = false" class="flex-1 py-2 rounded-lg border">Cancel</button>
-						<button x-on:click="withdraw()" class="flex-1 py-2 rounded-lg bg-rose-600 text-white font-medium">Withdraw</button>
+						<button x-on:click="withdraw()" x-bind:disabled="!allowUntrackedCash && !lockers.length" x-bind:class="(!allowUntrackedCash && !lockers.length) ? 'opacity-50 cursor-not-allowed' : ''" class="flex-1 py-2 rounded-lg bg-rose-600 text-white font-medium">Withdraw</button>
 					</div>
 				</div>
 			</div>
@@ -689,14 +692,17 @@ templ POS(d POSData) {
 										<div class="mt-3">
 											<label class="block text-sm text-slate-600 mb-1">Bank cash into</label>
 											<select x-model="closeLockerId" class="w-full border rounded-lg px-3 py-2">
-												<template x-if="allowUntrackedCash">
-													<option value="">— leave cash in drawer —</option>
-												</template>
 												<template x-for="lk in lockers" :key="lk.id">
 													<option :value="lk.id" x-text="lk.name + ' (' + sym + ' ' + money(lk.balance) + ')'"></option>
 												</template>
+												<template x-if="allowUntrackedCash">
+													<option value="">— leave cash in drawer —</option>
+												</template>
 											</select>
 										</div>
+									</template>
+									<template x-if="!allowUntrackedCash && !lockers.length">
+										<p class="mt-3 text-sm text-rose-600">No cash locker set up. Ask an admin to add one to bank the closing cash (untracked movements are turned off).</p>
 									</template>
 								</div>
 								<!-- Plugin drawer sections (e.g. recharge float closing) — its own
@@ -705,7 +711,7 @@ templ POS(d POSData) {
 							</div>
 							<div class="flex gap-2 mt-3">
 								<button x-on:click="showClose = false" class="flex-1 py-2 rounded-lg border">Cancel</button>
-								<button x-on:click="submitClose()" class="flex-1 py-2 rounded-lg bg-slate-800 text-white font-medium">Close &amp; Reconcile</button>
+								<button x-on:click="submitClose()" x-bind:disabled="!allowUntrackedCash && !lockers.length && countTotal(closeCounts) > 0" x-bind:class="(!allowUntrackedCash && !lockers.length && countTotal(closeCounts) > 0) ? 'opacity-50 cursor-not-allowed' : ''" class="flex-1 py-2 rounded-lg bg-slate-800 text-white font-medium">Close &amp; Reconcile</button>
 							</div>
 						</div>
 					</template>

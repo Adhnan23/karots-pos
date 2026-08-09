@@ -388,6 +388,7 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
       await this.loadUnits();
       await this.loadHolds();
       await this.loadLockers();
+      this.preselectLocker("openLockerId", "in"); // open dialog shows at load
       await this.loadPriceOptions();
       await this.loadQuickPicks();
       // Another terminal receiving stock changes which products have two live
@@ -448,7 +449,6 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
       } catch (e) {
         this.lockers = [];
       }
-      this.applyLockerDefaults();
     },
 
     // The pre-selected locker for a money-move dialog. kind "in" (open/deposit) or
@@ -463,11 +463,15 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
       }
       return ""; // untracked
     },
-    applyLockerDefaults() {
-      this.openLockerId = this.lockerDefaultValue("in");
-      this.depositLockerId = this.lockerDefaultValue("in");
-      this.withdrawLockerId = this.lockerDefaultValue("out");
-      this.closeLockerId = this.lockerDefaultValue("out");
+    // Pre-select a dialog's locker AFTER its <option>s exist. Assigning at init
+    // (before the x-for options mount) leaves the <select> stuck on the first
+    // option even though the model is right; the blank-then-value in $nextTick
+    // forces the select to sync to the real default once options are present.
+    preselectLocker(field, kind) {
+      this[field] = "";
+      this.$nextTick(() => {
+        this[field] = this.lockerDefaultValue(kind);
+      });
     },
 
     // Load each plugin drawer section's input fragment into the Open ('open') or
@@ -962,6 +966,7 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
       this.closeCounts = {};
       this.closeResult = null;
       this.showClose = true;
+      this.preselectLocker("closeLockerId", "out");
       this.loadDrawerSections("close");
     },
     async submitClose() {
