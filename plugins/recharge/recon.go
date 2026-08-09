@@ -26,6 +26,12 @@ var txKinds = map[string]txKind{
 	"wallet_in":  {cashSign: 0, floatSign: +1},  // customer pays a sale by wallet transfer
 	"reload":     {cashSign: 0, floatSign: -1},  // airtime sold (cash handled by the sale)
 	"refill":     {cashSign: 0, floatSign: +1},  // admin buys float from supplier (no drawer; expense booked)
+	// Reload reversals. The refund cash-out is an explicit Withdraw in the handler,
+	// so cashSign is 0 here. "reversal" returns the float (a failed reload); its
+	// twin "reversal_lost" leaves the float gone (wrong number) — the loss is then
+	// carried by the un-recovered refill expense, not booked twice.
+	"reversal":      {cashSign: 0, floatSign: +1},
+	"reversal_lost": {cashSign: 0, floatSign: 0},
 }
 
 // decreasesFloat reports whether a positive-amount transaction of this type
@@ -80,6 +86,62 @@ func (s *Store) RecordTransactionTx(ctx context.Context, q appdb.Queryer, in TxI
 		in.SessionID, in.CarrierID, in.DeviceID, in.Type, in.Amount, cashDelta, floatDelta,
 		in.SaleID, in.ExpenseID, nullStr(in.Reference), nullStr(in.Note), in.CreatedBy, in.ServiceCharge)
 	return id, err
+}
+
+// reverseReloadTx reverses a reload within a caller tx: it guards that the target
+// is an un-reversed reload, inserts the compensating reversal transaction, and
+// stamps the original. mode "failed" returns the float (+amount); "wrong_number"
+// leaves it gone (float_delta 0) — the loss is already carried by the un-recovered
+// refill expense, so booking it again would double-count. It moves NO drawer cash;
+// the handler does that with an explicit Withdraw.
+func (s *Store) reverseReloadTx(ctx context.Context, q appdb.Queryer, reloadTxID int64, mode string, userID int64) (int64, error) {
+	var orig struct {
+		SessionID  int64           `db:"session_id"`
+		CarrierID  int64           `db:"carrier_id"`
+		DeviceID   int64           `db:"device_id"`
+		Type       string          `db:"type"`
+		Amount     decimal.Decimal `db:"amount"`
+		ReversedAt *time.Time      `db:"reversed_at"`
+	}
+	if err := q.GetContext(ctx, &orig, `
+		SELECT session_id, carrier_id, device_id, type, amount, reversed_at
+		FROM recharge_transactions WHERE id=$1 FOR UPDATE`, reloadTxID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, errors.New("reload not found")
+		}
+		return 0, err
+	}
+	if orig.Type != "reload" {
+		return 0, errors.New("only reloads can be reversed")
+	}
+	if orig.ReversedAt != nil {
+		return 0, errors.New("this reload was already reversed")
+	}
+	revType := "reversal"
+	switch mode {
+	case "failed":
+		revType = "reversal"
+	case "wrong_number":
+		revType = "reversal_lost"
+	default:
+		return 0, errors.New("unknown reversal mode")
+	}
+	note := "reversal of reload #" + strconv.FormatInt(reloadTxID, 10) + " (" + mode + ")"
+	revID, err := s.RecordTransactionTx(ctx, q, TxInput{
+		SessionID: orig.SessionID, CarrierID: orig.CarrierID, DeviceID: orig.DeviceID,
+		Type: revType, Amount: orig.Amount, Note: note, CreatedBy: userID,
+	})
+	if err != nil {
+		return 0, err
+	}
+	// The reversal_of on the ORIGINAL points to the reversal row (marks it reversed
+	// and links the pair); the reversal row's own reversal_of stays NULL.
+	if _, err := q.ExecContext(ctx,
+		`UPDATE recharge_transactions SET reversed_at = NOW(), reversal_of = $2 WHERE id = $1`,
+		reloadTxID, revID); err != nil {
+		return 0, err
+	}
+	return revID, nil
 }
 
 // DeviceBalance returns a device's live float in a session:
