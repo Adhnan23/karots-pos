@@ -13,6 +13,7 @@ import (
 	"karots-pos/internal/features/cashregister"
 	"karots-pos/internal/features/expenses"
 	"karots-pos/internal/features/recipes"
+	"karots-pos/internal/features/stock"
 	"karots-pos/internal/middleware"
 	"karots-pos/internal/response"
 
@@ -213,15 +214,42 @@ func (h *cashierUI) Quote(c echo.Context) error {
 	qd := decimal.NewFromInt(int64(qty))
 	lineTotal := unit.Mul(qd).Round(2)
 
+	resolved, consCost := h.resolveComponents(ctx, sv, size, double, qty)
+	comps := make([]map[string]any, 0, len(resolved))
+	for _, rc := range resolved {
+		comps = append(comps, map[string]any{"product_id": rc.ProductID, "quantity": rc.Qty.String()})
+	}
+
+	return response.OK(c, map[string]any{
+		"product_id":      sv.ProductID,
+		"unit_price":      unit.String(),
+		"line_total":      lineTotal.String(),
+		"description":     buildDesc(sv.Name, size, color, double, qty),
+		"components":      comps,
+		"consumable_cost": consCost.Round(2).String(),
+	})
+}
+
+// resolvedComp is one stock component a job draws down: the product and how much.
+type resolvedComp struct {
+	ProductID int64
+	Qty       decimal.Decimal
+}
+
+// resolveComponents computes the paper/film + core-recipe components a metered job
+// consumes for the given size/side/qty, plus their estimated cost. Shared by Quote
+// (which prices + previews it) and OwnUse (which actually consumes it), so a shop-use
+// job draws down exactly what a sold job would.
+func (h *cashierUI) resolveComponents(ctx context.Context, sv *Service, size string, double bool, qty int) ([]resolvedComp, decimal.Decimal) {
 	// Paper sheets: a double-sided copy puts 2 impressions on 1 sheet.
 	baseUnits := qty
 	if double {
 		baseUnits = (qty + 1) / 2
 	}
-	cs, _ := h.p.store.ConsumablesFor(ctx, sid, size)
-	comps := make([]map[string]any, 0, len(cs))
-	consCost := decimal.Zero
 	base := decimal.NewFromInt(int64(baseUnits))
+	cs, _ := h.p.store.ConsumablesFor(ctx, sv.ID, size)
+	out := make([]resolvedComp, 0, len(cs))
+	consCost := decimal.Zero
 	// Anything the plugin already resolved for this size wins over a core recipe
 	// naming the same product. The two lists are independent, so without this an
 	// item listed in both would be deducted and charged twice on every job —
@@ -240,7 +268,7 @@ func (h *cashierUI) Quote(c echo.Context) error {
 			WholeUnits:         true,
 		}
 		consumed := comp.Consumed(base)
-		comps = append(comps, map[string]any{"product_id": cm.ProductID, "quantity": consumed.String()})
+		out = append(out, resolvedComp{ProductID: cm.ProductID, Qty: consumed})
 		consCost = consCost.Add(consumed.Mul(h.p.store.ConsumableCost(ctx, cm.ProductID)))
 	}
 
@@ -251,18 +279,63 @@ func (h *cashierUI) Quote(c echo.Context) error {
 		if fromPlugin[cons.ProductID] {
 			continue
 		}
-		comps = append(comps, map[string]any{"product_id": cons.ProductID, "quantity": cons.Qty.String()})
+		out = append(out, resolvedComp{ProductID: cons.ProductID, Qty: cons.Qty})
 		consCost = consCost.Add(cons.Qty.Mul(h.p.store.ConsumableCost(ctx, cons.ProductID)))
 	}
+	return out, consCost.Round(2)
+}
 
-	return response.OK(c, map[string]any{
-		"product_id":      sv.ProductID,
-		"unit_price":      unit.String(),
-		"line_total":      lineTotal.String(),
-		"description":     buildDesc(sv.Name, size, color, double, qty),
-		"components":      comps,
-		"consumable_cost": consCost.Round(2).String(),
-	})
+// OwnUse records a no-cash shop-use job: it consumes each paper/consumable
+// component as own_use (the same P&L line products use) and logs a kind='own_use'
+// doc_job. No customer, no drawer move, no receipt.
+func (h *cashierUI) OwnUse(c echo.Context) error {
+	ctx := c.Request().Context()
+	uid := middleware.CurrentUserID(c)
+
+	sid, _ := strconv.ParseInt(c.FormValue("service"), 10, 64)
+	sv, err := h.p.store.ServiceByID(ctx, sid)
+	if err != nil || sv == nil {
+		return apperr.NotFound("service")
+	}
+	size := c.FormValue("size")
+	color := truthy(c.FormValue("color"))
+	double := truthy(c.FormValue("double"))
+	qty, _ := strconv.Atoi(c.FormValue("qty"))
+	if qty <= 0 {
+		return apperr.Validation("quantity must be greater than zero")
+	}
+
+	resolved, consCost := h.resolveComponents(ctx, sv, size, double, qty)
+	if len(resolved) == 0 {
+		return apperr.Validation("this service has no paper/consumables to record for shop use")
+	}
+	desc := buildDesc(sv.Name, size, color, double, qty)
+	for _, rc := range resolved {
+		if err := h.p.core.Stock.Consume(ctx, stock.ConsumeInput{
+			ProductID: rc.ProductID,
+			Quantity:  rc.Qty.String(),
+			Reason:    "own_use",
+			Note:      "Print & Copy shop use: " + desc,
+		}, uid); err != nil {
+			return err
+		}
+	}
+	sidPtr := sid
+	if err := h.p.store.InsertJob(ctx, Job{
+		ServiceID:      &sidPtr,
+		Description:    desc,
+		Qty:            decimal.NewFromInt(int64(qty)),
+		UnitPrice:      decimal.Zero,
+		LineTotal:      decimal.Zero,
+		ConsumableCost: consCost,
+		Kind:           "own_use",
+	}); err != nil {
+		return err
+	}
+	h.p.core.Audit.Record(ctx, uid, audit.ActionCreate, "documents_ownuse",
+		strconv.FormatInt(sid, 10), desc)
+	c.Response().Header().Set("HX-Trigger", response.Toast("Shop use recorded", "success"))
+	return c.NoContent(http.StatusOK)
 }
 
 // RecordInput is the post-checkout payload: the sale id + the document jobs on it.

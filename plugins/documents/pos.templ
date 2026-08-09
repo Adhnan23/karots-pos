@@ -21,7 +21,7 @@ templ JobFragment(svc Service) {
 		x-data="{
 			svc: JSON.parse($el.dataset.svc), prices:[],
 			size:'', color:false, double:false, qty:1,
-			price:'', quote:null,
+			price:'', quote:null, confirmOwn:false,
 			seedOptions(){ const d=this.prices.find(p=>(p.size||'')===this.size)||this.prices[0]; if(d){ this.color=!!d.color; this.double=!!d.double_side } },
 			focusQty(){ this.$nextTick(()=>{ const el=this.$refs.qtyInput; if(el){ el.focus(); el.select&&el.select() } }) },
 			sizes(){ return [...new Set(this.prices.filter(p=>p.size).map(p=>p.size))] },
@@ -30,7 +30,8 @@ templ JobFragment(svc Service) {
 			async initPrices(){ if(this.svc.kind!=='metered'){ return } try{ const r=await fetch('/cashier/documents/prices?service='+this.svc.id); this.prices=(await r.json()).data||[]; const sz=this.sizes(); if(sz.length){ this.size=sz[0] } this.seedOptions() }catch(e){} this.refresh(); this.focusQty() },
 			async refresh(){ if(!this.svc||this.svc.kind!=='metered'||!(Number(this.qty)>0)){ this.quote=null; return } const u='/cashier/documents/quote?service='+this.svc.id+'&size='+encodeURIComponent(this.size)+'&color='+(this.color?1:0)+'&double='+(this.double?1:0)+'&qty='+Number(this.qty); try{ const r=await apiFetch('GET',u,undefined,{silent:true}); this.quote=r.data }catch(e){ this.quote=null } },
 			addMetered(){ if(!this.quote){ return } window.dispatchEvent(new CustomEvent('pos-add-service',{detail:{ id:this.quote.product_id, name:this.quote.description, description:this.quote.description, price:Number(this.quote.line_total), qty:Number(this.qty), unitPrice:this.quote.unit_price, components:this.quote.components, docJob:{ service_id:this.svc.id, description:this.quote.description, qty:String(this.qty), unit_price:this.quote.unit_price, line_total:this.quote.line_total, consumable_cost:this.quote.consumable_cost } }})); this.quote=null },
-			addCustom(){ const amt=Number(this.price); if(!this.svc||!(amt>0)){ return } const desc=this.svc.name; window.dispatchEvent(new CustomEvent('pos-add-service',{detail:{ id:this.svc.product_id, name:desc, description:desc, price:amt, components:[], docJob:{ service_id:this.svc.id, description:desc, qty:'1', unit_price:String(amt), line_total:String(amt), consumable_cost:'0' } }})); this.price='' }
+			addCustom(){ const amt=Number(this.price); if(!this.svc||!(amt>0)){ return } const desc=this.svc.name; window.dispatchEvent(new CustomEvent('pos-add-service',{detail:{ id:this.svc.product_id, name:desc, description:desc, price:amt, components:[], docJob:{ service_id:this.svc.id, description:desc, qty:'1', unit_price:String(amt), line_total:String(amt), consumable_cost:'0' } }})); this.price='' },
+			async ownUse(){ if(!this.svc||this.svc.kind!=='metered'||!(Number(this.qty)>0)){ this.confirmOwn=false; return } const body=new URLSearchParams({service:this.svc.id, size:this.size, color:this.color?'1':'0', double:this.double?'1':'0', qty:String(Number(this.qty))}); this.confirmOwn=false; try{ const r=await fetch('/cashier/documents/ownuse',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded','HX-Request':'true'},body,credentials:'same-origin'}); window.dispatchEvent(new CustomEvent('show-toast',{detail:{message: r.ok?'Shop use recorded':'Shop use failed', level: r.ok?'success':'error'}})); if(r.ok){ this.quote=null } }catch(e){ window.dispatchEvent(new CustomEvent('show-toast',{detail:{message:'Shop use failed',level:'error'}})) } }
 		}"
 		x-init="initPrices()"
 	>
@@ -58,7 +59,19 @@ templ JobFragment(svc Service) {
 						<template x-if="quote"><span>Total <span class="font-semibold tabular-nums" x-text="Number(quote.line_total).toFixed(2)"></span></span></template>
 						<template x-if="!quote"><span class="text-rose-500">Set a valid size/qty</span></template>
 					</div>
-					<button type="button" x-on:click="addMetered()" x-bind:disabled="!quote" class="px-4 py-2.5 rounded-lg bg-emerald-600 text-white font-semibold disabled:opacity-40">Add to cart</button>
+					<div class="flex items-center gap-2">
+						<button type="button" x-on:click="confirmOwn=true" x-bind:disabled="!quote" class="px-3 py-2.5 rounded-lg border border-slate-300 text-slate-600 text-sm font-medium disabled:opacity-40" title="Consume paper for the shop's own work — no customer, no charge">🏠 Shop use</button>
+						<button type="button" x-on:click="addMetered()" x-bind:disabled="!quote" class="px-4 py-2.5 rounded-lg bg-emerald-600 text-white font-semibold disabled:opacity-40">Add to cart</button>
+					</div>
+				</div>
+				<!-- Inline shop-use confirmation (no browser dialog) -->
+				<div x-show="confirmOwn" x-cloak class="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm">
+					<div class="font-medium text-amber-800">Record as shop use?</div>
+					<div class="text-amber-700 mt-0.5">No customer and no charge — the paper is consumed as the shop's own-use (for adverts, forms, etc.).</div>
+					<div class="flex justify-end gap-2 mt-2">
+						<button type="button" x-on:click="confirmOwn=false" class="px-3 py-2 rounded-lg border border-slate-300 text-slate-600 text-sm">Cancel</button>
+						<button type="button" x-on:click="ownUse()" class="px-3 py-2 rounded-lg bg-amber-600 text-white text-sm font-medium">Confirm shop use</button>
+					</div>
 				</div>
 			</div>
 			<!-- Custom builder: price only (labour is settled later in admin) -->

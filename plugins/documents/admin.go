@@ -190,6 +190,7 @@ type ReportData struct {
 	UserName, Symbol, Preset, From, To string
 	Rows                               []ServiceTotals
 	Revenue, Consumables, Labour       decimal.Decimal
+	OwnUse                             decimal.Decimal // paper cost consumed for shop's own work
 }
 
 func (a *adminUI) Report(c echo.Context) error {
@@ -212,6 +213,7 @@ func (a *adminUI) Report(c echo.Context) error {
 		d.Consumables = d.Consumables.Add(r.Consumables)
 		d.Labour = d.Labour.Add(r.Labour)
 	}
+	d.OwnUse, _ = a.p.store.OwnUseCost(ctx, from, to)
 	return response.RenderPage(c, ReportPage(d))
 }
 

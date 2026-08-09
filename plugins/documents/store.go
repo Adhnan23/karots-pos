@@ -419,8 +419,19 @@ func (s *Store) ServiceTotals(ctx context.Context, from, to any) ([]ServiceTotal
 		       COALESCE(SUM(j.consumable_cost),0) AS consumables, COALESCE(SUM(j.labour_amount),0) AS labour
 		FROM doc_job j LEFT JOIN doc_service sv ON sv.id = j.service_id
 		WHERE j.created_at >= $1 AND j.created_at < $2
+		  AND j.kind = 'sale' AND j.reversed_at IS NULL
 		GROUP BY sv.category, sv.name ORDER BY revenue DESC`, from, to)
 	return rows, err
+}
+
+// OwnUseCost totals the consumable cost of shop-use jobs in a range — paper the
+// shop consumed for its own work (adverts, forms), booked as own-use, not a sale.
+func (s *Store) OwnUseCost(ctx context.Context, from, to any) (decimal.Decimal, error) {
+	var v decimal.Decimal
+	err := s.db.GetContext(ctx, &v, `
+		SELECT COALESCE(SUM(consumable_cost),0) FROM doc_job
+		WHERE kind = 'own_use' AND created_at >= $1 AND created_at < $2`, from, to)
+	return v, err
 }
 
 // PaperUsed totals consumable units + cost over a range (from stock movements that

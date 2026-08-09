@@ -49,6 +49,7 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 	reg.Cashier().GET("/documents/receipts", ch.Receipts)
 	reg.Cashier().GET("/documents/job/:id/reverse", ch.ReverseJobForm)
 	reg.Cashier().POST("/documents/job/:id/reverse", ch.ReverseJob)
+	reg.Cashier().POST("/documents/ownuse", ch.OwnUse)
 	reg.Admin().GET("/documents/receipts", a.Receipts)
 
 	// A receipts panel on the unified Receipts page (cashier + admin): recent

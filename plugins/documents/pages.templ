@@ -256,6 +256,9 @@ templ ReportPage(d ReportData) {
 				@docKpi("Labour", money.Format(d.Symbol, d.Labour), "indigo")
 				@docKpi("Gross profit", money.Format(d.Symbol, d.Revenue.Sub(d.Consumables).Sub(d.Labour)), "slate")
 			</div>
+			if d.OwnUse.IsPositive() {
+				<div class="text-sm text-slate-500">Shop own-use paper (not a sale): <span class="font-medium tabular-nums">{ money.Format(d.Symbol, d.OwnUse) }</span></div>
+			}
 			<div class="bg-white rounded-2xl shadow-sm p-6">
 				<h2 class="text-lg font-semibold mb-4">By service</h2>
 				<table class="w-full text-sm">
