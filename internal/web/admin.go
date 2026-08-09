@@ -777,8 +777,15 @@ func (a *adminUI) CustomerCreate(c echo.Context) error {
 	if err := c.Validate(&in); err != nil {
 		return err
 	}
-	if _, _, err := a.s.customers.Create(c.Request().Context(), in); err != nil {
+	// Service.Create reuses an existing customer on a phone match (the till wants
+	// that seamless behaviour). On the admin page a repeat is a mistake, so tell
+	// the admin instead of silently pretending a new customer was created.
+	_, reused, err := a.s.customers.Create(c.Request().Context(), in)
+	if err != nil {
 		return err
+	}
+	if reused {
+		return apperr.Conflict("a customer with this phone number already exists")
 	}
 	return htmxDone(c, "Customer created", "reload-customers")
 }

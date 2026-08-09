@@ -220,6 +220,14 @@ func (s *Service) Get(ctx context.Context, id int64) (*Supplier, error) {
 
 func (s *Service) Create(ctx context.Context, in CreateInput) (*Supplier, error) {
 	in.Name = strings.TrimSpace(in.Name)
+	// No two active suppliers should share a name (case-insensitive). Without this
+	// a repeated "Add supplier" silently spawned a duplicate. The importer's own
+	// upsert (ImportOne / FindOrCreateByName) is a separate, intentional path.
+	if existing, ferr := s.repo.FindByName(ctx, in.Name); ferr == nil && existing != nil {
+		return nil, apperr.Conflict("a supplier named \"" + existing.Name + "\" already exists")
+	} else if ferr != nil && !errors.Is(ferr, sql.ErrNoRows) {
+		return nil, apperr.Internal("failed to check for an existing supplier", ferr)
+	}
 	opening, err := parseOpening(in.OpeningBalance)
 	if err != nil {
 		return nil, err
