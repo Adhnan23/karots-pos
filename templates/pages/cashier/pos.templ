@@ -20,6 +20,9 @@ type POSData struct {
 	// a locker in every money-move dialog (0 = none).
 	AllowUntrackedCash bool
 	DefaultLockerID    int64
+	// AllowContinueLastCount: when false the Open Register dialog hides the
+	// "Continue last" button, so a shared drawer must always be counted fresh.
+	AllowContinueLastCount bool
 }
 
 // POS is the cashier terminal. Almost all interactivity is driven by the pos()
@@ -30,7 +33,7 @@ templ POS(d POSData) {
 	@layouts.Cashier("Cashier", d.CashierName, d.Role, "pos", d.ShowChangePin) {
 		<div
 			class="h-full"
-			x-data={ "pos('" + d.Symbol + "', '" + d.DefaultSaleType + "', " + jsBool(d.AskToPrint) + ", " + plugin.CashierMenuRootsJSON() + ", " + plugin.DrawerSectionsJSON() + ", " + jsBool(d.CanManageCredit) + ", " + jsBool(d.AllowUntrackedCash) + ", " + strconv.FormatInt(d.DefaultLockerID, 10) + ")" }
+			x-data={ "pos('" + d.Symbol + "', '" + d.DefaultSaleType + "', " + jsBool(d.AskToPrint) + ", " + plugin.CashierMenuRootsJSON() + ", " + plugin.DrawerSectionsJSON() + ", " + jsBool(d.CanManageCredit) + ", " + jsBool(d.AllowUntrackedCash) + ", " + strconv.FormatInt(d.DefaultLockerID, 10) + ", " + jsBool(d.AllowContinueLastCount) + ")" }
 			x-init="init()"
 			x-on:keydown.window="onKey($event)"
 			x-on:pos-add-service.window="addServiceLine($event.detail)"
@@ -42,7 +45,7 @@ templ POS(d POSData) {
 					<p class="text-sm text-slate-500 mb-3">Count the cash in the drawer — how many of each note and coin.</p>
 
 					<!-- Reopen options: continue with last close, or start fresh -->
-					<div x-show="lastClosing !== null" class="flex flex-wrap gap-2 mb-3 text-sm">
+					<div x-show="lastClosing !== null && allowContinueLast" class="flex flex-wrap gap-2 mb-3 text-sm">
 						<button type="button" x-on:click="useLastCounts()" class="px-3 py-1.5 rounded-lg bg-indigo-50 text-indigo-700 font-medium">
 							Continue last (<span x-text="sym + ' ' + money(lastClosing)"></span>)
 						</button>

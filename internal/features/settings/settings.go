@@ -49,6 +49,10 @@ type Settings struct {
 	AllowUntrackedCash bool `db:"allow_untracked_cash" json:"allow_untracked_cash"`
 	// DefaultLockerID pre-selects a locker in every till money-move. NULL = none.
 	DefaultLockerID *int64 `db:"default_locker_id" json:"default_locker_id,omitempty"`
+	// AllowContinueLastCount lets the Open Register dialog offer "Continue last"
+	// (pre-fill from this cashier's last close). Turn off for a shared single
+	// drawer so a stale carried-forward count can't be reused. Default true.
+	AllowContinueLastCount bool `db:"allow_continue_last_count" json:"allow_continue_last_count"`
 	// InstallID identifies this shop's install. The owner reads it to the
 	// developer, who derives the support PIN from it — it is an identifier, not a
 	// secret, so showing it is safe and is the whole point.
@@ -90,6 +94,7 @@ type UpdateInput struct {
 	AllowUntrackedCash bool  `json:"allow_untracked_cash" form:"allow_untracked_cash"`
 	// DefaultLockerID: 0 (blank select) means "no default" and is stored as NULL.
 	DefaultLockerID   int64  `json:"default_locker_id"    form:"default_locker_id"`
+	AllowContinueLastCount bool `json:"allow_continue_last_count" form:"allow_continue_last_count"`
 }
 
 // LogoSrc returns the logo to use: the uploaded, self-contained image (works
@@ -158,7 +163,8 @@ func (r *Repository) Update(ctx context.Context, in UpdateInput) error {
 			force_pin_change=$20, allow_cashier_pin_change=$21,
 			lock_timeout_minutes=$22, stock_take_enabled=$23,
 			open_cash_drawer=$24, drawer_kick_pin=$25,
-			allow_untracked_cash=$26, default_locker_id=$27
+			allow_untracked_cash=$26, default_locker_id=$27,
+			allow_continue_last_count=$28
 		WHERE id = 1`,
 		in.ShopName, in.ShopNameSi, in.Address, in.Phone,
 		in.CurrencyCode, in.CurrencySymbol, in.ReceiptFooter,
@@ -169,7 +175,8 @@ func (r *Repository) Update(ctx context.Context, in UpdateInput) error {
 		in.ForcePinChange, in.AllowCashierPinChange,
 		in.LockTimeoutMinutes, in.StockTakeEnabled,
 		in.OpenCashDrawer, in.DrawerKickPin,
-		in.AllowUntrackedCash, nilIfZero(in.DefaultLockerID))
+		in.AllowUntrackedCash, nilIfZero(in.DefaultLockerID),
+		in.AllowContinueLastCount)
 	return err
 }
 

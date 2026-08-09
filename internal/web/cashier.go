@@ -96,6 +96,7 @@ func (h *cashierUI) POS(c echo.Context) error {
 	symbol, defaultType, askToPrint := "Rs.", "retail", true
 	openDrawer := false
 	allowUntracked, defaultLockerID := true, int64(0)
+	allowContinueLast := true
 	if cfg, err := h.s.settings.Get(ctx); err == nil {
 		symbol = cfg.CurrencySymbol
 		// A database that predates credit-as-a-payment may still hold 'credit'
@@ -107,6 +108,7 @@ func (h *cashierUI) POS(c echo.Context) error {
 		askToPrint = cfg.AskToPrint
 		openDrawer = cfg.OpenCashDrawer
 		allowUntracked = cfg.AllowUntrackedCash
+		allowContinueLast = cfg.AllowContinueLastCount
 		if cfg.DefaultLockerID != nil {
 			defaultLockerID = *cfg.DefaultLockerID
 		}
@@ -119,8 +121,9 @@ func (h *cashierUI) POS(c echo.Context) error {
 		DefaultSaleType: defaultType,
 		AskToPrint:      askToPrint,
 		OpenCashDrawer:  openDrawer,
-		AllowUntrackedCash: allowUntracked,
-		DefaultLockerID:    defaultLockerID,
+		AllowUntrackedCash:     allowUntracked,
+		DefaultLockerID:        defaultLockerID,
+		AllowContinueLastCount: allowContinueLast,
 		// Role-inclusive, like the server gates and the Suppliers tab: an admin or
 		// manager (and the system admin) always sees these; a cashier only with
 		// the flag. Gating on the raw flag hid the controls from admins.

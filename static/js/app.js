@@ -267,7 +267,7 @@ function printPromptHost() {
 
 // pos: the cashier terminal. Cart math here is a live preview only — the server
 // recomputes every amount authoritatively when the sale is posted.
-function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canManageCredit, allowUntrackedCash, defaultLockerId) {
+function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canManageCredit, allowUntrackedCash, defaultLockerId, allowContinueLast) {
   return {
     sym: symbol,
     // Cash-locker policy (Admin → Settings). When allowUntrackedCash is false the
@@ -275,6 +275,9 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
     // locker. defaultLockerId pre-selects a locker in every money-move dialog.
     allowUntrackedCash: allowUntrackedCash === undefined ? true : !!allowUntrackedCash,
     defaultLockerId: Number(defaultLockerId) || 0,
+    // When false, the Open Register dialog hides "Continue last" (pre-fill from the
+    // previous close) so a shared single drawer is always counted fresh.
+    allowContinueLast: allowContinueLast === undefined ? true : !!allowContinueLast,
     // Whether this cashier may approve an over-limit credit sale and raise a
     // customer's credit limit from the till (server re-checks; UI just shows it).
     canManageCredit: !!canManageCredit,

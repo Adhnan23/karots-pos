@@ -152,6 +152,9 @@ templ SettingsPage(d SettingsData) {
 							<p class="text-xs text-slate-400 mt-1">Pre-selected in every till money-move dialog (open, deposit, withdraw, close).</p>
 						}
 					</div>
+					<div class="space-y-2">
+						@toggleRow("allow_continue_last_count", "Allow \"Continue last\" when opening the till", "Lets the cashier reopen with the previous close count instead of counting fresh. Turn OFF for a single drawer shared by more than one person — a carried-forward count goes stale as soon as someone else uses the drawer in between.", d.S.AllowContinueLastCount)
+					</div>
 				</section>
 				<!-- Inventory -->
 				<section class="space-y-4 border-t pt-6">
