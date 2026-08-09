@@ -8,6 +8,7 @@ import (
 	"karots-pos/internal/features/products"
 	"karots-pos/internal/features/sales"
 	"karots-pos/internal/features/settings"
+	"karots-pos/internal/features/stock"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -29,4 +30,5 @@ type Core struct {
 	Sales        *sales.Service
 	Expenses     *expenses.Service
 	Products     *products.Service
+	Stock        *stock.Service
 }

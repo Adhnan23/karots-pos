@@ -542,6 +542,7 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 		DB: db, Cfg: cfg,
 		Audit: s.audit, Settings: s.settings, CashRegister: s.cashRegister,
 		Sales: s.sales, Expenses: s.expenses, Products: s.products,
+		Stock: s.stock,
 	}
 	reg := plugin.NewRegistry(core, plugin.NewMux(), e)
 	plugin.SetupAll(reg)
