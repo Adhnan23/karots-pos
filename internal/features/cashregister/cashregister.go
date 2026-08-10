@@ -104,6 +104,11 @@ type MovementInput struct {
 	// CounterLockerID, when > 0, names the locker the cash moves to (withdraw) or
 	// from (pay-in), so the move is tracked with a receipt instead of vanishing.
 	CounterLockerID int64 `json:"counter_locker_id" form:"counter_locker_id"`
+	// DeferDrawerKick tells the service NOT to fire the standalone drawer pulse,
+	// because the till (auto-print mode) will fold it into the receipt print as a
+	// single job — avoiding a second printer job and its inter-job gap. In prompt
+	// mode the client leaves this false so the drawer still pops at the cash event.
+	DeferDrawerKick bool `json:"defer_drawer_kick" form:"defer_drawer_kick"`
 }
 
 // TillCashEvent describes a till cash event whose locker side must be booked.
@@ -597,7 +602,13 @@ func (s *Service) adjust(ctx context.Context, userID int64, in MovementInput, mt
 	if receiptID > 0 {
 		sum.ReceiptID = &receiptID
 	}
-	s.kick(ctx)
+	// Skip the standalone pulse when the till will fold it into the receipt print
+	// (one job — see MovementInput.DeferDrawerKick). The drawer still pops there.
+	// But an untracked move (no locker leg) has no receipt to merge into, so fall
+	// back to kicking here — otherwise the drawer would never open.
+	if !in.DeferDrawerKick || receiptID == 0 {
+		s.kick(ctx)
+	}
 	return sum, nil
 }
 

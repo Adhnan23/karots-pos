@@ -330,8 +330,8 @@ func (h *cashierUI) ReceiveWalkIn(c echo.Context) error {
 	h.s.logAudit(c, audit.ActionCreate, "purchase", strconv.FormatInt(d.Purchase.ID, 10),
 		"received a delivery from "+sup.Name+" at the counter")
 	if rec != nil {
-		h.s.printMoneyReceipt(ctx, rec)
-		h.s.kickIfTill(ctx, pay.source) // paid cash from the drawer → pop it
+		// Fold the drawer pulse into the slip (one job) when paid cash from the till.
+		h.s.printMoneyReceiptKick(ctx, rec, pay.source.Kind == cashflow.KindTill)
 	}
 	return response.Created(c, d)
 }
@@ -449,20 +449,21 @@ func (h *cashierUI) SupplierPayAtCounter(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	h.s.kickIfTill(ctx, src) // paid from the drawer → pop it
 	h.s.logAudit(c, audit.ActionPayment, "supplier", strconv.FormatInt(id, 10),
 		"paid "+money.Display(res.Total)+" ("+res.Method+") at the counter")
 
 	msg := "Paid " + money.Display(res.Total) + " to " + sup.Name
 	cfg, _ := h.s.settings.Get(ctx)
 	if rec != nil && cfg != nil && cfg.AskToPrint {
+		h.s.kickIfTill(ctx, src) // prompt mode: pop the drawer now; slip prints on click
 		printURL := "/cashier/money-receipts/" + strconv.FormatInt(rec.ID, 10) + "/print"
 		c.Response().Header().Set("HX-Trigger",
 			response.PrintPrompt(msg+" · "+rec.ReceiptNo, printURL, false, "reload-suppliers", "close-modal"))
 		return c.NoContent(200)
 	}
 	if rec != nil {
-		h.s.printMoneyReceipt(ctx, rec)
+		// Auto-print: fold the drawer pulse into the slip (one job) when paid from the till.
+		h.s.printMoneyReceiptKick(ctx, rec, src.Kind == cashflow.KindTill)
 	}
 	return htmxDone(c, msg, "reload-suppliers")
 }
@@ -523,20 +524,21 @@ func (h *cashierUI) SupplierRefundAtCounter(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	h.s.kickIfTill(ctx, dest) // refund cash into the drawer → pop it
 	h.s.logAudit(c, audit.ActionPayment, "supplier", strconv.FormatInt(id, 10),
 		"refund received "+money.Display(res.Amount)+" ("+res.Method+") at the counter")
 
 	msg := "Received " + money.Display(res.Amount) + " back from " + sup.Name
 	cfg, _ := h.s.settings.Get(ctx)
 	if rec != nil && cfg != nil && cfg.AskToPrint {
+		h.s.kickIfTill(ctx, dest) // prompt mode: pop the drawer now; slip prints on click
 		printURL := "/cashier/money-receipts/" + strconv.FormatInt(rec.ID, 10) + "/print"
 		c.Response().Header().Set("HX-Trigger",
 			response.PrintPrompt(msg+" · "+rec.ReceiptNo, printURL, false, "reload-suppliers", "close-modal"))
 		return c.NoContent(200)
 	}
 	if rec != nil {
-		h.s.printMoneyReceipt(ctx, rec)
+		// Auto-print: fold the drawer pulse into the slip (one job) when cash came into the till.
+		h.s.printMoneyReceiptKick(ctx, rec, dest.Kind == cashflow.KindTill)
 	}
 	return htmxDone(c, msg, "reload-suppliers")
 }
@@ -762,8 +764,8 @@ func (h *cashierUI) ReceiveAgainstOrder(c echo.Context) error {
 	h.s.logAudit(c, audit.ActionUpdate, "purchase", strconv.FormatInt(poID, 10),
 		"received an order at the counter")
 	if rec != nil {
-		h.s.printMoneyReceipt(ctx, rec)
-		h.s.kickIfTill(ctx, pay.source) // paid cash from the drawer → pop it
+		// Fold the drawer pulse into the slip (one job) when paid cash from the till.
+		h.s.printMoneyReceiptKick(ctx, rec, pay.source.Kind == cashflow.KindTill)
 	}
 	return response.OK(c, d)
 }

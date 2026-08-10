@@ -100,19 +100,20 @@ func (h *cashierUI) ExpenseRecord(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	h.s.kickIfTill(ctx, src) // paid from the drawer → pop it
 	h.s.logAudit(c, audit.ActionCreate, "expense", strconv.FormatInt(expenseID, 10),
 		"recorded expense paid from "+rec.FromLabel+" at the counter")
 
 	msg := "Expense recorded — " + money.Display(rec.Amount)
 	cfg, _ := h.s.settings.Get(ctx)
 	if rec != nil && cfg != nil && cfg.AskToPrint {
+		h.s.kickIfTill(ctx, src) // prompt mode: pop the drawer now; slip prints on click
 		printURL := "/cashier/money-receipts/" + strconv.FormatInt(rec.ID, 10) + "/print"
 		c.Response().Header().Set("HX-Trigger", response.PrintPrompt(msg+" · "+rec.ReceiptNo, printURL, false))
 		return c.NoContent(200)
 	}
 	if rec != nil {
-		h.s.printMoneyReceipt(ctx, rec)
+		// Auto-print: fold the drawer pulse into the slip (one job) when paid from the till.
+		h.s.printMoneyReceiptKick(ctx, rec, src.Kind == cashflow.KindTill)
 	}
 	c.Response().Header().Set("HX-Trigger", response.Toast(msg, "success"))
 	return c.NoContent(200)

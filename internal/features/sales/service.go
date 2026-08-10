@@ -123,6 +123,13 @@ type CreateInput struct {
 	// The web layer sets this only for a user with can_manage_credit — the
 	// service trusts it as already-authorised.
 	AllowOverLimit bool `json:"allow_over_limit"`
+	// DeferDrawerKick tells the service NOT to fire the standalone drawer pulse
+	// for a cash sale, because the caller (the till, in auto-print mode) will
+	// merge the pulse into the receipt print as a SINGLE printer job. On a USB
+	// thermal printer two back-to-back jobs (kick, then receipt) each pay the
+	// device open/close + inter-job wait — that gap is what made the paper come
+	// out seconds after "Complete Sale". One combined job removes it.
+	DeferDrawerKick bool `json:"defer_drawer_kick"`
 }
 
 var hundred = decimal.NewFromInt(100)
@@ -643,7 +650,9 @@ func (s *Service) Create(ctx context.Context, in CreateInput, cashierID int64) (
 		return nil, err
 	}
 	// Post-commit: pop the physical drawer when the sale actually took cash.
-	if s.drawerKick != nil && tenderPaidCash(in.Payments) {
+	// Skipped when the till will fold the pulse into the receipt print (a single
+	// USB job — see DeferDrawerKick); the drawer still pops, just in that one job.
+	if s.drawerKick != nil && tenderPaidCash(in.Payments) && !in.DeferDrawerKick {
 		s.drawerKick(ctx)
 	}
 	return detail, nil

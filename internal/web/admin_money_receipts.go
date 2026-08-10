@@ -152,11 +152,26 @@ func (s *Server) afterMoneyMove(c echo.Context, rec *cashflow.Receipt) error {
 // cashier counter flows (credit collection, refunds) which can't redirect to the
 // admin-only receipt page — they print the slip and stay on the cashier screen.
 func (s *Server) printMoneyReceipt(ctx context.Context, rec *cashflow.Receipt) {
+	s.printMoneyReceiptKick(ctx, rec, false)
+}
+
+// printMoneyReceiptKick is printMoneyReceipt with an optional leading drawer
+// pulse. When kick is true (the cash actually left/entered the physical till
+// drawer) the pulse is folded into the SAME print job as the slip, so on a USB
+// thermal printer the drawer pops and the slip prints in one pass — no separate
+// kick job, no inter-job device open/close gap. Pass kick=false when the money
+// never touched the drawer (locker/bank leg) or when the caller kicks separately
+// (prompt mode, where the slip prints later on click).
+func (s *Server) printMoneyReceiptKick(ctx context.Context, rec *cashflow.Receipt, kick bool) {
 	cfg, err := s.settings.Get(ctx)
 	if err != nil || cfg == nil || strings.TrimSpace(cfg.ReceiptPrinter) == "" {
 		return
 	}
-	_ = printing.Raw(ctx, cfg.ReceiptPrinter, buildReceiptSlip(cfg, *rec))
+	slip := buildReceiptSlip(cfg, *rec)
+	if kick {
+		slip = append(escpos.DrawerKick(*cfg), slip...)
+	}
+	_ = printing.Raw(ctx, cfg.ReceiptPrinter, slip)
 }
 
 // buildReceiptSlip renders a money receipt as raw ESC/POS bytes for the thermal

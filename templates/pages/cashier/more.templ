@@ -205,6 +205,7 @@ type CreditData struct {
 	Role          string
 	ShowChangePin bool
 	Symbol        string
+	Search        string
 	Customers     []customers.Customer
 }
 
@@ -214,7 +215,19 @@ templ Credit(d CreditData) {
 			<div class="max-w-3xl mx-auto">
 				<h1 class="text-xl font-bold mb-1">Credit Collection</h1>
 				<p class="text-sm text-slate-500 mb-4">Customers who owe money. Collect a repayment against their balance.</p>
-				<div id="ccredit" hx-get="/cashier/credit/table" hx-trigger="reload-ccredit from:body" hx-swap="innerHTML">
+				<input
+					type="search"
+					name="q"
+					value={ d.Search }
+					placeholder="Search by name or phone…"
+					autofocus
+					class="w-full border rounded-lg px-3 py-2 mb-3"
+					hx-get="/cashier/credit/table"
+					hx-trigger="input changed delay:300ms, search"
+					hx-target="#ccredit"
+					hx-swap="innerHTML"
+				/>
+				<div id="ccredit" hx-get="/cashier/credit/table" hx-trigger="reload-ccredit from:body" hx-swap="innerHTML" hx-include="[name='q']">
 					@CreditTable(d)
 				</div>
 			</div>

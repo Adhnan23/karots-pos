@@ -118,7 +118,14 @@ func (h *cashierUI) MoneyReceiptPrint(c echo.Context) error {
 		c.Response().Header().Set("HX-Trigger", response.Toast("No receipt printer configured", "error"))
 		return c.NoContent(200)
 	}
-	if err := printing.Raw(ctx, target, buildReceiptSlip(cfg, *rec)); err != nil {
+	slip := buildReceiptSlip(cfg, *rec)
+	// ?kick=1 (the till's auto-print for a fresh withdraw/pay-in) folds the drawer
+	// pulse into THIS job so the drawer pops and the slip prints in one pass — no
+	// second job, no USB inter-job gap. Reprints from the Receipts tab omit it.
+	if c.QueryParam("kick") == "1" {
+		slip = append(escpos.DrawerKick(*cfg), slip...)
+	}
+	if err := printing.Raw(ctx, target, slip); err != nil {
 		c.Response().Header().Set("HX-Trigger", response.Toast("Print failed: "+err.Error(), "error"))
 		return c.NoContent(200)
 	}
@@ -361,8 +368,6 @@ func (s *Server) buildDebtSlip(ctx context.Context, cfg *settings.Settings, p cu
 		if cust.Phone != nil {
 			slip.CustomerPhone = *cust.Phone
 		}
-		cl := cust.CreditLimit
-		slip.CreditLimit = &cl
 	}
 	return escpos.DebtDocument(slip, *cfg, s.receiptImgOptions(ctx, cfg))
 }

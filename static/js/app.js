@@ -206,9 +206,13 @@ window.generateBarcode = generateBarcode;
 // printBill sends a sale to the thermal printer server-side (ESC/POS via CUPS).
 // This replaces opening the HTML receipt + window.print(), which a driverless
 // raw thermal queue mis-prints as PDF garbage. apiFetch toasts on failure.
-async function printBill(id) {
+async function printBill(id, kick) {
   try {
-    await apiFetch("POST", "/cashier/print/" + id);
+    // kick=true folds the cash-drawer pulse into this receipt job so the printer
+    // pops the drawer and prints in ONE pass (no separate kick job → no USB
+    // inter-job gap). Only the fresh cash-sale auto-print passes it; reprints
+    // never do, so reprinting an old receipt never opens the drawer.
+    await apiFetch("POST", "/cashier/print/" + id + (kick ? "?kick=1" : ""));
     toast("Receipt sent to printer", "success");
   } catch (_) {
     /* apiFetch already surfaced the error */
@@ -218,9 +222,12 @@ async function printBill(id) {
 // printMoneySlip sends a CR- money receipt (till open/close/withdraw/pay-in and
 // other cash moves) to the thermal printer, mirroring printBill for sales. The
 // server re-loads the receipt (resolving the operator name) and prints it.
-async function printMoneySlip(id) {
+async function printMoneySlip(id, kick) {
   if (!id) return;
-  await postPrint("/cashier/money-receipts/" + id + "/print");
+  // kick=true folds the drawer pulse into this slip job (one job → no USB
+  // inter-job gap). Only a fresh withdraw/pay-in auto-print passes it; reprints
+  // never do, so reprinting a CR- slip never opens the drawer.
+  await postPrint("/cashier/money-receipts/" + id + "/print" + (kick ? "?kick=1" : ""));
 }
 
 // postPrint POSTs to a slip-reprint endpoint (cashier or admin money receipt).
@@ -954,7 +961,7 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
     // afterDrawerMove applies the print policy after a till cash move, given the
     // API response data (which carries receipt_id for the CR- slip). With
     // askToPrint off it auto-prints; on, it opens the shared Print / Skip prompt.
-    afterDrawerMove(data) {
+    afterDrawerMove(data, mergeKick) {
       const id = data && data.receipt_id;
       if (!id) return;
       if (this.askToPrint) {
@@ -964,7 +971,9 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
           })
         );
       } else {
-        printMoneySlip(id);
+        // mergeKick (withdraw/pay-in): the server deferred its pulse, so fold it
+        // into this slip job. open/close don't merge — their server kick stands.
+        printMoneySlip(id, mergeKick);
       }
     },
     async openRegister() {
@@ -1031,6 +1040,9 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
         amount: String(this.withdrawAmount),
         reason: this.withdrawReason,
         counter_locker_id: Number(this.withdrawLockerId) || 0,
+        // Auto-print folds the drawer pulse into the slip (one job); prompt mode
+        // lets the server pulse at the cash event.
+        defer_drawer_kick: !this.askToPrint,
       });
       this.showWithdraw = false;
       this.withdrawAmount = "";
@@ -1039,7 +1051,7 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
       await this.loadSummary();
       await this.loadLockers();
       toast("Cash withdrawn", "success");
-      this.afterDrawerMove(json.data);
+      this.afterDrawerMove(json.data, true);
     },
     async deposit() {
       if (Number(this.depositAmount) <= 0) {
@@ -1050,6 +1062,9 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
         amount: String(this.depositAmount),
         reason: this.depositReason,
         counter_locker_id: Number(this.depositLockerId) || 0,
+        // Auto-print folds the drawer pulse into the slip (one job); prompt mode
+        // lets the server pulse at the cash event.
+        defer_drawer_kick: !this.askToPrint,
       });
       this.showDeposit = false;
       this.depositAmount = "";
@@ -1058,7 +1073,7 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
       await this.loadSummary();
       await this.loadLockers();
       toast("Cash deposited", "success");
-      this.afterDrawerMove(json.data);
+      this.afterDrawerMove(json.data, true);
     },
     async noSale() {
       // Pop the physical drawer with no transaction; apiFetch toasts its own error.
@@ -1941,6 +1956,11 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
       try {
         const payload = {
           sale_type: this.saleType,
+          // Auto-print mode folds the drawer pulse into the receipt job, so tell
+          // the server to skip its standalone kick (avoids a double pop and a
+          // second USB job). In prompt mode the server kicks at sale time as
+          // usual — the receipt isn't auto-printed there.
+          defer_drawer_kick: !this.askToPrint,
           customer_id: this.customerId ? Number(this.customerId) : null,
           discount: String(this.discount || 0),
           discount_type: this.discountType,
@@ -1993,7 +2013,7 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
           // Print-prompt OFF: no modal. Auto-print in the background and reset
           // for the next customer immediately. The live "Change" in the selling
           // bar is wiped by the reset, so surface it as a light banner instead.
-          printBill(json.data.sale.id); // fire-and-forget, self-toasts
+          printBill(json.data.sale.id, true); // one job: drawer pulse + receipt
           const change = Number(json.data.sale.change_given) || 0;
           this.newSale();
           this.changeBanner = change;

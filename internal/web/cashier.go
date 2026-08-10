@@ -223,10 +223,17 @@ func (s *Server) receiptImgOptions(ctx context.Context, cfg *settings.Settings) 
 
 // kickDrawer pops the physical cash drawer, best-effort, honouring the shop
 // setting. Used by the counter money-receipt handlers and the No-Sale button.
+// Fired on a detached goroutine so a slow `lp` accept on the raw thermal queue
+// never blocks the HTTP response (see newDrawerKicker for the full rationale).
 func (s *Server) kickDrawer(ctx context.Context) {
-	if cfg, err := s.settings.Get(ctx); err == nil && cfg != nil {
-		escpos.KickDrawer(ctx, *cfg)
-	}
+	bg := context.WithoutCancel(ctx)
+	go func() {
+		c, cancel := context.WithTimeout(bg, 20*time.Second)
+		defer cancel()
+		if cfg, err := s.settings.Get(c); err == nil && cfg != nil {
+			escpos.KickDrawer(c, *cfg)
+		}
+	}()
 }
 
 // kickIfTill kicks only when the cash actually entered or left the physical till
@@ -254,7 +261,7 @@ func (h *cashierUI) receiptQueue(c echo.Context, cfg *settings.Settings) string 
 // printRefundSlip prints the refund slip for a sale's latest return. Best-effort:
 // any failure (no return rows, no printer) is logged and swallowed so the return
 // flow is never blocked by printing.
-func (h *cashierUI) printRefundSlip(c echo.Context, saleID int64) {
+func (h *cashierUI) printRefundSlip(c echo.Context, saleID int64, kick bool) {
 	ctx := c.Request().Context()
 	rr, err := h.s.sales.ReturnReceipt(ctx, saleID)
 	if err != nil {
@@ -266,9 +273,27 @@ func (h *cashierUI) printRefundSlip(c echo.Context, saleID int64) {
 		log.Printf("refund slip: load settings: %v", err)
 		return
 	}
-	if err := escpos.Send(ctx, h.receiptQueue(c, cfg), escpos.ReturnDocument(*rr, *cfg, h.receiptOptions(ctx, cfg))); err != nil {
+	payload := escpos.ReturnDocument(*rr, *cfg, h.receiptOptions(ctx, cfg))
+	// A cash refund pops the till: fold the pulse into the return slip (one job)
+	// so the drawer opens and the slip prints in a single pass — no separate kick.
+	if kick {
+		payload = append(escpos.DrawerKick(*cfg), payload...)
+	}
+	if err := escpos.Send(ctx, h.receiptQueue(c, cfg), payload); err != nil {
 		log.Printf("refund slip: print for sale %d: %v", saleID, err)
 	}
+}
+
+// detailPaidCash reports whether a completed sale took any cash — the condition
+// for merging the drawer pulse into its receipt print (mirrors the service-side
+// tenderPaidCash, but reads the persisted payment rows).
+func detailPaidCash(d *sales.Detail) bool {
+	for _, p := range d.Payments {
+		if p.Method == "cash" && p.Amount.IsPositive() {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *cashierUI) PrintReceipt(c echo.Context) error {
@@ -288,7 +313,16 @@ func (h *cashierUI) PrintReceipt(c echo.Context) error {
 	opts := h.receiptOptions(ctx, cfg)
 	opts.Serials = h.saleSerials(ctx, id)
 	opts.CustomerDue = h.customerDue(ctx, detail)
-	if err := escpos.Send(ctx, h.receiptQueue(c, cfg), escpos.Document(*detail, *cfg, opts)); err != nil {
+	payload := escpos.Document(*detail, *cfg, opts)
+	// ?kick=1 (the till's auto-print for a fresh cash sale) folds the drawer pulse
+	// into THIS job so the printer pops the drawer and prints in one pass — no
+	// second CUPS/USB job, no inter-job gap. Reprints never pass kick, so an old
+	// receipt reprinted from the Receipts tab never opens the drawer. DrawerKick
+	// returns nil when the drawer is disabled, and we only kick on a cash sale.
+	if c.QueryParam("kick") == "1" && detailPaidCash(detail) {
+		payload = append(escpos.DrawerKick(*cfg), payload...)
+	}
+	if err := escpos.Send(ctx, h.receiptQueue(c, cfg), payload); err != nil {
 		return apperr.Internal("could not print receipt", err)
 	}
 	// Feedback for the HTMX reprint button; the Alpine apiFetch path toasts itself.
@@ -458,15 +492,13 @@ func (h *cashierUI) ReturnSubmit(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if cashRefunded {
-		h.s.kickDrawer(ctx) // cash handed back out of the drawer → pop it
-	}
 	h.s.logAudit(c, audit.ActionReturn, "sale", strconv.FormatInt(id, 10), "partial return")
 	// Hand the customer the goods-return slip. Non-fatal: a printer problem must
 	// never fail the return (the goods are already restocked / credit adjusted).
 	// The CR- refund receipt is tracked in the registry (not auto-printed here —
-	// the return slip already serves the customer).
-	h.printRefundSlip(c, id)
+	// the return slip already serves the customer). A cash refund's drawer pulse
+	// is folded into this slip (one job) — no separate kick.
+	h.printRefundSlip(c, id, cashRefunded)
 	return response.OK(c, detail)
 }
 
@@ -550,7 +582,8 @@ func (h *cashierUI) QuickItem(c echo.Context) error {
 
 func (h *cashierUI) creditData(c echo.Context) (cashierpages.CreditData, error) {
 	ctx := c.Request().Context()
-	all, err := h.s.customers.List(ctx, "")
+	search := strings.TrimSpace(c.QueryParam("q"))
+	all, err := h.s.customers.List(ctx, search)
 	if err != nil {
 		return cashierpages.CreditData{}, err
 	}
@@ -565,6 +598,7 @@ func (h *cashierUI) creditData(c echo.Context) (cashierpages.CreditData, error) 
 		Role:          middleware.CurrentRole(c),
 		ShowChangePin: h.showChangePin(c),
 		Symbol:        h.cashierSymbol(ctx),
+		Search:        search,
 		Customers:     owing,
 	}, nil
 }
@@ -643,9 +677,6 @@ func (h *cashierUI) CreditPay(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if res.Method == "cash" {
-		h.s.kickDrawer(ctx) // cash collected into the drawer → pop it
-	}
 	// Hand the customer a detailed credit-payment slip (all methods). The CR-
 	// money record is still created for cash inside the tx (tracking unchanged);
 	// it is just no longer the paper handed over.
@@ -659,6 +690,9 @@ func (h *cashierUI) CreditPay(c echo.Context) error {
 	// Print policy (mirrors sales & money moves): ask before printing on → offer
 	// the shared Print / Skip prompt for the slip; off → auto-print best-effort.
 	if cfg != nil && cfg.AskToPrint {
+		if res.Method == "cash" {
+			h.s.kickDrawer(ctx) // prompt mode: pop the drawer now; slip prints on click
+		}
 		printURL := "/cashier/receipts/credit/" + strconv.FormatInt(res.PaymentID, 10) + "/print"
 		c.Response().Header().Set("HX-Trigger",
 			response.PrintPrompt(msg, printURL, false, "reload-ccredit", "close-modal"))
@@ -666,6 +700,10 @@ func (h *cashierUI) CreditPay(c echo.Context) error {
 	}
 	if cfg != nil {
 		slip := h.s.buildDebtSlip(ctx, cfg, pay, cust, middleware.CurrentUserName(c))
+		// Auto-print: fold the drawer pulse into the slip (one job) for a cash repayment.
+		if res.Method == "cash" {
+			slip = append(escpos.DrawerKick(*cfg), slip...)
+		}
 		_ = escpos.Send(ctx, h.receiptQueue(c, cfg), slip)
 	}
 	return htmxDone(c, msg, "reload-ccredit")
