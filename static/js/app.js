@@ -359,8 +359,9 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
     receipt: null,
     // Auto-print mode only: the change to give from the last sale, surfaced as a
     // light banner (no modal) so it doesn't vanish when we reset for the next
-    // customer. Cleared on the next scan/add or via the banner's ✕.
+    // customer. Cleared on the next scan/add, via the banner's ✕, or after 20s.
     changeBanner: 0,
+    _changeTimer: null,
     // Parked carts (hold / resume).
     holds: [],
     showHolds: false,
@@ -1168,7 +1169,7 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
     // `opts.noPrompt` skips that question for callers that cannot answer it — see
     // scanQuickSale.
     addToCart(p, lot, opts) {
-      this.changeBanner = 0; // starting the next sale dismisses the change banner
+      this.hideChangeBanner(); // starting the next sale dismisses the change banner
       if (!lot && !(opts && opts.noPrompt)) {
         const lots = this.lotsFor(p.id);
         if (lots.length) {
@@ -1721,7 +1722,17 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
     // high→low. Stateless suggestion only — we don't track the live drawer mix,
     // so the cashier overrides if a note isn't on hand. Returns [{value, qty}].
     changeNotes() {
-      let rem = Math.round(this.changeDue() * 100); // work in cents to avoid float drift
+      return this.notesFor(this.changeDue());
+    },
+    // Dismiss the post-sale change banner and cancel its auto-hide timer.
+    hideChangeBanner() {
+      this.changeBanner = 0;
+      if (this._changeTimer) { clearTimeout(this._changeTimer); this._changeTimer = null; }
+    },
+    // Greedy high→low breakdown of an arbitrary amount into denominations.
+    // Shared by the live changeNotes() and the post-sale change banner.
+    notesFor(amount) {
+      let rem = Math.round((Number(amount) || 0) * 100); // cents, to avoid float drift
       const out = [];
       for (const d of this.denoms) {
         const cents = Math.round(Number(d.value) * 100);
@@ -1986,6 +1997,8 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
           const change = Number(json.data.sale.change_given) || 0;
           this.newSale();
           this.changeBanner = change;
+          if (this._changeTimer) clearTimeout(this._changeTimer);
+          if (change > 0) this._changeTimer = setTimeout(() => { this.changeBanner = 0; }, 20000);
         }
         // Refresh in the background: catalog + drawer summary, the per-lot price
         // options (a lot may now be empty), and the frequent/recent shortcuts.
