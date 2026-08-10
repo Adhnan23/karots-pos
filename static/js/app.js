@@ -317,8 +317,7 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
     _leaves: [],
     customers: [],
     cart: [],
-    search: "",
-    scan: "",
+    search: "", // unified scan + product-search box
     saleType: defaultType || "retail",
     customerId: "",
     custSearch: "", // searchable customer chooser (filters the loaded list)
@@ -592,12 +591,10 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
           this.reset();
           return;
         case "F2":
+        case "F3":
+          // One unified box now handles both scanning and searching.
           e.preventDefault();
           this.focusEl("searchInput");
-          return;
-        case "F3":
-          e.preventDefault();
-          this.focusEl("scanInput");
           return;
         case "F9":
           e.preventDefault();
@@ -793,7 +790,7 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
       this.detailHtml = "";
       this.menuMode = "cards";
       this.loadGroupsTop();
-      this.focusEl("scanInput");
+      this.focusEl("searchInput");
     },
     async loadCustomers() {
       try {
@@ -1313,28 +1310,55 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
       while (it.serials.length < n) it.serials.push("");
       if (it.serials.length > n) it.serials.length = n;
     },
-    async scanBarcode() {
-      const code = this.scan.trim();
+    // onSearchEnter handles Enter in the unified scan/search box. A scanner types
+    // the barcode fast and sends Enter, so we try an exact barcode match FIRST
+    // (independent of the debounced result list, which may not have refreshed yet)
+    // — that keeps scanning instant and reliable. If it isn't a known barcode we
+    // fall back to the typed-search behaviour: add the single match, let the user
+    // pick when there are several, or offer to quick-add when nothing matches.
+    async onSearchEnter() {
+      const code = (this.search || "").trim();
       if (!code) return;
-      // Quick-Sell rush handoff from the phone app: a "KQ<barcode>X<qty>" code
-      // carries one product AND its quantity. Detect it before a normal lookup.
+      // Quick-Sell rush handoff from the phone app: "KQ<barcode>X<qty>".
       if (/^KQ\d+X\d+$/i.test(code)) {
         return this.scanQuickSale(code);
       }
-      try {
-        const json = await apiFetch("GET", `/api/products/barcode/${encodeURIComponent(code)}`, undefined, { silent: true });
-        this.addToCart(json.data);
-        this.scan = "";
-      } catch (e) {
-        this.scan = "";
-        // Unknown barcode → offer to quick-add it (prefilled with the scanned code)
-        // instead of a dead-end. Other errors still surface a toast.
-        if (e && e.status === 404) {
-          this.openQuickItem(code);
-        } else {
-          toast((e && e.message) || "Lookup failed", "error");
+      // 1) Exact barcode (the scan path). Only probe for numeric input — real
+      // scanner barcodes are digits, and this avoids a wasted 404 on every
+      // name search. An alphanumeric SKU still resolves via the search fallback
+      // below (the search endpoint matches barcodes too).
+      if (/^\d+$/.test(code)) {
+        try {
+          const json = await apiFetch("GET", `/api/products/barcode/${encodeURIComponent(code)}`, undefined, { silent: true });
+          this.addToCart(json.data);
+          this.search = "";
+          await this.loadProducts(); // back to the menu
+          return;
+        } catch (e) {
+          if (e && e.status !== 404) {
+            toast((e && e.message) || "Lookup failed", "error");
+            return;
+          }
         }
       }
+      // 2) Not a barcode → decide from a fresh search result set.
+      await this.loadProducts();
+      const list = this.products || [];
+      if (list.length === 1) {
+        this.addToCart(list[0]);
+        this.search = "";
+        await this.loadProducts();
+        return;
+      }
+      if (list.length === 0) {
+        // Nothing matched — offer to quick-add it (prefilled with what was typed/
+        // scanned) instead of a dead-end.
+        this.openQuickItem(code);
+        this.search = "";
+        await this.loadProducts();
+        return;
+      }
+      // Several matches: leave them on screen for the cashier to tap.
     },
     // scanQuickSale handles a phone Quick-Sell barcode "KQ<barcode>X<qty>":
     // resolve the product by its real (numeric) barcode and SET that cart line's
@@ -1342,7 +1366,7 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
     // the qty rather than adding again, so an accidental double-scan can't double
     // the sale.
     async scanQuickSale(code) {
-      this.scan = "";
+      this.search = "";
       const m = /^KQ(\d+)X(\d+)$/i.exec(code);
       if (!m) {
         toast("Unreadable quick-sale code", "error");

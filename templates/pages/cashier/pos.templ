@@ -99,20 +99,13 @@ templ POS(d POSData) {
 					<div class="flex gap-3 mb-4 shrink-0">
 						<input
 							type="text"
-							x-ref="scanInput"
-							x-model="scan"
-							x-on:keydown.enter.prevent="scanBarcode()"
-							placeholder="Scan barcode + Enter  (F3)"
-							class="flex-1 border rounded-lg px-3 py-2.5"
-							autofocus
-						/>
-						<input
-							type="search"
 							x-ref="searchInput"
 							x-model="search"
 							x-on:input.debounce.300ms="loadProducts()"
-							placeholder="Search products…  (F2)"
+							x-on:keydown.enter.prevent="onSearchEnter()"
+							placeholder="Scan barcode or search products…  (F2)"
 							class="flex-1 border rounded-lg px-3 py-2.5"
+							autofocus
 						/>
 						<button
 							type="button"
@@ -466,8 +459,7 @@ templ POS(d POSData) {
 						<!-- Keyboard shortcut legend (desktop only) -->
 						<div class="hidden lg:flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-400 pt-1">
 							<span><kbd>F1</kbd> Menu</span>
-								<span><kbd>F2</kbd> Search</span>
-							<span><kbd>F3</kbd> Scan</span>
+							<span><kbd>F2</kbd> Scan / search</span>
 							<span><kbd>F9</kbd> Discount</span>
 							<span><kbd>F4</kbd> Hold</span>
 							<span><kbd>F10</kbd> Amount</span>
