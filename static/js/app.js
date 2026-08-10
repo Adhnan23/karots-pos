@@ -357,6 +357,10 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
     newCustomer: { name: "", phone: "", credit_limit: "" },
     closeResult: null,
     receipt: null,
+    // Auto-print mode only: the change to give from the last sale, surfaced as a
+    // light banner (no modal) so it doesn't vanish when we reset for the next
+    // customer. Cleared on the next scan/add or via the banner's ✕.
+    changeBanner: 0,
     // Parked carts (hold / resume).
     holds: [],
     showHolds: false,
@@ -1164,6 +1168,7 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
     // `opts.noPrompt` skips that question for callers that cannot answer it — see
     // scanQuickSale.
     addToCart(p, lot, opts) {
+      this.changeBanner = 0; // starting the next sale dismisses the change banner
       if (!lot && !(opts && opts.noPrompt)) {
         const lots = this.lotsFor(p.id);
         if (lots.length) {
@@ -1965,16 +1970,23 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
         await this.attributeReloads(json.data.sale.id);
         await this.recordDocJobs(json.data.sale.id);
         toast("Sale complete", "success");
-        // Show the "Sale Complete + change to give" panel IMMEDIATELY, in every
-        // print mode, so the cashier always sees the change and is never left
-        // waiting on the printer or the background refreshes. It stays up until
-        // they start the next sale (Enter / New Sale / scan).
-        this.receipt = json.data;
-        // Everything below is fire-and-forget: a slow thermal printer or a heavy
-        // catalog/best-seller query must never delay the change showing or the
-        // next customer. (Previously these were awaited in series, which is what
-        // made completing a sale feel like it took ~10s.)
-        if (!this.askToPrint) printBill(json.data.sale.id); // auto-print, self-toasts
+        this.changeBanner = 0;
+        // Respect the "print prompt" setting. Either way the change is surfaced
+        // instantly and never blocks on the printer or the background refreshes
+        // (previously these were awaited in series → completing felt like ~10s).
+        if (this.askToPrint) {
+          // Print-prompt ON: show the Sale Complete modal (Print Bill / New
+          // Sale). The cashier decides whether to print; change shows on it.
+          this.receipt = json.data;
+        } else {
+          // Print-prompt OFF: no modal. Auto-print in the background and reset
+          // for the next customer immediately. The live "Change" in the selling
+          // bar is wiped by the reset, so surface it as a light banner instead.
+          printBill(json.data.sale.id); // fire-and-forget, self-toasts
+          const change = Number(json.data.sale.change_given) || 0;
+          this.newSale();
+          this.changeBanner = change;
+        }
         // Refresh in the background: catalog + drawer summary, the per-lot price
         // options (a lot may now be empty), and the frequent/recent shortcuts.
         this.loadProducts();

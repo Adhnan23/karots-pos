@@ -747,6 +747,16 @@ templ POS(d POSData) {
 				</div>
 			</div>
 
+			<!-- Auto-print mode (print prompt OFF): no modal, just surface the change
+			     to give. Dismisses on the next scan/add (see addToCart) or the ✕. -->
+			<div x-show="changeBanner > 0" x-cloak class="fixed top-4 left-1/2 -translate-x-1/2 z-40 flex items-center gap-4 rounded-xl bg-emerald-600 text-white shadow-xl px-6 py-3">
+				<div>
+					<div class="text-xs font-medium uppercase tracking-wide text-emerald-100">Change to give</div>
+					<div class="text-3xl font-extrabold" x-text="sym + ' ' + money(changeBanner)"></div>
+				</div>
+				<button x-on:click="changeBanner = 0" class="text-2xl leading-none text-emerald-100 hover:text-white">&times;</button>
+			</div>
+
 			<!-- Credit confirmation. Deliberately focuses NOTHING: a prompt that
 			     Enter can dismiss is no better than the silent conversion it
 			     replaces. -->
