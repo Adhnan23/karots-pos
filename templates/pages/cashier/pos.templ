@@ -737,9 +737,16 @@ templ POS(d POSData) {
 						<div class="text-sm text-slate-500" x-text="receipt && receipt.sale.receipt_no"></div>
 						<div class="text-2xl font-bold mt-3" x-text="receipt && (sym + ' ' + money(receipt.sale.total))"></div>
 						<div class="text-xs text-slate-400">Total</div>
-						<div x-show="receipt && Number(receipt.sale.change_given) > 0" class="mt-4 rounded-xl bg-emerald-50 border border-emerald-200 py-3">
+						<div x-show="receipt && Number(receipt.sale.change_given) > 0" class="mt-4 rounded-xl bg-emerald-50 border border-emerald-200 py-3 px-3">
 							<div class="text-xs font-medium text-emerald-700 uppercase tracking-wide">Change to give</div>
 							<div class="text-4xl font-extrabold text-emerald-700" x-text="receipt && (sym + ' ' + money(receipt.sale.change_given))"></div>
+							<div class="mt-2 flex flex-wrap justify-center gap-1.5 text-xs text-emerald-700" x-show="receipt && notesFor(receipt.sale.change_given).length">
+								<template x-for="c in (receipt ? notesFor(receipt.sale.change_given) : [])" x-bind:key="c.value">
+									<span class="px-1.5 py-0.5 rounded bg-emerald-100 border border-emerald-200">
+										<span x-text="c.qty"></span>×<span x-text="sym + ' ' + money(c.value)"></span>
+									</span>
+								</template>
+							</div>
 						</div>
 						<button x-on:click="printReceipt()" class="w-full mt-4 py-2.5 rounded-lg bg-slate-800 text-white font-medium">🧾 Print Bill</button>
 						<button x-on:click="newSale()" class="w-full mt-2 py-2.5 rounded-lg bg-indigo-600 text-white font-medium">New Sale</button>
