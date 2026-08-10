@@ -1413,19 +1413,30 @@ func (a *adminUI) LowStockReport(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	// Seed the supplier picker's text with the selected supplier's name.
+	supName := ""
+	if q.PreferredSupplierID != nil {
+		for _, s := range sups {
+			if s.ID == *q.PreferredSupplierID {
+				supName = s.Name
+				break
+			}
+		}
+	}
 	return response.RenderPage(c, adminpages.LowStockPage(adminpages.LowStockData{
-		UserName:   middleware.CurrentUserName(c),
-		Symbol:     a.symbol(ctx),
-		Rows:       rows,
-		Suppliers:  sups,
-		Categories: cats,
-		Demand:     a.reorderDemand(ctx, rows),
-		Total:      total,
-		Page:       page,
-		PageSize:   reportPageSize,
-		Search:     search,
-		CategoryID: catParam,
-		SupplierID: supParam,
+		UserName:     middleware.CurrentUserName(c),
+		Symbol:       a.symbol(ctx),
+		Rows:         rows,
+		Suppliers:    sups,
+		Categories:   cats,
+		Demand:       a.reorderDemand(ctx, rows),
+		Total:        total,
+		Page:         page,
+		PageSize:     reportPageSize,
+		Search:       search,
+		CategoryID:   catParam,
+		SupplierID:   supParam,
+		SupplierName: supName,
 	}))
 }
 

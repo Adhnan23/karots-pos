@@ -7,6 +7,7 @@ import (
 	"karots-pos/internal/features/products"
 	"karots-pos/internal/features/suppliers"
 	"karots-pos/internal/money"
+	adminfragments "karots-pos/templates/fragments/admin"
 	"karots-pos/templates/layouts"
 )
 
@@ -22,9 +23,10 @@ type LowStockData struct {
 	Total          int
 	Page, PageSize int
 	// Current filter values (echoed back into the filter bar).
-	Search     string
-	CategoryID string
-	SupplierID string
+	Search       string
+	CategoryID   string
+	SupplierID   string
+	SupplierName string
 }
 
 templ LowStockPage(d LowStockData) {
@@ -97,40 +99,52 @@ templ LowStockPage(d LowStockData) {
 	}
 }
 
-// lowStockFilters is the reorder page's filter bar: name search, category and
-// preferred-supplier dropdowns. A plain GET form — each apply reloads the page,
-// but the ticked cart lives in localStorage so it survives the reload.
+// lowStockFilters is the reorder page's filter bar: live name search plus the
+// searchable category and preferred-supplier pickers (same as the product form).
+// No Apply button — typing (debounced), picking a category, or picking a supplier
+// re-runs the search. Each change reloads the page, but the ticked cart lives in
+// localStorage so it survives; the search box re-focuses after the reload. Lives
+// inside the poBuilder x-data scope so its Alpine handlers resolve.
 templ lowStockFilters(d LowStockData) {
-	<form method="get" action="/admin/reports/low-stock" class="flex flex-wrap items-end gap-3 mb-5">
+	<form
+		method="get"
+		action="/admin/reports/low-stock"
+		class="flex flex-wrap items-end gap-3 mb-5"
+		x-on:category-changed="$el.requestSubmit()"
+		x-on:picked="$el.requestSubmit()"
+	>
 		<div class="flex-1 min-w-48">
 			<label class="block text-xs font-medium text-slate-500 mb-1">Search</label>
-			<input type="search" name="search" value={ d.Search } placeholder="Product name or barcode…" class="w-full border rounded-lg px-3 py-2"/>
+			<input
+				type="search"
+				name="search"
+				value={ d.Search }
+				placeholder="Product name or barcode…"
+				class="w-full border rounded-lg px-3 py-2"
+				x-on:input.debounce.400ms="$el.form.requestSubmit()"
+				x-on:keydown.enter.prevent="$el.form.requestSubmit()"
+				x-init="if ($el.value) { $el.focus(); const v = $el.value; $el.value = ''; $el.value = v; }"
+			/>
 		</div>
-		<div class="min-w-48">
+		<div class="min-w-56">
 			<label class="block text-xs font-medium text-slate-500 mb-1">Category</label>
-			<select name="category_id" class="w-full border rounded-lg px-3 py-2 bg-white">
-				<option value="">All categories</option>
-				for _, cat := range d.Categories {
-					<option value={ strconv.FormatInt(cat.ID, 10) } selected?={ d.CategoryID == strconv.FormatInt(cat.ID, 10) }>{ indent(cat.Depth) + cat.Name }</option>
-				}
-			</select>
+			@adminfragments.CategoryPicker(d.Categories, "category_id", d.CategoryID, true, "All categories", true, false)
 		</div>
-		<div class="min-w-48">
+		<div class="min-w-56">
 			<label class="block text-xs font-medium text-slate-500 mb-1">Preferred supplier</label>
-			<select name="supplier_id" class="w-full border rounded-lg px-3 py-2 bg-white">
-				<option value="">All suppliers</option>
-				for _, sup := range d.Suppliers {
-					<option value={ strconv.FormatInt(sup.ID, 10) } selected?={ d.SupplierID == strconv.FormatInt(sup.ID, 10) }>{ sup.Name }</option>
-				}
-			</select>
+			@adminfragments.SupplierPicker("supplier_id", supFilterID(d.SupplierID), d.SupplierName, "All suppliers", true)
 		</div>
-		<div class="flex gap-2">
-			<button type="submit" class="px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium">Apply</button>
-			if d.Search != "" || d.CategoryID != "" || d.SupplierID != "" {
-				<a href="/admin/reports/low-stock" class="px-4 py-2 rounded-lg border text-slate-600">Clear</a>
-			}
-		</div>
+		if d.Search != "" || d.CategoryID != "" || d.SupplierID != "" {
+			<a href="/admin/reports/low-stock" class="px-4 py-2 rounded-lg border text-slate-600">Clear</a>
+		}
 	</form>
+}
+
+// supFilterID parses the supplier filter query value into the id the picker seeds
+// with (0 when empty/invalid = "All suppliers").
+func supFilterID(s string) int64 {
+	id, _ := strconv.ParseInt(s, 10, 64)
+	return id
 }
 
 // reorderCartBar shows how many items are gathered (across all filters/pages), an
