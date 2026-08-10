@@ -2563,9 +2563,21 @@ function grnReceive(symbol, config) {
 
 // poBuilder: the low-stock reorder picker. Tick items, set qty + supplier, then
 // create one draft Purchase Order per supplier and open the printable order(s).
+// The picked items live in localStorage, not just the current page's rows, so a
+// buyer can search/filter (category, supplier, name) several times, tick items on
+// each result set, and build ONE purchase order from everything accumulated. Each
+// filter change is a full page reload; the cart survives it.
+const REORDER_CART_KEY = "reorder_cart_v1";
+
 function poBuilder(rows) {
+  const loadCart = () => {
+    try { return JSON.parse(localStorage.getItem(REORDER_CART_KEY) || "{}") || {}; }
+    catch (_) { return {}; }
+  };
   return {
     busy: false,
+    showCart: false,
+    cart: loadCart(), // { [product_id]: {product_id,name,unit,qty,supplier_id,supplier_name,cost} }
     lines: (rows || []).map((r) => ({
       product_id: Number(r.product_id) || 0,
       name: r.name || "",
@@ -2580,6 +2592,40 @@ function poBuilder(rows) {
       _supResults: [],
       selected: false,
     })),
+    init() {
+      // Reflect anything already in the cart onto this page's visible rows, so a
+      // previously-ticked item stays ticked when it reappears in a new filter.
+      this.lines.forEach((l) => {
+        const c = this.cart[l.product_id];
+        if (!c) return;
+        l.selected = true;
+        if (Number(c.qty) > 0) l.suggested = Number(c.qty);
+        if (Number(c.supplier_id) > 0) { l.supplier_id = Number(c.supplier_id); l.supplier_name = c.supplier_name || ""; }
+      });
+    },
+    persist() {
+      try { localStorage.setItem(REORDER_CART_KEY, JSON.stringify(this.cart)); } catch (_) {}
+    },
+    snapshot(l) {
+      return {
+        product_id: Number(l.product_id), name: l.name, unit: l.unit,
+        qty: Number(l.suggested) || 0, supplier_id: Number(l.supplier_id) || 0,
+        supplier_name: l.supplier_name || "", cost: l.cost || "0",
+      };
+    },
+    // toggleLine adds/removes a row from the cross-filter cart when its box changes.
+    toggleLine(l) {
+      if (l.selected) this.cart[l.product_id] = this.snapshot(l);
+      else delete this.cart[l.product_id];
+      this.persist();
+    },
+    // syncLine keeps a ticked row's qty/supplier edits mirrored into the cart.
+    syncLine(l) {
+      if (l.selected) { this.cart[l.product_id] = this.snapshot(l); this.persist(); }
+    },
+    toggleAll(on) {
+      this.lines.forEach((l) => { l.selected = !!on; this.toggleLine(l); });
+    },
     async searchLineSuppliers(l) {
       const q = l._supQuery.trim();
       if (!q) { l._supResults = []; return; }
@@ -2593,38 +2639,45 @@ function poBuilder(rows) {
       l.supplier_name = s ? s.name : "";
       l._supOpen = false;
       l._supQuery = "";
+      this.syncLine(l);
     },
-
-    toggleAll(on) {
-      this.lines.forEach((l) => (l.selected = !!on));
+    cartItems() { return Object.values(this.cart); },
+    selectedCount() { return this.cartItems().length; },
+    removeCartItem(id) {
+      delete this.cart[id];
+      this.persist();
+      const l = this.lines.find((x) => String(x.product_id) === String(id));
+      if (l) l.selected = false;
     },
-    selected() {
-      return this.lines.filter((l) => l.selected && Number(l.suggested) > 0);
-    },
-    selectedCount() {
-      return this.selected().length;
+    clearCart() {
+      this.cart = {};
+      this.persist();
+      this.lines.forEach((l) => (l.selected = false));
+      this.showCart = false;
     },
     async build() {
       if (this.busy) return;
-      const picked = this.selected();
-      if (picked.length === 0) {
+      const items = this.cartItems().filter((c) => Number(c.qty) > 0);
+      if (items.length === 0) {
         toast("Tick at least one item to order", "error");
         return;
       }
-      if (picked.some((l) => Number(l.supplier_id) <= 0)) {
+      if (items.some((c) => Number(c.supplier_id) <= 0)) {
         toast("Choose a supplier for every ticked item", "error");
+        this.showCart = true;
         return;
       }
-      const lines = picked.map((l) => ({
-        product_id: Number(l.product_id),
-        supplier_id: Number(l.supplier_id),
-        quantity: String(l.suggested),
-        cost_price: String(l.cost || 0),
+      const lines = items.map((c) => ({
+        product_id: Number(c.product_id),
+        supplier_id: Number(c.supplier_id),
+        quantity: String(c.qty),
+        cost_price: String(c.cost || 0),
       }));
       this.busy = true;
       try {
         const res = await apiFetch("POST", "/admin/purchases/draft", { lines });
         const ids = (res && res.data && res.data.ids) || [];
+        this.clearCart();
         toast(ids.length + " purchase order(s) created", "success");
         if (ids.length > 0) {
           window.location = "/admin/purchases/po/print?mode=combined&ids=" + ids.join(",");

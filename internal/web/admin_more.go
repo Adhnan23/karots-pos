@@ -1391,9 +1391,17 @@ func (a *adminUI) LowStockReport(c echo.Context) error {
 	// reorder worklist. Page through at the real maximum instead, and keep the
 	// total so the page can say how many there are.
 	page := pageParam(c)
-	rows, total, err := a.s.products.List(ctx, products.ListQuery{
-		LowStock: true, Limit: reportPageSize, Page: page,
-	})
+	search := strings.TrimSpace(c.QueryParam("search"))
+	catParam := strings.TrimSpace(c.QueryParam("category_id"))
+	supParam := strings.TrimSpace(c.QueryParam("supplier_id"))
+	q := products.ListQuery{LowStock: true, Limit: reportPageSize, Page: page, Search: search}
+	if id, err := strconv.ParseInt(catParam, 10, 64); err == nil && id > 0 {
+		q.CategoryID = &id
+	}
+	if id, err := strconv.ParseInt(supParam, 10, 64); err == nil && id > 0 {
+		q.PreferredSupplierID = &id
+	}
+	rows, total, err := a.s.products.List(ctx, q)
 	if err != nil {
 		return err
 	}
@@ -1401,15 +1409,23 @@ func (a *adminUI) LowStockReport(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	cats, err := a.s.categories.Tree(ctx)
+	if err != nil {
+		return err
+	}
 	return response.RenderPage(c, adminpages.LowStockPage(adminpages.LowStockData{
-		UserName:  middleware.CurrentUserName(c),
-		Symbol:    a.symbol(ctx),
-		Rows:      rows,
-		Suppliers: sups,
-		Demand:    a.reorderDemand(ctx, rows),
-		Total:     total,
-		Page:      page,
-		PageSize:  reportPageSize,
+		UserName:   middleware.CurrentUserName(c),
+		Symbol:     a.symbol(ctx),
+		Rows:       rows,
+		Suppliers:  sups,
+		Categories: cats,
+		Demand:     a.reorderDemand(ctx, rows),
+		Total:      total,
+		Page:       page,
+		PageSize:   reportPageSize,
+		Search:     search,
+		CategoryID: catParam,
+		SupplierID: supParam,
 	}))
 }
 

@@ -3,6 +3,7 @@ package adminpages
 import (
 	"strconv"
 
+	"karots-pos/internal/features/categories"
 	"karots-pos/internal/features/products"
 	"karots-pos/internal/features/suppliers"
 	"karots-pos/internal/money"
@@ -16,9 +17,14 @@ type LowStockData struct {
 	Symbol         string
 	Rows           []products.Product
 	Suppliers      []suppliers.Supplier
+	Categories     []categories.TreeNode
 	Demand         map[int64]ReorderInfo
 	Total          int
 	Page, PageSize int
+	// Current filter values (echoed back into the filter bar).
+	Search     string
+	CategoryID string
+	SupplierID string
 }
 
 templ LowStockPage(d LowStockData) {
@@ -27,11 +33,17 @@ templ LowStockPage(d LowStockData) {
 			<h1 class="text-2xl font-bold">Low Stock / Reorder</h1>
 			<a href="/admin/purchases/new" class="text-sm text-slate-500 hover:underline">Manual purchase order →</a>
 		</div>
-		<div class="bg-white rounded-2xl shadow-sm p-6" x-data={ "poBuilder(" + lowStockConfigJSON(d.Rows, d.Demand) + ")" }>
+		<div class="bg-white rounded-2xl shadow-sm p-6" x-data={ "poBuilder(" + lowStockConfigJSON(d.Rows, d.Demand) + ")" } x-init="init()">
+			@lowStockFilters(d)
 			if len(d.Rows) == 0 {
-				<p class="py-6 text-center text-slate-500">All products are above their reorder level. 🎉</p>
+				if d.Search != "" || d.CategoryID != "" || d.SupplierID != "" {
+					<p class="py-6 text-center text-slate-500">No low-stock items match these filters. <a href="/admin/reports/low-stock" class="text-indigo-600 hover:underline">Clear filters</a></p>
+				} else {
+					<p class="py-6 text-center text-slate-500">All products are above their reorder level. 🎉</p>
+				}
+				@reorderCartBar()
 			} else {
-				<p class="text-sm text-slate-500 mb-4">Tick the items to reorder, set the quantity and supplier, then build the purchase order(s). The suggested quantity is demand-based (last 90 days of sales projected over a 2-week lead time). “Sold last wk/mo” show recent velocity (7 / 30 days) and “Sold last yr” shows the same 90-day window a year ago for seasonality.</p>
+				<p class="text-sm text-slate-500 mb-4">Tick the items to reorder, set the quantity and supplier, then build the purchase order(s). Filter by category, supplier or name — your ticks are kept as you search, so you can gather items from several searches into one order. The suggested quantity is demand-based (last 90 days of sales projected over a 2-week lead time).</p>
 				<table class="w-full text-sm">
 					<thead class="text-left text-slate-500 border-b">
 						<tr>
@@ -48,13 +60,13 @@ templ LowStockPage(d LowStockData) {
 					<tbody>
 						<template x-for="(l, i) in lines" x-bind:key="l.product_id">
 							<tr class="border-b last:border-0" x-bind:class="l.selected ? 'bg-indigo-50/50' : ''">
-								<td class="py-2 px-3"><input type="checkbox" x-model="l.selected"/></td>
+								<td class="py-2 px-3"><input type="checkbox" x-bind:checked="l.selected" x-on:change="l.selected = $event.target.checked; toggleLine(l)"/></td>
 								<td class="py-2 px-3 font-medium" x-text="l.name"></td>
 								<td class="py-2 px-3 text-right"><span x-text="l.on_hand"></span> <span class="text-slate-400" x-text="l.unit"></span></td>
 								<td class="py-2 px-3 text-right text-slate-500" x-text="l.sold_last_week"></td>
 								<td class="py-2 px-3 text-right text-slate-500" x-text="l.sold_last_month"></td>
 								<td class="py-2 px-3 text-right text-slate-500" x-text="l.sold_last_year"></td>
-								<td class="py-2 px-3"><input type="number" step="0.001" min="0" x-model.number="l.suggested" class="w-full border rounded px-2 py-1 text-right"/></td>
+								<td class="py-2 px-3"><input type="number" step="0.001" min="0" x-model.number="l.suggested" x-on:input="syncLine(l)" class="w-full border rounded px-2 py-1 text-right"/></td>
 								<td class="py-2 px-3 relative" x-on:click.away="l._supOpen=false" x-on:keydown.escape="l._supOpen=false">
 									<button type="button" x-on:click="l._supOpen=!l._supOpen" class="w-full flex items-center justify-between gap-1 border rounded px-2 py-1 text-left">
 										<span class="truncate" x-text="l.supplier_name || 'Select supplier…'" x-bind:class="l.supplier_name ? '' : 'text-slate-400'"></span>
@@ -73,19 +85,82 @@ templ LowStockPage(d LowStockData) {
 						</template>
 					</tbody>
 				</table>
-				<div class="flex items-center justify-between border-t mt-4 pt-4">
-					<div class="text-sm text-slate-500"><span x-text="selectedCount()"></span> selected</div>
-					<button type="button" x-on:click="build()" x-bind:disabled="busy || selectedCount() === 0" class="px-5 py-2.5 rounded-lg bg-indigo-600 text-white font-semibold disabled:opacity-40">Build Purchase Order(s)</button>
-				</div>
+				@reorderCartBar()
 				if d.Total > d.PageSize {
-					<p class="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 mt-4">
-						{ strconv.Itoa(d.Total) } products are below their reorder level — this page shows { strconv.Itoa(len(d.Rows)) }. Build an order from these, then move to the next page.
+					<p class="text-sm text-slate-500 mt-4">
+						{ strconv.Itoa(d.Total) } low-stock products match — this page shows { strconv.Itoa(len(d.Rows)) }. Ticks are kept as you page and filter, so gather everything, then build one order.
 					</p>
 				}
-				@rptPager("", d.Page, d.PageSize, d.Total)
+				@rptPager(lowStockQuery(d), d.Page, d.PageSize, d.Total)
 			}
 		</div>
 	}
+}
+
+// lowStockFilters is the reorder page's filter bar: name search, category and
+// preferred-supplier dropdowns. A plain GET form — each apply reloads the page,
+// but the ticked cart lives in localStorage so it survives the reload.
+templ lowStockFilters(d LowStockData) {
+	<form method="get" action="/admin/reports/low-stock" class="flex flex-wrap items-end gap-3 mb-5">
+		<div class="flex-1 min-w-48">
+			<label class="block text-xs font-medium text-slate-500 mb-1">Search</label>
+			<input type="search" name="search" value={ d.Search } placeholder="Product name or barcode…" class="w-full border rounded-lg px-3 py-2"/>
+		</div>
+		<div class="min-w-48">
+			<label class="block text-xs font-medium text-slate-500 mb-1">Category</label>
+			<select name="category_id" class="w-full border rounded-lg px-3 py-2 bg-white">
+				<option value="">All categories</option>
+				for _, cat := range d.Categories {
+					<option value={ strconv.FormatInt(cat.ID, 10) } selected?={ d.CategoryID == strconv.FormatInt(cat.ID, 10) }>{ indent(cat.Depth) + cat.Name }</option>
+				}
+			</select>
+		</div>
+		<div class="min-w-48">
+			<label class="block text-xs font-medium text-slate-500 mb-1">Preferred supplier</label>
+			<select name="supplier_id" class="w-full border rounded-lg px-3 py-2 bg-white">
+				<option value="">All suppliers</option>
+				for _, sup := range d.Suppliers {
+					<option value={ strconv.FormatInt(sup.ID, 10) } selected?={ d.SupplierID == strconv.FormatInt(sup.ID, 10) }>{ sup.Name }</option>
+				}
+			</select>
+		</div>
+		<div class="flex gap-2">
+			<button type="submit" class="px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium">Apply</button>
+			if d.Search != "" || d.CategoryID != "" || d.SupplierID != "" {
+				<a href="/admin/reports/low-stock" class="px-4 py-2 rounded-lg border text-slate-600">Clear</a>
+			}
+		</div>
+	</form>
+}
+
+// reorderCartBar shows how many items are gathered (across all filters/pages), an
+// expandable review of them, and the build button. Bound to the poBuilder scope.
+templ reorderCartBar() {
+	<div class="border-t mt-4 pt-4">
+		<div class="flex items-center justify-between gap-4">
+			<button type="button" x-on:click="showCart = !showCart" x-bind:disabled="selectedCount() === 0" class="text-sm text-indigo-600 hover:underline disabled:text-slate-400 disabled:no-underline">
+				<span x-text="selectedCount()"></span> item(s) in this order <span x-show="selectedCount() > 0" x-text="showCart ? '▴' : '▾'"></span>
+			</button>
+			<button type="button" x-on:click="build()" x-bind:disabled="busy || selectedCount() === 0" class="px-5 py-2.5 rounded-lg bg-indigo-600 text-white font-semibold disabled:opacity-40">Build Purchase Order(s)</button>
+		</div>
+		<div x-show="showCart" x-cloak class="mt-3 border rounded-lg divide-y">
+			<template x-for="c in cartItems()" x-bind:key="c.product_id">
+				<div class="flex items-center justify-between gap-3 px-3 py-2 text-sm">
+					<div class="min-w-0">
+						<div class="font-medium truncate" x-text="c.name"></div>
+						<div class="text-xs text-slate-500">
+							<span x-text="c.qty"></span> <span x-text="c.unit"></span> ·
+							<span x-text="c.supplier_name || 'no supplier'" x-bind:class="c.supplier_id ? '' : 'text-rose-500'"></span>
+						</div>
+					</div>
+					<button type="button" x-on:click="removeCartItem(c.product_id)" class="text-slate-400 hover:text-rose-600 shrink-0">✕</button>
+				</div>
+			</template>
+			<div class="px-3 py-2 text-right">
+				<button type="button" x-on:click="clearCart()" class="text-xs text-slate-500 hover:text-rose-600">Clear all</button>
+			</div>
+		</div>
+	</div>
 }
 
 // suggestedOrder proposes a quantity that brings stock back to roughly twice the

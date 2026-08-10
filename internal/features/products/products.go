@@ -84,6 +84,9 @@ type ListQuery struct {
 	CategoryID *int64 `query:"category_id" form:"category_id"`
 	Search     string `query:"search"      form:"search"`
 	LowStock   bool   `query:"low_stock"   form:"low_stock"`
+	// PreferredSupplierID filters to products whose preferred (default) supplier is
+	// this one — used by the reorder picker to build a per-supplier order. nil = all.
+	PreferredSupplierID *int64 `query:"supplier_id" form:"supplier_id"`
 	// IncludeServices lets a caller see non-stocked service lines, which every
 	// other list deliberately hides (stock, valuation and low-stock columns are
 	// meaningless for them). Needed by pickers that attach a service to
@@ -167,9 +170,10 @@ func (r *Repository) List(ctx context.Context, q ListQuery) ([]Product, error) {
 		  AND `+searchClause+`
 		  AND ($4::bigint IS NULL OR p.category_id IN (SELECT id FROM subcats))
 		  AND ($5 = false OR COALESCE(s.quantity,0) <= p.reorder_level)
+		  AND ($10::bigint IS NULL OR p.preferred_supplier_id = $10)
 		ORDER BY `+searchRank+` p.name, p.id
 		LIMIT $6 OFFSET $7`,
-		toks, raw, fuzzy, q.CategoryID, q.LowStock, q.Limit, q.offset(), q.IncludeServices, q.IncludeInactive)
+		toks, raw, fuzzy, q.CategoryID, q.LowStock, q.Limit, q.offset(), q.IncludeServices, q.IncludeInactive, q.PreferredSupplierID)
 	return rows, err
 }
 
@@ -297,8 +301,9 @@ func (r *Repository) Count(ctx context.Context, q ListQuery) (int, error) {
 		WHERE (p.is_active = true OR $7) AND (p.is_service = false OR $6)
 		  AND `+searchClause+`
 		  AND ($4::bigint IS NULL OR p.category_id IN (SELECT id FROM subcats))
-		  AND ($5 = false OR COALESCE(s.quantity,0) <= p.reorder_level)`,
-		toks, raw, fuzzy, q.CategoryID, q.LowStock, q.IncludeServices, q.IncludeInactive)
+		  AND ($5 = false OR COALESCE(s.quantity,0) <= p.reorder_level)
+		  AND ($8::bigint IS NULL OR p.preferred_supplier_id = $8)`,
+		toks, raw, fuzzy, q.CategoryID, q.LowStock, q.IncludeServices, q.IncludeInactive, q.PreferredSupplierID)
 	return n, err
 }
 

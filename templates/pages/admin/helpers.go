@@ -198,6 +198,22 @@ func pgHref(baseQuery string, page int) string {
 	return "?" + baseQuery + "&page=" + strconv.Itoa(page)
 }
 
+// lowStockQuery is the reorder page's active filters as a query string, so the
+// pager keeps the category / supplier / search selection across pages.
+func lowStockQuery(d LowStockData) string {
+	q := url.Values{}
+	if d.Search != "" {
+		q.Set("search", d.Search)
+	}
+	if d.CategoryID != "" {
+		q.Set("category_id", d.CategoryID)
+	}
+	if d.SupplierID != "" {
+		q.Set("supplier_id", d.SupplierID)
+	}
+	return q.Encode()
+}
+
 // invQuery is the Inventory report's filter state as a query string, so the
 // pager and the CSV link both keep the active filters.
 func invQuery(d InventoryReportData) string {
