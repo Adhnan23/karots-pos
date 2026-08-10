@@ -222,18 +222,22 @@ func TestASCIIReplacesNonLatin(t *testing.T) {
 
 func TestDebtDocument(t *testing.T) {
 	d := decimal.RequireFromString
-	before, after, limit := d("5000.00"), d("3000.00"), d("10000.00")
+	before, after := d("5000.00"), d("3000.00")
 	out := DebtDocument(DebtSlip{
 		ReceiptNo: "DP-000123", Date: "2026-06-28 14:05",
 		CustomerName: "Nimal Perera", CustomerPhone: "0771239876",
 		Method: "Cash", CashierName: "Kamal", Amount: d("2000.00"),
-		BalanceBefore: &before, BalanceAfter: &after, CreditLimit: &limit,
+		BalanceBefore: &before, BalanceAfter: &after,
 	}, cfg("80"), Options{})
 	s := string(out)
 	for _, want := range []string{"CREDIT PAYMENT", "DP-000123", "Nimal Perera", "0771239876", "2,000.00", "3,000.00"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("debt slip missing %q", want)
 		}
+	}
+	// The customer's credit limit must never appear on the slip they're handed.
+	if strings.Contains(s, "Credit limit") {
+		t.Error("debt slip must not print the credit limit")
 	}
 	if out[0] != esc || out[1] != '@' {
 		t.Fatalf("expected ESC @ init")

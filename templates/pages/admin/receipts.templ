@@ -281,7 +281,6 @@ templ RcDebtReceiptPage(d RcDebtViewData) {
 			<div class="r-hr"></div>
 			<div class="r-row r-small"><span>Previous balance</span><span>{ money.Format(d.Symbol, *d.Receipt.BalanceBefore) }</span></div>
 			<div class="r-row r-big"><span>Remaining</span><span>{ money.Format(d.Symbol, *d.Receipt.BalanceAfter) }</span></div>
-			<div class="r-row r-small"><span>Credit limit</span><span>{ money.Format(d.Symbol, d.Receipt.CreditLimit) }</span></div>
 		}
 		if d.Receipt.CashierName != nil {
 			<div class="r-row r-small"><span>Served by</span><span>{ *d.Receipt.CashierName }</span></div>

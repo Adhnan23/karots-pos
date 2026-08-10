@@ -426,7 +426,7 @@ func WarrantyDocument(s WarrantySlip, cfg settings.Settings, opts Options) []byt
 type DebtSlip struct {
 	ReceiptNo, Date, CustomerName, CustomerPhone, Method, CashierName string
 	Amount                                                            decimal.Decimal
-	BalanceBefore, BalanceAfter, CreditLimit                          *decimal.Decimal
+	BalanceBefore, BalanceAfter                                       *decimal.Decimal
 }
 
 // DebtDocument builds the ESC/POS byte stream for a credit payment slip.
@@ -481,9 +481,6 @@ func DebtDocument(s DebtSlip, cfg settings.Settings, opts Options) []byte {
 		b.Write([]byte{esc, 'E', 1})
 		line(&b, leftRight("Remaining balance", money.Format(sym, *s.BalanceAfter), w))
 		b.Write([]byte{esc, 'E', 0})
-		if s.CreditLimit != nil {
-			line(&b, leftRight("Credit limit", money.Format(sym, *s.CreditLimit), w))
-		}
 	}
 	divider(&b, w)
 	b.Write([]byte{esc, 'a', 1})
