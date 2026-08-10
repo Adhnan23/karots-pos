@@ -1965,19 +1965,22 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
         await this.attributeReloads(json.data.sale.id);
         await this.recordDocJobs(json.data.sale.id);
         toast("Sale complete", "success");
-        if (this.askToPrint) {
-          this.receipt = json.data; // show the Print / New Sale prompt
-        } else {
-          await printBill(json.data.sale.id); // auto-print (async, self-toasts)
-          this.newSale(); // reset cart for the next customer
-        }
-        await this.loadProducts();
-        await this.loadSummary();
-        // Lots just moved: one may now be empty (and stop being a choice), so the
-        // next customer must be offered the current picture, not a stale one.
-        await this.loadPriceOptions();
-        // This sale just changed what's frequent/recent — refresh the shortcuts.
-        await this.loadQuickPicks();
+        // Show the "Sale Complete + change to give" panel IMMEDIATELY, in every
+        // print mode, so the cashier always sees the change and is never left
+        // waiting on the printer or the background refreshes. It stays up until
+        // they start the next sale (Enter / New Sale / scan).
+        this.receipt = json.data;
+        // Everything below is fire-and-forget: a slow thermal printer or a heavy
+        // catalog/best-seller query must never delay the change showing or the
+        // next customer. (Previously these were awaited in series, which is what
+        // made completing a sale feel like it took ~10s.)
+        if (!this.askToPrint) printBill(json.data.sale.id); // auto-print, self-toasts
+        // Refresh in the background: catalog + drawer summary, the per-lot price
+        // options (a lot may now be empty), and the frequent/recent shortcuts.
+        this.loadProducts();
+        this.loadSummary();
+        this.loadPriceOptions();
+        this.loadQuickPicks();
       } catch (e) {
         // A job's material read short. Offer a found-at-till confirm, but only
         // while some service-with-components line hasn't been approved yet — once

@@ -735,9 +735,11 @@ templ POS(d POSData) {
 					<div class="p-5 text-center">
 						<div class="text-lg font-bold">Sale Complete</div>
 						<div class="text-sm text-slate-500" x-text="receipt && receipt.sale.receipt_no"></div>
-						<div class="text-3xl font-bold my-3" x-text="receipt && (sym + ' ' + money(receipt.sale.total))"></div>
-						<div class="text-sm" x-show="receipt && Number(receipt.sale.change_given) > 0">
-							Change: <span x-text="receipt && (sym + ' ' + money(receipt.sale.change_given))"></span>
+						<div class="text-2xl font-bold mt-3" x-text="receipt && (sym + ' ' + money(receipt.sale.total))"></div>
+						<div class="text-xs text-slate-400">Total</div>
+						<div x-show="receipt && Number(receipt.sale.change_given) > 0" class="mt-4 rounded-xl bg-emerald-50 border border-emerald-200 py-3">
+							<div class="text-xs font-medium text-emerald-700 uppercase tracking-wide">Change to give</div>
+							<div class="text-4xl font-extrabold text-emerald-700" x-text="receipt && (sym + ' ' + money(receipt.sale.change_given))"></div>
 						</div>
 						<button x-on:click="printReceipt()" class="w-full mt-4 py-2.5 rounded-lg bg-slate-800 text-white font-medium">🧾 Print Bill</button>
 						<button x-on:click="newSale()" class="w-full mt-2 py-2.5 rounded-lg bg-indigo-600 text-white font-medium">New Sale</button>
