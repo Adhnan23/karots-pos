@@ -2079,8 +2079,18 @@ async function poProductSearch(line) {
     line._open = false;
     return;
   }
+  // Debounce + sequence: a barcode scanner dumps the whole code in a few ms, so
+  // without this the overlapping fetches resolve out of order and a stale
+  // (often empty) partial-query response clobbers the real match — the tell-tale
+  // "shows nothing, offers to add the barcode as a name" bug. The scanner has its
+  // own exact-lookup field now (scanBarcode); this keeps manual typing honest too.
+  const seq = (line._seq = (line._seq || 0) + 1);
+  if (line._t) clearTimeout(line._t);
+  await new Promise((res) => { line._t = setTimeout(res, 200); });
+  if (seq !== line._seq) return; // a newer keystroke superseded this one
   try {
     const json = await apiFetch("GET", "/api/products?limit=20&search=" + encodeURIComponent(q));
+    if (seq !== line._seq) return; // response arrived after a newer query started
     line._results = json.data || [];
     line._open = true;
   } catch (_) {
@@ -2090,6 +2100,7 @@ async function poProductSearch(line) {
 function poProductChoose(line, r) {
   line.product_id = r.id;
   line.product_name = r.name;
+  line.barcode = r.barcode || "";
   line.cost_price = Number(r.cost_price) || 0;
   line.selling_price = Number(r.selling_price) || 0;
   line.cur_cost = Number(r.cost_price) || 0;
@@ -2343,6 +2354,28 @@ function grn(symbol, config) {
         this.supplierName = r.preferred_supplier_name || "";
       }
     },
+    // scanBarcode is the dedicated scanner path: an EXACT lookup on the code, not
+    // the fuzzy keystroke search. Scanners end with Enter, so this fires on Enter
+    // (and on blur/change). Found -> fill the whole line; not found -> keep the
+    // scanned code so a product created from the name below still carries it.
+    async scanBarcode(l) {
+      const code = (l.barcode || "").trim();
+      if (!code) return;
+      try {
+        const json = await apiFetch("GET", "/api/products/barcode/" + encodeURIComponent(code), undefined, { silent: true });
+        const p = json && json.data;
+        if (p && p.id) {
+          this.choose(l, p);
+          l.barcode = p.barcode || code;
+          return;
+        }
+      } catch (_) {
+        /* fall through to the not-found hint */
+      }
+      l.product_id = 0;
+      l._open = false;
+      toast("No product with that barcode — type the name to search or add it", "info");
+    },
     async searchSuppliers() {
       const q = this.supQuery.trim();
       if (!q) { this.supResults = []; return; }
@@ -2363,6 +2396,7 @@ function grn(symbol, config) {
         this.lines = config.lines.map((l) => ({
           product_id: Number(l.product_id) || 0,
           product_name: l.name || l.product_name || "",
+          barcode: l.barcode || "",
           // ordered is set only when receiving against an order, so the planned
           // quantity survives a short delivery.
           ordered: l.ordered || "",
@@ -2382,7 +2416,7 @@ function grn(symbol, config) {
       return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     },
     addLine() {
-      this.lines.push({ product_id: 0, product_name: "", ordered: "", quantity: 0, cost_price: 0, selling_price: 0, expiry_date: "", _open: false, _results: [] });
+      this.lines.push({ product_id: 0, product_name: "", barcode: "", ordered: "", quantity: 0, cost_price: 0, selling_price: 0, expiry_date: "", _open: false, _results: [] });
     },
     removeLine(i) {
       this.lines.splice(i, 1);
@@ -2431,6 +2465,9 @@ function grn(symbol, config) {
       }
       try {
         const body = { name: name };
+        // Carry the scanned barcode onto the new product so the next delivery
+        // finds it by scan instead of forcing another manual add.
+        if ((l.barcode || "").trim()) body.barcode = l.barcode.trim();
         if (this.productNeedsPrices) {
           body.cost_price = String(cost);
           body.selling_price = String(sell);
@@ -2440,6 +2477,7 @@ function grn(symbol, config) {
         if (!p) return;
         l.product_id = p.id;
         l.product_name = p.name;
+        if (p.barcode) l.barcode = p.barcode;
         l._results = [];
         l._open = false;
         toast(p.name + " added — it'll show in the owner's review list", "success");

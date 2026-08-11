@@ -336,7 +336,8 @@ templ SupplierReceive(d SupplierReceiveData) {
 							<template x-for="(l, i) in lines" x-bind:key="i">
 								<tr class="border-b">
 									<td class="py-1 pr-2 relative" x-on:click.away="l._open=false">
-										<input type="text" x-model="l.product_name" x-on:input="pick(l)" x-on:focus="pick(l)" placeholder="Search name or barcode…" class="w-full border rounded px-2 py-1"/>
+										<input type="text" inputmode="numeric" x-model="l.barcode" x-on:keydown.enter.prevent="scanBarcode(l)" x-on:change="scanBarcode(l)" placeholder="Scan barcode" class="w-full border rounded px-2 py-1 mb-1"/>
+										<input type="text" x-model="l.product_name" x-on:input="pick(l)" x-on:focus="pick(l)" placeholder="Search name…" class="w-full border rounded px-2 py-1"/>
 										<div x-show="l._open && (l._results.length || (canCreateProducts && (l.product_name || '').trim()))" class="absolute z-20 left-0 right-0 mt-1 bg-white border rounded-lg shadow max-h-56 overflow-auto" x-cloak>
 											<template x-for="r in l._results" x-bind:key="r.id">
 												<button type="button" x-on:click="choose(l, r)" class="block w-full text-left px-3 py-1.5 hover:bg-slate-100" x-text="r.name + (r.barcode ? '  ·  ' + r.barcode : '')"></button>
@@ -450,7 +451,8 @@ templ SupplierOrder(d SupplierOrderData) {
 							<template x-for="(l, i) in lines" x-bind:key="i">
 								<tr class="border-b">
 									<td class="py-1 pr-2 relative" x-on:click.away="l._open=false">
-										<input type="text" x-model="l.product_name" x-on:input="pick(l)" x-on:focus="pick(l)" placeholder="Search name or barcode…" class="w-full border rounded px-2 py-1"/>
+										<input type="text" inputmode="numeric" x-model="l.barcode" x-on:keydown.enter.prevent="scanBarcode(l)" x-on:change="scanBarcode(l)" placeholder="Scan barcode" class="w-full border rounded px-2 py-1 mb-1"/>
+										<input type="text" x-model="l.product_name" x-on:input="pick(l)" x-on:focus="pick(l)" placeholder="Search name…" class="w-full border rounded px-2 py-1"/>
 										<div x-show="l._open && (l._results.length || (canCreateProducts && (l.product_name || '').trim()))" class="absolute z-20 left-0 right-0 mt-1 bg-white border rounded-lg shadow max-h-56 overflow-auto" x-cloak>
 											<template x-for="r in l._results" x-bind:key="r.id">
 												<button type="button" x-on:click="choose(l, r)" class="block w-full text-left px-3 py-1.5 hover:bg-slate-100" x-text="r.name + (r.barcode ? '  ·  ' + r.barcode : '')"></button>
