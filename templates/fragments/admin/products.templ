@@ -222,13 +222,6 @@ templ ProductForm(p *products.Product, cats []categories.TreeNode, us []units.Un
 					<label class="block text-sm font-medium mb-1">Preferred Supplier <span class="text-slate-400 font-normal">(optional)</span></label>
 					@SupplierPicker("preferred_supplier_id", prefSupplierID(p), prefSupplierName(p, sups), "Search supplier…", true)
 				</div>
-				<div>
-					<label class="block text-sm font-medium mb-1">Barcode</label>
-					<div class="bc-field flex gap-2">
-						<input name="barcode" value={ valOf(p, fBarcode) } class="flex-1 border rounded-lg px-3 py-2"/>
-						<button type="button" onclick="generateBarcode(this)" class="px-3 py-2 rounded-lg border text-slate-700 whitespace-nowrap disabled:opacity-40">Generate</button>
-					</div>
-				</div>
 				<div class="grid grid-cols-3 gap-4">
 					<div>
 						<label class="block text-sm font-medium mb-1">Cost</label>
@@ -275,6 +268,16 @@ templ ProductForm(p *products.Product, cats []categories.TreeNode, us []units.Un
 					<div>
 						<label class="block text-sm font-medium mb-1">Warranty (months)</label>
 						<input name="warranty_months" type="number" min="0" value={ valOf(p, fWarrantyMonths) } placeholder="0 = none" class="w-full border rounded-lg px-3 py-2"/>
+					</div>
+				</div>
+				<!-- Barcode is the LAST field on purpose: a scanner ends its scan with Enter,
+				     which submits the form — so it must come after everything else is filled,
+				     turning "scan the barcode" into the natural final "save" action. -->
+				<div>
+					<label class="block text-sm font-medium mb-1">Barcode</label>
+					<div class="bc-field flex gap-2">
+						<input name="barcode" value={ valOf(p, fBarcode) } placeholder="Type, scan, or generate — scanning saves" class="flex-1 border rounded-lg px-3 py-2"/>
+						<button type="button" onclick="generateBarcode(this)" class="px-3 py-2 rounded-lg border text-slate-700 whitespace-nowrap disabled:opacity-40">Generate</button>
 					</div>
 				</div>
 				<div class="flex justify-end gap-3 pt-2">

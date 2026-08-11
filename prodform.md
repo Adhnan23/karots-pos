@@ -1,0 +1,226 @@
+- generic [ref=f6e1]:
+  - generic [ref=f6e2]:
+    - complementary [ref=f6e3]:
+      - generic [ref=f6e4]:
+        - generic [ref=f6e5]: POS Admin
+        - generic [ref=f6e6]: Admin
+        - generic [ref=f6e7]: 8/11/2026, 2:20:18 PM
+      - button "Search / jump… ⌘K" [ref=f6e9] [cursor=pointer]:
+        - generic [ref=f6e10]: Search / jump…
+        - generic [ref=f6e14]: ⌘K
+      - navigation [ref=f6e15]:
+        - link "🏠 Dashboard" [ref=f6e16] [cursor=pointer]:
+          - /url: /admin
+          - generic [ref=f6e17]: 🏠
+          - generic [ref=f6e18]: Dashboard
+        - link "🧾 Sell" [ref=f6e19] [cursor=pointer]:
+          - /url: /admin/sell
+          - generic [ref=f6e20]: 🧾
+          - generic [ref=f6e21]: Sell
+        - link "📦 Inventory" [ref=f6e22] [cursor=pointer]:
+          - /url: /admin/inventory
+          - generic [ref=f6e23]: 📦
+          - generic [ref=f6e24]: Inventory
+        - link "🛒 Purchasing" [ref=f6e25] [cursor=pointer]:
+          - /url: /admin/purchasing
+          - generic [ref=f6e26]: 🛒
+          - generic [ref=f6e27]: Purchasing
+        - link "💰 Money" [ref=f6e28] [cursor=pointer]:
+          - /url: /admin/money
+          - generic [ref=f6e29]: 💰
+          - generic [ref=f6e30]: Money
+        - link "📊 Reports" [ref=f6e31] [cursor=pointer]:
+          - /url: /admin/reports
+          - generic [ref=f6e32]: 📊
+          - generic [ref=f6e33]: Reports
+        - link "⚙️ Setup" [ref=f6e34] [cursor=pointer]:
+          - /url: /admin/setup
+          - generic [ref=f6e35]: ⚙️
+          - generic [ref=f6e36]: Setup
+        - link "🖨 Print & Copy" [ref=f6e37] [cursor=pointer]:
+          - /url: /admin/documents
+          - generic [ref=f6e38]: 🖨
+          - generic [ref=f6e39]: Print & Copy
+        - link "📶 Reload & Bills" [ref=f6e40] [cursor=pointer]:
+          - /url: /admin/recharge
+          - generic [ref=f6e41]: 📶
+          - generic [ref=f6e42]: Reload & Bills
+      - generic [ref=f6e43]:
+        - button "☀️ Light mode" [ref=f6e44] [cursor=pointer]:
+          - generic [ref=f6e45]: ☀️
+          - generic [ref=f6e46]: Light mode
+        - link "Change PIN" [ref=f6e47] [cursor=pointer]:
+          - /url: /account/pin
+        - button "🔒 Lock screen" [ref=f6e49] [cursor=pointer]
+        - button "Log out" [ref=f6e51] [cursor=pointer]
+    - main [ref=f6e52]:
+      - generic [ref=f6e53]:
+        - heading "Products" [level=1] [ref=f6e54]
+        - generic [ref=f6e55]:
+          - button "Export ▾" [ref=f6e57] [cursor=pointer]
+          - button "Import" [ref=f6e58] [cursor=pointer]
+          - button "+ New Product" [ref=f6e59] [cursor=pointer]
+      - generic [ref=f6e60]:
+        - generic [ref=f6e61]:
+          - searchbox "Search by name or barcode…" [ref=f6e62]
+          - button "All categories ▾" [ref=f6e65] [cursor=pointer]:
+            - generic [ref=f6e66]: All categories
+            - generic [ref=f6e67]: ▾
+          - generic [ref=f6e68]:
+            - checkbox "Show disabled" [ref=f6e69]
+            - text: Show disabled
+        - table [ref=f6e71]:
+          - rowgroup [ref=f6e72]:
+            - row [ref=f6e73]:
+              - columnheader "Product" [ref=f6e74]
+              - columnheader "Category" [ref=f6e75]
+              - columnheader "Price" [ref=f6e76]
+              - columnheader "Stock" [ref=f6e77]
+              - columnheader "Status" [ref=f6e78]
+              - columnheader [ref=f6e79]
+          - rowgroup [ref=f6e80]:
+            - row [ref=f6e81]:
+              - cell "Coca-Cola 1.5L 1000000000048" [ref=f6e82]:
+                - generic [ref=f6e83]: Coca-Cola 1.5L
+                - generic [ref=f6e84]: "1000000000048"
+              - cell "Soft Drinks" [ref=f6e85]
+              - cell "Rs. 380.00" [ref=f6e86]
+              - cell "0.00 pcs" [ref=f6e87]
+              - cell "low" [ref=f6e88]
+              - cell [ref=f6e89]:
+                - button "Edit" [ref=f6e90] [cursor=pointer]
+                - button "Disable" [ref=f6e91] [cursor=pointer]
+            - row [ref=f6e92]:
+              - cell "Dhal (Mysoor) 1kg 1000000000062" [ref=f6e93]:
+                - generic [ref=f6e94]: Dhal (Mysoor) 1kg
+                - generic [ref=f6e95]: "1000000000062"
+              - cell "Groceries" [ref=f6e96]
+              - cell "Rs. 340.00" [ref=f6e97]
+              - cell "54.00 kg" [ref=f6e98]
+              - cell "ok" [ref=f6e99]
+              - cell [ref=f6e100]:
+                - button "Edit" [ref=f6e101] [cursor=pointer]
+                - button "Disable" [ref=f6e102] [cursor=pointer]
+            - row [ref=f6e103]:
+              - cell "Mineral Water 1L 1000000000055" [ref=f6e104]:
+                - generic [ref=f6e105]: Mineral Water 1L
+                - generic [ref=f6e106]: "1000000000055"
+              - cell "Beverages" [ref=f6e107]
+              - cell "Rs. 90.00" [ref=f6e108]
+              - cell "98.00 pcs" [ref=f6e109]
+              - cell "ok" [ref=f6e110]
+              - cell [ref=f6e111]:
+                - button "Edit" [ref=f6e112] [cursor=pointer]
+                - button "Disable" [ref=f6e113] [cursor=pointer]
+            - row [ref=f6e114]:
+              - cell "Red Rice 1kg 1000000000079" [ref=f6e115]:
+                - generic [ref=f6e116]: Red Rice 1kg
+                - generic [ref=f6e117]: "1000000000079"
+              - cell "Rice & Grains" [ref=f6e118]
+              - cell "Rs. 300.00" [ref=f6e119]
+              - cell "64.00 kg" [ref=f6e120]
+              - cell "ok" [ref=f6e121]
+              - cell [ref=f6e122]:
+                - button "Edit" [ref=f6e123] [cursor=pointer]
+                - button "Disable" [ref=f6e124] [cursor=pointer]
+            - row [ref=f6e125]:
+              - cell "Rice 1kg (Samba) 1000000000024" [ref=f6e126]:
+                - generic [ref=f6e127]: Rice 1kg (Samba)
+                - generic [ref=f6e128]: "1000000000024"
+              - cell "Rice & Grains" [ref=f6e129]
+              - cell "Rs. 240.00" [ref=f6e130]
+              - cell "113.00 kg" [ref=f6e131]
+              - cell "ok" [ref=f6e132]
+              - cell [ref=f6e133]:
+                - button "Edit" [ref=f6e134] [cursor=pointer]
+                - button "Disable" [ref=f6e135] [cursor=pointer]
+            - row [ref=f6e136]:
+              - cell "Sprite 1L 1000000000086" [ref=f6e137]:
+                - generic [ref=f6e138]: Sprite 1L
+                - generic [ref=f6e139]: "1000000000086"
+              - cell "Soft Drinks" [ref=f6e140]
+              - cell "Rs. 310.00" [ref=f6e141]
+              - cell "42.00 pcs" [ref=f6e142]
+              - cell "ok" [ref=f6e143]
+              - cell [ref=f6e144]:
+                - button "Edit" [ref=f6e145] [cursor=pointer]
+                - button "Disable" [ref=f6e146] [cursor=pointer]
+            - row [ref=f6e147]:
+              - cell "Sugar 1kg 1000000000017" [ref=f6e148]:
+                - generic [ref=f6e149]: Sugar 1kg
+                - generic [ref=f6e150]: "1000000000017"
+              - cell "Groceries" [ref=f6e151]
+              - cell "Rs. 250.00" [ref=f6e152]
+              - cell "74.00 kg" [ref=f6e153]
+              - cell "ok" [ref=f6e154]
+              - cell [ref=f6e155]:
+                - button "Edit" [ref=f6e156] [cursor=pointer]
+                - button "Disable" [ref=f6e157] [cursor=pointer]
+            - row [ref=f6e158]:
+              - cell "Tea Leaves 100g 1000000000031" [ref=f6e159]:
+                - generic [ref=f6e160]: Tea Leaves 100g
+                - generic [ref=f6e161]: "1000000000031"
+              - cell "Groceries" [ref=f6e162]
+              - cell "Rs. 150.00" [ref=f6e163]
+              - cell "64.00 pcs" [ref=f6e164]
+              - cell "ok" [ref=f6e165]
+              - cell [ref=f6e166]:
+                - button "Edit" [ref=f6e167] [cursor=pointer]
+                - button "Disable" [ref=f6e168] [cursor=pointer]
+  - generic [ref=f6e170]:
+    - generic [ref=f6e171]:
+      - heading "New Product" [level=3] [ref=f6e172]
+      - button "✕" [ref=f6e173] [cursor=pointer]
+    - generic [ref=f6e174]:
+      - generic [ref=f6e175]:
+        - generic [ref=f6e176]: Name
+        - textbox [active] [ref=f6e177]
+      - generic [ref=f6e178]:
+        - generic [ref=f6e179]: Local name (optional — Sinhala / Tamil)
+        - textbox "e.g. තේ කොළ / தேயிலை" [ref=f6e180]
+      - generic [ref=f6e181]:
+        - generic [ref=f6e182]:
+          - generic [ref=f6e183]: Category
+          - button "Select category… ▾" [ref=f6e185] [cursor=pointer]:
+            - generic [ref=f6e186]: Select category…
+            - generic [ref=f6e187]: ▾
+        - generic [ref=f6e188]:
+          - generic [ref=f6e189]: Unit
+          - button "Piece (pcs) ▾" [ref=f6e191] [cursor=pointer]:
+            - generic [ref=f6e192]: Piece (pcs)
+            - generic [ref=f6e193]: ▾
+      - generic [ref=f6e194]:
+        - generic [ref=f6e195]: Preferred Supplier (optional)
+        - textbox "Search supplier…" [ref=f6e198]
+      - generic [ref=f6e199]:
+        - generic [ref=f6e200]:
+          - generic [ref=f6e201]: Cost
+          - spinbutton [ref=f6e202]
+        - generic [ref=f6e203]:
+          - generic [ref=f6e204]: Selling
+          - spinbutton [ref=f6e205]
+        - generic [ref=f6e206]:
+          - generic [ref=f6e207]: Wholesale
+          - spinbutton [ref=f6e208]
+      - generic [ref=f6e209]:
+        - generic [ref=f6e210]:
+          - generic [ref=f6e211]: Tax %
+          - spinbutton [ref=f6e212]
+        - generic [ref=f6e213]:
+          - generic [ref=f6e214]: Reorder Level
+          - spinbutton [ref=f6e215]
+      - generic [ref=f6e216]:
+        - generic [ref=f6e217]:
+          - checkbox "Track serial number" [ref=f6e218]
+          - generic [ref=f6e219]: Track serial number
+        - generic [ref=f6e220]:
+          - generic [ref=f6e221]: Warranty (months)
+          - spinbutton "0 = none" [ref=f6e222]
+      - generic [ref=f6e223]:
+        - generic [ref=f6e224]: Barcode
+        - generic [ref=f6e225]:
+          - textbox "Type, scan, or generate — scanning saves" [ref=f6e226]
+          - button "Generate" [ref=f6e227] [cursor=pointer]
+      - generic [ref=f6e228]:
+        - button "Cancel" [ref=f6e229] [cursor=pointer]
+        - button "Save" [ref=f6e230] [cursor=pointer]
