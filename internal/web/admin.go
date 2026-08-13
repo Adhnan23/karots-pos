@@ -119,8 +119,49 @@ func (a *adminUI) Dashboard(c echo.Context) error {
 		OutstandingDue: due,
 		ReviewCount:    reviewCount,
 		Recent:         recent,
+		Charts:         a.dashboardChartData(ctx, 14),
 		Setup:          a.setupStatus(ctx),
 	}))
+}
+
+// DashboardCharts renders just the chart carousel for a chosen range, swapped in
+// by the range buttons over HTMX (no full-page reload).
+func (a *adminUI) DashboardCharts(c echo.Context) error {
+	days := 14
+	switch c.QueryParam("days") {
+	case "7":
+		days = 7
+	case "30":
+		days = 30
+	case "90":
+		days = 90
+	}
+	return response.RenderFragment(c, adminpages.DashboardCharts(a.dashboardChartData(c.Request().Context(), days)))
+}
+
+// dashboardChartData runs the reports-section queries over the last `days` window
+// for the home-page chart carousel. Best-effort: a failed query yields an empty
+// chart rather than a broken page.
+func (a *adminUI) dashboardChartData(ctx context.Context, days int) adminpages.DashboardChartsData {
+	now := time.Now()
+	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	from := start.AddDate(0, 0, -(days - 1))
+	tomorrow := start.AddDate(0, 0, 1)
+	gran := "day"
+	if days > 31 {
+		gran = "week"
+	}
+
+	d := adminpages.DashboardChartsData{Symbol: a.symbol(ctx), Days: days}
+	d.Trend, _ = a.s.reports.SalesByPeriod(ctx, from, tomorrow, gran)
+	if pl, err := a.s.reports.Compute(ctx, from, tomorrow); err == nil && pl != nil {
+		d.Pay = pl.ByPayment
+		d.Top = pl.TopProducts
+	}
+	d.Cashiers, _ = a.s.reports.SalesByCashier(ctx, from, tomorrow)
+	d.Cats, _ = a.s.reports.ProfitByCategory(ctx, from, tomorrow)
+	d.Expenses, _ = a.s.reports.ExpensesByCategory(ctx, from, tomorrow)
+	return d
 }
 
 // --- products ---

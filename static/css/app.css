@@ -84,6 +84,14 @@ html.dark body.bg-slate-100 { background-color: #0b1120 !important; color: #e2e8
 .dark .text-slate-500,
 .dark .text-slate-400 { color: #94a3b8 !important; }
 
+/* SVG chart text uses fill-slate-* (an SVG `fill`, not `color`), so the text-*
+   overrides above don't reach it — mirror them here so axis labels, bar values
+   and legends stay legible on the dark card background. */
+.dark .fill-slate-700 { fill: #e2e8f0 !important; }
+.dark .fill-slate-600 { fill: #cbd5e1 !important; }
+.dark .fill-slate-500,
+.dark .fill-slate-400 { fill: #94a3b8 !important; }
+
 .dark .border,
 .dark .border-t,
 .dark .border-b,

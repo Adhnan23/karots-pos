@@ -256,6 +256,7 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	// Admin (manager/admin)
 	ag := e.Group("/admin", jwt, lockGuard, pinGuard, middleware.RequireRole(auth.RoleAdmin, auth.RoleManager))
 	ag.GET("", admin.Dashboard)
+	ag.GET("/dashboard/charts", admin.DashboardCharts)
 	ag.GET("/products", admin.Products)
 	ag.GET("/products/table", admin.ProductsTable)
 	ag.GET("/products/review", admin.ProductReview)
