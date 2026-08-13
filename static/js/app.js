@@ -31,6 +31,56 @@ document.addEventListener("DOMContentLoaded", function () {
   document.body.addEventListener("htmx:beforeRequest", loadingStart);
   document.body.addEventListener("htmx:afterRequest", loadingStop);
 
+  // Kiosk key guard — stop browser shortcuts that strand a cashier on a browser
+  // screen with no way back (the whole app runs in a Chrome kiosk).
+  //
+  //  1. Function keys F1-F12 are neutralised EVERYWHERE: F1 Help, F3 Find, F5
+  //     Reload, F11 fullscreen, F12 DevTools all pull the user out of the app, and
+  //     none of them have a legit use here. The till's own F1-F10 still work on the
+  //     sell screen (its handlers listen in the bubble phase, after this one). On a
+  //     cashier page a stray F1 also jumps back to the sell screen — what a cashier
+  //     actually wants; the sell screen maps F1 to its own reset, so we skip it
+  //     there. On admin, F1 simply does nothing.
+  //  2. Inside the cashier kiosk only, the browser-chrome combos are blocked too —
+  //     reload, find, print, save, open, bookmark, zoom, and Alt+←/→ back/forward.
+  //     Admin keeps Ctrl+F / Ctrl+P etc. We deliberately leave clipboard/undo
+  //     (Ctrl+C/V/X/A/Z/Y), the ⌘K command palette, and Ctrl+Shift+R (a manual
+  //     reload escape hatch) alone.
+  //
+  // Capture phase so we beat the browser default and any page component, and we
+  // only preventDefault (never stopPropagation). NOTE: browser-LEVEL shortcuts
+  // (F12 DevTools, Ctrl+N/T/W, Ctrl+U view-source) can't always be cancelled from
+  // the page — a truly locked kiosk still needs the Chrome kiosk flags/policy.
+  document.addEventListener(
+    "keydown",
+    function (e) {
+      const p = location.pathname;
+      const inCashier = p.startsWith("/cashier") || p.startsWith("/account");
+
+      if (/^F\d{1,2}$/.test(e.key)) {
+        e.preventDefault();
+        if (e.key === "F1" && p.startsWith("/cashier") && p !== "/cashier") {
+          location.href = "/cashier";
+        }
+        return;
+      }
+
+      if (!inCashier) return;
+      const mod = e.ctrlKey || e.metaKey;
+      // Ctrl/Cmd combos that open browser chrome — but not Shift variants (leaves
+      // Ctrl+Shift+R) and not the editing/palette keys we rely on.
+      if (mod && !e.shiftKey && e.key.length === 1 && "rfpsodg=+-0".includes(e.key.toLowerCase())) {
+        e.preventDefault();
+        return;
+      }
+      // Alt + Left/Right = browser back/forward — walks the cashier out of the app.
+      if (e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+        e.preventDefault();
+      }
+    },
+    true,
+  );
+
   // Replace the native confirm() for hx-confirm with our styled modal.
   document.body.addEventListener("htmx:confirm", function (e) {
     if (!e.detail.question) return; // no hx-confirm on this element → proceed
