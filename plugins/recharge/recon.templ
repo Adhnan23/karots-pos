@@ -59,7 +59,7 @@ templ ReconBody(d ReconData) {
 templ txForm(d ReconData) {
 	<div
 		class="bg-white rounded-2xl shadow-sm p-6"
-		x-data="{ type:'deposit', cid:'', did:'', amount:'', svc:'', devices:[], async loadDevices(){ this.devices=[]; this.did=''; if(!this.cid){ return } try{ const r=await fetch('/cashier/recharge/devices?for=money&carrier_id='+encodeURIComponent(this.cid)); const j=await r.json(); this.devices=j.data||[]; if(this.devices.length){ this.did=String(this.devices[0].id) } }catch(e){} }, dev(){ return this.devices.find(x=>String(x.id)===String(this.did)) }, bal(){ const x=this.dev(); return x?Number(x.balance):0 }, decreases(){ return this.type==='deposit' }, over(){ return this.decreases() && Number(this.amount)>this.bal() } }"
+		x-data="{ type:'deposit', cid:'', did:'', amount:'', svc:'', cash:'', devices:[], async loadDevices(){ this.devices=[]; this.did=''; if(!this.cid){ return } try{ const r=await fetch('/cashier/recharge/devices?for=money&carrier_id='+encodeURIComponent(this.cid)); const j=await r.json(); this.devices=j.data||[]; if(this.devices.length){ this.did=String(this.devices[0].id) } }catch(e){} }, dev(){ return this.devices.find(x=>String(x.id)===String(this.did)) }, bal(){ const x=this.dev(); return x?Number(x.balance):0 }, decreases(){ return this.type==='deposit' }, over(){ return this.decreases() && Number(this.amount)>this.bal() } }"
 		x-init="cid=$el.querySelector('[data-first-carrier]')?.value || ''; loadDevices()"
 	>
 		<h2 class="text-lg font-semibold mb-4">Record a transaction</h2>
@@ -124,6 +124,12 @@ templ txForm(d ReconData) {
 				<input type="number" name="service_charge" min="0" step="0.01" x-model="svc" placeholder="0.00" class="w-full border rounded-lg px-3 py-2.5 text-right"/>
 				<p x-show="Number(svc)>0" class="text-xs text-slate-500 mt-1">Customer pays <span class="font-semibold tabular-nums" x-text="(Number(amount||0)+Number(svc||0)).toFixed(2)"></span> total (charge added to drawer).</p>
 			</div>
+			<div x-show="type==='deposit'">
+				<label class="block text-sm font-medium text-slate-600 mb-1">Cash given (optional)</label>
+				<input type="number" name="cash_given" min="0" step="0.01" x-model="cash" placeholder="0.00" class="w-full border rounded-lg px-3 py-2.5 text-right"/>
+				<p x-show="Number(cash)>0 && Number(cash) >= Number(amount||0)+Number(svc||0)" class="text-xs text-emerald-600 mt-1">Change: <span class="font-semibold tabular-nums" x-text="(Number(cash)-(Number(amount||0)+Number(svc||0))).toFixed(2)"></span></p>
+				<p x-show="Number(cash)>0 && Number(cash) < Number(amount||0)+Number(svc||0)" class="text-xs text-rose-500 mt-1">Still owed: <span class="font-semibold tabular-nums" x-text="((Number(amount||0)+Number(svc||0))-Number(cash)).toFixed(2)"></span></p>
+			</div>
 			<div>
 				<label class="block text-sm font-medium text-slate-600 mb-1">Reference (optional)</label>
 				<input type="text" name="reference" placeholder="txn / phone no." class="w-full border rounded-lg px-3 py-2.5"/>
@@ -144,7 +150,7 @@ templ txForm(d ReconData) {
 templ bankTxForm(d ReconData) {
 	<div
 		class="bg-white rounded-2xl shadow-sm p-6"
-		x-data="{ type:'billpay', bankId:'', amount:'', svc:'', banks:[], async load(){ try{ const r=await fetch('/cashier/recharge/banks'); const j=await r.json(); this.banks=j.data||[]; if(this.banks.length){ this.bankId=String(this.banks[0].id) } }catch(e){} }, bank(){ return this.banks.find(x=>String(x.id)===String(this.bankId)) }, bal(){ const x=this.bank(); return x?Number(x.balance):0 }, over(){ return this.type==='billpay' && Number(this.amount)>this.bal() } }"
+		x-data="{ type:'billpay', bankId:'', amount:'', svc:'', cash:'', banks:[], async load(){ try{ const r=await fetch('/cashier/recharge/banks'); const j=await r.json(); this.banks=j.data||[]; if(this.banks.length){ this.bankId=String(this.banks[0].id) } }catch(e){} }, bank(){ return this.banks.find(x=>String(x.id)===String(this.bankId)) }, bal(){ const x=this.bank(); return x?Number(x.balance):0 }, over(){ return this.type==='billpay' && Number(this.amount)>this.bal() } }"
 		x-init="load()"
 	>
 		<h2 class="text-lg font-semibold mb-1">Bill payment &amp; cash</h2>
@@ -193,6 +199,12 @@ templ bankTxForm(d ReconData) {
 				<input type="number" name="service_charge" min="0" step="0.01" x-model="svc" placeholder="0.00" class="w-full border rounded-lg px-3 py-2.5 text-right"/>
 				<p x-show="Number(svc)>0 && type==='billpay'" class="text-xs text-slate-500 mt-1">Customer pays <span class="font-semibold tabular-nums" x-text="(Number(amount||0)+Number(svc||0)).toFixed(2)"></span> total (charge added to drawer).</p>
 				<p x-show="Number(svc)>0 && type==='getmoney'" class="text-xs text-slate-500 mt-1">Charge kept as extra cash in the drawer.</p>
+			</div>
+			<div x-show="type==='billpay'">
+				<label class="block text-sm font-medium text-slate-600 mb-1">Cash given (optional)</label>
+				<input type="number" name="cash_given" min="0" step="0.01" x-model="cash" placeholder="0.00" class="w-full border rounded-lg px-3 py-2.5 text-right"/>
+				<p x-show="Number(cash)>0 && Number(cash) >= Number(amount||0)+Number(svc||0)" class="text-xs text-emerald-600 mt-1">Change: <span class="font-semibold tabular-nums" x-text="(Number(cash)-(Number(amount||0)+Number(svc||0))).toFixed(2)"></span></p>
+				<p x-show="Number(cash)>0 && Number(cash) < Number(amount||0)+Number(svc||0)" class="text-xs text-rose-500 mt-1">Still owed: <span class="font-semibold tabular-nums" x-text="((Number(amount||0)+Number(svc||0))-Number(cash)).toFixed(2)"></span></p>
 			</div>
 			<div>
 				<label class="block text-sm font-medium text-slate-600 mb-1">Reference (optional)</label>

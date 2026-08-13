@@ -11,6 +11,8 @@ import (
 	"karots-pos/internal/features/settings"
 	"karots-pos/internal/money"
 	"karots-pos/internal/printing"
+	"karots-pos/internal/receiptimg"
+	poststatic "karots-pos/static"
 
 	"github.com/shopspring/decimal"
 )
@@ -26,6 +28,7 @@ type slipData struct {
 	Reference     string
 	Amount        decimal.Decimal
 	ServiceCharge decimal.Decimal
+	CashGiven     decimal.Decimal // cash the customer handed over; zero = not recorded (no change line)
 	Operator      string // who recorded it (shown as "By: …")
 	When          time.Time
 }
@@ -49,10 +52,10 @@ func (p *Plugin) reprintTx(ctx context.Context, t TxRow) error {
 	if t.Device != "—" {
 		device = t.Device
 	}
-	return printing.Raw(ctx, cfg.ReceiptPrinter, buildSlip(cfg, slipData{
+	return printing.Raw(ctx, cfg.ReceiptPrinter, buildSlip(cfg, receiptimg.SlipOptions(ctx, cfg, poststatic.Files), slipData{
 		Kind: t.Type, ReceiptNo: floatNo(t.ID), Carrier: t.Carrier, Device: device,
-		Amount: t.Amount, ServiceCharge: t.ServiceCharge, Reference: refText(t.Reference),
-		Operator: t.Operator, When: t.CreatedAt,
+		Amount: t.Amount, ServiceCharge: t.ServiceCharge, CashGiven: derefDec(t.CashGiven),
+		Reference: refText(t.Reference), Operator: t.Operator, When: t.CreatedAt,
 	}))
 }
 
@@ -67,84 +70,89 @@ func (p *Plugin) reprintBill(ctx context.Context, t BillTxRow) error {
 	if cfg == nil || strings.TrimSpace(cfg.ReceiptPrinter) == "" {
 		return nil
 	}
-	return printing.Raw(ctx, cfg.ReceiptPrinter, buildSlip(cfg, slipData{
+	return printing.Raw(ctx, cfg.ReceiptPrinter, buildSlip(cfg, receiptimg.SlipOptions(ctx, cfg, poststatic.Files), slipData{
 		Kind: t.Type, ReceiptNo: billNo(t.ID), Carrier: t.Bank, Amount: t.Amount,
-		ServiceCharge: t.ServiceCharge, Reference: refText(t.Reference),
-		Operator: t.Operator, When: t.CreatedAt,
+		ServiceCharge: t.ServiceCharge, CashGiven: derefDec(t.CashGiven),
+		Reference: refText(t.Reference), Operator: t.Operator, When: t.CreatedAt,
 	}))
 }
 
-// buildSlip renders a transaction slip as raw ESC/POS bytes. It reuses the core
-// printing transport (printing.Raw) and touches no core printing/escpos code.
-func buildSlip(cfg *settings.Settings, d slipData) []byte {
-	width := 32
-	if strings.TrimSpace(cfg.ReceiptWidth) == "80" {
-		width = 48
+// buildSlip renders a reload/bill transaction slip as raw ESC/POS bytes using the
+// SHARED core receipt header/footer (escpos.Header/Footer), so a recharge slip
+// carries the same branding — big shop name, secondary-language name, address,
+// settings footer + credit line — as the sale receipt. Only the body (carrier/
+// bank, amounts, change) is recharge-specific.
+func buildSlip(cfg *settings.Settings, opts escpos.Options, d slipData) []byte {
+	w := escpos.Columns(cfg.ReceiptWidth)
+	sym := cfg.CurrencySymbol
+	if sym == "" {
+		sym = "Rs."
 	}
-
 	var b bytes.Buffer
-	b.Write([]byte{0x1B, 0x40}) // ESC @  initialise
-	center := func() { b.Write([]byte{0x1B, 0x61, 0x01}) }
-	left := func() { b.Write([]byte{0x1B, 0x61, 0x00}) }
-	bold := func(on bool) {
-		if on {
-			b.Write([]byte{0x1B, 0x45, 0x01})
-		} else {
-			b.Write([]byte{0x1B, 0x45, 0x00})
-		}
-	}
-	// Sanitise every free-text/label field to printable ASCII, exactly like the
-	// core money-receipt slip (the thermal font has no dash/non-Latin glyphs).
-	line := func(s string) { b.WriteString(escpos.ASCII(s)); b.WriteByte('\n') }
-	rule := func() { b.WriteString(strings.Repeat("-", width)); b.WriteByte('\n') }
+	escpos.Init(&b)
+	escpos.Header(&b, *cfg, opts)
+	escpos.Title(&b, txLabel(d.Kind))
 
-	center()
-	bold(true)
-	line(cfg.ShopName)
-	bold(false)
-	if cfg.Address != nil && strings.TrimSpace(*cfg.Address) != "" {
-		line(*cfg.Address)
-	}
-	if cfg.Phone != nil && strings.TrimSpace(*cfg.Phone) != "" {
-		line(*cfg.Phone)
-	}
-	rule()
-	// Same header shape as CR-/DP- receipts: bold "<TITLE> RECEIPT" then the number.
-	bold(true)
-	line(strings.ToUpper(txLabel(d.Kind)) + " RECEIPT")
-	bold(false)
+	// --- Meta (left, values right-aligned like the sale) ---
+	escpos.Left(&b)
+	escpos.Divider(&b, w)
 	if strings.TrimSpace(d.ReceiptNo) != "" {
-		line(d.ReceiptNo)
+		escpos.Line(&b, escpos.LeftRight("Receipt:", d.ReceiptNo, w))
 	}
-	rule()
-	left()
+	escpos.Line(&b, escpos.LeftRight("Date:", d.When.Format("2006-01-02 15:04"), w))
 	// Bill-pay / get-money name the bank; everything else names a carrier.
 	if d.Kind == "billpay" || d.Kind == "getmoney" {
-		line("Bank    : " + d.Carrier)
+		escpos.Line(&b, escpos.LeftRight("Bank:", escpos.ASCII(d.Carrier), w))
 	} else {
-		line("Carrier : " + d.Carrier)
+		escpos.Line(&b, escpos.LeftRight("Carrier:", escpos.ASCII(d.Carrier), w))
 	}
 	if strings.TrimSpace(d.Device) != "" {
-		line("Device  : " + d.Device)
-	}
-	line("Amount  : " + money.Format(cfg.CurrencySymbol, d.Amount))
-	if d.ServiceCharge.IsPositive() {
-		line("Service : " + money.Format(cfg.CurrencySymbol, d.ServiceCharge))
-		line("Total   : " + money.Format(cfg.CurrencySymbol, d.Amount.Add(d.ServiceCharge)))
+		escpos.Line(&b, escpos.LeftRight("Device:", escpos.ASCII(d.Device), w))
 	}
 	if strings.TrimSpace(d.Reference) != "" {
-		line("Ref     : " + d.Reference)
+		escpos.Line(&b, escpos.LeftRight("Ref:", escpos.ASCII(d.Reference), w))
 	}
 	if strings.TrimSpace(d.Operator) != "" {
-		line("By      : " + d.Operator)
+		escpos.Line(&b, escpos.LeftRight("By:", escpos.ASCII(d.Operator), w))
 	}
-	line("Date    : " + d.When.Format("2006-01-02 15:04"))
-	rule()
-	center()
-	line("Thank you")
-	b.WriteString("\n\n\n")
-	b.Write([]byte{0x1D, 0x56, 0x42, 0x00}) // GS V partial cut with feed
+	escpos.Divider(&b, w)
+
+	// --- Amounts (Total/Amount emphasized like the sale's TOTAL) ---
+	due := d.Amount
+	if d.ServiceCharge.IsPositive() {
+		escpos.Line(&b, escpos.LeftRight("Amount", money.Format(sym, d.Amount), w))
+		escpos.Line(&b, escpos.LeftRight("Service", money.Format(sym, d.ServiceCharge), w))
+		due = d.Amount.Add(d.ServiceCharge)
+		escpos.Emphasis(&b, true)
+		escpos.Line(&b, escpos.LeftRight("Total", money.Format(sym, due), w))
+		escpos.Emphasis(&b, false)
+	} else {
+		escpos.Emphasis(&b, true)
+		escpos.Line(&b, escpos.LeftRight("Amount", money.Format(sym, d.Amount), w))
+		escpos.Emphasis(&b, false)
+	}
+	// Tender + change, like a sale receipt — only when the cash given was recorded.
+	if d.CashGiven.IsPositive() {
+		escpos.Line(&b, escpos.LeftRight("Paid", money.Format(sym, d.CashGiven), w))
+		if change := d.CashGiven.Sub(due); change.IsNegative() {
+			escpos.Line(&b, escpos.LeftRight("Balance", money.Format(sym, change.Neg()), w))
+		} else {
+			escpos.Line(&b, escpos.LeftRight("Change", money.Format(sym, change), w))
+		}
+	}
+	escpos.Divider(&b, w)
+
+	escpos.Footer(&b, *cfg)
 	return b.Bytes()
+}
+
+// derefDec unwraps a nullable money column to a plain decimal (NULL → zero), so a
+// slip with no recorded tender simply omits the change line.
+func derefDec(d *decimal.Decimal) decimal.Decimal {
+	if d == nil {
+		return decimal.Zero
+	}
+	return *d
 }
 
 // txLabel is the human label for a transaction type.

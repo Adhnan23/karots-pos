@@ -184,12 +184,12 @@ func (h *cashierUI) Refill(c echo.Context) error {
 	msg := "Float refilled — paid from " + rec.FromLabel
 	reprintURL := "/cashier/recharge/tx/" + strconv.FormatInt(txID, 10) + "/print"
 	if cfg, cerr := h.p.core.Settings.Get(ctx); cerr == nil && cfg != nil && cfg.AskToPrint {
-		c.Response().Header().Set("HX-Trigger", response.PrintPrompt(msg, reprintURL, false))
+		c.Response().Header().Set("HX-Trigger", response.PrintPrompt(msg, reprintURL, false, "close-modal"))
 		return c.NoContent(http.StatusOK)
 	}
 	if t, terr := h.p.store.TxByID(ctx, txID); terr == nil {
 		_ = h.p.reprintTx(ctx, t) // best-effort: a printer hiccup never fails the refill
 	}
-	c.Response().Header().Set("HX-Trigger", response.Toast(msg, "success"))
+	c.Response().Header().Set("HX-Trigger", response.ToastAnd(msg, "success", "close-modal"))
 	return c.NoContent(http.StatusOK)
 }

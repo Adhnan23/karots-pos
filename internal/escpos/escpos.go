@@ -78,6 +78,108 @@ type Options struct {
 	CustomerDue decimal.Decimal
 }
 
+// Init writes the ESC/POS reset + Latin code page that every receipt starts with.
+func Init(b *bytes.Buffer) {
+	b.Write([]byte{esc, '@'})    // initialize
+	b.Write([]byte{esc, 't', 0}) // code page PC437 (Latin)
+}
+
+// Header writes the shared, centered branding block at the top of EVERY receipt —
+// logo, the shop name in double-width bold, the secondary-language (Sinhala/Tamil)
+// name image, address, phone and VAT no — so a sale, a money receipt and a
+// recharge slip all carry identical branding. Leaves the printer centered; the
+// caller switches to left before the body.
+func Header(b *bytes.Buffer, cfg settings.Settings, opts Options) {
+	w := columns(cfg.ReceiptWidth)
+	b.Write([]byte{esc, 'a', 1}) // center
+	// Logo at the very top (rendered as a full-width raster, centered on canvas).
+	if len(opts.Logo) > 0 {
+		b.Write(opts.Logo)
+		line(b, "")
+	}
+	b.Write([]byte{esc, 'E', 1})   // bold on
+	b.Write([]byte{gs, '!', 0x11}) // double width + height
+	line(b, ascii(cfg.ShopName))
+	b.Write([]byte{gs, '!', 0x00}) // normal size
+	b.Write([]byte{esc, 'E', 0})   // bold off
+	// Secondary shop name (Sinhala/Tamil) is a raster image (the built-in font
+	// can't draw it); printed here at the same size the sale receipt uses.
+	if len(opts.SubName) > 0 {
+		b.Write(opts.SubName)
+	}
+	line(b, "") // breathing room between the name and the address block
+	if s := deref(cfg.Address); s != "" {
+		for _, ln := range wrap(ascii(s), w) {
+			line(b, ln)
+		}
+	}
+	if s := deref(cfg.Phone); s != "" {
+		line(b, "Tel: "+ascii(s))
+	}
+	if cfg.TaxRegistered {
+		if s := deref(cfg.TaxRegNo); s != "" {
+			line(b, "VAT: "+ascii(s))
+		}
+	}
+}
+
+// Title writes a centered, bold, star-wrapped receipt title (e.g. "*** REFUND ***")
+// under the header. An empty title prints nothing — a sale needs no title line.
+// Assumes the printer is still centered (call right after Header).
+func Title(b *bytes.Buffer, title string) {
+	if strings.TrimSpace(title) == "" {
+		return
+	}
+	line(b, "")
+	b.Write([]byte{esc, 'E', 1})
+	line(b, "*** "+strings.ToUpper(ascii(title))+" ***")
+	b.Write([]byte{esc, 'E', 0})
+}
+
+// Footer writes the shared, centered footer at the bottom of EVERY receipt — the
+// shop's own footer message from Settings, a thank-you line, and the builder
+// credit line in the small font — then feeds past the cutter gap and cuts. This
+// is what makes every receipt end the same way.
+func Footer(b *bytes.Buffer, cfg settings.Settings) {
+	w := columns(cfg.ReceiptWidth)
+	b.Write([]byte{esc, 'a', 1}) // center
+	if s := deref(cfg.ReceiptFooter); s != "" {
+		for _, ln := range wrap(ascii(s), w) {
+			line(b, ln)
+		}
+	}
+	line(b, "Thank you! Come again.")
+	line(b, "")
+	b.Write([]byte{esc, 'M', 1}) // select Font B (smaller)
+	line(b, "POS built by Adhnan")
+	line(b, "adhnanmsa@gmail.com | 0769626396")
+	b.Write([]byte{esc, 'M', 0}) // back to Font A
+	// Feed past the head-to-cutter gap (plus a little margin) before cutting.
+	b.Write([]byte{esc, 'd', feedBeforeCut})
+	b.Write([]byte{gs, 'V', 1})
+}
+
+// Exported thin wrappers so slip builders in other packages (money receipts,
+// recharge) render rows with exactly the same alignment as the sale receipt.
+func Line(b *bytes.Buffer, s string)              { line(b, s) }
+func Divider(b *bytes.Buffer, w int)              { divider(b, w) }
+func LeftRight(l, r string, w int) string         { return leftRight(l, r, w) }
+func BigLine(b *bytes.Buffer, l, r string, w int) { bigLine(b, l, r, w) }
+func Columns(width string) int                    { return columns(width) }
+func Wrap(s string, w int) []string               { return wrap(s, w) }
+func Left(b *bytes.Buffer)                         { b.Write([]byte{esc, 'a', 0}) }
+func Center(b *bytes.Buffer)                       { b.Write([]byte{esc, 'a', 1}) }
+
+// Emphasis toggles bold, for a builder that wants to stress one row (e.g. the
+// amount) exactly like the sale's TOTAL.
+func Emphasis(b *bytes.Buffer, on bool) {
+	if on {
+		b.Write([]byte{esc, 'E', 1})
+	} else {
+		b.Write([]byte{esc, 'E', 0})
+	}
+}
+
 // Document builds the ESC/POS byte stream for a completed sale.
 func Document(d sales.Detail, cfg settings.Settings, opts Options) []byte {
 	w := columns(cfg.ReceiptWidth)
@@ -87,40 +189,8 @@ func Document(d sales.Detail, cfg settings.Settings, opts Options) []byte {
 	}
 
 	var b bytes.Buffer
-	b.Write([]byte{esc, '@'})    // initialize
-	b.Write([]byte{esc, 't', 0}) // code page PC437 (Latin)
-
-	// --- Header (centered) ---
-	b.Write([]byte{esc, 'a', 1}) // center
-	// Logo at the very top (rendered as a full-width raster, centered on canvas).
-	if len(opts.Logo) > 0 {
-		b.Write(opts.Logo)
-		line(&b, "")
-	}
-	b.Write([]byte{esc, 'E', 1})   // bold on
-	b.Write([]byte{gs, '!', 0x11}) // double width + height
-	line(&b, ascii(cfg.ShopName))
-	b.Write([]byte{gs, '!', 0x00}) // normal size
-	b.Write([]byte{esc, 'E', 0})   // bold off
-	// Secondary shop name (Sinhala/Tamil) is rendered as an image by the caller
-	// because the built-in font can't draw it; printed here if supplied.
-	if len(opts.SubName) > 0 {
-		b.Write(opts.SubName)
-	}
-	line(&b, "") // breathing room between the name and the address block
-	if s := deref(cfg.Address); s != "" {
-		for _, ln := range wrap(ascii(s), w) {
-			line(&b, ln)
-		}
-	}
-	if s := deref(cfg.Phone); s != "" {
-		line(&b, "Tel: "+ascii(s))
-	}
-	if cfg.TaxRegistered {
-		if s := deref(cfg.TaxRegNo); s != "" {
-			line(&b, "VAT: "+ascii(s))
-		}
-	}
+	Init(&b)
+	Header(&b, cfg, opts)
 
 	// --- Meta (left) ---
 	b.Write([]byte{esc, 'a', 0}) // left
@@ -201,27 +271,7 @@ func Document(d sales.Detail, cfg settings.Settings, opts Options) []byte {
 	}
 	divider(&b, w)
 
-	// --- Footer (centered) ---
-	b.Write([]byte{esc, 'a', 1})
-	if s := deref(cfg.ReceiptFooter); s != "" {
-		for _, ln := range wrap(ascii(s), w) {
-			line(&b, ln)
-		}
-	}
-	line(&b, "Thank you! Come again.")
-
-	// Credit line in the small built-in font (Font B), centered.
-	line(&b, "")
-	b.Write([]byte{esc, 'M', 1}) // select Font B (smaller)
-	line(&b, "POS built by Adhnan")
-	line(&b, "adhnanmsa@gmail.com | 0769626396")
-	b.Write([]byte{esc, 'M', 0}) // back to Font A
-
-	// Feed past the head-to-cutter gap (plus a little margin) before cutting, so
-	// the last printed line clears the blade instead of being sheared at the end.
-	b.Write([]byte{esc, 'd', feedBeforeCut})
-	b.Write([]byte{gs, 'V', 1})
-
+	Footer(&b, cfg)
 	return b.Bytes()
 }
 
@@ -275,27 +325,9 @@ func ReturnDocument(rr sales.ReturnReceipt, cfg settings.Settings, opts Options)
 	}
 
 	var b bytes.Buffer
-	b.Write([]byte{esc, '@'})
-	b.Write([]byte{esc, 't', 0})
-
-	// --- Header (centered) ---
-	b.Write([]byte{esc, 'a', 1})
-	if len(opts.Logo) > 0 {
-		b.Write(opts.Logo)
-		line(&b, "")
-	}
-	b.Write([]byte{esc, 'E', 1})
-	b.Write([]byte{gs, '!', 0x11})
-	line(&b, ascii(cfg.ShopName))
-	b.Write([]byte{gs, '!', 0x00})
-	b.Write([]byte{esc, 'E', 0})
-	if len(opts.SubName) > 0 {
-		b.Write(opts.SubName)
-	}
-	line(&b, "")
-	b.Write([]byte{esc, 'E', 1})
-	line(&b, "*** REFUND ***")
-	b.Write([]byte{esc, 'E', 0})
+	Init(&b)
+	Header(&b, cfg, opts)
+	Title(&b, "REFUND")
 
 	// --- Meta (left) ---
 	b.Write([]byte{esc, 'a', 0})
@@ -337,9 +369,7 @@ func ReturnDocument(rr sales.ReturnReceipt, cfg settings.Settings, opts Options)
 	// --- Footer (centered) ---
 	b.Write([]byte{esc, 'a', 1})
 	line(&b, "Refund slip - please retain.")
-
-	b.Write([]byte{esc, 'd', feedBeforeCut})
-	b.Write([]byte{gs, 'V', 1})
+	Footer(&b, cfg)
 
 	return b.Bytes()
 }
@@ -361,27 +391,9 @@ func WarrantyDocument(s WarrantySlip, cfg settings.Settings, opts Options) []byt
 	w := columns(cfg.ReceiptWidth)
 
 	var b bytes.Buffer
-	b.Write([]byte{esc, '@'})
-	b.Write([]byte{esc, 't', 0})
-
-	// --- Header (centered) ---
-	b.Write([]byte{esc, 'a', 1})
-	if len(opts.Logo) > 0 {
-		b.Write(opts.Logo)
-		line(&b, "")
-	}
-	b.Write([]byte{esc, 'E', 1})
-	b.Write([]byte{gs, '!', 0x11})
-	line(&b, ascii(cfg.ShopName))
-	b.Write([]byte{gs, '!', 0x00})
-	b.Write([]byte{esc, 'E', 0})
-	if len(opts.SubName) > 0 {
-		b.Write(opts.SubName)
-	}
-	line(&b, "")
-	b.Write([]byte{esc, 'E', 1})
-	line(&b, "*** WARRANTY REPLACEMENT ***")
-	b.Write([]byte{esc, 'E', 0})
+	Init(&b)
+	Header(&b, cfg, opts)
+	Title(&b, "WARRANTY REPLACEMENT")
 
 	// --- Body (left) ---
 	b.Write([]byte{esc, 'a', 0})
@@ -414,9 +426,7 @@ func WarrantyDocument(s WarrantySlip, cfg settings.Settings, opts Options) []byt
 	// --- Footer (centered) ---
 	b.Write([]byte{esc, 'a', 1})
 	line(&b, "Replacement slip - please retain.")
-
-	b.Write([]byte{esc, 'd', feedBeforeCut})
-	b.Write([]byte{gs, 'V', 1})
+	Footer(&b, cfg)
 
 	return b.Bytes()
 }
@@ -439,26 +449,9 @@ func DebtDocument(s DebtSlip, cfg settings.Settings, opts Options) []byte {
 		sym = "Rs."
 	}
 	var b bytes.Buffer
-	b.Write([]byte{esc, '@'})
-	b.Write([]byte{esc, 't', 0})
-	// header
-	b.Write([]byte{esc, 'a', 1})
-	if len(opts.Logo) > 0 {
-		b.Write(opts.Logo)
-		line(&b, "")
-	}
-	b.Write([]byte{esc, 'E', 1})
-	b.Write([]byte{gs, '!', 0x11})
-	line(&b, ascii(cfg.ShopName))
-	b.Write([]byte{gs, '!', 0x00})
-	b.Write([]byte{esc, 'E', 0})
-	if len(opts.SubName) > 0 {
-		b.Write(opts.SubName)
-	}
-	line(&b, "")
-	b.Write([]byte{esc, 'E', 1})
-	line(&b, "*** CREDIT PAYMENT ***")
-	b.Write([]byte{esc, 'E', 0})
+	Init(&b)
+	Header(&b, cfg, opts)
+	Title(&b, "CREDIT PAYMENT")
 	// meta
 	b.Write([]byte{esc, 'a', 0})
 	divider(&b, w)
@@ -487,9 +480,7 @@ func DebtDocument(s DebtSlip, cfg settings.Settings, opts Options) []byte {
 	if s.CashierName != "" {
 		line(&b, "Served by: "+ascii(s.CashierName))
 	}
-	line(&b, "Thank you - please retain.")
-	b.Write([]byte{esc, 'd', feedBeforeCut})
-	b.Write([]byte{gs, 'V', 1})
+	Footer(&b, cfg)
 	return b.Bytes()
 }
 

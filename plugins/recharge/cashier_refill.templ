@@ -25,7 +25,6 @@ templ CashierRefillForm(sources []adminfragments.LocationChoice) {
 				x-init="load()"
 				hx-post="/cashier/recharge/refill"
 				hx-swap="none"
-				hx-on::after-request="if(event.detail.successful){ $dispatch('close-modal') }"
 			>
 				<p class="text-xs text-slate-500">Increases the device's reload balance, books a shop expense, and pays the supplier from the cash source you pick — nothing else the owner keeps off-limits.</p>
 				<div>

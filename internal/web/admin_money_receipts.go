@@ -97,7 +97,7 @@ func (a *adminUI) MoneyReceiptPrint(c echo.Context) error {
 		c.Response().Header().Set("HX-Trigger", response.Toast("No receipt printer configured", "error"))
 		return c.NoContent(200)
 	}
-	if err := printing.Raw(ctx, cfg.ReceiptPrinter, buildReceiptSlip(cfg, *rec)); err != nil {
+	if err := printing.Raw(ctx, cfg.ReceiptPrinter, buildReceiptSlip(cfg, *rec, a.s.receiptImgOptions(ctx, cfg))); err != nil {
 		c.Response().Header().Set("HX-Trigger", response.Toast("Print failed: "+err.Error(), "error"))
 		return c.NoContent(200)
 	}
@@ -141,7 +141,7 @@ func (s *Server) afterMoneyMove(c echo.Context, rec *cashflow.Receipt) error {
 	}
 	// Skip & print: send the slip best-effort, then refresh in place.
 	if strings.TrimSpace(cfg.ReceiptPrinter) != "" {
-		_ = printing.Raw(ctx, cfg.ReceiptPrinter, buildReceiptSlip(cfg, *rec))
+		_ = printing.Raw(ctx, cfg.ReceiptPrinter, buildReceiptSlip(cfg, *rec, s.receiptImgOptions(ctx, cfg)))
 	}
 	c.Response().Header().Set("HX-Trigger", response.ToastAnd("Receipt "+rec.ReceiptNo+" recorded", "success", "close-modal"))
 	c.Response().Header().Set("HX-Refresh", "true")
@@ -167,7 +167,7 @@ func (s *Server) printMoneyReceiptKick(ctx context.Context, rec *cashflow.Receip
 	if err != nil || cfg == nil || strings.TrimSpace(cfg.ReceiptPrinter) == "" {
 		return
 	}
-	slip := buildReceiptSlip(cfg, *rec)
+	slip := buildReceiptSlip(cfg, *rec, s.receiptImgOptions(ctx, cfg))
 	if kick {
 		slip = append(escpos.DrawerKick(*cfg), slip...)
 	}
@@ -175,66 +175,48 @@ func (s *Server) printMoneyReceiptKick(ctx context.Context, rec *cashflow.Receip
 }
 
 // buildReceiptSlip renders a money receipt as raw ESC/POS bytes for the thermal
-// printer, carrying the shop header from Settings. Mirrors the recharge slip.
-func buildReceiptSlip(cfg *settings.Settings, r cashflow.Receipt) []byte {
-	width := 32
-	if strings.TrimSpace(cfg.ReceiptWidth) == "80" {
-		width = 48
-	}
+// printer using the SHARED receipt header/footer (escpos.Header/Footer), so a
+// money receipt carries the same branding — big shop name, secondary-language
+// name, address, settings footer + credit line — as the sale receipt. Only the
+// body (From/To/Party/Amount) is receipt-specific.
+func buildReceiptSlip(cfg *settings.Settings, r cashflow.Receipt, opts escpos.Options) []byte {
+	w := escpos.Columns(cfg.ReceiptWidth)
 	var b bytes.Buffer
-	b.Write([]byte{0x1B, 0x40}) // ESC @  initialise
-	center := func() { b.Write([]byte{0x1B, 0x61, 0x01}) }
-	left := func() { b.Write([]byte{0x1B, 0x61, 0x00}) }
-	bold := func(on bool) {
-		if on {
-			b.Write([]byte{0x1B, 0x45, 0x01})
-		} else {
-			b.Write([]byte{0x1B, 0x45, 0x00})
-		}
-	}
-	// Sanitise every free-text/label field to printable ASCII: the built-in
-	// thermal font has no glyphs for en/em dashes or non-Latin names, so raw
-	// bytes print as codepage garbage (e.g. a "—" shows up as a CJK character).
-	line := func(s string) { b.WriteString(escpos.ASCII(s)); b.WriteByte('\n') }
-	rule := func() { b.WriteString(strings.Repeat("-", width)); b.WriteByte('\n') }
+	escpos.Init(&b)
+	escpos.Header(&b, *cfg, opts)
+	escpos.Title(&b, receiptKindLabel(r.Kind))
 
-	center()
-	bold(true)
-	line(cfg.ShopName)
-	bold(false)
-	if cfg.Address != nil && strings.TrimSpace(*cfg.Address) != "" {
-		line(*cfg.Address)
-	}
-	if cfg.Phone != nil && strings.TrimSpace(*cfg.Phone) != "" {
-		line(*cfg.Phone)
-	}
-	rule()
-	bold(true)
-	line(strings.ToUpper(receiptKindLabel(r.Kind) + " RECEIPT"))
-	bold(false)
-	line(r.ReceiptNo)
-	rule()
-	left()
-	line("Date    : " + r.CreatedAt.Format("2006-01-02 15:04"))
-	line("From    : " + r.FromLabel)
-	line("To      : " + r.ToLabel)
+	// --- Meta (left, values right-aligned like the sale) ---
+	escpos.Left(&b)
+	escpos.Divider(&b, w)
+	escpos.Line(&b, escpos.LeftRight("Receipt:", r.ReceiptNo, w))
+	escpos.Line(&b, escpos.LeftRight("Date:", r.CreatedAt.Format("2006-01-02 15:04"), w))
+	escpos.Line(&b, escpos.LeftRight("From:", escpos.ASCII(r.FromLabel), w))
+	escpos.Line(&b, escpos.LeftRight("To:", escpos.ASCII(r.ToLabel), w))
 	if strings.TrimSpace(r.Party) != "" {
-		line("Party   : " + r.Party)
-	}
-	line("Amount  : " + money.Format(cfg.CurrencySymbol, r.Amount))
-	if strings.TrimSpace(r.Note) != "" {
-		line("Note    : " + r.Note)
+		escpos.Line(&b, escpos.LeftRight("Party:", escpos.ASCII(r.Party), w))
 	}
 	if r.CreatedByName != nil && *r.CreatedByName != "" {
-		line("By      : " + *r.CreatedByName)
+		escpos.Line(&b, escpos.LeftRight("By:", escpos.ASCII(*r.CreatedByName), w))
 	}
-	rule()
-	center()
-	line("Signature: ____________________")
-	line("")
-	line("Thank you")
-	b.WriteString("\n\n\n")
-	b.Write([]byte{0x1D, 0x56, 0x42, 0x00}) // GS V partial cut with feed
+	escpos.Divider(&b, w)
+
+	// --- Amount (emphasized, like the sale's TOTAL) ---
+	escpos.Emphasis(&b, true)
+	escpos.Line(&b, escpos.LeftRight("Amount", money.Format(cfg.CurrencySymbol, r.Amount), w))
+	escpos.Emphasis(&b, false)
+	if strings.TrimSpace(r.Note) != "" {
+		for _, ln := range escpos.Wrap(escpos.ASCII("Note: "+r.Note), w) {
+			escpos.Line(&b, ln)
+		}
+	}
+	escpos.Divider(&b, w)
+
+	// A money receipt is a cash hand-over, so keep a signature strip.
+	escpos.Center(&b)
+	escpos.Line(&b, "Signature: ____________________")
+
+	escpos.Footer(&b, *cfg)
 	return b.Bytes()
 }
 
@@ -265,6 +247,12 @@ func receiptKindLabel(k string) string {
 		return "Interest"
 	case "adjust":
 		return "Adjustment"
+	case "billpay":
+		return "Bill payment"
+	case "getmoney":
+		return "Money out"
+	case "reload", "deposit", "withdrawal", "topup":
+		return "Reload"
 	}
 	return k
 }

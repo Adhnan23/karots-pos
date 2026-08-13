@@ -208,17 +208,7 @@ func (h *cashierUI) receiptOptions(ctx context.Context, cfg *settings.Settings) 
 // receiptImgOptions builds the logo/sub-name raster options for a thermal slip.
 // Shared by sale receipts and warranty / CR- reprints (UI-agnostic).
 func (s *Server) receiptImgOptions(ctx context.Context, cfg *settings.Settings) escpos.Options {
-	var opts escpos.Options
-	dots := receiptimg.PrinterDots(cfg.ReceiptWidth)
-	if src := cfg.LogoSrc(); src != "" {
-		if img, err := receiptimg.LoadImage(ctx, src, poststatic.Files); err == nil {
-			opts.Logo = receiptimg.Logo(img, dots)
-		}
-	}
-	if cfg.ShopNameSi != nil && *cfg.ShopNameSi != "" {
-		opts.SubName = receiptimg.SubName(*cfg.ShopNameSi, dots, dots/14)
-	}
-	return opts
+	return receiptimg.SlipOptions(ctx, cfg, poststatic.Files)
 }
 
 // kickDrawer pops the physical cash drawer, best-effort, honouring the shop

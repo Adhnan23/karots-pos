@@ -61,6 +61,7 @@ type TxInput struct {
 	CreatedBy     int64
 	Untracked     bool            // bank card: record cash movement but no float delta
 	ServiceCharge decimal.Decimal // shop fee collected in cash on top of the principal
+	CashGiven     decimal.Decimal // cash the customer handed over (cash-in only); zero = not recorded
 }
 
 // RecordTransaction inserts a money movement, deriving its cash/float deltas.
@@ -81,10 +82,10 @@ func (s *Store) RecordTransactionTx(ctx context.Context, q appdb.Queryer, in TxI
 	err := q.GetContext(ctx, &id, `
 		INSERT INTO recharge_transactions
 		  (session_id, carrier_id, device_id, type, amount, cash_delta, float_delta,
-		   sale_id, expense_id, reference, note, created_by, service_charge)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
+		   sale_id, expense_id, reference, note, created_by, service_charge, cash_given)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id`,
 		in.SessionID, in.CarrierID, in.DeviceID, in.Type, in.Amount, cashDelta, floatDelta,
-		in.SaleID, in.ExpenseID, nullStr(in.Reference), nullStr(in.Note), in.CreatedBy, in.ServiceCharge)
+		in.SaleID, in.ExpenseID, nullStr(in.Reference), nullStr(in.Note), in.CreatedBy, in.ServiceCharge, nullDec(in.CashGiven))
 	return id, err
 }
 
@@ -580,13 +581,14 @@ type TxRow struct {
 	Carrier       string          `db:"carrier"`
 	Device        string          `db:"device"`
 	Type          string          `db:"type"`
-	Amount        decimal.Decimal `db:"amount"`
-	ServiceCharge decimal.Decimal `db:"service_charge"`
-	CashDelta     decimal.Decimal `db:"cash_delta"`
-	FloatDelta    decimal.Decimal `db:"float_delta"`
-	Reference     *string         `db:"reference"`
-	Operator      string          `db:"operator"`
-	Reversed      bool            `db:"reversed"`
+	Amount        decimal.Decimal  `db:"amount"`
+	ServiceCharge decimal.Decimal  `db:"service_charge"`
+	CashGiven     *decimal.Decimal `db:"cash_given"`
+	CashDelta     decimal.Decimal  `db:"cash_delta"`
+	FloatDelta    decimal.Decimal  `db:"float_delta"`
+	Reference     *string          `db:"reference"`
+	Operator      string           `db:"operator"`
+	Reversed      bool             `db:"reversed"`
 }
 
 // LedgerFilter narrows the admin ledger query (zero values = no filter).
@@ -605,7 +607,7 @@ func (s *Store) TxByID(ctx context.Context, id int64) (TxRow, error) {
 	var t TxRow
 	err := s.db.GetContext(ctx, &t, `
 		SELECT t.id, t.created_at, c.name AS carrier, COALESCE(d.label,'—') AS device, t.type,
-		       t.amount, t.service_charge, t.cash_delta, t.float_delta, t.reference,
+		       t.amount, t.service_charge, t.cash_given, t.cash_delta, t.float_delta, t.reference,
 		       COALESCE(u.name,'') AS operator, t.reversed_at IS NOT NULL AS reversed
 		FROM recharge_transactions t
 		JOIN recharge_carriers c ON c.id = t.carrier_id
@@ -619,7 +621,7 @@ func (s *Store) TxByID(ctx context.Context, id int64) (TxRow, error) {
 func (s *Store) Ledger(ctx context.Context, f LedgerFilter) ([]TxRow, error) {
 	q := `
 		SELECT t.id, t.created_at, c.name AS carrier, COALESCE(d.label,'—') AS device, t.type,
-		       t.amount, t.service_charge, t.cash_delta, t.float_delta, t.reference,
+		       t.amount, t.service_charge, t.cash_given, t.cash_delta, t.float_delta, t.reference,
 		       COALESCE(u.name,'') AS operator, t.reversed_at IS NOT NULL AS reversed
 		FROM recharge_transactions t
 		JOIN recharge_carriers c ON c.id = t.carrier_id
@@ -660,6 +662,15 @@ func nullStr(s string) *string {
 	return &s
 }
 
+// nullDec stores a positive tender as a value and anything else as SQL NULL, so
+// "no cash-given recorded" is distinct from a genuine zero on the slip.
+func nullDec(d decimal.Decimal) *decimal.Decimal {
+	if d.IsPositive() {
+		return &d
+	}
+	return nil
+}
+
 // ReceiptsTabVM carries the date-range state + role-scoped URLs a receipts tab
 // fragment needs (so the same template serves the admin and cashier shells).
 type ReceiptsTabVM struct {
@@ -685,6 +696,7 @@ type BillTxInput struct {
 	Type          string // billpay | getmoney
 	Amount        decimal.Decimal
 	ServiceCharge decimal.Decimal
+	CashGiven     decimal.Decimal // cash the customer handed over (bill-pay only); zero = not recorded
 	Reference     string
 	Note          string
 	CreatedBy     int64
@@ -696,10 +708,10 @@ func (s *Store) RecordBillTx(ctx context.Context, in BillTxInput) (int64, error)
 	err := s.db.GetContext(ctx, &id, `
 		INSERT INTO recharge_bill_tx
 		  (session_id, bank_locker_id, bank_name, type, amount, service_charge,
-		   reference, note, created_by)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+		   cash_given, reference, note, created_by)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
 		in.SessionID, in.BankLockerID, in.BankName, in.Type, in.Amount, in.ServiceCharge,
-		nullStr(in.Reference), nullStr(in.Note), in.CreatedBy)
+		nullDec(in.CashGiven), nullStr(in.Reference), nullStr(in.Note), in.CreatedBy)
 	return id, err
 }
 
@@ -710,10 +722,11 @@ type BillTxRow struct {
 	CreatedAt     time.Time       `db:"created_at"`
 	Bank          string          `db:"bank_name"`
 	Type          string          `db:"type"`
-	Amount        decimal.Decimal `db:"amount"`
-	ServiceCharge decimal.Decimal `db:"service_charge"`
-	Reference     *string         `db:"reference"`
-	Operator      string          `db:"operator"`
+	Amount        decimal.Decimal  `db:"amount"`
+	ServiceCharge decimal.Decimal  `db:"service_charge"`
+	CashGiven     *decimal.Decimal `db:"cash_given"`
+	Reference     *string          `db:"reference"`
+	Operator      string           `db:"operator"`
 }
 
 // BillTxByID loads one bill-payment row (operator joined) for the slip reprint.
@@ -721,7 +734,7 @@ func (s *Store) BillTxByID(ctx context.Context, id int64) (BillTxRow, error) {
 	var t BillTxRow
 	err := s.db.GetContext(ctx, &t, `
 		SELECT t.id, t.created_at, t.bank_name, t.type, t.amount, t.service_charge,
-		       t.reference, COALESCE(u.name,'') AS operator
+		       t.cash_given, t.reference, COALESCE(u.name,'') AS operator
 		FROM recharge_bill_tx t
 		LEFT JOIN users u ON u.id = t.created_by
 		WHERE t.id = $1`, id)
@@ -732,7 +745,7 @@ func (s *Store) BillTxByID(ctx context.Context, id int64) (BillTxRow, error) {
 func (s *Store) BillLedger(ctx context.Context, f LedgerFilter) ([]BillTxRow, error) {
 	q := `
 		SELECT t.id, t.created_at, t.bank_name, t.type, t.amount, t.service_charge,
-		       t.reference, COALESCE(u.name,'') AS operator
+		       t.cash_given, t.reference, COALESCE(u.name,'') AS operator
 		FROM recharge_bill_tx t
 		LEFT JOIN users u ON u.id = t.created_by
 		WHERE 1=1`

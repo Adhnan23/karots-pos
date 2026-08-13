@@ -260,6 +260,16 @@ func (h *cashierUI) Tx(c echo.Context) error {
 			return apperr.Validation("service charge must be zero or more")
 		}
 	}
+	// Optional cash-given (deposit only) so the slip prints the change, like a sale.
+	cashGiven := decimal.Zero
+	if v := strings.TrimSpace(c.FormValue("cash_given")); v != "" {
+		if cashGiven, err = money.Parse(v); err != nil || cashGiven.IsNegative() {
+			return apperr.Validation("cash given must be zero or more")
+		}
+	}
+	if typ != "deposit" { // only a cash-in has a tender; withdrawal hands cash out
+		cashGiven = decimal.Zero
+	}
 	ref := strings.TrimSpace(c.FormValue("reference"))
 	note := strings.TrimSpace(c.FormValue("note"))
 
@@ -324,10 +334,18 @@ func (h *cashierUI) Tx(c echo.Context) error {
 	txID, err := h.p.store.RecordTransaction(ctx, TxInput{
 		SessionID: sess.ID, CarrierID: carrierID, DeviceID: deviceID, Type: typ,
 		Amount: amt, Reference: ref, Note: note, CreatedBy: uid,
-		Untracked: !tracksFloat, ServiceCharge: svc,
+		Untracked: !tracksFloat, ServiceCharge: svc, CashGiven: cashGiven,
 	})
 	if err != nil {
 		return err
+	}
+
+	// Cash crossed the physical drawer (deposit in, withdrawal out) — pop it, like
+	// bill-pay does. Best-effort and setting-gated. This path never used to kick.
+	if kind.cashSign != 0 {
+		if cfg, cerr := h.p.core.Settings.Get(ctx); cerr == nil && cfg != nil {
+			escpos.KickDrawer(ctx, *cfg)
+		}
 	}
 
 	msg := carrier + " " + txLabel(typ) + " recorded"
@@ -516,6 +534,16 @@ func (h *cashierUI) BankTx(c echo.Context) error {
 			return apperr.Validation("service charge must be zero or more")
 		}
 	}
+	// Optional cash-given (bill-pay only) so the slip prints the change, like a sale.
+	cashGiven := decimal.Zero
+	if v := strings.TrimSpace(c.FormValue("cash_given")); v != "" {
+		if cashGiven, err = money.Parse(v); err != nil || cashGiven.IsNegative() {
+			return apperr.Validation("cash given must be zero or more")
+		}
+	}
+	if typ != "billpay" { // get-money hands cash out, so it has no customer tender
+		cashGiven = decimal.Zero
+	}
 	ref := strings.TrimSpace(c.FormValue("reference"))
 	note := strings.TrimSpace(c.FormValue("note"))
 
@@ -560,7 +588,7 @@ func (h *cashierUI) BankTx(c echo.Context) error {
 	// the movement lists in the "Bill" receipts tab. The money/receipts live in core.
 	billID, err := h.p.store.RecordBillTx(ctx, BillTxInput{
 		SessionID: &sess.ID, BankLockerID: bankID, BankName: bank.Name, Type: typ,
-		Amount: amt, ServiceCharge: svc, Reference: ref, Note: note, CreatedBy: uid,
+		Amount: amt, ServiceCharge: svc, CashGiven: cashGiven, Reference: ref, Note: note, CreatedBy: uid,
 	})
 	if err != nil {
 		return err

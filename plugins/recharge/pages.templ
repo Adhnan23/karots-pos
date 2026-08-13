@@ -514,6 +514,14 @@ templ TxSlipPage(cfg settings.Settings, thermal shared.ThermalData, t TxRow) {
 			<div class="r-row r-small"><span>Service charge</span><span>{ money.Format(cfg.CurrencySymbol, t.ServiceCharge) }</span></div>
 			<div class="r-row r-big"><span>Total</span><span>{ money.Format(cfg.CurrencySymbol, t.Amount.Add(t.ServiceCharge)) }</span></div>
 		}
+		if t.CashGiven != nil && t.CashGiven.IsPositive() {
+			<div class="r-row r-small"><span>Paid</span><span>{ money.Format(cfg.CurrencySymbol, *t.CashGiven) }</span></div>
+			if chg := t.CashGiven.Sub(t.Amount.Add(t.ServiceCharge)); chg.IsNegative() {
+				<div class="r-row r-small"><span>Balance due</span><span>{ money.Format(cfg.CurrencySymbol, chg.Neg()) }</span></div>
+			} else {
+				<div class="r-row r-big"><span>Change</span><span>{ money.Format(cfg.CurrencySymbol, chg) }</span></div>
+			}
+		}
 		if t.Reference != nil && *t.Reference != "" {
 			<div class="r-row r-small"><span>Reference</span><span class="r-right">{ *t.Reference }</span></div>
 		}
@@ -539,6 +547,14 @@ templ BillSlipPage(cfg settings.Settings, thermal shared.ThermalData, t BillTxRo
 		if t.ServiceCharge.IsPositive() {
 			<div class="r-row r-small"><span>Service charge</span><span>{ money.Format(cfg.CurrencySymbol, t.ServiceCharge) }</span></div>
 			<div class="r-row r-big"><span>Total</span><span>{ money.Format(cfg.CurrencySymbol, t.Amount.Add(t.ServiceCharge)) }</span></div>
+		}
+		if t.CashGiven != nil && t.CashGiven.IsPositive() {
+			<div class="r-row r-small"><span>Paid</span><span>{ money.Format(cfg.CurrencySymbol, *t.CashGiven) }</span></div>
+			if chg := t.CashGiven.Sub(t.Amount.Add(t.ServiceCharge)); chg.IsNegative() {
+				<div class="r-row r-small"><span>Balance due</span><span>{ money.Format(cfg.CurrencySymbol, chg.Neg()) }</span></div>
+			} else {
+				<div class="r-row r-big"><span>Change</span><span>{ money.Format(cfg.CurrencySymbol, chg) }</span></div>
+			}
 		}
 		if t.Operator != "" {
 			<div class="r-row r-small"><span>Served by</span><span>{ t.Operator }</span></div>
