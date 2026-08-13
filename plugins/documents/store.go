@@ -13,6 +13,7 @@ import (
 	"time"
 
 	appdb "karots-pos/internal/db"
+	"karots-pos/internal/features/activity"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/shopspring/decimal"
@@ -23,6 +24,42 @@ import (
 type Store struct{ db *sqlx.DB }
 
 func NewStore(db *sqlx.DB) *Store { return &Store{db: db} }
+
+// ActivityRows feeds document jobs into the core Activity trail. doc_job has no
+// actor column, so the acting user is resolved via its sale's cashier. Filtered
+// by the shared date/user/text filter; the system account is excluded like core.
+func (s *Store) ActivityRows(ctx context.Context, f activity.Filter) ([]activity.Row, error) {
+	limit := f.Limit
+	if limit <= 0 || limit > 20000 {
+		limit = 20000
+	}
+	var query *string
+	if f.Query != "" {
+		query = &f.Query
+	}
+	var rows []activity.Row
+	err := s.db.SelectContext(ctx, &rows, `
+		SELECT j.created_at, sa.cashier_id AS user_id, COALESCE(u.name,'')::text AS user_name,
+		       'documents'::text AS source,
+		       (CASE WHEN j.reversed_at IS NOT NULL THEN 'reversed '||COALESCE(j.kind,'job')
+		             ELSE COALESCE(j.kind,'job') END)::text AS action,
+		       (j.description || CASE WHEN j.qty > 1 THEN ' ×'||j.qty::text ELSE '' END)::text AS detail,
+		       j.line_total AS amount
+		FROM doc_job j
+		LEFT JOIN sales sa ON sa.id = j.sale_id
+		LEFT JOIN users u ON u.id = sa.cashier_id
+		WHERE ($1::timestamptz IS NULL OR j.created_at >= $1)
+		  AND ($2::timestamptz IS NULL OR j.created_at <  $2)
+		  AND ($3::bigint IS NULL OR sa.cashier_id = $3)
+		  AND ($4::text IS NULL OR j.description ILIKE '%'||$4||'%'
+		                        OR j.kind ILIKE '%'||$4||'%'
+		                        OR u.name ILIKE '%'||$4||'%')
+		  AND (sa.cashier_id IS NULL OR sa.cashier_id NOT IN (SELECT id FROM users WHERE is_system))
+		ORDER BY j.created_at DESC
+		LIMIT $5`,
+		f.From, f.To, f.UserID, query, limit)
+	return rows, err
+}
 
 type Service struct {
 	ID        int64  `db:"id"         json:"id"`

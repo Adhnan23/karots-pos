@@ -164,6 +164,12 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 		},
 	})
 
+	// Feed reloads + bill payments into the core Activity trail.
+	reg.AddActivityContributor(plugin.ActivityContributor{
+		Source: "recharge",
+		List:   p.store.ActivityRows,
+	})
+
 	// The first entry defines the section's sidebar target — the hub page, which
 	// lists the links below as cards (matching the core admin sections).
 	reg.AddAdminNav(plugin.AdminNavEntry{

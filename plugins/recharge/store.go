@@ -8,6 +8,7 @@ import (
 	"time"
 
 	appdb "karots-pos/internal/db"
+	"karots-pos/internal/features/activity"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/shopspring/decimal"
@@ -296,6 +297,48 @@ func (s *Store) serviceDefaults(ctx context.Context) (catID, unitID int64, err e
 // is NOT counted here (it's excluded from core revenue via pass_through).
 func (s *Store) RangeEarnings(ctx context.Context, from, to time.Time) (decimal.Decimal, error) {
 	return rangeEarnings(ctx, s.db, from, to)
+}
+
+// ActivityRows feeds the recharge trail (reloads + bill payments) into the core
+// Activity view via the ActivityContributor hook. Rows are normalized to the
+// shared shape and filtered by the same date/user/text filter; the developer's
+// system account is excluded here too, matching core.
+func (s *Store) ActivityRows(ctx context.Context, f activity.Filter) ([]activity.Row, error) {
+	limit := f.Limit
+	if limit <= 0 || limit > 20000 {
+		limit = 20000
+	}
+	var query *string
+	if f.Query != "" {
+		query = &f.Query
+	}
+	var rows []activity.Row
+	err := s.db.SelectContext(ctx, &rows, `
+		SELECT created_at, user_id, user_name, 'recharge'::text AS source, action, detail, amount
+		FROM (
+			(SELECT t.created_at, t.created_by AS user_id, COALESCE(u.name,'')::text AS user_name,
+			        t.type::text AS action,
+			        (COALESCE(NULLIF(t.reference,''), NULLIF(t.note,''), 'reload'))::text AS detail,
+			        t.amount
+			   FROM recharge_transactions t LEFT JOIN users u ON u.id = t.created_by)
+			UNION ALL
+			(SELECT b.created_at, b.created_by, COALESCE(u.name,'')::text,
+			        ('bill '||b.type)::text,
+			        (b.bank_name || COALESCE(' — '||NULLIF(b.reference,''), ''))::text,
+			        b.amount
+			   FROM recharge_bill_tx b LEFT JOIN users u ON u.id = b.created_by)
+		) t
+		WHERE ($1::timestamptz IS NULL OR created_at >= $1)
+		  AND ($2::timestamptz IS NULL OR created_at <  $2)
+		  AND ($3::bigint IS NULL OR user_id = $3)
+		  AND ($4::text IS NULL OR action ILIKE '%'||$4||'%'
+		                        OR detail ILIKE '%'||$4||'%'
+		                        OR user_name ILIKE '%'||$4||'%')
+		  AND (user_id IS NULL OR user_id NOT IN (SELECT id FROM users WHERE is_system))
+		ORDER BY created_at DESC
+		LIMIT $5`,
+		f.From, f.To, f.UserID, query, limit)
+	return rows, err
 }
 
 func rangeEarnings(ctx context.Context, q appdb.Queryer, from, to time.Time) (decimal.Decimal, error) {

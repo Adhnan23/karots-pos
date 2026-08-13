@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"time"
 
+	"karots-pos/internal/features/activity"
+
 	"github.com/a-h/templ"
 	"github.com/shopspring/decimal"
 )
@@ -139,6 +141,7 @@ var (
 	receiptTabs      []ReceiptTab
 	supplierActions  []CashierSupplierAction
 	plIncomes        []PLIncome
+	activityContribs []ActivityContributor
 )
 
 // ReceiptTab adds a tab to the unified Receipts page on BOTH the admin and cashier
@@ -165,6 +168,18 @@ type PLIncome struct {
 	Amount func(ctx context.Context, from, to time.Time) (decimal.Decimal, error)
 }
 
+// ActivityContributor lets a plugin feed its own trail into the central Activity
+// view (which can't SQL-union plugin tables — core stays plugin-free). The web
+// layer calls List with the active filter and merges the returned rows with the
+// core sources, then sorts and paginates the whole set. Source is the plugin's
+// source id (also its Source-filter value); keep it stable and unique. Return
+// (nil, err) defensively rather than failing the whole page. Rows for the hidden
+// system/developer account must be excluded here too — same as core.
+type ActivityContributor struct {
+	Source string
+	List   func(ctx context.Context, f activity.Filter) ([]activity.Row, error)
+}
+
 // Hook registration — plugins call these from Setup.
 func (r *Registry) AddAdminNav(e AdminNavEntry)          { adminNav = append(adminNav, e) }
 func (r *Registry) AddCashierTab(t CashierTab)           { cashierTabs = append(cashierTabs, t) }
@@ -184,6 +199,9 @@ func (r *Registry) AddCashierSupplierAction(a CashierSupplierAction) {
 	supplierActions = append(supplierActions, a)
 }
 func (r *Registry) AddPLIncome(s PLIncome) { plIncomes = append(plIncomes, s) }
+func (r *Registry) AddActivityContributor(a ActivityContributor) {
+	activityContribs = append(activityContribs, a)
+}
 
 // Getters for the template layer.
 func AdminNav() []AdminNavEntry           { return adminNav }
@@ -194,6 +212,7 @@ func PaletteEntries() []PaletteEntry      { return paletteEntries }
 func ReportCards() []ReportCard           { return reportCards }
 func PosActions() []PosAction             { return posActions }
 func PLIncomes() []PLIncome               { return plIncomes }
+func ActivityContributors() []ActivityContributor { return activityContribs }
 func CashierMenuRoots() []CashierMenuRoot { return cashierMenuRoots }
 func DrawerSections() []DrawerSection      { return drawerSections }
 

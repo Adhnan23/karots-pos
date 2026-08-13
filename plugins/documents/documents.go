@@ -68,6 +68,12 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 		Label: "🖨 Print & Copy",
 		Desc:  "Print/copy revenue, paper used & labour",
 	})
+
+	// Feed print/copy jobs into the core Activity trail.
+	reg.AddActivityContributor(plugin.ActivityContributor{
+		Source: "documents",
+		List:   p.store.ActivityRows,
+	})
 	reg.AddAdminNav(plugin.AdminNavEntry{
 		SectionLabel: "Print & Copy", Icon: "🖨",
 		Href: "/admin/documents", Label: "Print & Copy", Key: "documents-hub",

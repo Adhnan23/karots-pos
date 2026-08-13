@@ -3069,6 +3069,59 @@ function salesFilters(preset, from, to, status, method, q) {
   };
 }
 
+// activityFilters: unified Activity page filter bar. Mirrors salesFilters —
+// live-reloads #activity-list via HTMX and builds the export URL from state.
+function activityFilters(preset, from, to, user, source, q) {
+  return {
+    preset: preset,
+    from: from,
+    to: to,
+    user: user,
+    source: source,
+    q: q,
+    reload() {
+      window.htmx.ajax("GET", "/admin/activity/table", {
+        target: "#activity-list",
+        swap: "innerHTML",
+        values: {
+          preset: this.preset,
+          from: this.from,
+          to: this.to,
+          user: this.user,
+          source: this.source,
+          q: this.q,
+        },
+      });
+    },
+    setPreset(p) {
+      this.preset = p;
+      this.from = "";
+      this.to = "";
+      this.reload();
+    },
+    clear() {
+      this.preset = "";
+      this.from = "";
+      this.to = "";
+      this.user = "";
+      this.source = "";
+      this.q = "";
+      this.reload();
+    },
+    exportUrl(fmt) {
+      const p = new URLSearchParams();
+      p.set("format", fmt || "csv");
+      if (this.preset) p.set("preset", this.preset);
+      if (this.from) p.set("from", this.from);
+      if (this.to) p.set("to", this.to);
+      if (this.user) p.set("user", this.user);
+      if (this.source) p.set("source", this.source);
+      if (this.q) p.set("q", this.q);
+      return "/admin/activity/export?" + p.toString();
+    },
+  };
+}
+
 // saleReturn: per-line partial-return modal. Collects {sale_item_id: qty} and
 // posts to /api/sales/:id/partial-return.
 function saleReturn(saleId, opts) {

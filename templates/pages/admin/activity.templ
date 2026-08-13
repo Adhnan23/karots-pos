@@ -1,0 +1,183 @@
+package adminpages
+
+import (
+	"strconv"
+
+	"karots-pos/internal/features/activity"
+	"karots-pos/internal/money"
+	"karots-pos/templates/layouts"
+)
+
+// ActivitySource is one option in the Source filter (a core trail or a plugin).
+type ActivitySource struct {
+	ID    string
+	Label string
+}
+
+type ActivityData struct {
+	UserName string
+	Symbol   string
+	Rows     []activity.Row
+	Users    []activity.UserRef
+	Sources  []ActivitySource
+	// filter echoes
+	Preset  string
+	From    string
+	To      string
+	UserID  string
+	Source  string
+	Query   string
+	Page    int
+	HasNext bool
+}
+
+templ ActivityPage(d ActivityData) {
+	@layouts.Admin("Activity", d.UserName, "activity") {
+		<div class="mb-6">
+			<h1 class="text-2xl font-bold">Activity</h1>
+			<p class="text-sm text-slate-500">Who did what across the shop — audit, stock, cash drawer, lockers and plugins, in one filterable trail.</p>
+		</div>
+		<div
+			id="activity-filters"
+			class="bg-white rounded-2xl shadow-sm p-4 mb-6 space-y-3"
+			x-data={ activityFilterState(d) }
+		>
+			<input type="hidden" name="preset" x-model="preset"/>
+			<!-- Quick date presets -->
+			<div class="flex flex-wrap gap-2">
+				@activityPreset("today", "Today")
+				@activityPreset("this-week", "This week")
+				@activityPreset("this-month", "This month")
+				@activityPreset("last-week", "Last week")
+				@activityPreset("last-month", "Last month")
+				@activityPreset("this-year", "This year")
+			</div>
+			<div class="flex flex-wrap items-end gap-3">
+				<div>
+					<label class="block text-xs text-slate-500 mb-1">From</label>
+					<input type="date" name="from" x-model="from" x-on:change="preset=''; reload()" class="border rounded-lg px-3 py-2"/>
+				</div>
+				<div>
+					<label class="block text-xs text-slate-500 mb-1">To</label>
+					<input type="date" name="to" x-model="to" x-on:change="preset=''; reload()" class="border rounded-lg px-3 py-2"/>
+				</div>
+				<div>
+					<label class="block text-xs text-slate-500 mb-1">Who</label>
+					<select name="user" x-model="user" x-on:change="reload()" class="border rounded-lg px-3 py-2">
+						<option value="">Anyone</option>
+						for _, u := range d.Users {
+							<option value={ strconv.FormatInt(u.ID, 10) }>{ u.Name }</option>
+						}
+					</select>
+				</div>
+				<div>
+					<label class="block text-xs text-slate-500 mb-1">Source</label>
+					<select name="source" x-model="source" x-on:change="reload()" class="border rounded-lg px-3 py-2">
+						<option value="">All</option>
+						for _, s := range d.Sources {
+							<option value={ s.ID }>{ s.Label }</option>
+						}
+					</select>
+				</div>
+				<div class="flex-1 min-w-[12rem]">
+					<label class="block text-xs text-slate-500 mb-1">Search</label>
+					<input type="search" name="q" x-model="q" x-on:input.debounce.300ms="reload()" placeholder="Action / detail / user" class="w-full border rounded-lg px-3 py-2"/>
+				</div>
+				<button type="button" x-on:click="clear()" class="px-4 py-2 rounded-lg border text-slate-600 hover:bg-slate-50">Clear</button>
+				<div class="relative inline-block" x-data="{open:false}" @click.outside="open=false">
+					<button type="button" @click="open=!open" class="px-4 py-2 rounded-lg border border-emerald-300 text-emerald-700 font-medium hover:bg-emerald-50">
+						Export <span class="text-emerald-400">▾</span>
+					</button>
+					<div x-show="open" x-transition style="display:none" class="absolute right-0 mt-1 w-44 bg-white border rounded-lg shadow-lg z-20 py-1">
+						<a x-bind:href="exportUrl('csv')" class="block px-4 py-2 text-sm hover:bg-slate-50">CSV (.csv)</a>
+						<a x-bind:href="exportUrl('xlsx')" class="block px-4 py-2 text-sm hover:bg-slate-50">Excel (.xlsx)</a>
+						<a x-bind:href="exportUrl('ods')" class="block px-4 py-2 text-sm hover:bg-slate-50">ODF (.ods)</a>
+					</div>
+				</div>
+			</div>
+		</div>
+		<div class="bg-white rounded-2xl shadow-sm p-6">
+			<div id="activity-list" hx-get="/admin/activity/table" hx-trigger="reload-activity from:body" hx-include="#activity-filters" hx-swap="innerHTML">
+				@ActivityList(d)
+			</div>
+		</div>
+	}
+}
+
+// activityFilterState seeds the Alpine model from the server-resolved filter and
+// live-reloads #activity-list on any change.
+func activityFilterState(d ActivityData) string {
+	return "activityFilters(" +
+		strconv.Quote(d.Preset) + "," + strconv.Quote(d.From) + "," + strconv.Quote(d.To) + "," +
+		strconv.Quote(d.UserID) + "," + strconv.Quote(d.Source) + "," + strconv.Quote(d.Query) + ")"
+}
+
+templ activityPreset(value, label string) {
+	<button
+		type="button"
+		x-on:click={ "setPreset('" + value + "')" }
+		x-bind:class={ "preset === '" + value + "' ? 'bg-indigo-600 text-white border-indigo-600' : 'text-slate-600 hover:bg-slate-50'" }
+		class="px-3 py-1.5 rounded-lg border text-sm"
+	>{ label }</button>
+}
+
+// ActivityList is the swappable region: table + pager.
+templ ActivityList(d ActivityData) {
+	<div class="overflow-x-auto">
+		<table class="w-full text-sm">
+			<thead class="text-left text-slate-500 border-b">
+				<tr>
+					<th class="py-2 px-3">When</th>
+					<th class="py-2 px-3">Who</th>
+					<th class="py-2 px-3">Source</th>
+					<th class="py-2 px-3">Action</th>
+					<th class="py-2 px-3">Detail</th>
+					<th class="py-2 px-3 text-right">Amount</th>
+				</tr>
+			</thead>
+			<tbody>
+				for _, r := range d.Rows {
+					<tr class="border-b last:border-0 align-top">
+						<td class="py-2 px-3 text-slate-500 whitespace-nowrap">{ r.When.Format("2006-01-02 15:04") }</td>
+						<td class="py-2 px-3 whitespace-nowrap">{ orDash(r.UserName) }</td>
+						<td class="py-2 px-3">@activitySourceBadge(r.Source)</td>
+						<td class="py-2 px-3 capitalize whitespace-nowrap">{ r.Action }</td>
+						<td class="py-2 px-3 text-slate-600">{ r.Detail }</td>
+						<td class="py-2 px-3 text-right whitespace-nowrap">
+							if !r.Amount.IsZero() {
+								{ money.Format(d.Symbol, r.Amount) }
+							}
+						</td>
+					</tr>
+				}
+				if len(d.Rows) == 0 {
+					<tr><td colspan="6" class="px-3 py-8 text-center text-slate-400">No activity in this period.</td></tr>
+				}
+			</tbody>
+		</table>
+	</div>
+	@pager(d.Page, d.HasNext, "/admin/activity/table", "#activity-list", "#activity-filters")
+}
+
+templ activitySourceBadge(source string) {
+	switch source {
+		case "audit":
+			<span class="px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-700">audit</span>
+		case "stock":
+			<span class="px-2 py-0.5 rounded-full text-xs bg-amber-100 text-amber-700">stock</span>
+		case "cash":
+			<span class="px-2 py-0.5 rounded-full text-xs bg-emerald-100 text-emerald-700">cash</span>
+		case "locker":
+			<span class="px-2 py-0.5 rounded-full text-xs bg-indigo-100 text-indigo-700">locker</span>
+		default:
+			<span class="px-2 py-0.5 rounded-full text-xs bg-purple-100 text-purple-700">{ source }</span>
+	}
+}
+
+// orDash renders an em dash for a blank cell (e.g. a system-less movement).
+func orDash(s string) string {
+	if s == "" {
+		return "—"
+	}
+	return s
+}

@@ -10,6 +10,7 @@ import (
 	"net/http"
 
 	"karots-pos/internal/config"
+	"karots-pos/internal/features/activity"
 	"karots-pos/internal/features/audit"
 	"karots-pos/internal/features/auth"
 	"karots-pos/internal/features/cashflow"
@@ -67,6 +68,7 @@ type Server struct {
 	denominations    *denominations.Service
 	cashRegister     *cashregister.Service
 	audit            *audit.Service
+	activity         *activity.Service
 	warranty         *warranty.Service
 	recovery         *recovery.Service
 	groups           *productgroups.Service
@@ -97,6 +99,7 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 		reports:         reports.NewService(db),
 		denominations:   denominations.NewService(db),
 		audit:           audit.NewService(db),
+		activity:        activity.NewService(db),
 		warranty:        warranty.NewService(db),
 		recovery:        recovery.NewService(db),
 		groups:          productgroups.NewService(db),
@@ -523,6 +526,9 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	ag.POST("/users/:id/activate", admin.UserReactivate, middleware.RequireRole(auth.RoleAdmin))
 
 	ag.GET("/audit", admin.AuditLog, middleware.RequireRole(auth.RoleAdmin))
+	ag.GET("/activity", admin.Activity, middleware.RequireRole(auth.RoleAdmin))
+	ag.GET("/activity/table", admin.ActivityTable, middleware.RequireRole(auth.RoleAdmin))
+	ag.GET("/activity/export", admin.ActivityExport, middleware.RequireRole(auth.RoleAdmin))
 
 	ag.GET("/settings", admin.Settings)
 	ag.PUT("/settings", admin.SettingsUpdate)
