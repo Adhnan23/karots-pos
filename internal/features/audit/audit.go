@@ -84,6 +84,8 @@ func (r *Repository) List(ctx context.Context, f ListFilter) ([]Entry, error) {
 		WHERE ($1::timestamptz IS NULL OR created_at >= $1)
 		  AND ($2::timestamptz IS NULL OR created_at <  $2)
 		  AND ($3::text IS NULL OR entity = $3)
+		  -- Hide the hidden system/developer account's actions from the owner's trail.
+		  AND (user_id IS NULL OR user_id NOT IN (SELECT id FROM users WHERE is_system))
 		ORDER BY created_at DESC
 		LIMIT $4`, f.From, f.To, entity, f.Limit)
 	return rows, err

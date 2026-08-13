@@ -152,7 +152,9 @@ const movementWhere = `
 	WHERE ($1::bigint      IS NULL OR m.product_id = $1)
 	  AND ($2::text        IS NULL OR m.type = $2::stock_movement_type)
 	  AND ($3::timestamptz IS NULL OR m.created_at >= $3)
-	  AND ($4::timestamptz IS NULL OR m.created_at <  $4)`
+	  AND ($4::timestamptz IS NULL OR m.created_at <  $4)
+	  -- Hide the hidden system/developer account's movements from the owner's log.
+	  AND m.user_id NOT IN (SELECT id FROM users WHERE is_system)`
 
 // FindMovements returns one page of the audit trail, newest first. The id is a
 // tiebreaker so two movements written in the same instant can't swap places
