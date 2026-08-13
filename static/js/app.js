@@ -2946,6 +2946,50 @@ function pret(symbol) {
   };
 }
 
+// salesFilters: the admin Sales page filter bar. Seeded from the server-resolved
+// values, it reloads just the table (#sales-list) over HTMX on any change, so the
+// preset chips highlight instantly and search is live — no full-page reload.
+function salesFilters(preset, from, to, status, method, q) {
+  return {
+    preset: preset,
+    from: from,
+    to: to,
+    status: status,
+    method: method,
+    q: q,
+    reload() {
+      window.htmx.ajax("GET", "/admin/sales/table", {
+        target: "#sales-list",
+        swap: "innerHTML",
+        values: {
+          preset: this.preset,
+          from: this.from,
+          to: this.to,
+          status: this.status,
+          method: this.method,
+          q: this.q,
+        },
+      });
+    },
+    setPreset(p) {
+      // A preset owns the range, so clear any exact from/to it would fight with.
+      this.preset = p;
+      this.from = "";
+      this.to = "";
+      this.reload();
+    },
+    clear() {
+      this.preset = "";
+      this.from = "";
+      this.to = "";
+      this.status = "";
+      this.method = "";
+      this.q = "";
+      this.reload();
+    },
+  };
+}
+
 // saleReturn: per-line partial-return modal. Collects {sale_item_id: qty} and
 // posts to /api/sales/:id/partial-return.
 function saleReturn(saleId, opts) {

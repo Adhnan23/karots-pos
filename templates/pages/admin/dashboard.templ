@@ -67,11 +67,11 @@ templ Dashboard(d DashboardData) {
 			</a>
 		}
 		<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
-			@statCard("Today's Sales", strconv.Itoa(d.TodayCount), "indigo")
-			@statCard("Today's Revenue", money.Format(d.Symbol, d.TodayTotal), "emerald")
+			@statCardLink("Today's Sales", strconv.Itoa(d.TodayCount), "indigo", "/admin/sales?preset=today")
+			@statCardLink("Today's Revenue", money.Format(d.Symbol, d.TodayTotal), "emerald", "/admin/finance")
 			@statCardLink("Low Stock Items", strconv.Itoa(d.LowStockCount), "amber", "/admin/reports/low-stock")
 			@statCardLink("Expiring Soon", strconv.Itoa(d.ExpiringCount), "rose", "/admin/reports/batches?days=30")
-			@statCard("Customer Dues", money.Format(d.Symbol, d.OutstandingDue), "rose")
+			@statCardLink("Customer Dues", money.Format(d.Symbol, d.OutstandingDue), "rose", "/admin/customers")
 		</div>
 
 		<!-- Trends — the reports section's charts, surfaced on the home page,

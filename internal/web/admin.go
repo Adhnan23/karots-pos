@@ -742,13 +742,25 @@ func (a *adminUI) salesData(c echo.Context) (adminpages.SalesData, error) {
 	if hasNext {
 		rows = rows[:salesPageSize]
 	}
+	// Resolve preset → concrete from/to strings so the date inputs reflect the
+	// active window (e.g. clicking "This week" fills the pickers).
+	preset := c.QueryParam("preset")
+	fromStr, toStr := c.QueryParam("from"), c.QueryParam("to")
+	if preset != "" {
+		if _, _, fOut, tOut, err := reports.ResolveRange(preset, "", ""); err == nil {
+			fromStr, toStr = fOut, tOut
+		}
+	}
 	return adminpages.SalesData{
 		UserName: middleware.CurrentUserName(c),
 		Symbol:   a.symbol(ctx),
 		Rows:     rows,
-		From:     c.QueryParam("from"),
-		To:       c.QueryParam("to"),
+		Preset:   preset,
+		From:     fromStr,
+		To:       toStr,
 		Status:   c.QueryParam("status"),
+		Query:    strings.TrimSpace(c.QueryParam("q")),
+		Method:   strings.TrimSpace(c.QueryParam("method")),
 		Page:     page,
 		HasNext:  hasNext,
 	}, nil

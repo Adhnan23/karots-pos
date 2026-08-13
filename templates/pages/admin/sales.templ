@@ -12,51 +12,99 @@ type SalesData struct {
 	UserName string
 	Symbol   string
 	Rows     []sales.Sale
+	Preset   string
 	From     string
 	To       string
 	Status   string
+	Query    string
+	Method   string
 	Page     int
 	HasNext  bool
 }
 
 templ SalesPage(d SalesData) {
 	@layouts.Admin("Sales", d.UserName, "sales") {
-		<h1 class="text-2xl font-bold mb-6">Sales</h1>
-
-		<form
-			id="sales-filter-form"
-			class="flex flex-wrap items-end gap-3 mb-6 bg-white rounded-2xl shadow-sm p-4"
-			hx-get="/admin/sales/table"
-			hx-target="#sales-list"
-			hx-swap="innerHTML"
-			hx-trigger="submit, change"
+		<div class="flex items-center justify-between mb-6">
+			<h1 class="text-2xl font-bold">Sales</h1>
+			<a href="/admin/finance" class="text-sm text-indigo-600 hover:underline whitespace-nowrap">Finance report →</a>
+		</div>
+		<div
+			id="sales-filters"
+			class="bg-white rounded-2xl shadow-sm p-4 mb-6 space-y-3"
+			x-data={ salesFilterState(d) }
 		>
-			<div>
-				<label class="block text-xs text-slate-500 mb-1">From</label>
-				<input type="date" name="from" value={ d.From } class="border rounded-lg px-3 py-2"/>
+			<!-- Hidden preset so the pager / reload-sales hx-include carries it too. -->
+			<input type="hidden" name="preset" x-model="preset"/>
+			<!-- Quick date presets -->
+			<div class="flex flex-wrap gap-2">
+				@salesPreset("today", "Today")
+				@salesPreset("this-week", "This week")
+				@salesPreset("this-month", "This month")
+				@salesPreset("last-week", "Last week")
+				@salesPreset("last-month", "Last month")
+				@salesPreset("this-year", "This year")
 			</div>
-			<div>
-				<label class="block text-xs text-slate-500 mb-1">To</label>
-				<input type="date" name="to" value={ d.To } class="border rounded-lg px-3 py-2"/>
+			<!-- Exact range + status + method + search -->
+			<div class="flex flex-wrap items-end gap-3">
+				<div>
+					<label class="block text-xs text-slate-500 mb-1">From</label>
+					<input type="date" name="from" x-model="from" x-on:change="preset=''; reload()" class="border rounded-lg px-3 py-2"/>
+				</div>
+				<div>
+					<label class="block text-xs text-slate-500 mb-1">To</label>
+					<input type="date" name="to" x-model="to" x-on:change="preset=''; reload()" class="border rounded-lg px-3 py-2"/>
+				</div>
+				<div>
+					<label class="block text-xs text-slate-500 mb-1">Status</label>
+					<select name="status" x-model="status" x-on:change="reload()" class="border rounded-lg px-3 py-2">
+						<option value="">All</option>
+						<option value="completed">Completed</option>
+						<option value="credit">Credit</option>
+						<option value="returned">Returned</option>
+					</select>
+				</div>
+				<div>
+					<label class="block text-xs text-slate-500 mb-1">Payment</label>
+					<select name="method" x-model="method" x-on:change="reload()" class="border rounded-lg px-3 py-2">
+						<option value="">Any</option>
+						<option value="cash">Cash</option>
+						<option value="card">Card</option>
+						<option value="online">Online</option>
+						<option value="wallet">Wallet</option>
+					</select>
+				</div>
+				<div class="flex-1 min-w-[12rem]">
+					<label class="block text-xs text-slate-500 mb-1">Search</label>
+					<input type="search" name="q" x-model="q" x-on:input.debounce.300ms="reload()" placeholder="Receipt no / customer / phone" class="w-full border rounded-lg px-3 py-2"/>
+				</div>
+				<button type="button" x-on:click="clear()" class="px-4 py-2 rounded-lg border text-slate-600 hover:bg-slate-50">Clear</button>
 			</div>
-			<div>
-				<label class="block text-xs text-slate-500 mb-1">Status</label>
-				<select name="status" class="border rounded-lg px-3 py-2">
-					@salesStatusOption("", "All", d.Status)
-					@salesStatusOption("completed", "Completed", d.Status)
-					@salesStatusOption("credit", "Credit", d.Status)
-					@salesStatusOption("returned", "Returned", d.Status)
-				</select>
-			</div>
-			<button class="px-4 py-2 rounded-lg bg-slate-800 text-white">Filter</button>
-		</form>
+		</div>
 
 		<div class="bg-white rounded-2xl shadow-sm p-6">
-			<div id="sales-list" hx-get="/admin/sales/table" hx-trigger="reload-sales from:body" hx-include="#sales-filter-form" hx-swap="innerHTML">
+			<div id="sales-list" hx-get="/admin/sales/table" hx-trigger="reload-sales from:body" hx-include="#sales-filters" hx-swap="innerHTML">
 				@SalesList(d)
 			</div>
 		</div>
 	}
+}
+
+// salesFilterState seeds the Alpine filter model from the server-resolved values
+// and reloads just the table (#sales-list) via HTMX whenever a filter changes, so
+// presets highlight instantly and search is live — no full-page reload.
+func salesFilterState(d SalesData) string {
+	return "salesFilters(" +
+		strconv.Quote(d.Preset) + "," + strconv.Quote(d.From) + "," + strconv.Quote(d.To) + "," +
+		strconv.Quote(d.Status) + "," + strconv.Quote(d.Method) + "," + strconv.Quote(d.Query) + ")"
+}
+
+templ salesPreset(key, label string) {
+	<button
+		type="button"
+		x-on:click={ "setPreset('" + key + "')" }
+		x-bind:class={ "preset==='" + key + "' ? 'bg-indigo-600 text-white' : 'border text-slate-600 hover:bg-slate-50'" }
+		class="px-3 py-1.5 rounded-lg text-sm"
+	>{ label }</button>
 }
 
 // SalesList is the swappable region (table + pager).
@@ -79,7 +127,7 @@ templ SalesList(d SalesData) {
 			@SalesRows(d.Rows, d.Symbol)
 		</tbody>
 	</table>
-	@pager(d.Page, d.HasNext, "/admin/sales/table", "#sales-list", "#sales-filter-form")
+	@pager(d.Page, d.HasNext, "/admin/sales/table", "#sales-list", "#sales-filters")
 }
 
 templ SalesRows(rows []sales.Sale, symbol string) {

@@ -1842,14 +1842,20 @@ func (a *adminUI) SalesTable(c echo.Context) error {
 }
 
 func salesFilterFromQuery(c echo.Context) sales.ListFilter {
-	f := sales.ListFilter{Limit: 200, Status: c.QueryParam("status")}
-	if t, ok := parseDate(c.QueryParam("from")); ok {
-		f.From = &t
+	f := sales.ListFilter{
+		Limit:  200,
+		Status: c.QueryParam("status"),
+		Query:  strings.TrimSpace(c.QueryParam("q")),
+		Method: strings.TrimSpace(c.QueryParam("method")),
 	}
-	if t, ok := parseDate(c.QueryParam("to")); ok {
-		// make `to` inclusive of the whole day
-		end := t.AddDate(0, 0, 1)
-		f.To = &end
+	// A preset or an explicit from/to resolves to a [from, to) window via the same
+	// helper the reports/receipts pages use; no range params means "all time".
+	preset := c.QueryParam("preset")
+	if preset != "" || c.QueryParam("from") != "" || c.QueryParam("to") != "" {
+		if from, to, _, _, err := reports.ResolveRange(preset, c.QueryParam("from"), c.QueryParam("to")); err == nil {
+			f.From = &from
+			f.To = &to
+		}
 	}
 	return f
 }
