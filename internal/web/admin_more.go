@@ -1841,9 +1841,10 @@ func (a *adminUI) SalesTable(c echo.Context) error {
 	return response.RenderFragment(c, adminpages.SalesList(d))
 }
 
-// SalesExport streams the filtered sales list as a CSV download, honoring the
-// same filters as the on-screen table. Pages through in MaxListLimit batches so
-// a whole month exports rather than the first page.
+// SalesExport streams the filtered sales list as a downloadable spreadsheet
+// (csv | xlsx | ods via ?format=), honoring the same filters as the on-screen
+// table. Pages through in MaxListLimit batches so a whole month exports rather
+// than the first page.
 func (a *adminUI) SalesExport(c echo.Context) error {
 	ctx := c.Request().Context()
 	f := salesFilterFromQuery(c)
@@ -1875,7 +1876,7 @@ func (a *adminUI) SalesExport(c echo.Context) error {
 		}
 		f.Offset += f.Limit
 	}
-	return writeCSV(c, "sales", header, out)
+	return writeSheet(c, "sales", header, out)
 }
 
 func salesFilterFromQuery(c echo.Context) sales.ListFilter {

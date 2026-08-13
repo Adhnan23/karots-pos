@@ -78,7 +78,17 @@ templ SalesPage(d SalesData) {
 					<input type="search" name="q" x-model="q" x-on:input.debounce.300ms="reload()" placeholder="Receipt no / customer / phone" class="w-full border rounded-lg px-3 py-2"/>
 				</div>
 				<button type="button" x-on:click="clear()" class="px-4 py-2 rounded-lg border text-slate-600 hover:bg-slate-50">Clear</button>
-				<a x-bind:href="exportUrl()" class="px-4 py-2 rounded-lg border border-emerald-300 text-emerald-700 hover:bg-emerald-50">Export CSV</a>
+				<!-- Filter-aware export: links bind to the live filter state so the download matches the table. -->
+				<div class="relative inline-block" x-data="{open:false}" @click.outside="open=false">
+					<button type="button" @click="open=!open" class="px-4 py-2 rounded-lg border border-emerald-300 text-emerald-700 font-medium hover:bg-emerald-50">
+						Export <span class="text-emerald-400">▾</span>
+					</button>
+					<div x-show="open" x-transition style="display:none" class="absolute right-0 mt-1 w-44 bg-white border rounded-lg shadow-lg z-20 py-1">
+						<a x-bind:href="exportUrl('csv')" class="block px-4 py-2 text-sm hover:bg-slate-50">CSV (.csv)</a>
+						<a x-bind:href="exportUrl('xlsx')" class="block px-4 py-2 text-sm hover:bg-slate-50">Excel (.xlsx)</a>
+						<a x-bind:href="exportUrl('ods')" class="block px-4 py-2 text-sm hover:bg-slate-50">ODF (.ods)</a>
+					</div>
+				</div>
 			</div>
 		</div>
 

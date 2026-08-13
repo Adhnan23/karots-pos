@@ -3055,8 +3055,9 @@ function salesFilters(preset, from, to, status, method, q) {
       this.q = "";
       this.reload();
     },
-    exportUrl() {
+    exportUrl(fmt) {
       const p = new URLSearchParams();
+      p.set("format", fmt || "csv");
       if (this.preset) p.set("preset", this.preset);
       if (this.from) p.set("from", this.from);
       if (this.to) p.set("to", this.to);
