@@ -1841,6 +1841,43 @@ func (a *adminUI) SalesTable(c echo.Context) error {
 	return response.RenderFragment(c, adminpages.SalesList(d))
 }
 
+// SalesExport streams the filtered sales list as a CSV download, honoring the
+// same filters as the on-screen table. Pages through in MaxListLimit batches so
+// a whole month exports rather than the first page.
+func (a *adminUI) SalesExport(c echo.Context) error {
+	ctx := c.Request().Context()
+	f := salesFilterFromQuery(c)
+	f.Limit = sales.MaxListLimit
+	header := []string{"Receipt", "When", "Cashier", "Customer", "Type", "Subtotal", "Discount", "Total", "Paid", "Change", "Status"}
+	var out [][]string
+	for {
+		rows, err := a.s.sales.List(ctx, f)
+		if err != nil {
+			return err
+		}
+		for _, s := range rows {
+			out = append(out, []string{
+				s.ReceiptNo,
+				s.CreatedAt.Format("2006-01-02 15:04"),
+				s.CashierName,
+				ptrStr(s.CustomerName),
+				s.SaleType,
+				csvMoney(s.Subtotal),
+				csvMoney(s.Discount),
+				csvMoney(s.Total),
+				csvMoney(s.PaidAmount),
+				csvMoney(s.ChangeGiven),
+				s.Status,
+			})
+		}
+		if len(rows) < f.Limit {
+			break
+		}
+		f.Offset += f.Limit
+	}
+	return writeCSV(c, "sales", header, out)
+}
+
 func salesFilterFromQuery(c echo.Context) sales.ListFilter {
 	f := sales.ListFilter{
 		Limit:  200,

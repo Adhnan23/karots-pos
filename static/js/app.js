@@ -81,6 +81,24 @@ document.addEventListener("DOMContentLoaded", function () {
     true,
   );
 
+  // Right-click context menu in the cashier kiosk gives a way to Reload / Back /
+  // Save / Inspect — kill it, but keep it inside text inputs so paste still works.
+  document.addEventListener(
+    "contextmenu",
+    function (e) {
+      const p = location.pathname;
+      if (!(p.startsWith("/cashier") || p.startsWith("/account"))) return;
+      const el = e.target;
+      const editable =
+        el &&
+        (el.tagName === "INPUT" ||
+          el.tagName === "TEXTAREA" ||
+          el.isContentEditable);
+      if (!editable) e.preventDefault();
+    },
+    true,
+  );
+
   // Replace the native confirm() for hx-confirm with our styled modal.
   document.body.addEventListener("htmx:confirm", function (e) {
     if (!e.detail.question) return; // no hx-confirm on this element → proceed
@@ -3036,6 +3054,16 @@ function salesFilters(preset, from, to, status, method, q) {
       this.method = "";
       this.q = "";
       this.reload();
+    },
+    exportUrl() {
+      const p = new URLSearchParams();
+      if (this.preset) p.set("preset", this.preset);
+      if (this.from) p.set("from", this.from);
+      if (this.to) p.set("to", this.to);
+      if (this.status) p.set("status", this.status);
+      if (this.method) p.set("method", this.method);
+      if (this.q) p.set("q", this.q);
+      return "/admin/sales/export?" + p.toString();
     },
   };
 }

@@ -78,6 +78,7 @@ templ SalesPage(d SalesData) {
 					<input type="search" name="q" x-model="q" x-on:input.debounce.300ms="reload()" placeholder="Receipt no / customer / phone" class="w-full border rounded-lg px-3 py-2"/>
 				</div>
 				<button type="button" x-on:click="clear()" class="px-4 py-2 rounded-lg border text-slate-600 hover:bg-slate-50">Clear</button>
+				<a x-bind:href="exportUrl()" class="px-4 py-2 rounded-lg border border-emerald-300 text-emerald-700 hover:bg-emerald-50">Export CSV</a>
 			</div>
 		</div>
 

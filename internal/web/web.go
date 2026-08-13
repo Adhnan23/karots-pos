@@ -320,6 +320,7 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 
 	ag.GET("/sales", admin.Sales)
 	ag.GET("/sales/table", admin.SalesTable)
+	ag.GET("/sales/export", admin.SalesExport)
 	ag.GET("/sales/return/:id", admin.SaleReturnForm)
 	ag.POST("/sales/:id/return", admin.SaleReturn) // whole-sale return (fallback)
 
