@@ -24,8 +24,17 @@ type DashboardData struct {
 	OutstandingDue decimal.Decimal
 	ReviewCount    int
 	Recent         []sales.Sale
+	SalesDelta     StatDelta           // today's sale count vs yesterday
+	RevenueDelta   StatDelta           // today's revenue vs yesterday
 	Charts         DashboardChartsData // the interactive chart carousel (range-switchable)
 	Setup          []SetupStep         // onboarding checklist; shown only while incomplete
+}
+
+// StatDelta is a stat card's "vs yesterday" change. Show is false when yesterday
+// had no baseline (would be a divide-by-zero / meaningless ∞%), so the badge hides.
+type StatDelta struct {
+	Pct  float64
+	Show bool
 }
 
 // DashboardChartsData feeds the range-switchable chart carousel on the home page.
@@ -67,8 +76,8 @@ templ Dashboard(d DashboardData) {
 			</a>
 		}
 		<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
-			@statCardLink("Today's Sales", strconv.Itoa(d.TodayCount), "indigo", "/admin/sales?preset=today")
-			@statCardLink("Today's Revenue", money.Format(d.Symbol, d.TodayTotal), "emerald", "/admin/finance")
+			@statCardDelta("Today's Sales", strconv.Itoa(d.TodayCount), "indigo", "/admin/sales?preset=today", d.SalesDelta)
+			@statCardDelta("Today's Revenue", money.Format(d.Symbol, d.TodayTotal), "emerald", "/admin/finance", d.RevenueDelta)
 			@statCardLink("Low Stock Items", strconv.Itoa(d.LowStockCount), "amber", "/admin/reports/low-stock")
 			@statCardLink("Expiring Soon", strconv.Itoa(d.ExpiringCount), "rose", "/admin/reports/batches?days=30")
 			@statCardLink("Customer Dues", money.Format(d.Symbol, d.OutstandingDue), "rose", "/admin/customers")
@@ -308,6 +317,39 @@ templ statCardLink(label, value, color, href string) {
 		<div class="text-sm text-slate-500">{ label }</div>
 		<div class={ "text-2xl font-bold mt-1 text-" + color + "-600" }>{ value }</div>
 	</a>
+}
+
+// statCardDelta is statCardLink plus a "vs yesterday" ▲/▼ % badge.
+templ statCardDelta(label, value, color, href string, delta StatDelta) {
+	<a href={ templ.SafeURL(href) } class="block bg-white rounded-2xl shadow-sm p-5 hover:ring-2 hover:ring-indigo-300 transition">
+		<div class="text-sm text-slate-500">{ label }</div>
+		<div class="flex items-end justify-between gap-2">
+			<div class={ "text-2xl font-bold mt-1 text-" + color + "-600" }>{ value }</div>
+			if delta.Show {
+				@deltaBadge(delta.Pct)
+			}
+		</div>
+	</a>
+}
+
+// deltaBadge renders a coloured ▲/▼ percent chip; flat (≈0) reads neutral.
+templ deltaBadge(pct float64) {
+	switch {
+		case pct > 0.05:
+			<span class="text-xs font-medium px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 whitespace-nowrap">▲ { deltaPct(pct) }</span>
+		case pct < -0.05:
+			<span class="text-xs font-medium px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 whitespace-nowrap">▼ { deltaPct(pct) }</span>
+		default:
+			<span class="text-xs font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 whitespace-nowrap">± 0%</span>
+	}
+}
+
+// deltaPct formats a signed percent to a whole number with no sign (the arrow carries it).
+func deltaPct(pct float64) string {
+	if pct < 0 {
+		pct = -pct
+	}
+	return strconv.FormatFloat(pct, 'f', 0, 64) + "%"
 }
 
 templ statusBadge(status string) {

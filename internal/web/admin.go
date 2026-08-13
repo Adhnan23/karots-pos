@@ -86,6 +86,13 @@ func (a *adminUI) Dashboard(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	// Yesterday's P&L for the "vs yesterday" stat-card deltas (best-effort).
+	yStart := start.AddDate(0, 0, -1)
+	var yCount int
+	var yRev decimal.Decimal
+	if y, _ := a.s.reports.Compute(ctx, yStart, start); y != nil {
+		yCount, yRev = y.SalesCount, y.Revenue
+	}
 	recent := todays
 	if len(recent) > 8 {
 		recent = recent[:8]
@@ -119,9 +126,20 @@ func (a *adminUI) Dashboard(c echo.Context) error {
 		OutstandingDue: due,
 		ReviewCount:    reviewCount,
 		Recent:         recent,
+		SalesDelta:     statDelta(float64(pl.SalesCount), float64(yCount)),
+		RevenueDelta:   statDelta(pl.Revenue.InexactFloat64(), yRev.InexactFloat64()),
 		Charts:         a.dashboardChartData(ctx, 14),
 		Setup:          a.setupStatus(ctx),
 	}))
+}
+
+// statDelta computes a stat card's percent change vs a baseline. Show is false
+// when the baseline is zero (yesterday had none) — a % change is meaningless then.
+func statDelta(today, baseline float64) adminpages.StatDelta {
+	if baseline == 0 {
+		return adminpages.StatDelta{}
+	}
+	return adminpages.StatDelta{Pct: (today - baseline) / baseline * 100, Show: true}
 }
 
 // DashboardCharts renders just the chart carousel for a chosen range, swapped in
