@@ -278,6 +278,19 @@ exec "$CHROMIUM_BIN" --kiosk --app="\$URL" --incognito \\
 KIOSK_SH
   chmod 0755 "$INSTALL_DIR/kiosk.sh"
 
+  # Managed policy: hard-disable DevTools (F12 / Ctrl+Shift+I / right-click Inspect).
+  # The page-level key guard can't cancel browser-level F12, so lock it at the
+  # browser. Chromium reads managed policy from a distro-dependent dir; write to
+  # all the likely ones (deb, arch/generic, snap) so one of them takes.
+  POLICY_JSON='{ "DeveloperToolsAvailability": 2 }'
+  POLICY_DIRS="/etc/chromium/policies/managed /etc/chromium-browser/policies/managed"
+  case "$CHROMIUM_BIN" in
+    /snap/*) POLICY_DIRS="$POLICY_DIRS /var/snap/chromium/common/policies/managed" ;;
+  esac
+  for d in $POLICY_DIRS; do
+    install -d -m 0755 "$d" 2>/dev/null && printf '%s\n' "$POLICY_JSON" > "$d/karots-kiosk.json" 2>/dev/null || true
+  done
+
   AUTOSTART_DIR="$APP_HOME/.config/autostart"
   install -d -m 0755 -o "$APP_USER" -g "$APP_USER" "$AUTOSTART_DIR"
   cat > "$AUTOSTART_DIR/karots-kiosk.desktop" <<DESKTOP
