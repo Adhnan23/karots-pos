@@ -253,7 +253,14 @@ templ typeCard(value, title, sub string) {
 		x-bind:class={ "type==='" + value + "' ? 'ring-2 ring-emerald-500 bg-emerald-50' : 'border border-slate-200'" }
 		class="px-3 py-2.5 rounded-lg text-left"
 	>
-		<div class="font-medium text-sm">{ title }</div>
+		<div class="font-medium text-sm">
+			if value == "deposit" {
+				<span class="text-emerald-600 font-bold">↓</span>
+			} else if value == "withdrawal" {
+				<span class="text-rose-600 font-bold">↑</span>
+			}
+			{ title }
+		</div>
 		<div class="text-xs text-slate-400">{ sub }</div>
 	</button>
 }
