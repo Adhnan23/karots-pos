@@ -248,6 +248,13 @@ func applyReceivedLines(ctx context.Context, repo *Repository, stk *stock.Reposi
 		if err := repo.RefreshProductPricing(ctx, ln.ProductID, ln.CostPrice, ln.SellingPrice); err != nil {
 			return apperr.Internal("failed to refresh product pricing", err)
 		}
+		// Backfill the default supplier from whoever actually delivered this, so
+		// the reorder / low-stock-by-supplier report has something to filter on
+		// without the owner tagging every product by hand. No-op if it already
+		// has one.
+		if err := repo.SetPreferredSupplierIfEmpty(ctx, ln.ProductID, supplierID); err != nil {
+			return apperr.Internal("failed to set preferred supplier", err)
+		}
 	}
 	if owed.IsPositive() {
 		if err := sup.AddBalance(ctx, supplierID, owed); err != nil {
@@ -315,6 +322,13 @@ func createDraftTx(ctx context.Context, tx *sqlx.Tx, in CreateInput, userID int6
 	}
 	if err := insertDraftLines(ctx, repo, id, lines); err != nil {
 		return 0, err
+	}
+	// Ordering from a supplier is itself a signal of who supplies an item, so
+	// backfill the default supplier here too (only when none is set yet).
+	for _, ln := range lines {
+		if err := repo.SetPreferredSupplierIfEmpty(ctx, ln.ProductID, in.SupplierID); err != nil {
+			return 0, apperr.Internal("failed to set preferred supplier", err)
+		}
 	}
 	return id, nil
 }

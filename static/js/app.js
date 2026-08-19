@@ -372,6 +372,13 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
     groupChildren: [],
     groupStack: [],
     inGroups: true,
+    // Monotonic token guarding the menu loaders below. Typing fires a 300ms
+    // debounced search-load while an Enter/scan fires a top-menu reload, so two
+    // loadProducts() calls overlap; if the older (search) fetch resolves last it
+    // used to clobber groupChildren back to [] — menu cards vanished while the
+    // once-loaded Frequently-sold row stayed. Each loader bumps this on entry and
+    // drops its result if a newer load has started since.
+    _menuSeq: 0,
     // Plugin menu roots (e.g. "Reload & Bills"), injected server-side from
     // plugin.CashierMenuRoots(). Rendered as cards alongside product groups at
     // the top of the menu; tapping one drills into the menu-node protocol.
@@ -713,11 +720,13 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
     },
 
     async loadProducts() {
+      const seq = ++this._menuSeq;
       // Typing overrides the group menu: show flat name/barcode search results.
       if (this.search && this.search.trim()) {
         this.inGroups = false;
         const q = encodeURIComponent(this.search);
         const json = await apiFetch("GET", `/api/products?limit=100&search=${q}`);
+        if (seq !== this._menuSeq) return; // a newer load superseded this one
         this.products = json.data || [];
         this.groupChildren = [];
         return;
@@ -730,15 +739,19 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
       return this.openGroup(top.id, true);
     },
     async loadGroupsTop() {
+      const seq = ++this._menuSeq;
       this.groupStack = [];
       this.menuMode = "cards";
       this.pluginLeaves = [];
       const json = await apiFetch("GET", "/api/groups");
+      if (seq !== this._menuSeq) return; // a newer load superseded this one
       this.groupChildren = (json.data && json.data.groups) || [];
       this.products = [];
     },
     async openGroup(id, reload) {
+      const seq = ++this._menuSeq;
       const json = await apiFetch("GET", `/api/groups/${id}`);
+      if (seq !== this._menuSeq) return; // a newer load superseded this one
       const d = json.data || {};
       this.inGroups = true;
       this.menuMode = "cards";
@@ -765,8 +778,10 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
       return this.fetchNodes(r.url);
     },
     async fetchNodes(url) {
+      const seq = ++this._menuSeq;
       this.menuMode = "cards";
       const json = await apiFetch("GET", url);
+      if (seq !== this._menuSeq) return; // a newer load superseded this one
       const nodes = (json && json.nodes) || (json.data && json.data.nodes) || [];
       // Map nodes onto the existing card grids: folders -> groupChildren, leaves kept on the node.
       this.groupChildren = nodes
@@ -2563,6 +2578,17 @@ function grn(symbol, config) {
       if (!this.supplierId) {
         toast("Select a supplier", "error");
         return;
+      }
+      // Safety net for the forgotten "+ Add": a line with a typed name and a
+      // quantity but no product_id would otherwise be filtered out silently
+      // below and the delivery under-recorded. Create the product now; if it
+      // can't (e.g. a price is still missing) createProduct toasts why and we
+      // stop so the cashier can fix that row rather than losing it.
+      for (const l of this.lines) {
+        if (!Number(l.product_id) && (l.product_name || "").trim() && Number(l.quantity) > 0) {
+          await this.createProduct(l);
+          if (!Number(l.product_id)) return;
+        }
       }
       const items = this.lines
         .filter((l) => Number(l.product_id) > 0 && Number(l.quantity) > 0)

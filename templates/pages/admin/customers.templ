@@ -95,7 +95,7 @@ templ CustomerRows(rows []customers.Customer, symbol string) {
 						<button class="text-slate-600 hover:underline ml-3" hx-get={ "/admin/customers/opening/" + strconv.FormatInt(c.ID, 10) } hx-target="#modal-container" hx-swap="innerHTML">Opening</button>
 						<a class="text-slate-600 hover:underline ml-3" href={ templ.SafeURL("/admin/customers/" + strconv.FormatInt(c.ID, 10) + "/statement") } target="_blank">Statement</a>
 						if c.OutstandingBalance.IsPositive() {
-							<button class="text-emerald-600 hover:underline ml-3" hx-get={ "/admin/customers/pay/" + strconv.FormatInt(c.ID, 10) } hx-target="#modal-container" hx-swap="innerHTML"><span class="font-bold">↓</span> Pay</button>
+							<button class="text-emerald-600 hover:underline ml-3" hx-get={ "/admin/customers/pay/" + strconv.FormatInt(c.ID, 10) } hx-target="#modal-container" hx-swap="innerHTML"><span class="font-bold text-lg">↓</span> Pay</button>
 						}
 						<button class="text-red-600 hover:underline ml-3" hx-delete={ "/admin/customers/" + strconv.FormatInt(c.ID, 10) } hx-swap="none" hx-confirm={ "Deactivate " + c.Name + "?" }>Deactivate</button>
 					} else {

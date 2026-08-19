@@ -246,6 +246,60 @@ func (a *adminUI) SupplierReactivate(c echo.Context) error {
 	return htmxReload(c, "Supplier re-enabled", "reload-suppliers")
 }
 
+// SupplierReassignForm asks which supplier should take over this one's products
+// — a distributor swap: the company kept the goods but changed who delivers them.
+func (a *adminUI) SupplierReassignForm(c echo.Context) error {
+	ctx := c.Request().Context()
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	from, err := a.s.suppliers.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	count, err := a.s.products.CountByPreferredSupplier(ctx, id)
+	if err != nil {
+		return err
+	}
+	all, err := a.s.suppliers.List(ctx, "")
+	if err != nil {
+		return err
+	}
+	// Every active supplier except the source is a possible destination.
+	targets := make([]suppliers.Supplier, 0, len(all))
+	for _, s := range all {
+		if s.ID != id {
+			targets = append(targets, s)
+		}
+	}
+	return response.RenderFragment(c, adminpages.SupplierReassignForm(adminpages.SupplierReassignData{
+		From:    *from,
+		Count:   count,
+		Targets: targets,
+	}))
+}
+
+// SupplierReassignApply moves every product from this supplier to the chosen one.
+func (a *adminUI) SupplierReassignApply(c echo.Context) error {
+	ctx := c.Request().Context()
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	toID, err := strconv.ParseInt(c.FormValue("target_id"), 10, 64)
+	if err != nil {
+		return apperr.Validation("pick a supplier to move to")
+	}
+	n, err := a.s.products.ReassignPreferredSupplier(ctx, id, toID)
+	if err != nil {
+		return err
+	}
+	a.s.logAudit(c, audit.ActionUpdate, "supplier", strconv.FormatInt(id, 10),
+		"moved "+strconv.FormatInt(n, 10)+" products to supplier "+strconv.FormatInt(toID, 10))
+	return htmxDone(c, "Moved "+strconv.FormatInt(n, 10)+" products to the new supplier", "reload-suppliers")
+}
+
 func (a *adminUI) SupplierPay(c echo.Context) error {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {

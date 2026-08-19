@@ -99,7 +99,8 @@ templ SupplierRows(rows []suppliers.Supplier, symbol string) {
 						<button class="text-indigo-600 hover:underline" hx-get={ "/admin/suppliers/form/" + strconv.FormatInt(s.ID, 10) } hx-target="#modal-container" hx-swap="innerHTML">Edit</button>
 						<button class="text-slate-600 hover:underline ml-3" hx-get={ "/admin/suppliers/opening/" + strconv.FormatInt(s.ID, 10) } hx-target="#modal-container" hx-swap="innerHTML">Opening</button>
 						<a class="text-slate-600 hover:underline ml-3" href={ templ.SafeURL("/admin/suppliers/" + strconv.FormatInt(s.ID, 10) + "/statement") } target="_blank">Statement</a>
-						<button class="text-rose-600 hover:underline ml-3" hx-get={ "/admin/suppliers/pay/" + strconv.FormatInt(s.ID, 10) } hx-target="#modal-container" hx-swap="innerHTML"><span class="font-bold">↑</span> Pay</button>
+						<button class="text-slate-600 hover:underline ml-3" title="Move this supplier's products to another supplier (distributor change)" hx-get={ "/admin/suppliers/reassign/" + strconv.FormatInt(s.ID, 10) } hx-target="#modal-container" hx-swap="innerHTML">Move items</button>
+						<button class="text-rose-600 hover:underline ml-3" hx-get={ "/admin/suppliers/pay/" + strconv.FormatInt(s.ID, 10) } hx-target="#modal-container" hx-swap="innerHTML"><span class="font-bold text-lg">↑</span> Pay</button>
 						<button class="text-red-600 hover:underline ml-3" hx-delete={ "/admin/suppliers/" + strconv.FormatInt(s.ID, 10) } hx-swap="none" hx-confirm={ "Disable supplier " + s.Name + "?" }>Disable</button>
 					} else {
 						<button class="text-emerald-600 hover:underline" hx-post={ "/admin/suppliers/" + strconv.FormatInt(s.ID, 10) + "/activate" } hx-swap="none" hx-confirm={ "Re-enable " + s.Name + "?" }>Reactivate</button>
@@ -107,6 +108,39 @@ templ SupplierRows(rows []suppliers.Supplier, symbol string) {
 				</td>
 			</tr>
 		}
+	}
+}
+
+type SupplierReassignData struct {
+	From    suppliers.Supplier
+	Count   int
+	Targets []suppliers.Supplier
+}
+
+// SupplierReassignForm moves every product defaulting to one supplier over to
+// another — for when a company keeps the goods but changes the distributor.
+templ SupplierReassignForm(d SupplierReassignData) {
+	@modalShell("Move products to another supplier") {
+		<form class="p-6 space-y-4" hx-post={ "/admin/suppliers/" + strconv.FormatInt(d.From.ID, 10) + "/reassign" } hx-swap="none">
+			<p class="text-sm text-slate-600">
+				<span class="font-semibold">{ strconv.Itoa(d.Count) }</span> product(s) currently default to
+				<span class="font-semibold">{ d.From.Name }</span>. Pick who delivers them now — every one moves across.
+			</p>
+			if d.Count == 0 {
+				<p class="text-sm text-amber-600">Nothing to move: no products have this supplier as their default.</p>
+			}
+			<div>
+				<label class="block text-sm font-medium mb-1">Move all to</label>
+				<select name="target_id" required class="w-full border rounded-lg px-3 py-2">
+					<option value="">— pick a supplier —</option>
+					for _, t := range d.Targets {
+						<option value={ strconv.FormatInt(t.ID, 10) }>{ t.Name }</option>
+					}
+				</select>
+				<p class="text-xs text-slate-500 mt-1">Only the default supplier tag changes — stock, prices and history stay put.</p>
+			</div>
+			@modalButtons()
+		</form>
 	}
 }
 
@@ -292,7 +326,7 @@ templ SupplierPaymentForm(d SupplierPayData) {
 						<input name="reference" class="w-full border rounded-lg px-3 py-2" placeholder="cheque / txn no"/>
 					</div>
 					<div class="flex justify-end">
-						<button type="submit" class="px-4 py-2 rounded-lg bg-emerald-600 text-white font-medium"><span class="font-bold">↓</span> Record refund</button>
+						<button type="submit" class="px-4 py-2 rounded-lg bg-emerald-600 text-white font-medium"><span class="font-bold text-lg">↓</span> Record refund</button>
 					</div>
 				</form>
 			</div>

@@ -99,7 +99,7 @@ templ SuppliersTable(d SuppliersData) {
 									hx-get={ "/cashier/suppliers/pay/" + strconv.FormatInt(s.ID, 10) }
 									hx-target="#modal-container"
 									class="text-rose-600 hover:underline"
-								><span class="font-bold">↑</span> Pay</button>
+								><span class="font-bold text-lg">↑</span> Pay</button>
 								<a
 									href={ templ.SafeURL("/cashier/suppliers/" + strconv.FormatInt(s.ID, 10) + "/receive") }
 									class="text-indigo-600 hover:underline"
@@ -350,6 +350,14 @@ templ SupplierReceive(d SupplierReceiveData) {
 												</button>
 											</template>
 										</div>
+											<!-- Persistent reminder: the transient dropdown's "+ Add" is
+											     easy to miss once you move to qty/cost, and an unlinked line
+											     is dropped on save. This stays in the row until the line is
+											     linked to a product. -->
+											<button type="button" x-show="canCreateProducts && !l._open && (l.product_name || '').trim() && !Number(l.product_id)" x-cloak x-on:click="createProduct(l)" class="mt-1 w-full text-left text-xs rounded px-2 py-1.5 bg-amber-50 text-amber-800 border border-amber-300 hover:bg-amber-100">
+												<span class="font-semibold">+ Add &#34;</span><span x-text="l.product_name"></span><span class="font-semibold">&#34; to the catalog</span>
+												<span class="block text-amber-600 mt-0.5" x-text="newItemHint(l)"></span>
+											</button>
 									</td>
 									<td class="py-1 pr-2">
 										<div class="flex items-center rounded border">
@@ -465,6 +473,14 @@ templ SupplierOrder(d SupplierOrderData) {
 												</button>
 											</template>
 										</div>
+											<!-- Persistent reminder: the transient dropdown's "+ Add" is
+											     easy to miss once you move to qty/cost, and an unlinked line
+											     is dropped on save. This stays in the row until the line is
+											     linked to a product. -->
+											<button type="button" x-show="canCreateProducts && !l._open && (l.product_name || '').trim() && !Number(l.product_id)" x-cloak x-on:click="createProduct(l)" class="mt-1 w-full text-left text-xs rounded px-2 py-1.5 bg-amber-50 text-amber-800 border border-amber-300 hover:bg-amber-100">
+												<span class="font-semibold">+ Add &#34;</span><span x-text="l.product_name"></span><span class="font-semibold">&#34; to the catalog</span>
+												<span class="block text-amber-600 mt-0.5" x-text="newItemHint(l)"></span>
+											</button>
 									</td>
 									<td class="py-1 pr-2">
 										<div class="flex items-center rounded border">

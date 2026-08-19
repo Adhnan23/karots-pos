@@ -257,7 +257,7 @@ templ CreditTable(d CreditData) {
 								hx-get={ "/cashier/credit/pay/" + strconv.FormatInt(c.ID, 10) }
 								hx-target="#modal-container"
 								class="text-emerald-600 hover:underline"
-							><span class="font-bold">↓</span> Collect</button>
+							><span class="font-bold text-lg">↓</span> Collect</button>
 						</td>
 					</tr>
 				}
@@ -295,7 +295,7 @@ templ CreditPayForm(c customers.Customer, symbol string) {
 			<p class="text-xs text-slate-500" x-show="method !== 'cash'" x-cloak>Card / online repayments are recorded but do not affect your cash drawer.</p>
 			<div class="flex justify-end gap-3 pt-2">
 				<button type="button" class="px-4 py-2 rounded-lg border" x-on:click="$dispatch('close-modal')">Cancel</button>
-				<button type="submit" class="px-4 py-2 rounded-lg bg-emerald-600 text-white"><span class="font-bold">↓</span> Collect</button>
+				<button type="submit" class="px-4 py-2 rounded-lg bg-emerald-600 text-white"><span class="font-bold text-lg">↓</span> Collect</button>
 			</div>
 		</form>
 	}

@@ -445,6 +445,27 @@ func (r *Repository) SetBarcodeIfEmpty(ctx context.Context, id int64, code strin
 	return n > 0, nil
 }
 
+// CountByPreferredSupplier counts products whose default supplier is this one —
+// shown in the reassign dialog so the owner knows how many lines will move.
+func (r *Repository) CountByPreferredSupplier(ctx context.Context, supplierID int64) (int, error) {
+	var n int
+	err := r.db.GetContext(ctx, &n,
+		`SELECT count(*) FROM products WHERE preferred_supplier_id = $1`, supplierID)
+	return n, err
+}
+
+// ReassignPreferredSupplier moves every product from one default supplier to
+// another (a distributor swap) in one statement, returning how many moved.
+func (r *Repository) ReassignPreferredSupplier(ctx context.Context, fromID, toID int64) (int64, error) {
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE products SET preferred_supplier_id = $1 WHERE preferred_supplier_id = $2`, toID, fromID)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
+}
+
 // CountNeedsReview is the number of active products still flagged for review
 // (quick-added at the till). Powers the admin-panel badge.
 func (r *Repository) CountNeedsReview(ctx context.Context) (int, error) {

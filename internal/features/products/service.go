@@ -301,6 +301,31 @@ func (s *Service) CountNeedsReview(ctx context.Context) (int, error) {
 	return n, nil
 }
 
+// CountByPreferredSupplier is how many products default to this supplier.
+func (s *Service) CountByPreferredSupplier(ctx context.Context, supplierID int64) (int, error) {
+	n, err := s.repo.CountByPreferredSupplier(ctx, supplierID)
+	if err != nil {
+		return 0, apperr.Internal("failed to count supplier's products", err)
+	}
+	return n, nil
+}
+
+// ReassignPreferredSupplier moves every product defaulting to one supplier over
+// to another — for when a company changes the distributor behind the same goods.
+func (s *Service) ReassignPreferredSupplier(ctx context.Context, fromID, toID int64) (int64, error) {
+	if fromID <= 0 || toID <= 0 {
+		return 0, apperr.Validation("pick both suppliers")
+	}
+	if fromID == toID {
+		return 0, apperr.Validation("pick a different supplier to move to")
+	}
+	n, err := s.repo.ReassignPreferredSupplier(ctx, fromID, toID)
+	if err != nil {
+		return 0, apperr.Internal("failed to reassign products", err)
+	}
+	return n, nil
+}
+
 // SetCost updates a product's cost price (stock-take opening-stock valuation).
 func (s *Service) SetCost(ctx context.Context, id int64, cost decimal.Decimal) error {
 	if cost.IsNegative() {

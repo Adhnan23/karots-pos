@@ -121,6 +121,22 @@ func (r *Repository) RefreshProductPricing(ctx context.Context, productID int64,
 	return err
 }
 
+// SetPreferredSupplierIfEmpty stamps a product's default supplier from the
+// delivery/order it first arrives on, but ONLY when it has none yet — an owner's
+// deliberate choice (or a value set by an earlier delivery) is never overwritten.
+// This backfills the field the reorder / low-stock-by-supplier report relies on
+// without anyone hand-editing every product.
+func (r *Repository) SetPreferredSupplierIfEmpty(ctx context.Context, productID, supplierID int64) error {
+	if supplierID <= 0 || productID <= 0 {
+		return nil
+	}
+	_, err := r.q.ExecContext(ctx, `
+		UPDATE products
+		SET preferred_supplier_id = $1
+		WHERE id = $2 AND preferred_supplier_id IS NULL`, supplierID, productID)
+	return err
+}
+
 func (r *Repository) FindByID(ctx context.Context, id int64) (*Purchase, error) {
 	var p Purchase
 	err := r.q.GetContext(ctx, &p, `

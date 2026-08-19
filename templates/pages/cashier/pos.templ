@@ -248,8 +248,8 @@ templ POS(d POSData) {
 						<button type="button" x-on:click="showHolds = true" class="py-2 rounded-lg border text-sm text-slate-600 hover:bg-slate-50">
 							Held (<span x-text="holds.length"></span>)
 						</button>
-						<button type="button" x-on:click="showDeposit = true; preselectLocker('depositLockerId','in')" class="py-2 rounded-lg border text-sm text-slate-600 hover:bg-slate-50"><span class="text-emerald-600 font-bold">↓</span> Deposit</button>
-						<button type="button" x-on:click="showWithdraw = true; preselectLocker('withdrawLockerId','out')" class="py-2 rounded-lg border text-sm text-slate-600 hover:bg-slate-50"><span class="text-rose-600 font-bold">↑</span> Withdraw</button>
+						<button type="button" x-on:click="showDeposit = true; preselectLocker('depositLockerId','in')" class="py-2 rounded-lg border text-sm text-slate-600 hover:bg-slate-50"><span class="text-emerald-600 font-bold text-lg">↓</span> Deposit</button>
+						<button type="button" x-on:click="showWithdraw = true; preselectLocker('withdrawLockerId','out')" class="py-2 rounded-lg border text-sm text-slate-600 hover:bg-slate-50"><span class="text-rose-600 font-bold text-lg">↑</span> Withdraw</button>
 						if d.OpenCashDrawer {
 							<button type="button" x-on:click="noSale()" title="Open the cash drawer without a sale" class="py-2 rounded-lg border text-sm text-slate-600 hover:bg-slate-50">Open Drawer</button>
 						}

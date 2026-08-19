@@ -8,7 +8,16 @@ import "karots-pos/templates/layouts"
 // re-render the whole page with errMsg set.
 templ LoginPage(errMsg, installID, serverTime string) {
 	@layouts.Base("Login") {
-		<div class="min-h-full flex items-center justify-center p-6">
+		<!-- The Konami code (↑↑↓↓←→←→ B A) reveals the install id on screen: in
+		     kiosk mode DevTools/console/right-click are locked, so the console.info
+		     line below is unreachable at the shop. A fixed key sequence can't be hit
+		     by a stray click/keypress the way a tap-count could. Not a secret
+		     (useless without the master key), just kept off the default screen. -->
+		<div
+			class="min-h-full flex items-center justify-center p-6"
+			x-data="{ reveal: false, seq: ['ArrowUp','ArrowUp','ArrowDown','ArrowDown','ArrowLeft','ArrowRight','ArrowLeft','ArrowRight','b','a'], pos: 0, key(e) { const k = e.key.length === 1 ? e.key.toLowerCase() : e.key; if (k === this.seq[this.pos]) { this.pos++; if (this.pos === this.seq.length) { this.reveal = true; this.pos = 0; } } else { this.pos = (k === this.seq[0]) ? 1 : 0; } } }"
+			x-on:keydown.window="key($event)"
+		>
 			<div class="w-full max-w-md bg-white rounded-2xl shadow-sm p-8">
 				<h1 class="text-2xl font-bold text-center text-slate-800">Point of Sale</h1>
 				<p class="text-center text-slate-500 mt-1">Sign in with your phone number and PIN</p>
@@ -68,6 +77,11 @@ templ LoginPage(errMsg, installID, serverTime string) {
 					     so a shop whose clock is wrong can still be matched: the support PIN
 					     is time-based, and the developer computes it for THIS clock. -->
 					@installIDConsole(installID, serverTime)
+					<div x-show="reveal" x-cloak class="mt-6 pt-4 border-t text-center">
+						<div class="text-xs text-slate-400">Install ID</div>
+						<div class="text-lg font-mono font-semibold text-slate-700 tracking-wider select-all">{ installID }</div>
+						<div class="text-xs text-slate-400 mt-1">{ serverTime }</div>
+					</div>
 				}
 			</div>
 		</div>
