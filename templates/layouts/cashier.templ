@@ -40,7 +40,7 @@ func cashierPalette(role string, canSuppliers bool) []paletteEntry {
 templ Cashier(title, userName, role, active string, showChangePin bool) {
 	@Base(title) {
 		<div class="h-full flex flex-col">
-			<header class="h-14 shrink-0 bg-slate-900 text-white flex items-center justify-between px-5">
+			<header class="h-14 shrink-0 bg-slate-900 text-white flex items-center justify-between px-5 whitespace-nowrap">
 				<div class="flex items-center gap-6">
 					<div class="font-bold">POS Terminal</div>
 					<nav class="flex items-center gap-1 text-sm">
@@ -96,7 +96,37 @@ templ Cashier(title, userName, role, active string, showChangePin bool) {
 			</div>
 			@CommandPalette(paletteJSON(cashierPalette(role, middleware.CanHandleSuppliersCtx(ctx))))
 		</div>
+		@kioskAutoFit()
 	}
+}
+
+// kioskAutoFit scales the terminal down just enough that its widest row (the top
+// nav) fits the screen. Budget POS panels (1366 / 1280 / 1024) are narrower than
+// the terminal's natural width, so the nav used to wrap onto two lines and a
+// horizontal scrollbar appeared — and the workaround was zooming the browser out
+// by hand every shift. This does that automatically. It only ever shrinks (never
+// enlarges past 100%), so a full-HD screen is untouched.
+templ kioskAutoFit() {
+	<script>
+	(function () {
+	  function fit() {
+	    var el = document.documentElement;
+	    el.style.zoom = "1"; // measure at natural size, avoids a feedback loop
+	    var needed = Math.max(el.scrollWidth, document.body.scrollWidth);
+	    var avail = el.clientWidth;
+	    var PAD = 16; // leave slack so the edge item (Log out) isn't flush/clipped
+	    if (needed + PAD > avail) el.style.zoom = (avail / (needed + PAD)).toFixed(4);
+	  }
+	  window.addEventListener("load", fit);
+	  window.addEventListener("resize", fit);
+	  // Menu drill-downs, modals and plugin fragments swap in via HTMX and can
+	  // change the widest row, so refit after each settle.
+	  document.addEventListener("htmx:afterSettle", fit);
+	  // Web-font load shifts text width; refit once it's ready.
+	  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit);
+	  fit();
+	})();
+	</script>
 }
 
 templ cashierTab(href, label string, on bool) {
