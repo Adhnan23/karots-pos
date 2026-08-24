@@ -1,0 +1,226 @@
+package productplus
+
+import (
+	"karots-pos/templates/layouts"
+	"strconv"
+	"strings"
+)
+
+// FieldsPage is the admin field-manager: define the custom product fields that
+// get injected into the product form and (opt-in) into product search.
+templ FieldsPage(userName string, fields []Field, showDisabled bool) {
+	@layouts.Admin("Product Plus", userName, "productplus") {
+		<div class="p-6 space-y-4">
+			<div class="flex items-center justify-between">
+				<div>
+					<h1 class="text-2xl font-bold">🧩 Product Plus</h1>
+					<p class="text-sm text-slate-500">Extra product fields (model no, year, description, yes/no, dropdowns). They appear on the product form; a required field back-fills existing products from its default. Tick "searchable" to make a field findable in the till and every product list.</p>
+				</div>
+				<button
+					hx-get="/admin/productplus/form"
+					hx-target="#modal-container"
+					hx-swap="innerHTML"
+					class="px-4 py-2 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700"
+				>+ Add field</button>
+			</div>
+			<label class="inline-flex items-center gap-2 text-sm text-slate-600">
+				<input
+					type="checkbox"
+					checked?={ showDisabled }
+					hx-get="/admin/productplus/table"
+					hx-target="#ppfields"
+					hx-swap="innerHTML"
+					hx-vals="js:{show_disabled: event.target.checked ? '1' : ''}"
+					class="rounded border-slate-300"
+				/>
+				Show disabled
+			</label>
+			<div id="ppfields" hx-get="/admin/productplus/table" hx-trigger="reload-ppfields from:body" hx-swap="innerHTML">
+				@FieldsTable(fields, showDisabled)
+			</div>
+		</div>
+	}
+}
+
+// FieldsTable renders the defined fields; it is the reload target after any change.
+templ FieldsTable(fields []Field, showDisabled bool) {
+	<div class="bg-white rounded-2xl shadow-sm overflow-hidden">
+		<table class="w-full text-sm">
+			<thead class="bg-slate-50 text-slate-500 text-left">
+				<tr>
+					<th class="px-4 py-3">Label</th>
+					<th class="px-4 py-3">Key</th>
+					<th class="px-4 py-3">Type</th>
+					<th class="px-4 py-3">Default</th>
+					<th class="px-4 py-3">Flags</th>
+					<th class="px-4 py-3 text-right">Actions</th>
+				</tr>
+			</thead>
+			<tbody class="divide-y divide-slate-100">
+				if len(fields) == 0 {
+					<tr><td colspan="6" class="px-4 py-8 text-center text-slate-400">No custom fields yet. Add one to enrich your products.</td></tr>
+				}
+				for _, f := range fields {
+					<tr class={ templ.KV("opacity-50", !f.IsActive) }>
+						<td class="px-4 py-3 font-medium">{ f.Label }</td>
+						<td class="px-4 py-3 text-slate-400 font-mono text-xs">{ f.Key }</td>
+						<td class="px-4 py-3">{ fieldTypeLabel(f) }</td>
+						<td class="px-4 py-3 text-slate-500">{ f.DefaultValue }</td>
+						<td class="px-4 py-3 space-x-1">
+							if f.Required {
+								<span class="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">required</span>
+							}
+							if f.Searchable {
+								<span class="text-xs px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200">searchable</span>
+							}
+							if !f.IsActive {
+								<span class="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">disabled</span>
+							}
+						</td>
+						<td class="px-4 py-3 text-right whitespace-nowrap">
+							<button hx-get={ "/admin/productplus/form/" + strconv.FormatInt(f.ID, 10) } hx-target="#modal-container" hx-swap="innerHTML" class="text-indigo-600 hover:underline">Edit</button>
+							if f.IsActive {
+								<button hx-post={ "/admin/productplus/" + strconv.FormatInt(f.ID, 10) + "/active" } hx-vals='{"active":""}' hx-swap="none" class="ml-3 text-rose-600 hover:underline">Disable</button>
+							} else {
+								<button hx-post={ "/admin/productplus/" + strconv.FormatInt(f.ID, 10) + "/active" } hx-vals='{"active":"1"}' hx-swap="none" class="ml-3 text-emerald-600 hover:underline">Enable</button>
+							}
+						</td>
+					</tr>
+				}
+			</tbody>
+		</table>
+	</div>
+}
+
+func fieldTypeLabel(f Field) string {
+	switch f.Type {
+	case "text":
+		return "Text"
+	case "number":
+		return "Number"
+	case "bool":
+		return "Yes / No"
+	case "select":
+		return "Dropdown (" + strconv.Itoa(len(f.Options)) + ")"
+	}
+	return f.Type
+}
+
+// FieldForm is the create (f == nil) / edit modal for one field.
+templ FieldForm(f *Field) {
+	@ppModal(formTitle(f)) {
+		<form
+			class="px-6 py-4 space-y-4"
+			x-data={ "{ type: '" + formType(f) + "' }" }
+			if f == nil {
+				hx-post="/admin/productplus"
+			} else {
+				hx-put={ "/admin/productplus/" + strconv.FormatInt(f.ID, 10) }
+			}
+			hx-swap="none"
+		>
+			<div>
+				<label class="block text-sm font-medium text-slate-600 mb-1">Label</label>
+				<input type="text" name="label" required value={ formLabel(f) } placeholder="Model No" class="w-full border rounded-lg px-3 py-2.5"/>
+			</div>
+			<div class="grid grid-cols-2 gap-3">
+				<div>
+					<label class="block text-sm font-medium text-slate-600 mb-1">Type</label>
+					<select name="type" x-model="type" class="w-full border rounded-lg px-3 py-2.5">
+						<option value="text" selected?={ formType(f) == "text" }>Text</option>
+						<option value="number" selected?={ formType(f) == "number" }>Number</option>
+						<option value="bool" selected?={ formType(f) == "bool" }>Yes / No</option>
+						<option value="select" selected?={ formType(f) == "select" }>Dropdown</option>
+					</select>
+				</div>
+				<div>
+					<label class="block text-sm font-medium text-slate-600 mb-1">Order</label>
+					<input type="number" name="sort_order" value={ formSort(f) } class="w-full border rounded-lg px-3 py-2.5"/>
+				</div>
+			</div>
+			<div x-show="type==='select'" x-cloak>
+				<label class="block text-sm font-medium text-slate-600 mb-1">Options (one per line)</label>
+				<textarea name="options" rows="4" placeholder="Grade A&#10;Grade B&#10;Grade C" class="w-full border rounded-lg px-3 py-2.5 font-mono text-sm">{ formOptions(f) }</textarea>
+			</div>
+			<div>
+				<label class="block text-sm font-medium text-slate-600 mb-1">Default value</label>
+				<input type="text" name="default_value" value={ formDefault(f) } placeholder="left blank for most" class="w-full border rounded-lg px-3 py-2.5"/>
+				<p class="text-xs text-slate-400 mt-1">Products without a value read this. A required field should have one so existing products stay valid.</p>
+			</div>
+			<div class="flex gap-6">
+				<label class="inline-flex items-center gap-2 text-sm text-slate-700">
+					<input type="checkbox" name="required" value="1" checked?={ formBool(f, "required") } class="rounded border-slate-300"/> Required
+				</label>
+				<label class="inline-flex items-center gap-2 text-sm text-slate-700">
+					<input type="checkbox" name="searchable" value="1" checked?={ formBool(f, "searchable") } class="rounded border-slate-300"/> Searchable
+				</label>
+			</div>
+			<div class="flex justify-end gap-3 pt-2">
+				<button type="button" class="px-4 py-2 rounded-lg border" x-on:click="$dispatch('close-modal')">Cancel</button>
+				<button type="submit" class="px-4 py-2 rounded-lg bg-indigo-600 text-white font-semibold">Save field</button>
+			</div>
+		</form>
+	}
+}
+
+// ppModal mirrors the core admin modal shell so the fragment can be swapped into
+// #modal-container and dismissed with the "close-modal" event.
+templ ppModal(title string) {
+	<div class="fixed inset-0 bg-black/40 flex items-center justify-center z-40 p-4" x-data>
+		<div class="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-full overflow-auto">
+			<div class="flex items-center justify-between px-6 py-4 border-b">
+				<h3 class="text-lg font-semibold">{ title }</h3>
+				<button class="text-slate-400 hover:text-slate-600" x-on:click="$dispatch('close-modal')">✕</button>
+			</div>
+			{ children... }
+		</div>
+	</div>
+}
+
+// --- small templ helpers so the templ stays declarative ---
+
+func formTitle(f *Field) string {
+	if f == nil {
+		return "Add custom field"
+	}
+	return "Edit field"
+}
+func formType(f *Field) string {
+	if f == nil {
+		return "text"
+	}
+	return f.Type
+}
+func formLabel(f *Field) string {
+	if f == nil {
+		return ""
+	}
+	return f.Label
+}
+func formDefault(f *Field) string {
+	if f == nil {
+		return ""
+	}
+	return f.DefaultValue
+}
+func formSort(f *Field) string {
+	if f == nil {
+		return "0"
+	}
+	return strconv.Itoa(f.SortOrder)
+}
+func formOptions(f *Field) string {
+	if f == nil {
+		return ""
+	}
+	return strings.Join(f.Options, "\n")
+}
+func formBool(f *Field, which string) bool {
+	if f == nil {
+		return false
+	}
+	if which == "required" {
+		return f.Required
+	}
+	return f.Searchable
+}
