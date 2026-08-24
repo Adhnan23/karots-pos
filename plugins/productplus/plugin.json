@@ -1,0 +1,7 @@
+{
+  "key": "productplus",
+  "name": "Product Plus",
+  "import": "karots-pos/plugins/productplus",
+  "version": "1.0.0",
+  "description": "Admin-defined custom product fields (model no, year, description, yes/no, dropdowns) injected into the product form, with per-field required defaults and opt-in searchability across the till and every product list."
+}
