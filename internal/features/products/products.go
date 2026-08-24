@@ -143,6 +143,27 @@ type Repository struct{ db db.Queryer }
 
 func NewRepository(q db.Queryer) *Repository { return &Repository{db: q} }
 
+// SearchContributor, when non-nil, contributes extra product ids to every search
+// (List/Count) — used by a plugin to make its own searchable fields findable in
+// core product search. It is a package-level func var, not a plugin import, so
+// internal/features/products never depends on internal/plugin (which imports it):
+// the web layer sets this during plugin setup. nil = core-only behaviour.
+var SearchContributor func(ctx context.Context, query string) ([]int64, error)
+
+// searchMatchIDs returns the plugin-contributed ids for a query (empty when no
+// contributor is set, no search term, or the contributor errors — it must never
+// break the core search).
+func searchMatchIDs(ctx context.Context, q ListQuery) []int64 {
+	if q.Search == "" || SearchContributor == nil {
+		return nil
+	}
+	ids, err := SearchContributor(ctx, q.Search)
+	if err != nil {
+		return nil
+	}
+	return ids
+}
+
 // subcatsCTE expands a selected category to itself + all descendants so that
 // filtering by a parent category also returns products in its sub-categories.
 // $4 is the category id; the search placeholders occupy $1-$3 (see searchClause).
@@ -167,13 +188,14 @@ func (r *Repository) List(ctx context.Context, q ListQuery) ([]Product, error) {
 	var rows []Product
 	err := r.db.SelectContext(ctx, &rows, subcatsCTE+selectProduct+`
 		WHERE (p.is_active = true OR $9) AND (p.is_service = false OR $8)
-		  AND `+searchClause+`
+		  AND (`+searchClause+` OR p.id = ANY($11::bigint[]))
 		  AND ($4::bigint IS NULL OR p.category_id IN (SELECT id FROM subcats))
 		  AND ($5 = false OR COALESCE(s.quantity,0) <= p.reorder_level)
 		  AND ($10::bigint IS NULL OR p.preferred_supplier_id = $10)
 		ORDER BY `+searchRank+` p.name, p.id
 		LIMIT $6 OFFSET $7`,
-		toks, raw, fuzzy, q.CategoryID, q.LowStock, q.Limit, q.offset(), q.IncludeServices, q.IncludeInactive, q.PreferredSupplierID)
+		toks, raw, fuzzy, q.CategoryID, q.LowStock, q.Limit, q.offset(), q.IncludeServices, q.IncludeInactive, q.PreferredSupplierID,
+		pq.Array(searchMatchIDs(ctx, q)))
 	return rows, err
 }
 
@@ -299,11 +321,12 @@ func (r *Repository) Count(ctx context.Context, q ListQuery) (int, error) {
 		SELECT COUNT(*) FROM products p
 		LEFT JOIN stock s ON s.product_id = p.id
 		WHERE (p.is_active = true OR $7) AND (p.is_service = false OR $6)
-		  AND `+searchClause+`
+		  AND (`+searchClause+` OR p.id = ANY($9::bigint[]))
 		  AND ($4::bigint IS NULL OR p.category_id IN (SELECT id FROM subcats))
 		  AND ($5 = false OR COALESCE(s.quantity,0) <= p.reorder_level)
 		  AND ($8::bigint IS NULL OR p.preferred_supplier_id = $8)`,
-		toks, raw, fuzzy, q.CategoryID, q.LowStock, q.IncludeServices, q.IncludeInactive, q.PreferredSupplierID)
+		toks, raw, fuzzy, q.CategoryID, q.LowStock, q.IncludeServices, q.IncludeInactive, q.PreferredSupplierID,
+		pq.Array(searchMatchIDs(ctx, q)))
 	return n, err
 }
 
