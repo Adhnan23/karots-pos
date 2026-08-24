@@ -100,3 +100,43 @@ func TestBankUsableByCashier(t *testing.T) {
 		})
 	}
 }
+
+func TestBankBillLegs(t *testing.T) {
+	acct := cashflow.Locker(7)
+	cash := cashflow.Till(3)
+	ext := cashflow.External()
+
+	// Cash flows delegate to buildBankLegs (covered above); assert the credit
+	// variants: billpay keeps only the account→biller leg, get-money keeps none.
+	t.Run("billpay on credit: account pays biller only, no cash leg", func(t *testing.T) {
+		got := bankBillLegs("billpay", true, acct, cash, dec("100"), dec("20"), "Bill 42")
+		if len(got) != 1 {
+			t.Fatalf("got %d legs, want 1", len(got))
+		}
+		g := got[0]
+		if g.From != acct || g.To != ext || !g.Amount.Equal(dec("100")) {
+			t.Fatalf("leg = {%v->%v %s}, want {account->external 100}", g.From, g.To, g.Amount)
+		}
+	})
+
+	t.Run("getmoney on credit: no cash-flow legs (pure cash advance)", func(t *testing.T) {
+		if got := bankBillLegs("getmoney", true, acct, cash, dec("100"), dec("0"), "x"); len(got) != 0 {
+			t.Fatalf("got %d legs, want 0", len(got))
+		}
+	})
+
+	t.Run("cash flow delegates to buildBankLegs", func(t *testing.T) {
+		if got := bankBillLegs("billpay", false, acct, cash, dec("100"), dec("0"), "x"); len(got) != 2 {
+			t.Fatalf("got %d legs, want 2 (account + customer cash)", len(got))
+		}
+	})
+}
+
+func TestCreditID(t *testing.T) {
+	if creditID(true, 9) != 9 {
+		t.Fatal("on-credit should carry the customer id")
+	}
+	if creditID(false, 9) != 0 {
+		t.Fatal("a cash bill must not stamp the selected customer as owing it")
+	}
+}

@@ -46,6 +46,21 @@ func buildBankLegs(typ string, account, cash cashflow.Location, amt, svc decimal
 	return nil
 }
 
+// bankBillLegs picks the cashflow legs for a bank-account bill-pay / get-money.
+// A cash flow uses the full buildBankLegs (account + customer cash). On credit the
+// customer-cash legs are dropped — the caller charges the total to the customer's
+// account instead — so a bill-pay keeps only the account→biller leg, and a
+// get-money keeps none (it becomes a pure cash advance handled without an account).
+func bankBillLegs(typ string, onCredit bool, account, cash cashflow.Location, amt, svc decimal.Decimal, biller string) []bankLeg {
+	if !onCredit {
+		return buildBankLegs(typ, account, cash, amt, svc, biller)
+	}
+	if typ == "billpay" {
+		return []bankLeg{{From: account, To: cashflow.External(), Amount: amt, Party: biller}}
+	}
+	return nil
+}
+
 // bankUsableByCashier reports whether a locker is one a cashier may run bill-pay
 // against: an active bank the owner marked cashier-accessible. Used both to filter
 // the cashier's bank picker and to guard the POST (a forged bank id can't slip

@@ -13,6 +13,7 @@ import (
 	"karots-pos/internal/escpos"
 	"karots-pos/internal/features/cashflow"
 	"karots-pos/internal/features/cashregister"
+	"karots-pos/internal/features/customers"
 	"karots-pos/internal/features/lockers"
 	"karots-pos/internal/middleware"
 	"karots-pos/internal/money"
@@ -490,6 +491,57 @@ func (h *cashierUI) Banks(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{"data": rows})
 }
 
+// accountRow is one selectable source for a bill-pay / get-money: either a core
+// bank locker or a money-usable device float. The client picks by (kind, id).
+type accountRow struct {
+	Kind    string          `json:"kind"` // "bank" | "device"
+	ID      int64           `json:"id"`
+	Name    string          `json:"name"`
+	Balance decimal.Decimal `json:"balance"`
+}
+
+// Accounts lists every account a cashier can pay a bill from / receive money into:
+// the active cashier-accessible bank lockers PLUS the money-usable (for_money)
+// devices with their live float. Device balances are session-scoped, so with no
+// open drawer only banks are returned.
+func (h *cashierUI) Accounts(c echo.Context) error {
+	ctx := c.Request().Context()
+	banks, err := h.p.bankLockers(ctx)
+	if err != nil {
+		return err
+	}
+	out := make([]accountRow, 0, len(banks))
+	for _, b := range banks {
+		out = append(out, accountRow{Kind: "bank", ID: b.ID, Name: b.Name, Balance: b.Balance})
+	}
+	if sess, _ := h.p.core.CashRegister.Current(ctx, middleware.CurrentUserID(c)); sess != nil {
+		devs, err := h.p.store.DevicesWithBalance(ctx, sess.ID, 0, "money")
+		if err != nil {
+			return err
+		}
+		for _, d := range devs {
+			out = append(out, accountRow{Kind: "device", ID: d.ID, Name: d.Carrier + " · " + d.Label, Balance: d.Balance})
+		}
+	}
+	return c.JSON(http.StatusOK, map[string]any{"data": out})
+}
+
+// moneyDevice loads one money-usable device with its live session float, or a
+// validation error if the id isn't an active for_money device (guards a forged
+// account id the picker filter wouldn't have offered).
+func (h *cashierUI) moneyDevice(ctx context.Context, sessionID, deviceID int64) (*DeviceBalanceRow, error) {
+	rows, err := h.p.store.DevicesWithBalance(ctx, sessionID, 0, "money")
+	if err != nil {
+		return nil, err
+	}
+	for i := range rows {
+		if rows[i].ID == deviceID {
+			return &rows[i], nil
+		}
+	}
+	return nil, apperr.Validation("choose a valid account")
+}
+
 // BankTx records a bill payment or a get-money done by the cashier against a core
 // bank locker, moving every leg through cashflow.Move (so each leg gets a CR-
 // receipt and shows in core Cash Flow / net position):
@@ -515,14 +567,6 @@ func (h *cashierUI) BankTx(c echo.Context) error {
 	if typ != "billpay" && typ != "getmoney" {
 		return apperr.BadRequest("invalid transaction type")
 	}
-	bankID, err := strconv.ParseInt(c.FormValue("bank_locker_id"), 10, 64)
-	if err != nil || bankID == 0 {
-		return apperr.Validation("choose a bank")
-	}
-	bank, err := h.p.lockers.Get(ctx, bankID)
-	if err != nil || !bankUsableByCashier(bank) {
-		return apperr.Validation("choose a valid bank")
-	}
 	amt, err := money.Parse(c.FormValue("amount"))
 	if err != nil || !amt.IsPositive() {
 		return apperr.Validation("amount must be positive")
@@ -534,20 +578,31 @@ func (h *cashierUI) BankTx(c echo.Context) error {
 			return apperr.Validation("service charge must be zero or more")
 		}
 	}
-	// Optional cash-given (bill-pay only) so the slip prints the change, like a sale.
+	// Optional cash-given (cash bill-pay only) so the slip prints the change.
 	cashGiven := decimal.Zero
 	if v := strings.TrimSpace(c.FormValue("cash_given")); v != "" {
 		if cashGiven, err = money.Parse(v); err != nil || cashGiven.IsNegative() {
 			return apperr.Validation("cash given must be zero or more")
 		}
 	}
-	if typ != "billpay" { // get-money hands cash out, so it has no customer tender
+	// On credit: the whole total goes on a customer's account instead of cash.
+	// ponytail: no credit-limit check here and the debt won't itemize on the core
+	// customer Statement (which reconstructs from sales/returns/payments) — the
+	// balance and Credit Collection settlement are correct. Add a statement
+	// contributor hook + limit guard if bills-on-credit grow beyond a courtesy.
+	onCredit := c.FormValue("on_credit") != ""
+	custID, _ := strconv.ParseInt(c.FormValue("customer_id"), 10, 64)
+	if onCredit && custID <= 0 {
+		return apperr.Validation("choose a customer to put this on their account")
+	}
+	if typ != "billpay" || onCredit { // no customer cash tender on cash-out or credit
 		cashGiven = decimal.Zero
 	}
 	ref := strings.TrimSpace(c.FormValue("reference"))
 	note := strings.TrimSpace(c.FormValue("note"))
+	total := amt.Add(svc)
 
-	reason := bank.Name + " " + txLabel(typ)
+	reason := txLabel(typ)
 	if ref != "" {
 		reason += " #" + ref
 	}
@@ -555,46 +610,69 @@ func (h *cashierUI) BankTx(c echo.Context) error {
 		reason += " - " + note
 	}
 
-	// The External counterparty is labelled per leg on the (background) CR- receipts:
-	// the bank↔biller leg names the biller, the till↔customer legs name the customer.
-	biller := "Bill payment"
-	if ref != "" {
-		biller = "Bill " + ref
-	}
-	legs := buildBankLegs(typ, cashflow.Locker(bankID), cashflow.Till(uid), amt, svc, biller)
-
-	// All legs in ONE transaction so a drawer/bank overdraw rolls everything back.
-	if err := appdb.WithTx(ctx, h.p.core.DB, func(tx *sqlx.Tx) error {
-		for _, l := range legs {
-			if _, err := h.p.cashflow.MoveTx(ctx, tx, cashflow.MoveInput{
-				From: l.From, To: l.To, Amount: l.Amount, Reason: reason,
-				ReceiptKind: typ, Party: l.Party, ActorID: uid,
-			}); err != nil {
+	// Resolve the account. Every flow moves an account EXCEPT a credit get-money,
+	// which is a pure cash advance (cash out now, customer owes) with no account.
+	acctKind := c.FormValue("account_kind")
+	acctID, _ := strconv.ParseInt(c.FormValue("account_id"), 10, 64)
+	var (
+		bankID, deviceID int64
+		acctName         = "On account"
+		bank             *lockers.Locker
+		dev              *DeviceBalanceRow
+	)
+	if !(onCredit && typ == "getmoney") {
+		switch acctKind {
+		case "bank":
+			if bank, err = h.p.lockers.Get(ctx, acctID); err != nil || !bankUsableByCashier(bank) {
+				return apperr.Validation("choose a valid account")
+			}
+			bankID, acctName = bank.ID, bank.Name
+		case "device":
+			if dev, err = h.moneyDevice(ctx, sess.ID, acctID); err != nil {
 				return err
 			}
+			deviceID, acctName = dev.ID, dev.Carrier+" · "+dev.Label
+		default:
+			return apperr.Validation("choose an account")
 		}
-		return nil
-	}); err != nil {
+	}
+	reason = acctName + " " + reason
+
+	// Move the money. Bank accounts move through core cashflow (CR- receipts);
+	// device floats move through the device ledger + cash register. Credit replaces
+	// the customer cash leg with a charge to their account.
+	switch {
+	case bankID != 0:
+		err = h.moveBillBank(ctx, uid, bankID, typ, amt, svc, total, onCredit, custID, reason, ref)
+	case deviceID != 0:
+		err = h.moveBillDevice(ctx, uid, sess.ID, dev, typ, amt, svc, total, onCredit, custID, reason)
+	default: // credit get-money: cash advance, no account
+		err = h.moveCashAdvance(ctx, uid, amt, total, custID, reason)
+	}
+	if err != nil {
 		return err
 	}
 
-	// Cash crossed the physical drawer either way — bill-pay takes it in, get-money
-	// pays it out — so pop it, best-effort and setting-gated.
-	if cfg, cerr := h.p.core.Settings.Get(ctx); cerr == nil && cfg != nil {
-		escpos.KickDrawer(ctx, *cfg)
+	// Kick the drawer only when physical cash actually crossed it (a credit bill-pay
+	// takes no cash in). Best-effort and setting-gated.
+	if !(onCredit && typ == "billpay") {
+		if cfg, cerr := h.p.core.Settings.Get(ctx); cerr == nil && cfg != nil {
+			escpos.KickDrawer(ctx, *cfg)
+		}
 	}
 
-	// Log the customer-facing detail (balance-free) so the slip can be reprinted and
-	// the movement lists in the "Bill" receipts tab. The money/receipts live in core.
+	// Log the customer-facing detail (balance-free) for the slip reprint and the
+	// "Bill" receipts tab. The money itself lives in the ledgers moved above.
 	billID, err := h.p.store.RecordBillTx(ctx, BillTxInput{
-		SessionID: &sess.ID, BankLockerID: bankID, BankName: bank.Name, Type: typ,
-		Amount: amt, ServiceCharge: svc, CashGiven: cashGiven, Reference: ref, Note: note, CreatedBy: uid,
+		SessionID: &sess.ID, BankLockerID: bankID, DeviceID: deviceID, CustomerID: creditID(onCredit, custID),
+		BankName: acctName, Type: typ, Amount: amt, ServiceCharge: svc, CashGiven: cashGiven,
+		Reference: ref, Note: note, CreatedBy: uid,
 	})
 	if err != nil {
 		return err
 	}
 
-	msg := bank.Name + " " + txLabel(typ) + " recorded"
+	msg := acctName + " " + txLabel(typ) + " recorded"
 	return h.printPolicy(c, "/cashier/recharge/bill/"+strconv.FormatInt(billID, 10)+"/print",
 		func(ctx context.Context) error {
 			t, err := h.p.store.BillTxByID(ctx, billID)
@@ -603,6 +681,100 @@ func (h *cashierUI) BankTx(c echo.Context) error {
 			}
 			return h.p.reprintBill(ctx, t)
 		}, msg)
+}
+
+// creditID returns the customer id only when the bill was actually put on credit,
+// so a customer merely selected (but paid cash) isn't stamped as owing it.
+func creditID(onCredit bool, custID int64) int64 {
+	if onCredit {
+		return custID
+	}
+	return 0
+}
+
+// moveBillBank moves a bill-pay / get-money against a core bank locker via cashflow
+// (every leg a CR- receipt). On credit the customer-cash leg is dropped and the
+// total is charged to the customer's account inside the SAME tx as the bank leg,
+// so a failure rolls both back.
+func (h *cashierUI) moveBillBank(ctx context.Context, uid, bankID int64, typ string, amt, svc, total decimal.Decimal, onCredit bool, custID int64, reason, ref string) error {
+	biller := "Bill payment"
+	if ref != "" {
+		biller = "Bill " + ref
+	}
+	legs := bankBillLegs(typ, onCredit, cashflow.Locker(bankID), cashflow.Till(uid), amt, svc, biller)
+	return appdb.WithTx(ctx, h.p.core.DB, func(tx *sqlx.Tx) error {
+		for _, l := range legs {
+			if _, err := h.p.cashflow.MoveTx(ctx, tx, cashflow.MoveInput{
+				From: l.From, To: l.To, Amount: l.Amount, Reason: reason,
+				ReceiptKind: typ, Party: l.Party, ActorID: uid,
+			}); err != nil {
+				return err
+			}
+		}
+		if onCredit {
+			return customers.NewRepository(tx).AddBalance(ctx, custID, total)
+		}
+		return nil
+	})
+}
+
+// moveBillDevice moves a bill-pay / get-money against a money-usable device float:
+// the float goes down (bill paid) or up (customer funded), mirrored by drawer cash
+// (or a customer-account charge on credit). A tracked device is overdraw-guarded on
+// bill-pay. Sequential like the other device money moves (Tx), not one tx.
+func (h *cashierUI) moveBillDevice(ctx context.Context, uid, sessID int64, dev *DeviceBalanceRow, typ string, amt, svc, total decimal.Decimal, onCredit bool, custID int64, reason string) error {
+	carrierID, err := h.p.store.CarrierOfDevice(ctx, dev.ID)
+	if err != nil {
+		return err
+	}
+	// billpay decreases the float (e-money to the biller); get-money increases it
+	// (customer's e-money funds the device). Reuse the existing float tx types.
+	floatType := "billpay"
+	if typ == "getmoney" {
+		floatType = "withdrawal"
+	}
+	// Overdraw guard on a bill-pay from a tracked float (get-money only adds float).
+	if dev.TracksFloat && typ == "billpay" {
+		over, err := h.p.store.wouldOverdraw(ctx, sessID, dev.ID, amt)
+		if err != nil {
+			return err
+		}
+		if over {
+			return apperr.Conflict("not enough float on this device")
+		}
+	}
+	// Float ledger row (untracked = bank card: cash moves, no float delta).
+	if _, err := h.p.store.RecordTransaction(ctx, TxInput{
+		SessionID: sessID, CarrierID: carrierID, DeviceID: dev.ID, Type: floatType,
+		Amount: amt, Note: reason, CreatedBy: uid, Untracked: !dev.TracksFloat,
+	}); err != nil {
+		return err
+	}
+	// Customer side: cash across the drawer, or a charge to their account on credit.
+	if onCredit {
+		return h.p.customers.AddBalance(ctx, custID, total)
+	}
+	if typ == "billpay" {
+		_, err = h.p.core.CashRegister.PayIn(ctx, uid, cashregister.MovementInput{Amount: total.String(), Reason: reason})
+		return err
+	}
+	// get-money cash: hand out the principal, keep the service charge as extra cash.
+	if _, err := h.p.core.CashRegister.Withdraw(ctx, uid, cashregister.MovementInput{Amount: amt.String(), Reason: reason}); err != nil {
+		return err
+	}
+	if svc.IsPositive() {
+		_, err = h.p.core.CashRegister.PayIn(ctx, uid, cashregister.MovementInput{Amount: svc.String(), Reason: reason + " service charge"})
+	}
+	return err
+}
+
+// moveCashAdvance handles a get-money put on credit with no account chosen: hand
+// the customer cash now (drawer-guarded), they owe the total on their account.
+func (h *cashierUI) moveCashAdvance(ctx context.Context, uid int64, amt, total decimal.Decimal, custID int64, reason string) error {
+	if _, err := h.p.core.CashRegister.Withdraw(ctx, uid, cashregister.MovementInput{Amount: amt.String(), Reason: reason}); err != nil {
+		return err
+	}
+	return h.p.customers.AddBalance(ctx, custID, total)
 }
 
 // printPolicy applies the shop's "ask before printing" policy to a recharge slip,
@@ -879,8 +1051,17 @@ func (h *cashierUI) carrierName(ctx context.Context, id int64) string {
 // payments and float open/close/transactions deliberately stay on the dedicated
 // "Reload & Bills" page (recharge nav tab), where their forms are server-rendered
 // and HTMX-processed on page load — no fragile fragment injection in the menu.
+// MenuRoot is the top of the "Reload & Bills" cashier-menu card: three leaves —
+// Reload (drills carrier → device → amount), Bill payment & cash, and Float
+// transactions (both inline detail fragments). Replaces the old dedicated
+// Reload & Bills top-nav tab; every flow it hosted is reachable from here.
 func (h *cashierUI) MenuRoot(c echo.Context) error {
-	return h.MenuReloadCarriers(c)
+	nodes := []menuNode{
+		{Kind: "folder", Name: "Reload", Emoji: "📶", ChildrenURL: "/cashier/recharge/menu/reload/carriers"},
+		{Kind: "leaf", Action: "detail", Name: "Bill payment & cash", Emoji: "🧾", DetailURL: "/cashier/recharge/menu/bill"},
+		{Kind: "leaf", Action: "detail", Name: "Float transactions", Emoji: "💱", DetailURL: "/cashier/recharge/menu/float"},
+	}
+	return c.JSON(http.StatusOK, map[string]any{"nodes": nodes})
 }
 
 // MenuReloadCarriers lists every carrier as a folder into its devices.

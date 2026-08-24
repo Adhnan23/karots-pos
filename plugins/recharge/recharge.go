@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"karots-pos/internal/features/cashflow"
+	"karots-pos/internal/features/customers"
 	"karots-pos/internal/features/lockers"
 	"karots-pos/internal/middleware"
 	"karots-pos/internal/plugin"
@@ -31,6 +32,10 @@ type Plugin struct {
 	// cashflow.Move so every leg gets a CR- receipt and shows in core Cash Flow.
 	cashflow *cashflow.Service
 	lockers  *lockers.Service
+	// customers is a core repo built over the shared pool too, used only to move a
+	// bill onto a customer's account (AddBalance). NewRepository takes a db.Queryer,
+	// so the same call works over a *sqlx.Tx to book credit inside the money tx.
+	customers *customers.Repository
 }
 
 func (p *Plugin) Name() string { return "Reload & Bills" }
@@ -46,6 +51,7 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 	// the same sales service the core UI uses (Core.Sales) for its overdraw guard.
 	p.cashflow = cashflow.NewService(reg.Core.DB, reg.Core.Sales)
 	p.lockers = lockers.NewService(reg.Core.DB)
+	p.customers = customers.NewRepository(reg.Core.DB)
 
 	a := &adminUI{p: p}
 	reg.Admin().GET("/recharge", a.Hub)
@@ -79,6 +85,7 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 	reg.Cashier().GET("/recharge/carriers", ch.Carriers)
 	reg.Cashier().GET("/recharge/devices", ch.Devices)
 	reg.Cashier().GET("/recharge/banks", ch.Banks)
+	reg.Cashier().GET("/recharge/accounts", ch.Accounts)
 	reg.Cashier().GET("/recharge", ch.Recon)
 	reg.Cashier().POST("/recharge/open", ch.SaveOpening)
 	reg.Cashier().POST("/recharge/close", ch.SaveClosing)
@@ -119,13 +126,14 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 		CashierHref: "/cashier/recharge/receipts/recharge", AdminHref: "/admin/recharge/receipts/recharge",
 	})
 
-	reg.AddCashierTab(plugin.CashierTab{Href: "/cashier/recharge", Label: "Reload & Bills", Key: "recharge"})
-	// A "Reload" card at the root of the cashier POS menu (alongside the product-
-	// group cards) drills straight into carrier → device → amount. Bill payments
-	// and float transactions stay on the dedicated Reload & Bills tab above, whose
-	// forms are server-rendered and HTMX-wired on page load.
+	// Everything lives in the Sell-page cashier menu now (no dedicated top-nav tab):
+	// a "Reload & Bills" card at the root of the POS menu (alongside the product-
+	// group cards) opens three leaves — Reload (carrier → device → amount), Bill
+	// payment & cash, and Float transactions — served by MenuRoot below. The old
+	// /cashier/recharge recon page stays routed (reachable via the command palette)
+	// as the read-only reconciliation summary.
 	reg.AddCashierMenuRoot(plugin.CashierMenuRoot{
-		Key: "recharge", Emoji: "📲", Label: "Reload", ChildrenURL: "/cashier/recharge/menu",
+		Key: "recharge", Emoji: "📲", Label: "Reload & Bills", ChildrenURL: "/cashier/recharge/menu",
 	})
 	// Float opening/closing rides the core till Open/Close dialogs via this section;
 	// the save URLs are the existing recon endpoints (open = SaveOpening, close =

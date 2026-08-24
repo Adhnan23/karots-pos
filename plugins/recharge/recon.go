@@ -662,6 +662,15 @@ func nullStr(s string) *string {
 	return &s
 }
 
+// nullInt64 stores a positive id as a value and anything else as SQL NULL, so a
+// bill row that has no bank locker / no device / no customer stores NULL there.
+func nullInt64(v int64) *int64 {
+	if v > 0 {
+		return &v
+	}
+	return nil
+}
+
 // nullDec stores a positive tender as a value and anything else as SQL NULL, so
 // "no cash-given recorded" is distinct from a genuine zero on the slip.
 func nullDec(d decimal.Decimal) *decimal.Decimal {
@@ -688,10 +697,16 @@ type ReceiptsTabVM struct {
 // core (cashflow.Move → CR- receipts + locker ledger); this row only carries the
 // customer-facing detail for the slip reprint and the "Bill" receipts tab.
 
-// BillTxInput is one bill-payment / get-money to record.
+// BillTxInput is one bill-payment / get-money to record. The account side is
+// either a core bank locker (BankLockerID) or a money-usable device float
+// (DeviceID) — exactly one is non-zero, except a pure-credit get-money which has
+// neither. BankName always carries the display label. CustomerID (>0) means the
+// total was put on that customer's account instead of taken/given in cash.
 type BillTxInput struct {
 	SessionID     *int64
 	BankLockerID  int64
+	DeviceID      int64
+	CustomerID    int64
 	BankName      string
 	Type          string // billpay | getmoney
 	Amount        decimal.Decimal
@@ -707,10 +722,11 @@ func (s *Store) RecordBillTx(ctx context.Context, in BillTxInput) (int64, error)
 	var id int64
 	err := s.db.GetContext(ctx, &id, `
 		INSERT INTO recharge_bill_tx
-		  (session_id, bank_locker_id, bank_name, type, amount, service_charge,
-		   cash_given, reference, note, created_by)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
-		in.SessionID, in.BankLockerID, in.BankName, in.Type, in.Amount, in.ServiceCharge,
+		  (session_id, bank_locker_id, device_id, customer_id, bank_name, type, amount,
+		   service_charge, cash_given, reference, note, created_by)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+		in.SessionID, nullInt64(in.BankLockerID), nullInt64(in.DeviceID), nullInt64(in.CustomerID),
+		in.BankName, in.Type, in.Amount, in.ServiceCharge,
 		nullDec(in.CashGiven), nullStr(in.Reference), nullStr(in.Note), in.CreatedBy)
 	return id, err
 }

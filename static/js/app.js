@@ -818,12 +818,16 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
       const res = await fetch(url, { credentials: "same-origin" });
       this.detailHtml = await res.text();
       this.menuMode = "detail";
-      this.$nextTick(() =>
-        window.Alpine &&
-        window.Alpine.initTree &&
-        this.$refs.detailBox &&
-        window.Alpine.initTree(this.$refs.detailBox)
-      );
+      this.$nextTick(() => {
+        const box = this.$refs.detailBox;
+        if (!box) return;
+        // Wire Alpine AND HTMX on the injected fragment: x-html sets innerHTML,
+        // which activates neither on its own. Without htmx.process, any hx-post
+        // inside (e.g. the bill-payment form) stays inert and the form does a
+        // native GET navigation instead of the intended HTMX POST.
+        if (window.Alpine && window.Alpine.initTree) window.Alpine.initTree(box);
+        if (window.htmx && window.htmx.process) window.htmx.process(box);
+      });
     },
     // The amount step lives inside a `<template x-if="menuMode==='amount'">`, so
     // its input is inserted a frame or two after menuMode flips — a single
@@ -1297,7 +1301,14 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
         unit_price: lot ? Number(lot.price) : this.unitPriceFor(p),
         tax_rate: Number(p.tax_rate) || 0,
         qty: 1,
-        stock: Number(p.stock_qty),
+        // A service/recipe product (e.g. coffee) holds no stock of its own — its
+        // availability comes from the components the server consumes on sale. Give
+        // it unlimited stock so the found-at-till oversell prompt (a stocked-item
+        // concept) never trips on its always-zero count; a genuinely short
+        // component instead surfaces server-side as CONSUMABLE_SHORT. Mirrors the
+        // explicit service-line path (addServiceLine).
+        stock: p.is_service ? Number.MAX_SAFE_INTEGER : Number(p.stock_qty),
+        is_service: !!p.is_service,
         // The chosen lot: sent to the server, which re-reads the price from it
         // and depletes that lot instead of taking FEFO. 0 = the normal path.
         batch_id: lotId,
@@ -1908,7 +1919,10 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
     consumablePrompt: null,
     approveConsumable() {
       for (const it of this.cart) {
-        if (Array.isArray(it.components) && it.components.length) it.allow_oversell = true;
+        // Flag any service line: one that carries explicit components (a document
+        // job) OR a plain recipe product (coffee) whose components the server
+        // expands from its stored recipe and which therefore has none listed here.
+        if (it.is_service || (Array.isArray(it.components) && it.components.length)) it.allow_oversell = true;
       }
       this.consumablePrompt = null;
       this.checkout(false); // re-enter; tender re-validates, then posts with the flags set
@@ -2116,7 +2130,9 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
         // through to the toast and never loop.
         if (e && e.code === "CONSUMABLE_SHORT") {
           const pending = this.cart.some(
-            (it) => Array.isArray(it.components) && it.components.length && !it.allow_oversell
+            (it) =>
+              (it.is_service || (Array.isArray(it.components) && it.components.length)) &&
+              !it.allow_oversell
           );
           if (pending) {
             this.consumablePrompt = true;
@@ -3036,6 +3052,83 @@ function pret(symbol) {
       } finally {
         this.busy = false;
       }
+    },
+  };
+}
+
+// billCashForm: the recharge "Bill payment & cash" recorder. The account picker
+// lists both core bank lockers and money-usable device floats (GET /accounts);
+// a bill/cash can be settled in cash or put on a customer's account (credit). It
+// posts to /cashier/recharge/bank-tx. Defined here (not inline) so it also works
+// when the form is injected via the cashier-menu detail path, where an inline
+// <script> would not execute.
+function billCashForm() {
+  return {
+    type: "billpay",
+    accKind: "",
+    accId: "",
+    accounts: [],
+    amount: "",
+    svc: "",
+    cash: "",
+    onCredit: false,
+    customerId: "",
+    custSearch: "",
+    customers: [],
+    async load() {
+      try {
+        const r = await fetch("/cashier/recharge/accounts", { credentials: "same-origin" });
+        const j = await r.json();
+        this.accounts = j.data || [];
+        // Keep the current selection if still present, else default to the first.
+        const has = this.accounts.some((a) => a.kind === this.accKind && String(a.id) === String(this.accId));
+        if (!has && this.accounts.length) {
+          this.accKind = this.accounts[0].kind;
+          this.accId = String(this.accounts[0].id);
+        }
+      } catch (_) {}
+      try {
+        const rc = await fetch("/api/customers", { credentials: "same-origin" });
+        const jc = await rc.json();
+        this.customers = jc.data || [];
+      } catch (_) {
+        this.customers = [];
+      }
+    },
+    account() {
+      return this.accounts.find((a) => a.kind === this.accKind && String(a.id) === String(this.accId));
+    },
+    bal() {
+      const a = this.account();
+      return a ? Number(a.balance) : 0;
+    },
+    // A bill-pay draws the account down, so block an amount over its balance. A
+    // device get-money adds float, and a credit get-money touches no account.
+    over() {
+      return this.type === "billpay" && !!this.account() && Number(this.amount) > this.bal();
+    },
+    filteredCustomers() {
+      const q = this.custSearch.trim().toLowerCase();
+      const list = q
+        ? this.customers.filter((c) => c.name.toLowerCase().includes(q) || (c.phone || "").includes(q))
+        : this.customers;
+      return list.slice(0, 30);
+    },
+    ready() {
+      if (Number(this.amount) <= 0) return false;
+      if (this.onCredit && !this.customerId) return false;
+      // Every flow needs an account EXCEPT a credit get-money (pure cash advance).
+      const needAccount = !(this.onCredit && this.type === "getmoney");
+      if (needAccount && !this.accId) return false;
+      return !this.over();
+    },
+    reset() {
+      this.amount = "";
+      this.svc = "";
+      this.cash = "";
+      this.onCredit = false;
+      this.customerId = "";
+      this.custSearch = "";
     },
   };
 }

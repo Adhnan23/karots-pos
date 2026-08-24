@@ -150,16 +150,16 @@ templ txForm(d ReconData) {
 templ bankTxForm(d ReconData) {
 	<div
 		class="bg-white rounded-2xl shadow-sm p-6"
-		x-data="{ type:'billpay', bankId:'', amount:'', svc:'', cash:'', banks:[], async load(){ try{ const r=await fetch('/cashier/recharge/banks'); const j=await r.json(); this.banks=j.data||[]; if(this.banks.length){ this.bankId=String(this.banks[0].id) } }catch(e){} }, bank(){ return this.banks.find(x=>String(x.id)===String(this.bankId)) }, bal(){ const x=this.bank(); return x?Number(x.balance):0 }, over(){ return this.type==='billpay' && Number(this.amount)>this.bal() } }"
+		x-data="billCashForm()"
 		x-init="load()"
 	>
 		<h2 class="text-lg font-semibold mb-1">Bill payment &amp; cash</h2>
-		<p class="text-xs text-slate-400 mb-4">Pay a bill from a bank (balance goes down, cash comes in) or hand out cash (balance goes up, cash goes out). Service charge is extra cash into the drawer. Each leg is recorded in the shop's cash flow with a receipt.</p>
+		<p class="text-xs text-slate-400 mb-4">Pay a bill (the account pays the biller, cash comes in) or hand out cash (the account is funded, cash goes out). Pay from a bank or a money-transfer device float. Service charge is extra cash into the drawer, or put the whole thing on a customer's account.</p>
 		<form
 			hx-post="/cashier/recharge/bank-tx"
 			hx-target="#recon-body"
 			hx-swap="outerHTML"
-			hx-on::after-request="if(event.detail.successful) this.reset()"
+			hx-on::after-request="if(event.detail.successful){ reset(); load(); }"
 			class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3"
 		>
 			<div class="col-span-full">
@@ -167,40 +167,64 @@ templ bankTxForm(d ReconData) {
 				<input type="hidden" name="type" x-model="type"/>
 				<div class="grid grid-cols-2 gap-2">
 					<button type="button" x-on:click="type='billpay'" x-bind:class="type==='billpay' ? 'ring-2 ring-emerald-500 bg-emerald-50' : 'border border-slate-200'" class="px-3 py-2.5 rounded-lg text-left">
-						<div class="font-medium text-sm">Pay a bill</div>
-						<div class="text-xs text-slate-400">Customer gives you cash → your bank pays the biller (cash in, bank down)</div>
+						<div class="font-medium text-sm"><span class="text-emerald-600 font-bold text-lg">↓</span> Pay a bill</div>
+						<div class="text-xs text-slate-400">Account pays the biller → cash in (or on account)</div>
 					</button>
 					<button type="button" x-on:click="type='getmoney'" x-bind:class="type==='getmoney' ? 'ring-2 ring-emerald-500 bg-emerald-50' : 'border border-slate-200'" class="px-3 py-2.5 rounded-lg text-left">
-						<div class="font-medium text-sm">Give cash out</div>
-						<div class="text-xs text-slate-400">Customer funds your bank → you hand them cash (cash out, bank up)</div>
+						<div class="font-medium text-sm"><span class="text-rose-600 font-bold text-lg">↑</span> Give cash out</div>
+						<div class="text-xs text-slate-400">Account funded → you hand out cash (or on account)</div>
 					</button>
 				</div>
 			</div>
-			<div class="col-span-full">
-				<label class="block text-sm font-medium text-slate-600 mb-1">Bank</label>
-				<input type="hidden" name="bank_locker_id" x-model="bankId"/>
+			<!-- Account: banks + money-usable device floats. Hidden on a credit get-money (a pure cash advance, no account). -->
+			<div class="col-span-full" x-show="!(onCredit && type==='getmoney')">
+				<label class="block text-sm font-medium text-slate-600 mb-1">Account (bank or device)</label>
+				<input type="hidden" name="account_kind" x-model="accKind"/>
+				<input type="hidden" name="account_id" x-model="accId"/>
 				<div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
-					<template x-for="b in banks" x-bind:key="b.id">
-						<button type="button" x-on:click="bankId=String(b.id)" x-bind:class="String(bankId)===String(b.id) ? 'ring-2 ring-indigo-500 bg-indigo-50' : 'border border-slate-200'" class="px-3 py-2.5 rounded-lg text-left">
-							<div class="font-medium text-sm" x-text="b.name"></div>
-							<div class="text-xs text-slate-400" x-text="'Bal: '+Number(b.balance).toFixed(2)"></div>
+					<template x-for="a in accounts" x-bind:key="a.kind+':'+a.id">
+						<button type="button" x-on:click="accKind=a.kind; accId=String(a.id)" x-bind:class="accKind===a.kind && String(accId)===String(a.id) ? 'ring-2 ring-indigo-500 bg-indigo-50' : 'border border-slate-200'" class="px-3 py-2.5 rounded-lg text-left">
+							<div class="font-medium text-sm" x-text="a.name"></div>
+							<div class="text-xs text-slate-400"><span x-text="a.kind==='device' ? '📱 float' : '🏦 bank'"></span> · <span x-text="Number(a.balance).toFixed(2)"></span></div>
 						</button>
 					</template>
 				</div>
-				<p x-show="banks.length===0" class="text-xs text-rose-500 mt-1">No banks yet. Add one under Money → Cash Lockers (kind = Bank).</p>
+				<p x-show="accounts.length===0" class="text-xs text-rose-500 mt-1">No accounts. Add a bank under Money → Cash Lockers (kind = Bank), or a money device under Admin → Reload &amp; Bills.</p>
 			</div>
 			<div>
 				<label class="block text-sm font-medium text-slate-600 mb-1">Amount</label>
 				<input type="number" name="amount" min="0" step="0.01" x-model="amount" required placeholder="0.00" class="w-full border rounded-lg px-3 py-2.5 text-right"/>
-				<p x-show="over()" class="text-xs text-rose-500 mt-1">Amount exceeds this bank's balance.</p>
+				<p x-show="over()" class="text-xs text-rose-500 mt-1">Amount exceeds this account's balance.</p>
 			</div>
 			<div>
 				<label class="block text-sm font-medium text-slate-600 mb-1">Service charge (optional)</label>
 				<input type="number" name="service_charge" min="0" step="0.01" x-model="svc" placeholder="0.00" class="w-full border rounded-lg px-3 py-2.5 text-right"/>
-				<p x-show="Number(svc)>0 && type==='billpay'" class="text-xs text-slate-500 mt-1">Customer pays <span class="font-semibold tabular-nums" x-text="(Number(amount||0)+Number(svc||0)).toFixed(2)"></span> total (charge added to drawer).</p>
-				<p x-show="Number(svc)>0 && type==='getmoney'" class="text-xs text-slate-500 mt-1">Charge kept as extra cash in the drawer.</p>
+				<p x-show="Number(svc)>0 && !onCredit && type==='billpay'" class="text-xs text-slate-500 mt-1">Customer pays <span class="font-semibold tabular-nums" x-text="(Number(amount||0)+Number(svc||0)).toFixed(2)"></span> total (charge added to drawer).</p>
+				<p x-show="Number(svc)>0 && !onCredit && type==='getmoney'" class="text-xs text-slate-500 mt-1">Charge kept as extra cash in the drawer.</p>
+				<p x-show="Number(svc)>0 && onCredit" class="text-xs text-slate-500 mt-1">Added to what the customer owes.</p>
 			</div>
-			<div x-show="type==='billpay'">
+			<!-- Credit toggle + customer picker: put the whole total on a customer's account. -->
+			<div class="col-span-full border-t border-slate-100 pt-3">
+				<label class="inline-flex items-center gap-2 text-sm font-medium text-slate-700">
+					<input type="checkbox" x-model="onCredit" class="rounded border-slate-300"/>
+					On credit (put on a customer's account)
+				</label>
+				<input type="hidden" name="on_credit" x-bind:value="onCredit ? '1' : ''"/>
+				<div x-show="onCredit" x-cloak class="mt-2">
+					<input type="hidden" name="customer_id" x-model="customerId"/>
+					<input type="text" x-model="custSearch" placeholder="Search customer by name / phone…" class="w-full border rounded-lg px-3 py-2.5 text-sm"/>
+					<div class="mt-1 max-h-40 overflow-y-auto border rounded-lg divide-y" x-show="custSearch.trim()!==''">
+						<template x-for="c in filteredCustomers()" x-bind:key="c.id">
+							<button type="button" x-on:click="customerId=String(c.id); custSearch=c.name" class="w-full text-left px-3 py-2 text-sm hover:bg-indigo-50" x-bind:class="String(customerId)===String(c.id) ? 'bg-indigo-50 font-medium' : ''">
+								<span x-text="c.name"></span> <span class="text-slate-400" x-text="c.phone || ''"></span>
+							</button>
+						</template>
+						<div x-show="filteredCustomers().length===0" class="px-3 py-2 text-xs text-slate-400">No match.</div>
+					</div>
+					<p x-show="onCredit && !customerId" class="text-xs text-rose-500 mt-1">Pick a customer.</p>
+				</div>
+			</div>
+			<div x-show="type==='billpay' && !onCredit">
 				<label class="block text-sm font-medium text-slate-600 mb-1">Cash given (optional)</label>
 				<input type="number" name="cash_given" min="0" step="0.01" x-model="cash" placeholder="0.00" class="w-full border rounded-lg px-3 py-2.5 text-right"/>
 				<p x-show="Number(cash)>0 && Number(cash) >= Number(amount||0)+Number(svc||0)" class="text-xs text-emerald-600 mt-1">Change: <span class="font-semibold tabular-nums" x-text="(Number(cash)-(Number(amount||0)+Number(svc||0))).toFixed(2)"></span></p>
@@ -211,7 +235,7 @@ templ bankTxForm(d ReconData) {
 				<input type="text" name="reference" placeholder="bill / txn no." class="w-full border rounded-lg px-3 py-2.5"/>
 			</div>
 			<div class="flex items-end">
-				<button type="submit" x-bind:disabled="!bankId || over()" class="w-full py-2.5 rounded-lg bg-emerald-600 text-white font-semibold hover:bg-emerald-700 disabled:opacity-40">Record &amp; print</button>
+				<button type="submit" x-bind:disabled="!ready()" class="w-full py-2.5 rounded-lg bg-emerald-600 text-white font-semibold hover:bg-emerald-700 disabled:opacity-40">Record &amp; print</button>
 			</div>
 		</form>
 	</div>
