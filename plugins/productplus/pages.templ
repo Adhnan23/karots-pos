@@ -163,6 +163,46 @@ templ FieldForm(f *Field) {
 	}
 }
 
+// ProductFieldsFragment renders the plugin's custom-field controls, injected into
+// the core product form. Each control is named "pp_<key>" so it posts with the
+// core form and the plugin's ProductSaved hook can read it. Bool is a Yes/No
+// select (not a checkbox) so it always submits exactly one value.
+templ ProductFieldsFragment(rows []FieldValue) {
+	<div class="border-t border-slate-200 pt-4 mt-2 space-y-3">
+		<h3 class="text-sm font-semibold text-slate-600">Custom fields</h3>
+		for _, r := range rows {
+			<div>
+				<label class="block text-sm font-medium text-slate-600 mb-1">
+					{ r.Field.Label }
+					if r.Field.Required {
+						<span class="text-rose-500">*</span>
+					}
+				</label>
+				switch r.Field.Type {
+					case "bool":
+						<select name={ "pp_" + r.Field.Key } class="w-full border rounded-lg px-3 py-2.5">
+							<option value="" selected?={ r.Value != "1" }>No</option>
+							<option value="1" selected?={ r.Value == "1" }>Yes</option>
+						</select>
+					case "select":
+						<select name={ "pp_" + r.Field.Key } required?={ r.Field.Required } class="w-full border rounded-lg px-3 py-2.5">
+							if !r.Field.Required {
+								<option value="" selected?={ r.Value == "" }>—</option>
+							}
+							for _, opt := range r.Field.Options {
+								<option value={ opt } selected?={ opt == r.Value }>{ opt }</option>
+							}
+						</select>
+					case "number":
+						<input type="number" step="any" name={ "pp_" + r.Field.Key } value={ r.Value } required?={ r.Field.Required } class="w-full border rounded-lg px-3 py-2.5"/>
+					default:
+						<input type="text" name={ "pp_" + r.Field.Key } value={ r.Value } required?={ r.Field.Required } class="w-full border rounded-lg px-3 py-2.5"/>
+				}
+			</div>
+		}
+	</div>
+}
+
 // ppModal mirrors the core admin modal shell so the fragment can be swapped into
 // #modal-container and dismissed with the "close-modal" event.
 templ ppModal(title string) {

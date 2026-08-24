@@ -37,8 +37,10 @@ func TestStoreFieldValueMatch(t *testing.T) {
 
 	s := &Store{db: tx}
 
+	// A test-only key so it never clashes with fields created in the live dev DB
+	// (the whole test rolls back, but the key's UNIQUE index sees committed rows).
 	fid, err := s.CreateField(ctx, Field{
-		Key: "model_no", Label: "Model No", Type: "text",
+		Key: "zz_test_model_no", Label: "Model No", Type: "text",
 		DefaultValue: "", Required: true, Searchable: true, SortOrder: 1, IsActive: true,
 	})
 	if err != nil {
