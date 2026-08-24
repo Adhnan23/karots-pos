@@ -3,6 +3,7 @@ package plugin
 import (
 	"context"
 	"encoding/json"
+	"net/url"
 	"time"
 
 	"karots-pos/internal/features/activity"
@@ -258,3 +259,53 @@ func ReceiptTabs() []ReceiptTab     { return receiptTabs }
 // CashierSupplierActions returns the plugin-contributed buttons for the cashier
 // Suppliers page.
 func CashierSupplierActions() []CashierSupplierAction { return supplierActions }
+
+// ProductFormSection injects fields into the core product create/edit form.
+// Render returns the plugin's fragment for a product (productID == 0 on create,
+// so render defaults). It must fail soft — return (nil, err) and core renders
+// nothing, so a plugin issue never blocks the core product form.
+type ProductFormSection struct {
+	Render func(ctx context.Context, productID int64) (templ.Component, error)
+}
+
+// ProductFormValidate runs BEFORE a product is created/updated on the admin form.
+// A plugin returns an apperr.Validation when a required custom field is missing;
+// core aborts the save and shows the error. The client-side `required` attribute
+// covers the everyday case — this is the server backstop.
+type ProductFormValidate func(ctx context.Context, form url.Values) error
+
+// ProductSaved runs AFTER a successful product create/update, with the raw form,
+// so a plugin can persist its own fields (e.g. custom-field values). Errors are
+// surfaced but the product is already saved.
+type ProductSaved func(ctx context.Context, productID int64, form url.Values) error
+
+// ProductSearchContributor lets a plugin add product ids to a search. Match
+// returns the ids whose plugin-owned, searchable data matches the query; the web
+// layer folds them into products.SearchContributor (which products.List ORs into
+// its search). Keep it one cheap query; return (nil, err) defensively.
+type ProductSearchContributor struct {
+	Match func(ctx context.Context, query string) ([]int64, error)
+}
+
+var (
+	productFormSections []ProductFormSection
+	productValidators   []ProductFormValidate
+	productSavedHooks   []ProductSaved
+	productSearchers    []ProductSearchContributor
+)
+
+func (r *Registry) AddProductFormSection(s ProductFormSection) {
+	productFormSections = append(productFormSections, s)
+}
+func (r *Registry) AddProductFormValidate(v ProductFormValidate) {
+	productValidators = append(productValidators, v)
+}
+func (r *Registry) AddProductSaved(s ProductSaved) { productSavedHooks = append(productSavedHooks, s) }
+func (r *Registry) AddProductSearchContributor(s ProductSearchContributor) {
+	productSearchers = append(productSearchers, s)
+}
+
+func ProductFormSections() []ProductFormSection             { return productFormSections }
+func ProductFormValidators() []ProductFormValidate          { return productValidators }
+func ProductSavedHooks() []ProductSaved                     { return productSavedHooks }
+func ProductSearchContributors() []ProductSearchContributor { return productSearchers }
