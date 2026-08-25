@@ -140,26 +140,30 @@ func TestStoreReorderAndBadges(t *testing.T) {
 		t.Fatalf("BadgesFor=%v want {%d:[zz_genuine]}", b, pid)
 	}
 
-	rollups, err := s.Reorder(ctx)
+	// Huge reorder level ⇒ tier total can't exceed it ⇒ NOT covered (needs reorder).
+	cov, err := s.CoverageFor(ctx, []int64{pid})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var found, low bool
-	for _, gr := range rollups {
-		if gr.Group.ID != gid {
-			continue
-		}
-		for _, tr := range gr.Tiers {
-			if tr.Tier.ID == tid {
-				found, low = true, tr.Low
-			}
-		}
+	c, ok := cov[pid]
+	if !ok {
+		t.Fatalf("coverage missing for %d", pid)
 	}
-	if !found {
-		t.Fatal("tier not present in rollup")
+	if c.Covered {
+		t.Fatalf("should NOT be covered (reorder_level huge), got %+v", c)
 	}
-	if !low {
-		t.Fatal("tier should be low (reorder_level huge)")
+	if c.Group != "zz_grp" || c.Tier != "zz_genuine" {
+		t.Fatalf("coverage note fields wrong: %+v", c)
+	}
+
+	// Drop the reorder level to 0-tracked-low then to a low number the tier clears:
+	// with reorder_level 0 the tier is "don't track" ⇒ not covered.
+	if err := s.UpdateTier(ctx, Tier{ID: tid, GroupID: gid, Name: "zz_genuine", ReorderLevel: 0}); err != nil {
+		t.Fatal(err)
+	}
+	cov, _ = s.CoverageFor(ctx, []int64{pid})
+	if cov[pid].Covered {
+		t.Fatal("reorder_level 0 means don't track ⇒ not covered")
 	}
 }
 

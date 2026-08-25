@@ -1459,6 +1459,47 @@ func (a *adminUI) LowStockReport(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	// Alternatives (plugin) annotation: mark low SKUs whose interchangeable tier is
+	// still stocked as "covered", and (when the filter is on) drop them from the
+	// worklist so you only reorder what the whole tier is short of. Inert when no
+	// plugin registers an annotator. ponytail: filters the current page only — the
+	// total/pager still count covered rows; fine for the bounded low-stock list.
+	alt := c.QueryParam("alt") != ""
+	annotators := plugin.ProductReorderAnnotators()
+	notes := map[int64]string{}
+	if len(annotators) > 0 && len(rows) > 0 {
+		ids := make([]int64, len(rows))
+		for i := range rows {
+			ids[i] = rows[i].ID
+		}
+		covered := map[int64]bool{}
+		for _, an := range annotators {
+			if an.Batch == nil {
+				continue
+			}
+			m, aerr := an.Batch(ctx, ids)
+			if aerr != nil {
+				continue
+			}
+			for id, n := range m {
+				if n.Note != "" {
+					notes[id] = n.Note
+				}
+				if n.Covered {
+					covered[id] = true
+				}
+			}
+		}
+		if alt {
+			kept := rows[:0]
+			for _, p := range rows {
+				if !covered[p.ID] {
+					kept = append(kept, p)
+				}
+			}
+			rows = kept
+		}
+	}
 	sups, err := a.s.suppliers.List(ctx, "")
 	if err != nil {
 		return err
@@ -1491,6 +1532,9 @@ func (a *adminUI) LowStockReport(c echo.Context) error {
 		CategoryID:   catParam,
 		SupplierID:   supParam,
 		SupplierName: supName,
+		Alt:          alt,
+		AltAvailable: len(annotators) > 0,
+		Notes:        notes,
 	}))
 }
 

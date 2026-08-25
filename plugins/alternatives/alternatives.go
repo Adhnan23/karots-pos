@@ -8,6 +8,7 @@ package alternatives
 import (
 	"context"
 	"io/fs"
+	"strconv"
 
 	"karots-pos/internal/plugin"
 	"karots-pos/plugins/alternatives/migrations"
@@ -59,4 +60,22 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 	})
 	// Till-card tier pin.
 	reg.AddProductBadgeProvider(plugin.ProductBadgeProvider{Batch: p.store.BadgesFor})
+	// Reorder worklist: mark a low SKU as covered when its tier still has stock.
+	reg.AddProductReorderAnnotator(plugin.ProductReorderAnnotator{Batch: p.reorderNotes})
+}
+
+// reorderNotes adapts the store's coverage into the core reorder annotation: a
+// product whose interchangeable tier is still above its reorder level is "covered"
+// (an equivalent is in stock), with a note naming the group/tier and its total.
+func (p *Plugin) reorderNotes(ctx context.Context, ids []int64) (map[int64]plugin.ReorderNote, error) {
+	cov, err := p.store.CoverageFor(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[int64]plugin.ReorderNote, len(cov))
+	for id, c := range cov {
+		note := "Alt: " + c.Group + " · " + c.Tier + " (tier has " + strconv.Itoa(c.TierTotal) + ")"
+		out[id] = plugin.ReorderNote{Covered: c.Covered, Note: note}
+	}
+	return out, nil
 }

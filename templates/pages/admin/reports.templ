@@ -27,6 +27,12 @@ type LowStockData struct {
 	CategoryID   string
 	SupplierID   string
 	SupplierName string
+	// Alternatives (plugin) integration: AltAvailable shows the filter checkbox when
+	// a plugin annotates reorder; Alt is the checkbox state; Notes is the per-product
+	// alternatives note keyed by product id.
+	Alt          bool
+	AltAvailable bool
+	Notes        map[int64]string
 }
 
 templ LowStockPage(d LowStockData) {
@@ -35,7 +41,7 @@ templ LowStockPage(d LowStockData) {
 			<h1 class="text-2xl font-bold">Low Stock / Reorder</h1>
 			<a href="/admin/purchases/new" class="text-sm text-slate-500 hover:underline">Manual purchase order →</a>
 		</div>
-		<div class="bg-white rounded-2xl shadow-sm p-6" x-data={ "poBuilder(" + lowStockConfigJSON(d.Rows, d.Demand) + ")" } x-init="init()">
+		<div class="bg-white rounded-2xl shadow-sm p-6" x-data={ "poBuilder(" + lowStockConfigJSON(d.Rows, d.Demand, d.Notes) + ")" } x-init="init()">
 			@lowStockFilters(d)
 			if len(d.Rows) == 0 {
 				if d.Search != "" || d.CategoryID != "" || d.SupplierID != "" {
@@ -63,7 +69,12 @@ templ LowStockPage(d LowStockData) {
 						<template x-for="(l, i) in lines" x-bind:key="l.product_id">
 							<tr class="border-b last:border-0" x-bind:class="l.selected ? 'bg-indigo-50/50' : ''">
 								<td class="py-2 px-3"><input type="checkbox" x-bind:checked="l.selected" x-on:change="l.selected = $event.target.checked; toggleLine(l)"/></td>
-								<td class="py-2 px-3 font-medium" x-text="l.name"></td>
+								<td class="py-2 px-3 font-medium">
+									<span x-text="l.name"></span>
+									<template x-if="l.note">
+										<span class="block text-xs font-normal text-indigo-500" x-text="l.note"></span>
+									</template>
+								</td>
 								<td class="py-2 px-3 text-right"><span x-text="l.on_hand"></span> <span class="text-slate-400" x-text="l.unit"></span></td>
 								<td class="py-2 px-3 text-right text-slate-500" x-text="l.sold_last_week"></td>
 								<td class="py-2 px-3 text-right text-slate-500" x-text="l.sold_last_month"></td>
@@ -134,6 +145,19 @@ templ lowStockFilters(d LowStockData) {
 			<label class="block text-xs font-medium text-slate-500 mb-1">Preferred supplier</label>
 			@adminfragments.SupplierPicker("supplier_id", supFilterID(d.SupplierID), d.SupplierName, "All suppliers", true)
 		</div>
+		if d.AltAvailable {
+			<label class="inline-flex items-center gap-2 text-sm text-slate-600 pb-2">
+				<input
+					type="checkbox"
+					name="alt"
+					value="1"
+					checked?={ d.Alt }
+					x-on:change="$el.form.requestSubmit()"
+					class="rounded border-slate-300"
+				/>
+				Filter by alternatives
+			</label>
+		}
 		if d.Search != "" || d.CategoryID != "" || d.SupplierID != "" {
 			<a href="/admin/reports/low-stock" class="px-4 py-2 rounded-lg border text-slate-600">Clear</a>
 		}

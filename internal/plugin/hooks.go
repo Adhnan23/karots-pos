@@ -193,9 +193,9 @@ func (r *Registry) AddCashierMenuRoot(m CashierMenuRoot) {
 	cashierMenuRoots = append(cashierMenuRoots, m)
 }
 func (r *Registry) AddDrawerSection(s DrawerSection) { drawerSections = append(drawerSections, s) }
-func (r *Registry) AddTenderMethod(t TenderMethod) { tenderMethods = append(tenderMethods, t) }
-func (r *Registry) AddLogoutGuard(g LogoutGuard)   { logoutGuards = append(logoutGuards, g) }
-func (r *Registry) AddReceiptTab(t ReceiptTab)     { receiptTabs = append(receiptTabs, t) }
+func (r *Registry) AddTenderMethod(t TenderMethod)   { tenderMethods = append(tenderMethods, t) }
+func (r *Registry) AddLogoutGuard(g LogoutGuard)     { logoutGuards = append(logoutGuards, g) }
+func (r *Registry) AddReceiptTab(t ReceiptTab)       { receiptTabs = append(receiptTabs, t) }
 func (r *Registry) AddCashierSupplierAction(a CashierSupplierAction) {
 	supplierActions = append(supplierActions, a)
 }
@@ -205,17 +205,17 @@ func (r *Registry) AddActivityContributor(a ActivityContributor) {
 }
 
 // Getters for the template layer.
-func AdminNav() []AdminNavEntry           { return adminNav }
-func CashierTabs() []CashierTab           { return cashierTabs }
-func SettingsSections() []SettingsSection { return settingsSecs }
-func DashboardCards() []DashboardCard     { return dashboardCards }
-func PaletteEntries() []PaletteEntry      { return paletteEntries }
-func ReportCards() []ReportCard           { return reportCards }
-func PosActions() []PosAction             { return posActions }
-func PLIncomes() []PLIncome               { return plIncomes }
+func AdminNav() []AdminNavEntry                   { return adminNav }
+func CashierTabs() []CashierTab                   { return cashierTabs }
+func SettingsSections() []SettingsSection         { return settingsSecs }
+func DashboardCards() []DashboardCard             { return dashboardCards }
+func PaletteEntries() []PaletteEntry              { return paletteEntries }
+func ReportCards() []ReportCard                   { return reportCards }
+func PosActions() []PosAction                     { return posActions }
+func PLIncomes() []PLIncome                       { return plIncomes }
 func ActivityContributors() []ActivityContributor { return activityContribs }
-func CashierMenuRoots() []CashierMenuRoot { return cashierMenuRoots }
-func DrawerSections() []DrawerSection      { return drawerSections }
+func CashierMenuRoots() []CashierMenuRoot         { return cashierMenuRoots }
+func DrawerSections() []DrawerSection             { return drawerSections }
 
 // CashierMenuRootsJSON renders the menu roots as a JSON array for the cashier
 // Alpine scope: [{"emoji":"📶","label":"Reload & Bills","url":"/cashier/recharge/menu"}].
@@ -304,13 +304,29 @@ type ProductBadgeProvider struct {
 	Batch func(ctx context.Context, productIDs []int64) (map[int64][]string, error)
 }
 
+// ReorderNote annotates one low-stock product on the reorder worklist. Covered
+// means an interchangeable equivalent is in stock, so the item need not be
+// reordered even though it reads low; Note is a short explanation shown on the row.
+type ReorderNote struct {
+	Covered bool
+	Note    string
+}
+
+// ProductReorderAnnotator lets a plugin annotate the low-stock/reorder page: given
+// the visible low-stock product ids, it returns per product whether an equivalent
+// covers it and a short note. Batched, best-effort (an error drops the annotations).
+type ProductReorderAnnotator struct {
+	Batch func(ctx context.Context, productIDs []int64) (map[int64]ReorderNote, error)
+}
+
 var (
-	productFormSections   []ProductFormSection
-	productValidators     []ProductFormValidate
-	productSavedHooks     []ProductSaved
-	productSearchers      []ProductSearchContributor
-	productMetaProviders  []ProductMetaProvider
-	productBadgeProviders []ProductBadgeProvider
+	productFormSections      []ProductFormSection
+	productValidators        []ProductFormValidate
+	productSavedHooks        []ProductSaved
+	productSearchers         []ProductSearchContributor
+	productMetaProviders     []ProductMetaProvider
+	productBadgeProviders    []ProductBadgeProvider
+	productReorderAnnotators []ProductReorderAnnotator
 )
 
 func (r *Registry) AddProductFormSection(s ProductFormSection) {
@@ -329,6 +345,9 @@ func (r *Registry) AddProductMetaProvider(p ProductMetaProvider) {
 func (r *Registry) AddProductBadgeProvider(p ProductBadgeProvider) {
 	productBadgeProviders = append(productBadgeProviders, p)
 }
+func (r *Registry) AddProductReorderAnnotator(a ProductReorderAnnotator) {
+	productReorderAnnotators = append(productReorderAnnotators, a)
+}
 
 func ProductFormSections() []ProductFormSection             { return productFormSections }
 func ProductFormValidators() []ProductFormValidate          { return productValidators }
@@ -336,3 +355,4 @@ func ProductSavedHooks() []ProductSaved                     { return productSave
 func ProductSearchContributors() []ProductSearchContributor { return productSearchers }
 func ProductMetaProviders() []ProductMetaProvider           { return productMetaProviders }
 func ProductBadgeProviders() []ProductBadgeProvider         { return productBadgeProviders }
+func ProductReorderAnnotators() []ProductReorderAnnotator   { return productReorderAnnotators }

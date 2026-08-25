@@ -33,7 +33,7 @@ templ GroupsPage(userName string, rows []GroupSummary, showDisabled bool) {
 					<p class="text-sm text-slate-500">Group interchangeable products into quality tiers. A group is found as a whole at the till, each product shows its tier as a pin, and reorder is judged per tier — not per SKU.</p>
 				</div>
 				<div class="flex items-center gap-2 shrink-0">
-					<a href="/admin/alternatives/reorder" class="px-4 py-2 rounded-lg border font-semibold whitespace-nowrap hover:bg-slate-50">Reorder report →</a>
+					<a href="/admin/alternatives/reorder" class="px-4 py-2 rounded-lg border font-semibold whitespace-nowrap hover:bg-slate-50">Reorder overview →</a>
 					<button
 						hx-get="/admin/alternatives/new"
 						hx-target="#modal-container"
@@ -258,18 +258,20 @@ templ MoveConfirmButton(tierID, productID int64) {
 	>Move here?</button>
 }
 
-// ReorderPage is the reorder-by-alternatives report.
+// ReorderPage is the read-only reorder-by-alternatives overview: per group, each
+// tier's total qty vs its reorder level, plus ungrouped low-stock items. The
+// actionable reorder→PO flow lives on the core Low Stock page (Filter by
+// alternatives); this is the at-a-glance summary.
 templ ReorderPage(userName string, rollups []GroupRollup, ungrouped []products.Product) {
-	@layouts.Admin("Reorder by alternatives", userName, "alternatives") {
+	@layouts.Admin("Reorder overview", userName, "alternatives") {
 		<div class="p-6 space-y-5 max-w-4xl">
 			<div class="flex items-center justify-between">
 				<div>
-					<h1 class="text-2xl font-bold">Reorder by alternatives</h1>
-					<p class="text-sm text-slate-500">Each tier's total on-hand qty vs its reorder level. A tier is low only when the whole interchangeable tier runs down — not one SKU.</p>
+					<h1 class="text-2xl font-bold">Reorder overview</h1>
+					<p class="text-sm text-slate-500">Each tier's total on-hand qty vs its reorder level. A tier is low only when the whole interchangeable tier runs down. To actually build a purchase order, use <a href="/admin/reports/low-stock" class="text-indigo-600 hover:underline">Low Stock / Reorder</a> with "Filter by alternatives".</p>
 				</div>
 				<a href="/admin/alternatives/reorder/export" class="px-4 py-2 rounded-lg border font-semibold whitespace-nowrap hover:bg-slate-50">Export CSV</a>
 			</div>
-
 			if len(rollups) == 0 {
 				<div class="bg-white rounded-2xl shadow-sm p-6 text-center text-slate-400">No groups yet.</div>
 			}
@@ -307,7 +309,6 @@ templ ReorderPage(userName string, rollups []GroupRollup, ungrouped []products.P
 					</table>
 				</div>
 			}
-
 			<div class="bg-white rounded-2xl shadow-sm overflow-hidden">
 				<div class="px-4 py-3 bg-slate-50 font-semibold">Ungrouped low stock</div>
 				<table class="w-full text-sm">

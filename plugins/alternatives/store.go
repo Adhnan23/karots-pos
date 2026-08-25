@@ -251,6 +251,55 @@ func (s *Store) BadgesFor(ctx context.Context, productIDs []int64) (map[int64][]
 	return out, nil
 }
 
+// Coverage tells the reorder worklist whether an interchangeable equivalent already
+// covers a low-stock product (so it need not be reordered) plus a short note.
+type Coverage struct {
+	Group     string
+	Tier      string
+	TierTotal int
+	Covered   bool // tier tracked (reorder_level>0) and its total is above the level
+}
+
+// CoverageFor computes, for each given product that is a group member, its tier's
+// total on-hand qty (across active members) and whether that total keeps the tier
+// above its reorder level. Used to suppress a low SKU whose tier is still healthy.
+func (s *Store) CoverageFor(ctx context.Context, productIDs []int64) (map[int64]Coverage, error) {
+	if len(productIDs) == 0 {
+		return nil, nil
+	}
+	type row struct {
+		ProductID    int64  `db:"product_id"`
+		Group        string `db:"grp"`
+		Tier         string `db:"tier"`
+		ReorderLevel int    `db:"reorder_level"`
+		TierTotal    int    `db:"tier_total"`
+	}
+	var rows []row
+	if err := s.db.SelectContext(ctx, &rows, `
+		SELECT m.product_id, g.name AS grp, t.name AS tier, t.reorder_level,
+		       (SELECT COALESCE(SUM(COALESCE(st.quantity,0)),0)::int
+		          FROM alt_members m2
+		          JOIN products p2 ON p2.id = m2.product_id AND p2.is_active
+		          LEFT JOIN stock st ON st.product_id = m2.product_id
+		          WHERE m2.tier_id = t.id) AS tier_total
+		FROM alt_members m
+		JOIN alt_tiers t  ON t.id = m.tier_id AND t.is_active
+		JOIN alt_groups g ON g.id = t.group_id AND g.is_active
+		WHERE m.product_id = ANY($1)`, pq.Array(productIDs)); err != nil {
+		return nil, err
+	}
+	out := make(map[int64]Coverage, len(rows))
+	for _, r := range rows {
+		out[r.ProductID] = Coverage{
+			Group:     r.Group,
+			Tier:      r.Tier,
+			TierTotal: r.TierTotal,
+			Covered:   r.ReorderLevel > 0 && r.TierTotal > r.ReorderLevel,
+		}
+	}
+	return out, nil
+}
+
 // TierRollup is a tier with its summed member qty and low flag.
 type TierRollup struct {
 	Tier     Tier
@@ -267,7 +316,7 @@ type GroupRollup struct {
 
 // Reorder returns every active group with its active tiers, each carrying the summed
 // on-hand qty of its active member products and a low flag (reorder_level>0 and
-// total<=level).
+// total<=level). Powers the read-only reorder-by-alternatives overview page.
 func (s *Store) Reorder(ctx context.Context) ([]GroupRollup, error) {
 	groups, err := s.Groups(ctx, false)
 	if err != nil {

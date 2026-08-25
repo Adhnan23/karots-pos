@@ -92,7 +92,7 @@ type ReorderInfo struct {
 // lowStockConfigJSON serialises the low-stock rows for the reorder PO builder's
 // Alpine state. The suggested order qty is demand-based when sales history exists
 // (ReorderInfo.Suggested), otherwise falls back to ≈ 2× reorder level − on-hand.
-func lowStockConfigJSON(rows []products.Product, demand map[int64]ReorderInfo) string {
+func lowStockConfigJSON(rows []products.Product, demand map[int64]ReorderInfo, notes map[int64]string) string {
 	type line struct {
 		ProductID     int64  `json:"product_id"`
 		Name          string `json:"name"`
@@ -106,6 +106,7 @@ func lowStockConfigJSON(rows []products.Product, demand map[int64]ReorderInfo) s
 		SupplierID    int64  `json:"supplier_id"`
 		SupplierName  string `json:"supplier_name"`
 		Selected      bool   `json:"selected"`
+		Note          string `json:"note"`
 	}
 	out := make([]line, 0, len(rows))
 	for _, p := range rows {
@@ -142,6 +143,7 @@ func lowStockConfigJSON(rows []products.Product, demand map[int64]ReorderInfo) s
 			ProductID: p.ID, Name: p.Name, OnHand: p.StockQty.String(), Unit: p.UnitAbbr,
 			Suggested: suggested, SoldLastWeek: soldWk, SoldLastMonth: soldMo, SoldLastYear: soldLY,
 			Cost: p.CostPrice.String(), SupplierID: sup, SupplierName: supName,
+			Note: notes[p.ID],
 		})
 	}
 	b, _ := json.Marshal(out)
@@ -210,6 +212,9 @@ func lowStockQuery(d LowStockData) string {
 	}
 	if d.SupplierID != "" {
 		q.Set("supplier_id", d.SupplierID)
+	}
+	if d.Alt {
+		q.Set("alt", "1")
 	}
 	return q.Encode()
 }
