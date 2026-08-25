@@ -1467,37 +1467,69 @@ func (a *adminUI) LowStockReport(c echo.Context) error {
 	alt := c.QueryParam("alt") != ""
 	annotators := plugin.ProductReorderAnnotators()
 	notes := map[int64]string{}
-	if len(annotators) > 0 && len(rows) > 0 {
-		ids := make([]int64, len(rows))
-		for i := range rows {
-			ids[i] = rows[i].ID
-		}
-		covered := map[int64]bool{}
-		for _, an := range annotators {
-			if an.Batch == nil {
-				continue
-			}
-			m, aerr := an.Batch(ctx, ids)
-			if aerr != nil {
-				continue
-			}
-			for id, n := range m {
-				if n.Note != "" {
-					notes[id] = n.Note
-				}
-				if n.Covered {
-					covered[id] = true
-				}
-			}
-		}
+	if len(annotators) > 0 {
+		// When filtering, pull in members of tiers that are low AS A WHOLE — even if
+		// the individual product isn't below its own reorder level — so the whole low
+		// group is orderable. Skips ids already present.
 		if alt {
-			kept := rows[:0]
+			present := map[int64]bool{}
 			for _, p := range rows {
-				if !covered[p.ID] {
-					kept = append(kept, p)
+				present[p.ID] = true
+			}
+			var need []int64
+			for _, an := range annotators {
+				if an.LowMembers == nil {
+					continue
+				}
+				extra, lerr := an.LowMembers(ctx)
+				if lerr != nil {
+					continue
+				}
+				for _, id := range extra {
+					if !present[id] {
+						need = append(need, id)
+						present[id] = true
+					}
 				}
 			}
-			rows = kept
+			if len(need) > 0 {
+				if extraRows, ferr := a.s.products.ByIDs(ctx, need); ferr == nil {
+					rows = append(rows, extraRows...)
+				}
+			}
+		}
+		if len(rows) > 0 {
+			ids := make([]int64, len(rows))
+			for i := range rows {
+				ids[i] = rows[i].ID
+			}
+			covered := map[int64]bool{}
+			for _, an := range annotators {
+				if an.Batch == nil {
+					continue
+				}
+				m, aerr := an.Batch(ctx, ids)
+				if aerr != nil {
+					continue
+				}
+				for id, n := range m {
+					if n.Note != "" {
+						notes[id] = n.Note
+					}
+					if n.Covered {
+						covered[id] = true
+					}
+				}
+			}
+			if alt {
+				kept := rows[:0]
+				for _, p := range rows {
+					if !covered[p.ID] {
+						kept = append(kept, p)
+					}
+				}
+				rows = kept
+			}
 		}
 	}
 	sups, err := a.s.suppliers.List(ctx, "")

@@ -55,13 +55,23 @@ func (s *Service) listOnce(ctx context.Context, q ListQuery) ([]Product, int, er
 	return rows, total, nil
 }
 
-
 // ListAll returns the entire active catalog unpaginated, for CSV/spreadsheet
 // export (List clamps Limit to 100 and would export only the first page).
 func (s *Service) ListAll(ctx context.Context) ([]Product, error) {
 	rows, err := s.repo.ListAll(ctx)
 	if err != nil {
 		return nil, apperr.Internal("failed to list products", err)
+	}
+	return rows, nil
+}
+
+// ByIDs returns the given products (full rows incl. stock_qty), preserving the id
+// order and silently dropping ids that don't resolve. Used to pull specific
+// products into a list — e.g. the reorder worklist adding low-tier alternatives.
+func (s *Service) ByIDs(ctx context.Context, ids []int64) ([]Product, error) {
+	rows, err := s.repo.byIDsOrdered(ctx, ids)
+	if err != nil {
+		return nil, apperr.Internal("failed to fetch products by id", err)
 	}
 	return rows, nil
 }
@@ -476,18 +486,18 @@ func toWriteRow(in CreateInput) (writeRow, error) {
 		return writeRow{}, apperr.Validation("tax rate is not a valid number")
 	}
 	return writeRow{
-		Name:       strings.TrimSpace(in.Name),
-		NameLocal:  nullStr(deref(in.NameLocal)),
-		Barcode:    nullStr(deref(in.Barcode)),
-		CategoryID: in.CategoryID,
-		UnitID:     in.UnitID,
-		Cost:       cost,
-		Selling:    sell,
-		Wholesale:  whole,
-		Tax:        tax,
-		Reorder:    in.ReorderLevel,
-		TrackSerial:    in.TrackSerial,
-		WarrantyMonths: in.WarrantyMonths,
+		Name:              strings.TrimSpace(in.Name),
+		NameLocal:         nullStr(deref(in.NameLocal)),
+		Barcode:           nullStr(deref(in.Barcode)),
+		CategoryID:        in.CategoryID,
+		UnitID:            in.UnitID,
+		Cost:              cost,
+		Selling:           sell,
+		Wholesale:         whole,
+		Tax:               tax,
+		Reorder:           in.ReorderLevel,
+		TrackSerial:       in.TrackSerial,
+		WarrantyMonths:    in.WarrantyMonths,
 		IsService:         in.IsService,
 		PreferredSupplier: nilIfZero(in.PreferredSupplierID),
 	}, nil

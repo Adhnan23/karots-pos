@@ -167,6 +167,53 @@ func TestStoreReorderAndBadges(t *testing.T) {
 	}
 }
 
+// A member of a tier that is low AS A WHOLE is returned by LowTierMemberIDs, so the
+// core reorder page can pull it in even when it isn't individually low.
+func TestStoreLowTierMemberIDs(t *testing.T) {
+	conn := testDB(t)
+	defer conn.Close()
+	ctx := context.Background()
+	tx, _ := conn.BeginTxx(ctx, nil)
+	defer tx.Rollback() //nolint:errcheck
+	s := &Store{db: tx}
+
+	gid, _ := s.CreateGroup(ctx, Group{Name: "zz_low"})
+	// Huge reorder level ⇒ tier total can't reach it ⇒ tier is low as a whole.
+	tid, _ := s.CreateTier(ctx, Tier{GroupID: gid, Name: "zz_t", ReorderLevel: 1000000})
+	var pid int64
+	if err := tx.GetContext(ctx, &pid, `SELECT id FROM products WHERE is_active ORDER BY id LIMIT 1`); err != nil {
+		t.Skip("no products")
+	}
+	if err := s.AddMember(ctx, pid, tid); err != nil {
+		t.Fatal(err)
+	}
+
+	ids, err := s.LowTierMemberIDs(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, id := range ids {
+		if id == pid {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("LowTierMemberIDs should include %d (its tier is low)", pid)
+	}
+
+	// Drop reorder level to 0 (don't track) ⇒ no longer a low-tier member.
+	if err := s.UpdateTier(ctx, Tier{ID: tid, GroupID: gid, Name: "zz_t", ReorderLevel: 0}); err != nil {
+		t.Fatal(err)
+	}
+	ids, _ = s.LowTierMemberIDs(ctx)
+	for _, id := range ids {
+		if id == pid {
+			t.Fatal("reorder_level 0 tier should NOT be a low-tier member")
+		}
+	}
+}
+
 // Summaries + AllMemberIDs sanity.
 func TestStoreSummaries(t *testing.T) {
 	conn := testDB(t)

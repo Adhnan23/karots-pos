@@ -254,10 +254,12 @@ func (s *Store) BadgesFor(ctx context.Context, productIDs []int64) (map[int64][]
 // Coverage tells the reorder worklist whether an interchangeable equivalent already
 // covers a low-stock product (so it need not be reordered) plus a short note.
 type Coverage struct {
-	Group     string
-	Tier      string
-	TierTotal int
-	Covered   bool // tier tracked (reorder_level>0) and its total is above the level
+	Group        string
+	Tier         string
+	TierTotal    int
+	ReorderLevel int
+	Covered      bool // tier tracked (reorder_level>0) and its total is above the level
+	Low          bool // tier tracked and its total is at/below the level (needs reorder)
 }
 
 // CoverageFor computes, for each given product that is a group member, its tier's
@@ -291,13 +293,40 @@ func (s *Store) CoverageFor(ctx context.Context, productIDs []int64) (map[int64]
 	out := make(map[int64]Coverage, len(rows))
 	for _, r := range rows {
 		out[r.ProductID] = Coverage{
-			Group:     r.Group,
-			Tier:      r.Tier,
-			TierTotal: r.TierTotal,
-			Covered:   r.ReorderLevel > 0 && r.TierTotal > r.ReorderLevel,
+			Group:        r.Group,
+			Tier:         r.Tier,
+			TierTotal:    r.TierTotal,
+			ReorderLevel: r.ReorderLevel,
+			Covered:      r.ReorderLevel > 0 && r.TierTotal > r.ReorderLevel,
+			Low:          r.ReorderLevel > 0 && r.TierTotal <= r.ReorderLevel,
 		}
 	}
 	return out, nil
+}
+
+// LowTierMemberIDs returns the product ids of every active member of a tier that is
+// low as a whole (tracked, total on-hand at/below its reorder level) — the items to
+// pull into the reorder worklist so the whole low group is orderable.
+func (s *Store) LowTierMemberIDs(ctx context.Context) ([]int64, error) {
+	var ids []int64
+	err := s.db.SelectContext(ctx, &ids, `
+		WITH tier_tot AS (
+			SELECT t.id, t.reorder_level,
+			       COALESCE(SUM(COALESCE(st.quantity,0)),0)::int AS total
+			FROM alt_tiers t
+			JOIN alt_groups g ON g.id = t.group_id AND g.is_active
+			LEFT JOIN alt_members m ON m.tier_id = t.id
+			LEFT JOIN products p ON p.id = m.product_id AND p.is_active
+			LEFT JOIN stock st ON st.product_id = m.product_id AND p.is_active
+			WHERE t.is_active
+			GROUP BY t.id
+		)
+		SELECT m.product_id
+		FROM alt_members m
+		JOIN tier_tot tt ON tt.id = m.tier_id
+		JOIN products p ON p.id = m.product_id AND p.is_active
+		WHERE tt.reorder_level > 0 AND tt.total <= tt.reorder_level`)
+	return ids, err
 }
 
 // TierRollup is a tier with its summed member qty and low flag.

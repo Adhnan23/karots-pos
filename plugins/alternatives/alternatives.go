@@ -60,13 +60,18 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 	})
 	// Till-card tier pin.
 	reg.AddProductBadgeProvider(plugin.ProductBadgeProvider{Batch: p.store.BadgesFor})
-	// Reorder worklist: mark a low SKU as covered when its tier still has stock.
-	reg.AddProductReorderAnnotator(plugin.ProductReorderAnnotator{Batch: p.reorderNotes})
+	// Reorder worklist: mark a low SKU as covered when its tier still has stock, and
+	// pull in whole tiers that are low even when their members aren't individually low.
+	reg.AddProductReorderAnnotator(plugin.ProductReorderAnnotator{
+		Batch:      p.reorderNotes,
+		LowMembers: p.store.LowTierMemberIDs,
+	})
 }
 
-// reorderNotes adapts the store's coverage into the core reorder annotation: a
-// product whose interchangeable tier is still above its reorder level is "covered"
-// (an equivalent is in stock), with a note naming the group/tier and its total.
+// reorderNotes adapts the store's coverage into the core reorder annotation. A
+// product whose tier is still above its reorder level is "covered" (an equivalent
+// is in stock); a product whose tier is low as a whole is flagged so the buyer
+// reorders any member. The note names the group/tier and its total.
 func (p *Plugin) reorderNotes(ctx context.Context, ids []int64) (map[int64]plugin.ReorderNote, error) {
 	cov, err := p.store.CoverageFor(ctx, ids)
 	if err != nil {
@@ -74,7 +79,15 @@ func (p *Plugin) reorderNotes(ctx context.Context, ids []int64) (map[int64]plugi
 	}
 	out := make(map[int64]plugin.ReorderNote, len(cov))
 	for id, c := range cov {
-		note := "Alt: " + c.Group + " · " + c.Tier + " (tier has " + strconv.Itoa(c.TierTotal) + ")"
+		var note string
+		switch {
+		case c.Low:
+			note = "Alt: " + c.Group + " · " + c.Tier + " LOW (tier " + strconv.Itoa(c.TierTotal) + " ≤ " + strconv.Itoa(c.ReorderLevel) + ")"
+		case c.Covered:
+			note = "Alt: covered by " + c.Group + " · " + c.Tier + " (tier has " + strconv.Itoa(c.TierTotal) + ")"
+		default:
+			note = "Alt: " + c.Group + " · " + c.Tier + " (tier has " + strconv.Itoa(c.TierTotal) + ")"
+		}
 		out[id] = plugin.ReorderNote{Covered: c.Covered, Note: note}
 	}
 	return out, nil
