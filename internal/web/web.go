@@ -577,5 +577,24 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 			return all, nil
 		}
 	}
+	// Same bridge for till-card badge providers → products.BadgeProvider.
+	if bps := plugin.ProductBadgeProviders(); len(bps) > 0 {
+		products.BadgeProvider = func(ctx context.Context, ids []int64) map[int64][]string {
+			out := map[int64][]string{}
+			for _, bp := range bps {
+				if bp.Batch == nil {
+					continue
+				}
+				m, err := bp.Batch(ctx, ids)
+				if err != nil {
+					continue
+				}
+				for id, badges := range m {
+					out[id] = append(out[id], badges...)
+				}
+			}
+			return out
+		}
+	}
 	reg.Mux.Mount(e.Group(""), cg, ag)
 }

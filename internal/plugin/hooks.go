@@ -296,12 +296,21 @@ type ProductMetaProvider struct {
 	Batch func(ctx context.Context, productIDs []int64) (map[int64]string, error)
 }
 
+// ProductBadgeProvider supplies short badge labels for products, shown as pins on
+// the till product card. Batch is called with the visible product ids and returns
+// each id's badges (omit an id for none). Best-effort: an error just drops the
+// badges. One query per page — no per-row calls.
+type ProductBadgeProvider struct {
+	Batch func(ctx context.Context, productIDs []int64) (map[int64][]string, error)
+}
+
 var (
-	productFormSections  []ProductFormSection
-	productValidators    []ProductFormValidate
-	productSavedHooks    []ProductSaved
-	productSearchers     []ProductSearchContributor
-	productMetaProviders []ProductMetaProvider
+	productFormSections   []ProductFormSection
+	productValidators     []ProductFormValidate
+	productSavedHooks     []ProductSaved
+	productSearchers      []ProductSearchContributor
+	productMetaProviders  []ProductMetaProvider
+	productBadgeProviders []ProductBadgeProvider
 )
 
 func (r *Registry) AddProductFormSection(s ProductFormSection) {
@@ -317,9 +326,13 @@ func (r *Registry) AddProductSearchContributor(s ProductSearchContributor) {
 func (r *Registry) AddProductMetaProvider(p ProductMetaProvider) {
 	productMetaProviders = append(productMetaProviders, p)
 }
+func (r *Registry) AddProductBadgeProvider(p ProductBadgeProvider) {
+	productBadgeProviders = append(productBadgeProviders, p)
+}
 
 func ProductFormSections() []ProductFormSection             { return productFormSections }
 func ProductFormValidators() []ProductFormValidate          { return productValidators }
 func ProductSavedHooks() []ProductSaved                     { return productSavedHooks }
 func ProductSearchContributors() []ProductSearchContributor { return productSearchers }
 func ProductMetaProviders() []ProductMetaProvider           { return productMetaProviders }
+func ProductBadgeProviders() []ProductBadgeProvider         { return productBadgeProviders }

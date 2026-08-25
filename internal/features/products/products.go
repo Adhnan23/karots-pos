@@ -44,6 +44,8 @@ type Product struct {
 	StockQty              decimal.Decimal `db:"stock_qty"               json:"stock_qty"`
 	CreatedByName         *string         `db:"created_by_name"         json:"created_by_name,omitempty"`
 	PreferredSupplierName *string         `db:"preferred_supplier_name" json:"preferred_supplier_name,omitempty"`
+	// Plugin-contributed, not persisted: till-card badge pins (e.g. quality tier).
+	Badges []string `db:"-" json:"badges,omitempty"`
 }
 
 // IsLowStock reports whether on-hand quantity is at or below the reorder level.
@@ -149,6 +151,10 @@ func NewRepository(q db.Queryer) *Repository { return &Repository{db: q} }
 // internal/features/products never depends on internal/plugin (which imports it):
 // the web layer sets this during plugin setup. nil = core-only behaviour.
 var SearchContributor func(ctx context.Context, query string) ([]int64, error)
+
+// BadgeProvider, when non-nil, returns per-product badge labels for the till card
+// (set by the web layer from plugin badge providers). nil = no badges.
+var BadgeProvider func(ctx context.Context, productIDs []int64) map[int64][]string
 
 // searchMatchIDs returns the plugin-contributed ids for a query (empty when no
 // contributor is set, no search term, or the contributor errors — it must never

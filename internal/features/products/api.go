@@ -22,9 +22,21 @@ func (h *APIHandler) List(c echo.Context) error {
 		return apperr.BadRequest("invalid query parameters")
 	}
 	q.Normalize()
-	rows, total, err := h.svc.List(c.Request().Context(), q)
+	ctx := c.Request().Context()
+	rows, total, err := h.svc.List(ctx, q)
 	if err != nil {
 		return err
+	}
+	if BadgeProvider != nil && len(rows) > 0 {
+		ids := make([]int64, len(rows))
+		for i := range rows {
+			ids[i] = rows[i].ID
+		}
+		if m := BadgeProvider(ctx, ids); m != nil {
+			for i := range rows {
+				rows[i].Badges = m[rows[i].ID]
+			}
+		}
 	}
 	return response.Paged(c, rows, response.NewPageMeta(q.Page, q.Limit, total))
 }
@@ -48,6 +60,11 @@ func (h *APIHandler) Get(c echo.Context) error {
 	p, err := h.svc.Get(c.Request().Context(), id)
 	if err != nil {
 		return err
+	}
+	if BadgeProvider != nil && p != nil {
+		if m := BadgeProvider(c.Request().Context(), []int64{p.ID}); m != nil {
+			p.Badges = m[p.ID]
+		}
 	}
 	return response.OK(c, p)
 }

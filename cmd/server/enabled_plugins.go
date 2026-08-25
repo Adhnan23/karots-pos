@@ -16,6 +16,7 @@ package main
 // so the bootstrapper can rewrite it safely.
 
 import (
+	_ "karots-pos/plugins/alternatives"
 	_ "karots-pos/plugins/documents"
 	_ "karots-pos/plugins/productplus"
 	_ "karots-pos/plugins/recharge"

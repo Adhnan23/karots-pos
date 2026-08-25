@@ -1,0 +1,7 @@
+{
+  "key": "alternatives",
+  "name": "Alternatives",
+  "import": "karots-pos/plugins/alternatives",
+  "version": "1.0.0",
+  "description": "Group interchangeable products into quality tiers for group-aware counter search, alternative suggestions with a tier pin on till cards, and reorder-by-alternatives."
+}
