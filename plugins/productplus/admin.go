@@ -79,6 +79,12 @@ func parseField(c echo.Context) (Field, error) {
 			return f, apperr.Validation("a dropdown needs at least one option")
 		}
 	}
+	// A required field must carry a default: existing products have no stored value
+	// and resolve to it, so without one they'd silently read blank. Bool is exempt —
+	// an empty default legitimately means "No".
+	if f.Required && f.Type != "bool" && f.DefaultValue == "" {
+		return f, apperr.Validation("a required field needs a default value so existing products back-fill from it")
+	}
 	return f, nil
 }
 

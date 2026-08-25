@@ -134,6 +134,13 @@ func (s *Store) DeleteValue(ctx context.Context, fieldID, productID int64) error
 
 // MatchProductIDs returns product ids whose value for a SEARCHABLE field contains
 // the query (case-insensitive substring). Distinct across fields.
+//
+// Text/number/select match on the stored value directly (a select value IS its
+// option label, e.g. "Grade B", so it reads naturally). A bool value is stored as
+// "1"/absence, which no human word matches — so a Yes bool is instead found by
+// typing the field's LABEL (search "waterproof" → every product where Waterproof
+// is Yes). Only the Yes side is findable, which is exactly what you'd want.
+//
 // ponytail: substring match only — no numeric range / exact-code fast path. Add a
 // typed column + index if searchable numbers ever need range queries.
 func (s *Store) MatchProductIDs(ctx context.Context, query string) ([]int64, error) {
@@ -141,7 +148,10 @@ func (s *Store) MatchProductIDs(ctx context.Context, query string) ([]int64, err
 	err := s.db.SelectContext(ctx, &ids, `
 		SELECT DISTINCT v.product_id
 		FROM pp_values v JOIN pp_fields f ON f.id = v.field_id
-		WHERE f.is_active AND f.searchable AND v.value ILIKE '%' || $1 || '%'`, query)
+		WHERE f.is_active AND f.searchable AND (
+			(f.type <> 'bool' AND v.value ILIKE '%' || $1 || '%')
+			OR (f.type = 'bool' AND v.value = '1' AND f.label ILIKE '%' || $1 || '%')
+		)`, query)
 	return ids, err
 }
 

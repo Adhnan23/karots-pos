@@ -11,7 +11,7 @@ import (
 templ FieldsPage(userName string, fields []Field, showDisabled bool) {
 	@layouts.Admin("Product Plus", userName, "productplus") {
 		<div class="p-6 space-y-4">
-			<div class="flex items-center justify-between">
+			<div class="flex items-start justify-between gap-4">
 				<div>
 					<h1 class="text-2xl font-bold">🧩 Product Plus</h1>
 					<p class="text-sm text-slate-500">Extra product fields (model no, year, description, yes/no, dropdowns). They appear on the product form; a required field back-fills existing products from its default. Tick "searchable" to make a field findable in the till and every product list.</p>
@@ -20,7 +20,7 @@ templ FieldsPage(userName string, fields []Field, showDisabled bool) {
 					hx-get="/admin/productplus/form"
 					hx-target="#modal-container"
 					hx-swap="innerHTML"
-					class="px-4 py-2 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700"
+					class="shrink-0 whitespace-nowrap px-4 py-2 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700"
 				>+ Add field</button>
 			</div>
 			<label class="inline-flex items-center gap-2 text-sm text-slate-600">

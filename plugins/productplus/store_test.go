@@ -77,4 +77,32 @@ func TestStoreFieldValueMatch(t *testing.T) {
 	if _, ok := vals[fid]; ok {
 		t.Fatalf("value not deleted: %v", vals)
 	}
+
+	// A searchable bool is found by its LABEL when Yes (value "1"), not by "1".
+	bid, err := s.CreateField(ctx, Field{
+		Key: "zz_test_waterproof", Label: "ZZ Waterproof", Type: "bool",
+		Searchable: true, SortOrder: 2, IsActive: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetValue(ctx, bid, pid, "1"); err != nil {
+		t.Fatal(err)
+	}
+	// pid now has ONLY the bool value in this tx (its text value was deleted above).
+	ids, err = s.MatchProductIDs(ctx, "zz waterproof")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 1 || ids[0] != pid {
+		t.Fatalf("bool label search = %v, want [%d]", ids, pid)
+	}
+	// The bool's raw "1" must NOT match it — bool is found only by label. (Other
+	// live products may match "1" via their own text values; we only assert pid.)
+	got, _ := s.MatchProductIDs(ctx, "1")
+	for _, id := range got {
+		if id == pid {
+			t.Fatalf("bool value '1' matched its own product %d", pid)
+		}
+	}
 }
