@@ -9,7 +9,6 @@ import (
 	"context"
 	"io/fs"
 
-	"karots-pos/internal/features/products"
 	"karots-pos/internal/plugin"
 	"karots-pos/plugins/productplus/migrations"
 )
@@ -49,12 +48,12 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 	reg.AddProductFormValidate(p.validateProductForm)
 	reg.AddProductSaved(p.saveProductForm)
 
-	// Search: register the hook AND set the products func-var seam. Only one plugin
-	// owns product custom-field search, so setting the var here is safe.
+	// Search: register the contributor hook. The web layer fans every plugin's
+	// contributor into the products search seam, so this composes with other plugins.
 	reg.AddProductSearchContributor(plugin.ProductSearchContributor{Match: p.matchProducts})
-	products.SearchContributor = func(ctx context.Context, q string) ([]int64, error) {
-		return p.store.MatchProductIDs(ctx, q)
-	}
+
+	// Read-only display: show a product's custom values in the admin product list.
+	reg.AddProductMetaProvider(plugin.ProductMetaProvider{Batch: p.store.MetaFor})
 }
 
 func (p *Plugin) matchProducts(ctx context.Context, q string) ([]int64, error) {

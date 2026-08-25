@@ -287,11 +287,21 @@ type ProductSearchContributor struct {
 	Match func(ctx context.Context, query string) ([]int64, error)
 }
 
+// ProductMetaProvider supplies read-only display text for products (e.g. a
+// plugin's custom-field values) shown in the admin product list. Batch is called
+// once per rendered page with every visible product id and returns a short display
+// string per id (omit an id for nothing to show). Best-effort: an error just hides
+// the meta, never breaks the list. One query for the whole page — no per-row calls.
+type ProductMetaProvider struct {
+	Batch func(ctx context.Context, productIDs []int64) (map[int64]string, error)
+}
+
 var (
-	productFormSections []ProductFormSection
-	productValidators   []ProductFormValidate
-	productSavedHooks   []ProductSaved
-	productSearchers    []ProductSearchContributor
+	productFormSections  []ProductFormSection
+	productValidators    []ProductFormValidate
+	productSavedHooks    []ProductSaved
+	productSearchers     []ProductSearchContributor
+	productMetaProviders []ProductMetaProvider
 )
 
 func (r *Registry) AddProductFormSection(s ProductFormSection) {
@@ -304,8 +314,12 @@ func (r *Registry) AddProductSaved(s ProductSaved) { productSavedHooks = append(
 func (r *Registry) AddProductSearchContributor(s ProductSearchContributor) {
 	productSearchers = append(productSearchers, s)
 }
+func (r *Registry) AddProductMetaProvider(p ProductMetaProvider) {
+	productMetaProviders = append(productMetaProviders, p)
+}
 
 func ProductFormSections() []ProductFormSection             { return productFormSections }
 func ProductFormValidators() []ProductFormValidate          { return productValidators }
 func ProductSavedHooks() []ProductSaved                     { return productSavedHooks }
 func ProductSearchContributors() []ProductSearchContributor { return productSearchers }
+func ProductMetaProviders() []ProductMetaProvider           { return productMetaProviders }

@@ -13,6 +13,7 @@ type ProductsData struct {
 	UserName   string
 	Symbol     string
 	Rows       []products.Product
+	Meta       map[int64]string // plugin-contributed read-only display line, by product id
 	Categories []categories.TreeNode
 	Page       int
 	HasNext    bool
@@ -85,7 +86,7 @@ templ ProductList(d ProductsData) {
 			</tr>
 		</thead>
 		<tbody>
-			@adminfragments.ProductTable(d.Rows, d.Symbol)
+			@adminfragments.ProductTable(d.Rows, d.Symbol, d.Meta)
 		</tbody>
 	</table>
 	@pager(d.Page, d.HasNext, "/admin/products/table", "#product-list", "#product-filter-form")

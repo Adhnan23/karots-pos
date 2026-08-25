@@ -3,8 +3,11 @@ package productplus
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	appdb "karots-pos/internal/db"
+
+	"github.com/lib/pq"
 )
 
 // Field is one admin-defined custom product field.
@@ -153,6 +156,52 @@ func (s *Store) MatchProductIDs(ctx context.Context, query string) ([]int64, err
 			OR (f.type = 'bool' AND v.value = '1' AND f.label ILIKE '%' || $1 || '%')
 		)`, query)
 	return ids, err
+}
+
+// MetaFor returns a short, read-only display string per product ("Model No: XJ-9 ·
+// Grade B · Waterproof"), for the admin product list. One query for the whole page.
+// Only STORED values appear (a value equal to the default has no row), so the line
+// stays sparse; bool shows the label only when Yes.
+func (s *Store) MetaFor(ctx context.Context, productIDs []int64) (map[int64]string, error) {
+	if len(productIDs) == 0 {
+		return nil, nil
+	}
+	type row struct {
+		ProductID int64  `db:"product_id"`
+		Label     string `db:"label"`
+		Type      string `db:"type"`
+		Value     string `db:"value"`
+	}
+	var rows []row
+	if err := s.db.SelectContext(ctx, &rows, `
+		SELECT v.product_id, f.label, f.type, v.value
+		FROM pp_values v JOIN pp_fields f ON f.id = v.field_id
+		WHERE f.is_active AND v.product_id = ANY($1)
+		ORDER BY v.product_id, f.sort_order, f.id`, pq.Array(productIDs)); err != nil {
+		return nil, err
+	}
+	parts := map[int64][]string{}
+	for _, r := range rows {
+		var label string
+		switch r.Type {
+		case "bool":
+			if r.Value != "1" { // No / unset: nothing to show
+				continue
+			}
+			label = r.Label
+		default:
+			if strings.TrimSpace(r.Value) == "" {
+				continue
+			}
+			label = r.Label + ": " + r.Value
+		}
+		parts[r.ProductID] = append(parts[r.ProductID], label)
+	}
+	out := make(map[int64]string, len(parts))
+	for id, ps := range parts {
+		out[id] = strings.Join(ps, " · ")
+	}
+	return out, nil
 }
 
 func nullJSON(b []byte) any {

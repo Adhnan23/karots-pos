@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"karots-pos/internal/apperr"
+	"karots-pos/internal/features/audit"
 	"karots-pos/internal/middleware"
 	"karots-pos/internal/response"
 
@@ -13,6 +14,14 @@ import (
 
 // adminUI hosts the plugin's own admin field-manager page.
 type adminUI struct{ p *Plugin }
+
+// audit records a field-manager change on the shared audit trail (no-op if the
+// core audit service is absent, e.g. in tests).
+func (a *adminUI) audit(c echo.Context, action, key, detail string) {
+	if a.p.core.Audit != nil {
+		a.p.core.Audit.Record(c.Request().Context(), middleware.CurrentUserID(c), action, "product_field", key, detail)
+	}
+}
 
 // Page renders the field-manager shell. "Show disabled" is off by default,
 // matching the app's other admin lists.
@@ -101,6 +110,7 @@ func (a *adminUI) CreateField(c echo.Context) error {
 	if _, err := a.p.store.CreateField(ctx, f); err != nil {
 		return err
 	}
+	a.audit(c, audit.ActionCreate, f.Key, "added custom field "+f.Label+" ("+f.Type+")")
 	c.Response().Header().Set("HX-Trigger", response.ToastAnd(f.Label+" added", "success", "reload-ppfields", "close-modal"))
 	return response.NoContent(c)
 }
@@ -119,6 +129,7 @@ func (a *adminUI) UpdateField(c echo.Context) error {
 	if err := a.p.store.UpdateField(ctx, f); err != nil {
 		return err
 	}
+	a.audit(c, audit.ActionUpdate, f.Key, "updated custom field "+f.Label)
 	c.Response().Header().Set("HX-Trigger", response.ToastAnd(f.Label+" saved", "success", "reload-ppfields", "close-modal"))
 	return response.NoContent(c)
 }
@@ -136,6 +147,7 @@ func (a *adminUI) SetActive(c echo.Context) error {
 	if active {
 		msg = "Field enabled"
 	}
+	a.audit(c, audit.ActionUpdate, strconv.FormatInt(id, 10), msg)
 	c.Response().Header().Set("HX-Trigger", response.ToastAnd(msg, "success", "reload-ppfields"))
 	return response.NoContent(c)
 }

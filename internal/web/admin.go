@@ -220,6 +220,7 @@ func (a *adminUI) productsData(c echo.Context) (adminpages.ProductsData, error) 
 		UserName:   middleware.CurrentUserName(c),
 		Symbol:     a.symbol(ctx),
 		Rows:       rows,
+		Meta:       productMeta(ctx, rows),
 		Categories: cats,
 		Page:       page,
 		HasNext:    hasNext,
@@ -227,6 +228,41 @@ func (a *adminUI) productsData(c echo.Context) (adminpages.ProductsData, error) 
 		CategoryID: catParam,
 		Inactive:   inactive,
 	}, nil
+}
+
+// productMeta gathers each plugin's read-only display line for the visible product
+// rows (one batched call per provider). Empty when no plugin contributes; a
+// provider error is skipped so the list always renders.
+func productMeta(ctx context.Context, rows []products.Product) map[int64]string {
+	providers := plugin.ProductMetaProviders()
+	if len(providers) == 0 || len(rows) == 0 {
+		return nil
+	}
+	ids := make([]int64, len(rows))
+	for i, r := range rows {
+		ids[i] = r.ID
+	}
+	meta := map[int64]string{}
+	for _, p := range providers {
+		if p.Batch == nil {
+			continue
+		}
+		m, err := p.Batch(ctx, ids)
+		if err != nil {
+			continue
+		}
+		for id, s := range m {
+			if s == "" {
+				continue
+			}
+			if meta[id] == "" {
+				meta[id] = s
+			} else {
+				meta[id] += " · " + s
+			}
+		}
+	}
+	return meta
 }
 
 func (a *adminUI) Products(c echo.Context) error {

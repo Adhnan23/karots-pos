@@ -11,17 +11,17 @@ import (
 )
 
 // ProductTable renders the <tbody> contents; it is the HTMX swap target.
-templ ProductTable(rows []products.Product, symbol string) {
+templ ProductTable(rows []products.Product, symbol string, meta map[int64]string) {
 	if len(rows) == 0 {
 		<tr><td colspan="6" class="py-6 text-center text-slate-500">No products found.</td></tr>
 	} else {
 		for _, p := range rows {
-			@ProductRow(p, symbol)
+			@ProductRow(p, symbol, meta[p.ID])
 		}
 	}
 }
 
-templ ProductRow(p products.Product, symbol string) {
+templ ProductRow(p products.Product, symbol string, metaLine string) {
 	<tr class={ "border-b last:border-0 hover:bg-slate-50", templ.KV("opacity-50", !p.IsActive) }>
 		<td class="py-2 px-3">
 			<div class="font-medium">
@@ -42,6 +42,9 @@ templ ProductRow(p products.Product, symbol string) {
 					hx-target="#modal-container"
 					hx-swap="innerHTML"
 				>+ Add barcode</button>
+			}
+			if metaLine != "" {
+				<div class="text-xs text-indigo-400 mt-0.5">{ metaLine }</div>
 			}
 		</td>
 		<td class="py-2 px-3 text-slate-600">{ p.CategoryName }</td>

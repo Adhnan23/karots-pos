@@ -556,5 +556,26 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	}
 	reg := plugin.NewRegistry(core, plugin.NewMux(), e)
 	plugin.SetupAll(reg)
+	// Bridge every plugin's product-search contributor into the single products
+	// search seam. Fanning out over the registered slice means two plugins (e.g.
+	// custom fields + alternatives) both contribute, instead of the last one to set
+	// the func var silently clobbering the others. A contributor error is skipped,
+	// never failing the search.
+	if scs := plugin.ProductSearchContributors(); len(scs) > 0 {
+		products.SearchContributor = func(ctx context.Context, q string) ([]int64, error) {
+			var all []int64
+			for _, sc := range scs {
+				if sc.Match == nil {
+					continue
+				}
+				ids, err := sc.Match(ctx, q)
+				if err != nil {
+					continue
+				}
+				all = append(all, ids...)
+			}
+			return all, nil
+		}
+	}
 	reg.Mux.Mount(e.Group(""), cg, ag)
 }

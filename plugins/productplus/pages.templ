@@ -2,9 +2,16 @@ package productplus
 
 import (
 	"karots-pos/templates/layouts"
+	"slices"
 	"strconv"
 	"strings"
 )
+
+// staleValue reports whether a select's stored value no longer matches any of its
+// options (the option was removed or renamed) — so the form can keep showing it.
+func staleValue(r FieldValue) bool {
+	return r.Field.Type == "select" && r.Value != "" && !slices.Contains(r.Field.Options, r.Value)
+}
 
 // FieldsPage is the admin field-manager: define the custom product fields that
 // get injected into the product form and (opt-in) into product search.
@@ -188,6 +195,11 @@ templ ProductFieldsFragment(rows []FieldValue) {
 						<select name={ "pp_" + r.Field.Key } required?={ r.Field.Required } class="w-full border rounded-lg px-3 py-2.5">
 							if !r.Field.Required {
 								<option value="" selected?={ r.Value == "" }>—</option>
+							}
+							if staleValue(r) {
+								// The stored value's option was removed/renamed; keep it selected
+								// so saving the product doesn't silently discard it.
+								<option value={ r.Value } selected>{ r.Value } (removed)</option>
 							}
 							for _, opt := range r.Field.Options {
 								<option value={ opt } selected?={ opt == r.Value }>{ opt }</option>

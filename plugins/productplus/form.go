@@ -3,6 +3,8 @@ package productplus
 import (
 	"context"
 	"net/url"
+	"slices"
+	"strconv"
 	"strings"
 
 	"karots-pos/internal/apperr"
@@ -50,11 +52,27 @@ func (p *Plugin) validateProductForm(ctx context.Context, form url.Values) error
 		return nil
 	}
 	for _, f := range fields {
+		val := strings.TrimSpace(form.Get("pp_" + f.Key))
 		// ponytail: required enforced here (the admin product form) only; other
-		// create paths (CSV import, till quick-add, capture app) resolve to the
-		// default. Widen to those paths only if a shop actually needs it.
-		if f.Required && strings.TrimSpace(form.Get("pp_"+f.Key)) == "" {
+		// create paths (till quick-add, capture app) resolve to the default and
+		// surface in the review queue. Widen only if a shop actually needs it.
+		if f.Required && val == "" {
 			return apperr.Validation(f.Label + " is required")
+		}
+		if val == "" {
+			continue
+		}
+		// The <select>/type=number inputs constrain the UI; this is the server
+		// backstop for a direct/API POST that bypasses them.
+		switch f.Type {
+		case "number":
+			if _, err := strconv.ParseFloat(val, 64); err != nil {
+				return apperr.Validation(f.Label + " must be a number")
+			}
+		case "select":
+			if !slices.Contains(f.Options, val) {
+				return apperr.Validation(val + " is not a valid " + f.Label + " option")
+			}
 		}
 	}
 	return nil
