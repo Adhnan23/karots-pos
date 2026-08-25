@@ -818,16 +818,22 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
       const res = await fetch(url, { credentials: "same-origin" });
       this.detailHtml = await res.text();
       this.menuMode = "detail";
-      this.$nextTick(() => {
-        const box = this.$refs.detailBox;
-        if (!box) return;
-        // Wire Alpine AND HTMX on the injected fragment: x-html sets innerHTML,
-        // which activates neither on its own. Without htmx.process, any hx-post
-        // inside (e.g. the bill-payment form) stays inert and the form does a
-        // native GET navigation instead of the intended HTMX POST.
-        if (window.Alpine && window.Alpine.initTree) window.Alpine.initTree(box);
+      this.wireDetail();
+    },
+    // Activate HTMX on the injected detail fragment. Alpine's x-html self-inits
+    // any x-data inside (so the form's fields work), but hx-* attributes need an
+    // explicit htmx.process — without it the bill-payment form's hx-post stays
+    // inert and "Record & print" does a native GET to a POST-only route (an error
+    // page). detailBox lives inside `<template x-if="menuMode==='detail'">`, which
+    // Alpine mounts a frame or two AFTER menuMode flips, so a single $nextTick
+    // fires before the ref exists — retry across animation frames like focusAmount.
+    wireDetail(tries = 8) {
+      const box = this.$refs.detailBox;
+      if (box) {
         if (window.htmx && window.htmx.process) window.htmx.process(box);
-      });
+        return;
+      }
+      if (tries > 0) requestAnimationFrame(() => this.wireDetail(tries - 1));
     },
     // The amount step lives inside a `<template x-if="menuMode==='amount'">`, so
     // its input is inserted a frame or two after menuMode flips — a single
