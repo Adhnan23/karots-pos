@@ -175,7 +175,7 @@ templ CategoryPicker(nodes []categories.TreeNode, fieldName, selected string, in
 }
 
 // ProductForm is the create/edit modal. A nil product means "create".
-templ ProductForm(p *products.Product, cats []categories.TreeNode, us []units.Unit, sups []suppliers.Supplier) {
+templ ProductForm(p *products.Product, cats []categories.TreeNode, us []units.Unit, sups []suppliers.Supplier, extra []templ.Component) {
 	<div
 		class="fixed inset-0 bg-black/40 flex items-center justify-center z-40 p-4"
 		x-data
@@ -270,6 +270,11 @@ templ ProductForm(p *products.Product, cats []categories.TreeNode, us []units.Un
 						<input name="warranty_months" type="number" min="0" value={ valOf(p, fWarrantyMonths) } placeholder="0 = none" class="w-full border rounded-lg px-3 py-2"/>
 					</div>
 				</div>
+				// Plugin-contributed custom fields (Product Plus). Rendered before barcode
+				// so the scanner-Enter-submits ordering below still holds. Empty = no plugin.
+				for _, comp := range extra {
+					@comp
+				}
 				<!-- Barcode is the LAST field on purpose: a scanner ends its scan with Enter,
 				     which submits the form — so it must come after everything else is filled,
 				     turning "scan the barcode" into the natural final "save" action. -->

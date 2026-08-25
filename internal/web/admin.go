@@ -19,6 +19,7 @@ import (
 	"karots-pos/internal/features/stock"
 	"karots-pos/internal/middleware"
 	"karots-pos/internal/money"
+	"karots-pos/internal/plugin"
 	"karots-pos/internal/printing"
 	"karots-pos/internal/receiptimg"
 	"karots-pos/internal/response"
@@ -26,6 +27,7 @@ import (
 	"karots-pos/templates/layouts"
 	adminpages "karots-pos/templates/pages/admin"
 
+	"github.com/a-h/templ"
 	"github.com/jmoiron/sqlx"
 	"github.com/labstack/echo/v4"
 	"github.com/shopspring/decimal"
@@ -258,6 +260,7 @@ func (a *adminUI) ProductForm(c echo.Context) error {
 		return err
 	}
 	var p *products.Product
+	var pid int64
 	if idStr := c.Param("id"); idStr != "" {
 		id, err := strconv.ParseInt(idStr, 10, 64)
 		if err != nil {
@@ -266,8 +269,20 @@ func (a *adminUI) ProductForm(c echo.Context) error {
 		if p, err = a.s.products.Get(ctx, id); err != nil {
 			return err
 		}
+		pid = id
 	}
-	return response.RenderFragment(c, adminfragments.ProductForm(p, cats, us, sups))
+	// Plugin-contributed form sections (Product Plus custom fields). Empty when no
+	// plugin registers one; a plugin render error is logged, not fatal to the form.
+	var extra []templ.Component
+	for _, sec := range plugin.ProductFormSections() {
+		comp, err := sec.Render(ctx, pid)
+		if err != nil {
+			c.Logger().Warnf("product form section: %v", err)
+			continue
+		}
+		extra = append(extra, comp)
+	}
+	return response.RenderFragment(c, adminfragments.ProductForm(p, cats, us, sups, extra))
 }
 
 // ProductBarcodeForm opens the small modal to add a barcode to an item that has
@@ -307,9 +322,23 @@ func (a *adminUI) ProductCreate(c echo.Context) error {
 	if err := c.Validate(&in); err != nil {
 		return err
 	}
-	p, err := a.s.products.Create(c.Request().Context(), in)
+	ctx := c.Request().Context()
+	if err := c.Request().ParseForm(); err != nil {
+		return apperr.BadRequest("invalid form")
+	}
+	for _, v := range plugin.ProductFormValidators() {
+		if err := v(ctx, c.Request().Form); err != nil {
+			return err
+		}
+	}
+	p, err := a.s.products.Create(ctx, in)
 	if err != nil {
 		return err
+	}
+	for _, h := range plugin.ProductSavedHooks() {
+		if err := h(ctx, p.ID, c.Request().Form); err != nil {
+			return err
+		}
 	}
 	a.s.logAudit(c, audit.ActionCreate, "product", strconv.FormatInt(p.ID, 10), "created "+in.Name)
 	return htmxDone(c, "Product created", "reload-products")
@@ -328,9 +357,22 @@ func (a *adminUI) ProductUpdate(c echo.Context) error {
 		return err
 	}
 	ctx := c.Request().Context()
+	if err := c.Request().ParseForm(); err != nil {
+		return apperr.BadRequest("invalid form")
+	}
+	for _, v := range plugin.ProductFormValidators() {
+		if err := v(ctx, c.Request().Form); err != nil {
+			return err
+		}
+	}
 	p, err := a.s.products.Update(ctx, id, in)
 	if err != nil {
 		return err
+	}
+	for _, h := range plugin.ProductSavedHooks() {
+		if err := h(ctx, id, c.Request().Form); err != nil {
+			return err
+		}
 	}
 	msg := "Product updated"
 	// Finishing a quick-added item: clear the review flag and correct the
