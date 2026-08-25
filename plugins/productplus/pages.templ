@@ -172,8 +172,9 @@ templ FieldForm(f *Field) {
 
 // ProductFieldsFragment renders the plugin's custom-field controls, injected into
 // the core product form. Each control is named "pp_<key>" so it posts with the
-// core form and the plugin's ProductSaved hook can read it. Bool is a Yes/No
-// select (not a checkbox) so it always submits exactly one value.
+// core form and the plugin's ProductSaved hook can read it. Bool is a checkbox:
+// checked posts "1"; unchecked posts nothing, and saveProductForm reads that
+// absence as No (NOT as "use the default") so unticking a default-Yes field sticks.
 templ ProductFieldsFragment(rows []FieldValue) {
 	<div class="border-t border-slate-200 pt-4 mt-2 space-y-3">
 		<h3 class="text-sm font-semibold text-slate-600">Custom fields</h3>
@@ -187,10 +188,10 @@ templ ProductFieldsFragment(rows []FieldValue) {
 				</label>
 				switch r.Field.Type {
 					case "bool":
-						<select name={ "pp_" + r.Field.Key } class="w-full border rounded-lg px-3 py-2.5">
-							<option value="" selected?={ r.Value != "1" }>No</option>
-							<option value="1" selected?={ r.Value == "1" }>Yes</option>
-						</select>
+						<label class="inline-flex items-center gap-2 py-1">
+							<input type="checkbox" name={ "pp_" + r.Field.Key } value="1" checked?={ r.Value == "1" } class="rounded border-slate-300"/>
+							<span class="text-sm text-slate-500">Yes</span>
+						</label>
 					case "select":
 						<select name={ "pp_" + r.Field.Key } required?={ r.Field.Required } class="w-full border rounded-lg px-3 py-2.5">
 							if !r.Field.Required {

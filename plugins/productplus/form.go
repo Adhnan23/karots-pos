@@ -92,6 +92,23 @@ func (p *Plugin) saveProductForm(ctx context.Context, productID int64, form url.
 		if present {
 			val = strings.TrimSpace(raw[0])
 		}
+		// Bool is a checkbox: checked posts "1", unchecked posts nothing. Treat that
+		// absence as an explicit No (""), NOT as "use the default" — otherwise
+		// unticking a default-Yes field would silently snap back to Yes.
+		if f.Type == "bool" {
+			val = ""
+			if present && strings.TrimSpace(raw[len(raw)-1]) == "1" {
+				val = "1"
+			}
+			if val == f.DefaultValue {
+				if derr := p.store.DeleteValue(ctx, f.ID, productID); derr != nil {
+					return derr
+				}
+			} else if serr := p.store.SetValue(ctx, f.ID, productID, val); serr != nil {
+				return serr
+			}
+			continue
+		}
 		if !present || val == f.DefaultValue {
 			if derr := p.store.DeleteValue(ctx, f.ID, productID); derr != nil {
 				return derr
