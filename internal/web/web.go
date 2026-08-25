@@ -129,17 +129,22 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	// rather than whenever the user happens to log in again.
 	middleware.SetUserValidator(func(ctx context.Context, userID int64) (middleware.UserFlags, bool) {
 		var row struct {
-			Active             bool `db:"is_active"`
-			CanHandleSuppliers bool `db:"can_handle_suppliers"`
-			CanManageCredit    bool `db:"can_manage_credit"`
+			Active             bool   `db:"is_active"`
+			CanHandleSuppliers bool   `db:"can_handle_suppliers"`
+			CanManageCredit    bool   `db:"can_manage_credit"`
+			IsSystem           bool   `db:"is_system"`
+			Role               string `db:"role"`
 		}
 		if err := db.GetContext(ctx, &row,
-			`SELECT is_active, can_handle_suppliers, can_manage_credit FROM users WHERE id = $1`, userID); err != nil {
+			`SELECT is_active, can_handle_suppliers, can_manage_credit, is_system, role FROM users WHERE id = $1`, userID); err != nil {
 			return middleware.UserFlags{}, false
 		}
 		return middleware.UserFlags{
 			CanHandleSuppliers: row.CanHandleSuppliers,
 			CanManageCredit:    row.CanManageCredit,
+			// Admin or the hidden support account may escape the kiosk; a cashier
+			// never can.
+			CanExitKiosk: row.IsSystem || row.Role == "admin",
 		}, row.Active
 	})
 	jwt := middleware.JWTAuth(cfg.JWTSecret)
@@ -166,6 +171,10 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	e.POST("/lock", a.Lock, jwt)
 	e.GET("/lock/config", a.LockConfig, jwt)
 	e.POST("/unlock", a.Unlock, jwt, limiter)
+
+	// Kiosk escape: an admin or the support account can drop the till to the
+	// desktop (Alt+F4 alone just relaunches). Hidden (404) from cashiers.
+	e.POST("/kiosk/exit", a.KioskExit, jwt, middleware.RequireKioskExit())
 
 	// Self-service / forced PIN change (all authenticated roles; NOT pin-gated,
 	// so a user forced to change can always reach it; lock-gated so a locked

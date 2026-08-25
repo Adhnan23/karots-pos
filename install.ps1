@@ -4,7 +4,9 @@
   The Windows counterpart of install.sh. Drop this script and karots-pos.exe next
   to each other and run it from an ELEVATED PowerShell:
 
-      powershell -ExecutionPolicy Bypass -File install.ps1
+      powershell -ExecutionPolicy Bypass -File install.ps1                       # server + local kiosk
+      powershell -ExecutionPolicy Bypass -File install.ps1 -NoKiosk              # server only (office/admin PC)
+      powershell -ExecutionPolicy Bypass -File install.ps1 -Server 192.168.1.10  # cashier terminal (kiosk only)
 
   What it does (idempotent - safe to re-run):
     1. Installs PostgreSQL and Chromium via winget.
@@ -30,12 +32,20 @@ param(
   [string]$DbUser     = "pos_user",
   [int]   $Port       = 3000,
   [string]$BackupDir  = "",
+  [string]$Server     = "",
   [switch]$NoKiosk
 )
 
 $ErrorActionPreference = "Stop"
 if (-not $BackupDir) { $BackupDir = Join-Path $InstallDir "backups" }
 $BinName = "karots-pos.exe"
+
+# Two roles, one script. Empty -Server → install the server HERE (PostgreSQL +
+# binary + boot task) and, unless -NoKiosk, a local kiosk at localhost. A non-empty
+# -Server → this is a thin cashier terminal: skip PostgreSQL/binary/task and set up
+# ONLY the Chromium kiosk pointed at http://<Server>:<port>.
+$Client = [bool]$Server
+$KioskTarget = if ($Server) { $Server } else { "localhost" }
 
 function Say  ($m) { Write-Host "==> $m" -ForegroundColor Cyan }
 function Warn ($m) { Write-Host "!   $m" -ForegroundColor Yellow }
@@ -57,21 +67,26 @@ if ($os.Major -lt 10) {
 if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
   Die "winget not found. Install 'App Installer' from the Microsoft Store (Windows 10 1809+/11), then re-run."
 }
+if ($Client -and $NoKiosk) { Die "-Server $Server set but -NoKiosk given — a cashier terminal with no kiosk has nothing to install." }
+if ($Client) { Say "Cashier-terminal mode: kiosk only, pointing at http://${Server}:$Port (no server installed here)." }
 
-# Locate the binary: -Binary arg -> beside this script -> Downloads.
-if (-not $Binary) {
-  $candidates = @(
-    (Join-Path $PSScriptRoot $BinName),
-    (Join-Path ([Environment]::GetFolderPath("UserProfile")) "Downloads\$BinName"),
-    (Join-Path (Get-Location) $BinName)
-  )
-  $Binary = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+# Locate the binary (server mode only — a cashier terminal ships no binary).
+if (-not $Client) {
+  # -Binary arg -> beside this script -> Downloads.
+  if (-not $Binary) {
+    $candidates = @(
+      (Join-Path $PSScriptRoot $BinName),
+      (Join-Path ([Environment]::GetFolderPath("UserProfile")) "Downloads\$BinName"),
+      (Join-Path (Get-Location) $BinName)
+    )
+    $Binary = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+  }
+  if (-not $Binary -or -not (Test-Path $Binary)) {
+    Die "binary not found. Put $BinName next to install.ps1 (or in Downloads), or pass -Binary <path>."
+  }
+  Say "Using binary:  $Binary"
+  Say "Install dir:   $InstallDir"
 }
-if (-not $Binary -or -not (Test-Path $Binary)) {
-  Die "binary not found. Put $BinName next to install.ps1 (or in Downloads), or pass -Binary <path>."
-}
-Say "Using binary:  $Binary"
-Say "Install dir:   $InstallDir"
 
 # ---------------------------------------------------------------------------
 # 1. Packages (winget)
@@ -84,8 +99,10 @@ function Winget-Install($id, $custom) {
   # winget returns non-zero when the package is already installed - not an error.
 }
 
-$PgSuper = New-Secret 16   # superuser password used only if winget installs PG now
-Winget-Install "PostgreSQL.PostgreSQL" "--superpassword $PgSuper --serverport 5432"
+if (-not $Client) {
+  $PgSuper = New-Secret 16   # superuser password used only if winget installs PG now
+  Winget-Install "PostgreSQL.PostgreSQL" "--superpassword $PgSuper --serverport 5432"
+}
 
 # Chromium (fall back to Google Chrome, which is the most reliable on winget).
 $installedChromium = $true
@@ -103,6 +120,11 @@ function Resolve-Browser {
 $Browser = Resolve-Browser
 if (-not $Browser) { Winget-Install "Google.Chrome" $null; $Browser = Resolve-Browser }
 if (-not $Browser) { Warn "No Chromium/Chrome found - the kiosk step will be skipped." }
+
+# ===========================================================================
+# SERVER-ONLY (§2-§4). Skipped entirely on a cashier terminal (-Server set).
+# ===========================================================================
+if (-not $Client) {
 
 # Locate psql.exe from the freshly installed PostgreSQL.
 $psql = Get-ChildItem "C:\Program Files\PostgreSQL\*\bin\psql.exe" -ErrorAction SilentlyContinue |
@@ -223,20 +245,35 @@ foreach ($i in 1..30) {
 }
 if ($up) { Say "Till is up." } else { Warn "Till did not answer yet - check $logDir\pos.log" }
 
+}   # end SERVER-ONLY block
+
 # ---------------------------------------------------------------------------
 # 5. Chromium kiosk at login
 # ---------------------------------------------------------------------------
 if (-not $NoKiosk -and $Browser) {
   Say "Setting up the Chromium kiosk ..."
   $kioskCmd = Join-Path $InstallDir "kiosk.cmd"
+  # Relaunch loop: a web page can't cancel Alt+F4 (Windows closes the window before
+  # JS sees it), so we don't try — we reopen. Alt+F4 or a crash becomes a ~1s
+  # flicker and staff can't reach the desktop. The ONLY way out is the admin/support
+  # kiosk-exit hotkey, which writes %SENTINEL% and closes the browser; the loop then
+  # sees the sentinel and stops on the desktop. "start /wait" plus a dedicated
+  # --user-data-dir makes this Chrome its own instance so the batch blocks until it
+  # closes (instead of handing off to another window and looping instantly).
   @"
 @echo off
+set SENTINEL=%TEMP%\karots-kiosk-exit
+if exist "%SENTINEL%" del "%SENTINEL%"
 :wait
-curl -s -o NUL http://localhost:$Port/health && goto up
+curl -s -o NUL http://${KioskTarget}:$Port/health && goto launch
 timeout /t 2 >NUL
 goto wait
-:up
-start "" "$Browser" --kiosk --app=http://localhost:$Port --incognito --noerrdialogs --disable-infobars --disable-session-crashed-bubble --disable-features=TranslateUI --check-for-update-interval=31536000
+:launch
+start "" /wait "$Browser" --kiosk --app=http://${KioskTarget}:$Port --incognito --user-data-dir="$InstallDir\kiosk-profile" --noerrdialogs --disable-infobars --disable-session-crashed-bubble --disable-features=TranslateUI --check-for-update-interval=31536000
+if exist "%SENTINEL%" ( del "%SENTINEL%" & goto end )
+timeout /t 1 >NUL
+goto launch
+:end
 "@ | Set-Content -Path $kioskCmd -Encoding ASCII
 
   # A shortcut in the all-users Startup folder launches it (minimised) at login.
@@ -256,6 +293,17 @@ start "" "$Browser" --kiosk --app=http://localhost:$Port --incognito --noerrdial
 # Done
 # ---------------------------------------------------------------------------
 Write-Host ""
+if ($Client) {
+Write-Host "OK  Karots POS cashier terminal is installed." -ForegroundColor Green
+Write-Host @"
+
+  Points at     http://${Server}:$Port   (the server PC on your LAN)
+  Kiosk         $(if (-not $NoKiosk -and $Browser) { "auto-opens at login - locked (Alt+F4 relaunches). Test now: $kioskCmd" } else { "SKIPPED - no browser found" })
+
+  No database, exe or task here - this terminal only draws the till from the
+  server. Make sure the server's firewall allows port $Port on the LAN.
+"@
+} else {
 Write-Host "OK  Karots POS is installed." -ForegroundColor Green
 Write-Host @"
 
@@ -268,6 +316,8 @@ Write-Host @"
                 'Generic / Text Only' driver is most reliable), then pick it in
                 Admin -> Settings -> Printers. Server-side spooler RAW - no browser,
                 no extra install. Network printers: tcp://IP:9100. See PRINTING.md.
+  Cashier PCs   run  powershell -File install.ps1 -Server <this-pc-ip>  on each terminal
 
   Keep $envFile private - it holds the DB password and JWT secret.
 "@
+}

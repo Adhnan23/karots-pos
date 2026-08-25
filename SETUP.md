@@ -62,11 +62,27 @@ is safe to re-run. In one go it: installs PostgreSQL + CUPS + Chromium, creates 
 `pos_db` database, moves the binary to `/opt/karots-pos`, writes a production `.env`
 (with a generated DB password, JWT secret and a `backups/` folder), runs the
 one-time `-init`, installs a **systemd service** (auto-starts on boot), and sets up
-a **Chromium kiosk** that opens the till full-screen at login. Nothing else to
-install — no Go, no Node.
+a **Chromium kiosk** that opens the till full-screen at login and can't be closed
+by staff (Alt+F4 just reopens it — see §4 for how a support user exits). Nothing
+else to install — no Go, no Node.
 
 After it finishes, jump to **first login** in §3, and set up your printer in §6
 (a raw CUPS queue). The rest of this guide is the manual equivalent, per step.
+
+### Three roles, one script
+
+The same `install.sh` installs whichever role you need — the switch is whether you
+pass a **server address**:
+
+| Command | What you get | When |
+|---|---|---|
+| `sudo ./install.sh` | server **+** local kiosk (points at `localhost`) | one PC that is both the server and the till |
+| `sudo KIOSK=no ./install.sh` | server, **no kiosk** | a headless Ubuntu box, or the owner's office PC where he wants a normal browser and his other work |
+| `sudo SERVER=192.168.1.10 ./install.sh` | **kiosk only**, pointed at that server | an extra cashier terminal — no PostgreSQL, no binary, no service installed |
+
+So: no address = "this is the server"; an address = "this is a cashier terminal, draw
+the till from there." Run the server install first, note its LAN IP, then run the
+`SERVER=<ip>` form on each extra till. (Windows: `-NoKiosk` and `-Server <ip>` — see §8.)
 
 > The binary must be a **static** build (`make build` — `CGO_ENABLED=0 GOAMD64=v1`)
 > so it runs on any distro and any x86-64 CPU. `install.sh` warns if you hand it a
@@ -295,6 +311,33 @@ journalctl -u karots-pos -f             # watch live logs
 
 It will now start on every boot and restart itself if it ever crashes.
 
+### The kiosk, and how to leave it
+
+`install.sh` sets up the till as a full-screen **Chromium kiosk** that opens at
+login. It's deliberately hard to escape: DevTools/right-click are locked, and the
+browser runs in a **relaunch loop** — pressing **Alt+F4** (or a crash) just reopens
+it in about a second. A web page can't cancel Alt+F4 (the window manager closes the
+window before the page ever sees the key), so instead of blocking it we make it
+harmless. Staff can't get to the desktop.
+
+The **only** way out is a deliberate gesture: sign in as an **admin** (or the
+support account), then type the sequence **↑ ↑ ↓ ↓ ← → ← → B A** (the Konami code).
+The till closes and drops to the desktop. It's armed *only* for an admin or the
+support account — a plain cashier can't trigger it. (This works on an **all-in-one**
+box, where the server and kiosk are the same PC. On a separate **cashier terminal**
+that only draws the till from another server, the hotkey does nothing — you manage
+that till from the server machine.) From the desktop you can do maintenance; start
+the kiosk again with:
+
+```bash
+sudo -u <kiosk-user> DISPLAY=:0 /opt/karots-pos/kiosk.sh &
+```
+
+> How it works, if you're curious: the hotkey POSTs `/kiosk/exit`; the server (which
+> runs as the same desktop user) writes `/tmp/karots-kiosk-exit` and closes Chromium.
+> The relaunch loop sees that sentinel file and stops on the desktop instead of
+> reopening. Everything else — Alt+F4 included — just reopens the till.
+
 ---
 
 ## 5. Open the till from other devices (optional)
@@ -447,6 +490,19 @@ rsync -az /var/lib/karots-pos/backups/ backupuser@BACKUP-HOST:/home/backupuser/p
 > boot Scheduled Task, and sets up a Chromium kiosk. The manual steps below are the
 > equivalent if you'd rather do it by hand.
 
+Like Linux (§0), the same `install.ps1` does all three roles:
+
+- `install.ps1` — server **+** local kiosk (all-in-one till).
+- `install.ps1 -NoKiosk` — server only (headless / office PC).
+- `install.ps1 -Server 192.168.1.10` — **kiosk only**, pointed at that server (a
+  cashier terminal; no PostgreSQL, exe or Scheduled Task installed here).
+
+The Windows kiosk works like the Linux one (§4): it **relaunches on Alt+F4** so
+staff can't reach the desktop, and the only way out is to sign in as an **admin**
+(or the support account) and type **↑ ↑ ↓ ↓ ← → ← → B A** — the till closes and you
+land on the desktop. Restart it from `C:\karots-pos\kiosk.cmd`. (On a separate
+cashier terminal the exit hotkey is a no-op — you manage the till from the server.)
+
 The program runs on Windows, **including receipt and barcode-label printing** — it
 talks to the Windows print spooler directly (RAW mode), so it works the same as on
 Linux. Network printers (`tcp://IP:9100`) also work identically.
@@ -499,6 +555,7 @@ field auto-suggests installed printers, same as Linux), or type a network printe
 | Printer dropdown is empty | CUPS not installed, or no print queue added (see §6). |
 | Receipts print garbage / huge feed | The print queue isn't *raw* — recreate it with `-m raw` (see §6 / `PRINTING.md`). |
 | Forgot a login | Use the Admin account to reset PINs in Admin → Users. If the Admin is locked out, contact us. |
+| Kiosk won't close / need the desktop | By design — Alt+F4 just reopens it. Sign in as an admin (or support) and type **↑ ↑ ↓ ↓ ← → ← → B A** to drop to the desktop (see §4). |
 
 Still stuck? Save the program's logs (`journalctl -u karots-pos` on Linux) and
 contact us.

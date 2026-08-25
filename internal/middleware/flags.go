@@ -19,6 +19,11 @@ type UserFlags struct {
 	// sale and raise a stored credit limit from the till. Meaningless for admins
 	// and managers, who may always do so.
 	CanManageCredit bool
+	// CanExitKiosk lets the session drop the Chromium kiosk to the desktop via the
+	// exit hotkey (Alt+F4 alone just relaunches). True for an admin or the hidden
+	// support account; never for a plain cashier. Computed in the validator so the
+	// route gate and the hotkey guard read one flag.
+	CanExitKiosk bool
 }
 
 // ctxKey is unexported so nothing outside this package can collide with it.
@@ -71,6 +76,28 @@ func CanManageCreditCtx(ctx context.Context) bool {
 // may only with the flag.
 func MayManageCredit(role string, flag bool) bool {
 	return role == "admin" || role == "manager" || flag
+}
+
+// CanExitKioskCtx reports whether the current request may use the kiosk-exit
+// hotkey, for templates (bare context). See UserFlags.CanExitKiosk.
+func CanExitKioskCtx(ctx context.Context) bool {
+	f, _ := ctx.Value(ctxFlagsKey).(UserFlags)
+	return f.CanExitKiosk
+}
+
+// RequireKioskExit gates the kiosk-exit route to an admin or the support account.
+// Must run after JWTAuth, which is what puts the flags in scope.
+func RequireKioskExit() echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			// 404, not 403: the endpoint stays invisible to a cashier poking
+			// around — it's a maintenance gesture, not a listed permission.
+			if !CanExitKioskCtx(c.Request().Context()) {
+				return apperr.NotFound("")
+			}
+			return next(c)
+		}
+	}
 }
 
 // RequireSupplierAccess gates the supplier counter routes. Must run after

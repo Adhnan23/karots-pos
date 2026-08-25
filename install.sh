@@ -5,8 +5,10 @@
 # Arch/CachyOS (pacman) and openSUSE (zypper). Just drop this script and the
 # `karots-pos` binary NEXT TO EACH OTHER on the machine and run it:
 #
-#   sudo ./install.sh                      # binary auto-found beside this script
+#   sudo ./install.sh                      # server + local kiosk (all-in-one till)
 #   sudo ./install.sh /path/to/karots-pos  # or point it at the binary
+#   sudo KIOSK=no ./install.sh             # server only (headless / office admin PC)
+#   sudo SERVER=192.168.1.10 ./install.sh  # cashier TERMINAL: kiosk only → that server
 #
 # What it does (all idempotent — safe to re-run):
 #   1. Installs PostgreSQL, CUPS (printing), Chromium and helpers via the
@@ -31,8 +33,16 @@ DB_USER="${DB_USER:-pos_user}"
 POS_PORT="${POS_PORT:-3000}"
 BACKUP_DIR="${BACKUP_DIR:-$INSTALL_DIR/backups}"
 KIOSK="${KIOSK:-yes}"                     # set KIOSK=no to skip the Chromium kiosk
+SERVER="${SERVER:-}"                       # set SERVER=<ip> → this box is a cashier TERMINAL: kiosk only, pointed there
 BIN_NAME="karots-pos"
 SERVICE="/etc/systemd/system/karots-pos.service"
+
+# Two roles, one script. Empty SERVER → install the server HERE (PostgreSQL +
+# binary + service) and, unless KIOSK=no, a local kiosk at localhost. A non-empty
+# SERVER → this is a thin cashier terminal: skip PostgreSQL/binary/service and set
+# up ONLY the Chromium kiosk pointed at http://<SERVER>:<port>.
+CLIENT=""; [ -n "$SERVER" ] && CLIENT=1
+KIOSK_TARGET="${SERVER:-localhost}"       # the address the kiosk opens
 
 say()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m!  \033[0m %s\n' "$*" >&2; }
@@ -43,6 +53,8 @@ die()  { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 # ---------------------------------------------------------------------------
 [ "$(id -u)" -eq 0 ] || die "run with sudo:  sudo ./install.sh"
 command -v systemctl >/dev/null || die "this installer needs systemd (systemctl not found)"
+[ -n "$CLIENT" ] && [ "$KIOSK" = "no" ] && die "SERVER=$SERVER set but KIOSK=no — a cashier terminal with no kiosk has nothing to install."
+[ -n "$CLIENT" ] && say "Cashier-terminal mode: kiosk only, pointing at http://$SERVER:$POS_PORT (no server installed here)."
 
 # Package manager → distro family.
 if   command -v apt-get >/dev/null; then PM=apt
@@ -60,26 +72,29 @@ APP_USER="${APP_USER:-${SUDO_USER:-}}"
 APP_HOME="$(getent passwd "$APP_USER" | cut -d: -f6)"
 [ -n "$APP_HOME" ] || die "cannot resolve home directory for user '$APP_USER'"
 
-# Locate the binary: explicit arg → beside this script → ~/Downloads → home.
-SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
-BINARY="${1:-}"
-if [ -z "$BINARY" ]; then
-  for cand in "$SCRIPT_DIR/$BIN_NAME" "$APP_HOME/Downloads/$BIN_NAME" "./$BIN_NAME" "$APP_HOME/$BIN_NAME"; do
-    [ -f "$cand" ] && { BINARY="$cand"; break; }
-  done
-fi
-[ -n "$BINARY" ] && [ -f "$BINARY" ] || die "binary not found. Put '$BIN_NAME' next to install.sh (or in ~/Downloads), or pass its path."
-say "Using binary:   $BINARY"
-say "Install dir:    $INSTALL_DIR   (service+kiosk user: $APP_USER)"
+# Locate the binary (server mode only — a cashier terminal ships no binary).
+if [ -z "$CLIENT" ]; then
+  # explicit arg → beside this script → ~/Downloads → home.
+  SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+  BINARY="${1:-}"
+  if [ -z "$BINARY" ]; then
+    for cand in "$SCRIPT_DIR/$BIN_NAME" "$APP_HOME/Downloads/$BIN_NAME" "./$BIN_NAME" "$APP_HOME/$BIN_NAME"; do
+      [ -f "$cand" ] && { BINARY="$cand"; break; }
+    done
+  fi
+  [ -n "$BINARY" ] && [ -f "$BINARY" ] || die "binary not found. Put '$BIN_NAME' next to install.sh (or in ~/Downloads), or pass its path."
+  say "Using binary:   $BINARY"
+  say "Install dir:    $INSTALL_DIR   (service+kiosk user: $APP_USER)"
 
-# Portability guard: a dynamically-linked binary dies on older machines with a
-# glibc-version error. A correct build is CGO_ENABLED=0 → fully static.
-if ldd "$BINARY" >/dev/null 2>&1; then
-  warn "This binary is DYNAMICALLY linked — it may fail on older machines with a"
-  warn "'GLIBC_… not found' error. Rebuild with 'make build' (CGO_ENABLED=0 GOAMD64=v1)."
-  warn "Continuing in 5s (Ctrl-C to abort)…"; sleep 5
-else
-  say "Binary is statically linked (portable). Good."
+  # Portability guard: a dynamically-linked binary dies on older machines with a
+  # glibc-version error. A correct build is CGO_ENABLED=0 → fully static.
+  if ldd "$BINARY" >/dev/null 2>&1; then
+    warn "This binary is DYNAMICALLY linked — it may fail on older machines with a"
+    warn "'GLIBC_… not found' error. Rebuild with 'make build' (CGO_ENABLED=0 GOAMD64=v1)."
+    warn "Continuing in 5s (Ctrl-C to abort)…"; sleep 5
+  else
+    say "Binary is statically linked (portable). Good."
+  fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -98,13 +113,21 @@ pm_try() { pm_install "$@" >/dev/null 2>&1; }   # best-effort (won't abort the r
 # ---------------------------------------------------------------------------
 # 1. Packages
 # ---------------------------------------------------------------------------
-say "Installing PostgreSQL, CUPS, curl, openssl…"
-case $PM in
-  apt)    pm_install postgresql cups curl openssl ca-certificates ;;
-  dnf)    pm_install postgresql-server postgresql cups curl openssl ;;
-  pacman) pm_install postgresql cups curl openssl ;;
-  zypper) pm_install postgresql-server postgresql cups curl openssl ;;
-esac
+if [ -z "$CLIENT" ]; then
+  say "Installing PostgreSQL, CUPS, curl, openssl…"
+  case $PM in
+    apt)    pm_install postgresql cups curl openssl ca-certificates ;;
+    dnf)    pm_install postgresql-server postgresql cups curl openssl ;;
+    pacman) pm_install postgresql cups curl openssl ;;
+    zypper) pm_install postgresql-server postgresql cups curl openssl ;;
+  esac
+else
+  say "Installing curl (cashier terminal — no PostgreSQL/CUPS needed here)…"
+  case $PM in
+    apt) pm_install curl ca-certificates ;;
+    *)   pm_install curl ;;
+  esac
+fi
 
 say "Installing Chromium…"
 CHROMIUM_BIN="$(command -v chromium || command -v chromium-browser || true)"
@@ -119,6 +142,11 @@ if [ -z "$CHROMIUM_BIN" ]; then
   fi
 fi
 [ -n "$CHROMIUM_BIN" ] || warn "Chromium not installed — the kiosk step will be skipped. Install it manually and re-run."
+
+# ===========================================================================
+# SERVER-ONLY (§2–§5). Skipped entirely on a cashier terminal (SERVER set).
+# ===========================================================================
+if [ -z "$CLIENT" ]; then
 
 # ---------------------------------------------------------------------------
 # 2. Initialise + start PostgreSQL (Fedora/Arch need an explicit initdb)
@@ -259,6 +287,8 @@ for _ in $(seq 1 30); do
 done
 [ -n "$up" ] && say "Till is up." || warn "Till did not answer yet — check:  journalctl -u karots-pos -f"
 
+fi   # end SERVER-ONLY block
+
 # ---------------------------------------------------------------------------
 # 6. Chromium kiosk (opens the till full-screen at desktop login)
 # ---------------------------------------------------------------------------
@@ -267,14 +297,25 @@ if [ "$KIOSK" = "yes" ] && [ -n "$CHROMIUM_BIN" ]; then
   cat > "$INSTALL_DIR/kiosk.sh" <<KIOSK_SH
 #!/usr/bin/env bash
 # Launches the till full-screen once the server is answering. Installed by install.sh.
-URL="http://localhost:$POS_PORT"
+URL="http://$KIOSK_TARGET:$POS_PORT"
+SENTINEL=/tmp/karots-kiosk-exit
 for _ in \$(seq 1 60); do curl -fsS "\$URL/health" >/dev/null 2>&1 && break; sleep 2; done
 # Keep the screen awake (no blanking / DPMS) — it's a till.
 xset s off -dpms s noblank 2>/dev/null || true
-exec "$CHROMIUM_BIN" --kiosk --app="\$URL" --incognito \\
-  --noerrdialogs --disable-infobars --disable-session-crashed-bubble \\
-  --disable-features=TranslateUI --check-for-update-interval=31536000 \\
-  --overscroll-history-navigation=0 --password-store=basic
+# Relaunch loop: a web page can't cancel Alt+F4 (the window manager closes the
+# window before JS sees it), so we don't try — we just reopen. Alt+F4 or a crash
+# becomes a ~1s flicker, and staff can't escape to the desktop. The ONLY way out
+# is the system account's kiosk-exit hotkey, which writes \$SENTINEL and kills
+# Chromium; the loop then sees the sentinel and stops on the desktop.
+rm -f "\$SENTINEL"
+while true; do
+  "$CHROMIUM_BIN" --kiosk --app="\$URL" --incognito \\
+    --noerrdialogs --disable-infobars --disable-session-crashed-bubble \\
+    --disable-features=TranslateUI --check-for-update-interval=31536000 \\
+    --overscroll-history-navigation=0 --password-store=basic
+  [ -e "\$SENTINEL" ] && { rm -f "\$SENTINEL"; break; }
+  sleep 1
+done
 KIOSK_SH
   chmod 0755 "$INSTALL_DIR/kiosk.sh"
 
@@ -310,6 +351,19 @@ fi
 # ---------------------------------------------------------------------------
 # Done
 # ---------------------------------------------------------------------------
+if [ -n "$CLIENT" ]; then
+cat <<DONE
+
+$(printf '\033[1;32m✓ Karots POS cashier terminal is installed.\033[0m')
+
+  Points at       http://$SERVER:$POS_PORT   (the server PC on your LAN)
+  Kiosk           $([ -n "$CHROMIUM_BIN" ] && echo "auto-opens at login for '$APP_USER' — locked (Alt+F4 relaunches)" || echo "SKIPPED — Chromium not found; install it and re-run")
+  Start now       sudo -u $APP_USER DISPLAY=:0 $INSTALL_DIR/kiosk.sh &
+
+  No database, binary or service here — this terminal only draws the till from
+  the server. Make sure the server's firewall allows port $POS_PORT on the LAN.
+DONE
+else
 cat <<DONE
 
 $(printf '\033[1;32m✓ Karots POS is installed.\033[0m')
@@ -322,6 +376,8 @@ $(printf '\033[1;32m✓ Karots POS is installed.\033[0m')
   Printing        install a RAW CUPS queue, then pick it in Admin → Settings → Printers
                   (see PRINTING.md). CUPS is already installed.
   Kiosk           $([ "$KIOSK" = yes ] && [ -n "$CHROMIUM_BIN" ] && echo "auto-opens at login for '$APP_USER'" || echo "skipped")
+  Cashier PCs      run  sudo SERVER=<this-pc-ip> ./install.sh  on each extra till terminal
 
   Keep $INSTALL_DIR/.env private — it holds the DB password and JWT secret.
 DONE
+fi

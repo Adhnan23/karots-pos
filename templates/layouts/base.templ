@@ -1,5 +1,7 @@
 package layouts
 
+import "karots-pos/internal/middleware"
+
 // Base is the bare HTML shell: head assets, a global toast host, and a modal
 // container that HTMX swaps fragments into. Pages with chrome (admin sidebar,
 // cashier topbar) compose this via Admin()/Cashier() below.
@@ -27,6 +29,9 @@ templ Base(title string) {
 			@ModalHost()
 			@ConfirmHost()
 			@PrintPromptHost()
+			if middleware.CanExitKioskCtx(ctx) {
+				@KioskExitHotkey()
+			}
 		</body>
 	</html>
 }
@@ -78,6 +83,19 @@ templ ConfirmHost() {
 			</div>
 		</div>
 	</div>
+}
+
+// KioskExitHotkey lets an admin or the support account escape the Chromium kiosk.
+// The browser reopens on Alt+F4 (relaunch loop in kiosk.sh), so the way out is a
+// secret key sequence — the same Konami code the login page uses to reveal the
+// install id — that POSTs /kiosk/exit; the server writes the loop's exit
+// sentinel and kills Chromium, dropping to the desktop. Rendered ONLY when
+// CanExitKioskCtx(ctx) is true, so a plain cashier never has it armed.
+templ KioskExitHotkey() {
+	<div
+		x-data="{ seq: ['ArrowUp','ArrowUp','ArrowDown','ArrowDown','ArrowLeft','ArrowRight','ArrowLeft','ArrowRight','b','a'], pos: 0, key(e) { const k = e.key.length === 1 ? e.key.toLowerCase() : e.key; if (k === this.seq[this.pos]) { this.pos++; if (this.pos === this.seq.length) { this.pos = 0; this.exit(); } } else { this.pos = (k === this.seq[0]) ? 1 : 0; } }, exit() { fetch('/kiosk/exit', { method: 'POST', credentials: 'same-origin' }).then(r => { if (!r.ok) window.dispatchEvent(new CustomEvent('show-toast', { detail: { level: 'error', message: 'Kiosk exit failed' } })); }).catch(() => {}); } }"
+		x-on:keydown.window="key($event)"
+	></div>
 }
 
 // AutoLockTimer arms the inactivity screen-lock. It reads the shop's timeout from
