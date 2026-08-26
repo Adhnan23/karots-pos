@@ -462,6 +462,8 @@ templ POS(d POSData) {
 								<input
 									type="number" min="0" step="any" inputmode="decimal"
 									x-model="keepAmount"
+									x-bind:max="changeDue().toFixed(2)"
+									x-on:input="if (Number(keepAmount) > changeDue()) keepAmount = Number(changeDue().toFixed(2))"
 									placeholder="0"
 									x-on:wheel.prevent
 									class="flex-1 min-w-0 px-2 py-1 rounded border border-slate-300 text-right"
