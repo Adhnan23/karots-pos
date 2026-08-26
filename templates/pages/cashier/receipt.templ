@@ -160,6 +160,16 @@ templ Receipt(d ReceiptData) {
 				} else if d.Detail.Sale.ChangeGiven.IsPositive() {
 					<div class="r-row r-big"><span>CHANGE</span><span>{ money.Format(d.Settings.CurrencySymbol, d.Detail.Sale.ChangeGiven) }</span></div>
 				}
+				{{ kept := d.Detail.Sale.PaidAmount.Sub(d.Detail.Sale.ChangeGiven).Sub(d.Detail.Sale.Total) }}
+				if kept.IsPositive() {
+					if d.Detail.Sale.RoundingToAccount.IsPositive() {
+						<div class="r-row"><span>On account</span><span>{ money.Format(d.Settings.CurrencySymbol, d.Detail.Sale.RoundingToAccount) }</span></div>
+					}
+					{{ roundCash := kept.Sub(d.Detail.Sale.RoundingToAccount) }}
+					if roundCash.IsPositive() {
+						<div class="r-row"><span>Change kept</span><span>{ money.Format(d.Settings.CurrencySymbol, roundCash) }</span></div>
+					}
+				}
 				<div class="r-hr"></div>
 				if d.Settings.ReceiptFooter != nil && *d.Settings.ReceiptFooter != "" {
 					<div class="r-center r-small">{ *d.Settings.ReceiptFooter }</div>

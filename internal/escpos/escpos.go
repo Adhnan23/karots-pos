@@ -269,6 +269,18 @@ func Document(d sales.Detail, cfg settings.Settings, opts Options) []byte {
 		line(&b, "")
 		bigLine(&b, "CHANGE", money.Format(sym, d.Sale.ChangeGiven), w)
 	}
+	// Rounding: cash the customer left behind (paid - change - total). It stayed
+	// in the drawer; shown here so the slip explains why cash out < change due —
+	// booked to an account customer's balance (On account) or kept as a rounding
+	// gain (walk-in money, tied to no one).
+	if kept := d.Sale.PaidAmount.Sub(d.Sale.ChangeGiven).Sub(d.Sale.Total); kept.IsPositive() {
+		if d.Sale.RoundingToAccount.IsPositive() {
+			line(&b, leftRight("On account", money.Format(sym, d.Sale.RoundingToAccount), w))
+		}
+		if cash := kept.Sub(d.Sale.RoundingToAccount); cash.IsPositive() {
+			line(&b, leftRight("Change kept", money.Format(sym, cash), w))
+		}
+	}
 	divider(&b, w)
 
 	Footer(&b, cfg)

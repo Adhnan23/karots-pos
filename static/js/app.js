@@ -280,10 +280,13 @@ async function printBill(id, kick) {
     // pops the drawer and prints in ONE pass (no separate kick job → no USB
     // inter-job gap). Only the fresh cash-sale auto-print passes it; reprints
     // never do, so reprinting an old receipt never opens the drawer.
-    await apiFetch("POST", "/cashier/print/" + id + (kick ? "?kick=1" : ""));
+    await apiFetch("POST", "/cashier/print/" + id + (kick ? "?kick=1" : ""), null, { silent: true });
     toast("Receipt sent to printer", "success");
   } catch (_) {
-    /* apiFetch already surfaced the error */
+    // The sale is already saved — only the print failed. Show a plain, actionable
+    // message instead of apiFetch's raw server error ("dial tcp …9100: connection
+    // refused"), which means nothing to a cashier.
+    toast("Receipt didn't print — check the printer is on and connected", "error");
   }
 }
 
@@ -304,10 +307,10 @@ async function printMoneySlip(id, kick) {
 async function postPrint(url) {
   if (!url) return;
   try {
-    await apiFetch("POST", url);
+    await apiFetch("POST", url, null, { silent: true });
     toast("Receipt sent to printer", "success");
   } catch (_) {
-    /* apiFetch already surfaced the error */
+    toast("Receipt didn't print — check the printer is on and connected", "error");
   }
 }
 
@@ -409,6 +412,13 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
     // Split tender: one or more payment lines (cash / card / online / wallet).
     // No method is pre-selected — the cashier picks one per sale (see selectMethod).
     payments: [{ method: "cash", amount: "", reference: "", deviceId: "" }],
+    // Rounding: how much of the change the shop KEEPS (customer leaves the coins,
+    // or wants a round sum back). "" / 0 = keep nothing → give the full computed
+    // change (the default; every ordinary sale). The kept surplus reconciles into
+    // the drawer, and for an account customer can be pushed onto their balance
+    // instead of kept as a walk-in rounding gain.
+    keepAmount: "",
+    roundToAccount: false,
     walletDevices: [], // recharge plugin tender: devices a wallet payment can credit (with live balance)
     busy: false,
     session: null,
@@ -1248,6 +1258,8 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
       this.discount = Number(h.discount) || 0;
       this.discountType = h.discount_type || "fixed";
       this.payments = [{ method: "cash", amount: "", reference: "", deviceId: "" }];
+      this.keepAmount = "";
+      this.roundToAccount = false;
       this.syncDefaultTender(); // a held sale with a customer shouldn't default to cash
       this.receipt = null;
       this.showHolds = false;
@@ -1833,11 +1845,33 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
     changeDue() {
       return Math.max(0, this.paidTotal() + this.accountTotal() - this.total());
     },
+    // Rounding is only meaningful on a pure cash-change sale (no on-account line,
+    // which the server zeroes change for anyway). roundable() gates the whole UI.
+    roundable() {
+      return this.accountTotal() === 0 && this.changeDue() > 0.005;
+    },
+    // How much the shop keeps: the cashier's entry, clamped to [0, computed
+    // change]. Blank = keep nothing.
+    keptAmount() {
+      const c = this.changeDue();
+      if (this.keepAmount === "" || this.keepAmount === null) return 0;
+      return Math.min(c, Math.max(0, Number(this.keepAmount) || 0));
+    },
+    // Change actually handed back = computed change minus what we keep. This is
+    // what the live "Change" line and its note breakdown show.
+    actualChange() {
+      return Math.max(0, this.changeDue() - this.keptAmount());
+    },
+    // Toggle: keep all the change (customer walks without it) / revert to none.
+    keepAllChange() {
+      const c = this.changeDue();
+      this.keepAmount = this.keptAmount() >= c - 0.005 ? "" : Number(c.toFixed(2));
+    },
     // Advisory greedy breakdown of the change due into available denominations,
     // high→low. Stateless suggestion only — we don't track the live drawer mix,
     // so the cashier overrides if a note isn't on hand. Returns [{value, qty}].
     changeNotes() {
-      return this.notesFor(this.changeDue());
+      return this.notesFor(this.actualChange());
     },
     // Dismiss the post-sale change banner and cancel its auto-hide timer.
     hideChangeBanner() {
@@ -2098,6 +2132,15 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
               amount: String(p.amount),
               reference: p.reference ? String(p.reference) : null,
             })),
+          // Only send when the shop actually keeps something — otherwise omit it
+          // so the server computes the exact change in decimal (no float
+          // round-trip) and the sale stays byte-identical to before.
+          ...(this.roundable() && this.keptAmount() > 0.005
+            ? {
+                change_given: String(Number(this.actualChange().toFixed(2))),
+                on_account_rounding: !!this.customerId && this.roundToAccount,
+              }
+            : {}),
         };
         const json = await apiFetch("POST", "/api/sales", payload, { silent: true });
         await this.attributeWallet(json.data.sale.id);
@@ -2159,6 +2202,8 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
       this.discount = "";
       this.discountType = "fixed";
       this.payments = [{ method: "cash", amount: "", reference: "", deviceId: "" }];
+      this.keepAmount = "";
+      this.roundToAccount = false;
       this.customerId = "";
       this.receipt = null;
       this._overLimitApproved = false;
@@ -3598,12 +3643,26 @@ function intake(sym) {
       const res = await fetch(url, {
         method: "POST",
         credentials: "same-origin",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        // Accept JSON so a save error comes back as the error envelope (with the
+        // real reason, e.g. "name is required") rather than the server's HTML
+        // error page — parsing that as JSON is what produced the useless
+        // "invalid JSON" toast.
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Accept: "application/json",
+        },
         body: new URLSearchParams(new FormData(form)),
       });
-      const json = await res.json();
-      if (!res.ok || !json.success) {
-        throw new Error(json?.error?.message || "Request failed");
+      let json = null;
+      try {
+        json = await res.json();
+      } catch (_) {
+        /* non-JSON body (shouldn't happen now we ask for JSON) — handled below */
+      }
+      if (!res.ok || !json || !json.success) {
+        throw new Error(
+          json?.error?.message || "Could not save — please check the fields and try again"
+        );
       }
       return json.data;
     },

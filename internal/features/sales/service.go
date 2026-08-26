@@ -123,6 +123,18 @@ type CreateInput struct {
 	// The web layer sets this only for a user with can_manage_credit — the
 	// service trusts it as already-authorised.
 	AllowOverLimit bool `json:"allow_over_limit"`
+	// ChangeGiven, when set, is the ACTUAL cash change handed back — which the
+	// cashier may record as less than the computed change when the customer
+	// leaves the difference behind (a customer who won't wait for 2 in coins, or
+	// asks for a round 500 back on a 490 bill paid with 1000). Storing the real
+	// change keeps change_given == cash actually out, so the drawer reconciles
+	// and the session doesn't drift. Empty string = give the full computed change
+	// (every existing sale). Clamped server-side to [0, computed change].
+	ChangeGiven string `json:"change_given"`
+	// OnAccountRounding books the kept surplus (computed change minus ChangeGiven)
+	// to the selected customer's balance as an advance instead of leaving it as a
+	// drawer rounding gain. Requires a customer and a positive kept amount.
+	OnAccountRounding bool `json:"on_account_rounding"`
 	// DeferDrawerKick tells the service NOT to fire the standalone drawer pulse
 	// for a cash sale, because the caller (the till, in auto-print mode) will
 	// merge the pulse into the receipt print as a SINGLE printer job. On a USB
@@ -532,12 +544,39 @@ func (s *Service) Create(ctx context.Context, in CreateInput, cashierID int64) (
 		// receipts list.
 		status := "completed"
 		change := tender.Paid.Add(tender.OnAccount).Sub(total)
+		roundingToAccount := decimal.Zero
 		if tender.OnAccount.IsPositive() {
 			if err := custRepo.AddBalance(ctx, cust.ID, tender.OnAccount); err != nil {
 				return apperr.Internal("failed to update customer balance", err)
 			}
 			status = "credit"
 			change = decimal.Zero
+		} else if change.IsPositive() && in.ChangeGiven != "" {
+			// Cashier recorded the actual change handed back. It may be less than
+			// the computed change when the customer leaves the difference; the kept
+			// surplus stays in the drawer (change_given now holds the real cash out,
+			// so close reconciles) and is either booked to an account customer's
+			// balance as an advance or simply kept as a rounding gain.
+			given, err := money.Parse(in.ChangeGiven)
+			if err != nil || given.IsNegative() {
+				return apperr.Validation("change given is invalid")
+			}
+			if given.GreaterThan(change) {
+				given = change // never hand back more than is due
+			}
+			kept := change.Sub(given)
+			change = given
+			if in.OnAccountRounding && kept.IsPositive() && in.CustomerID != nil {
+				if _, err := custRepo.FindByID(ctx, *in.CustomerID); err != nil {
+					return apperr.Validation("selected customer not found")
+				}
+				// Negative delta = advance: reduces their outstanding balance (or
+				// becomes store credit when they owe nothing).
+				if err := custRepo.AddBalance(ctx, *in.CustomerID, kept.Neg()); err != nil {
+					return apperr.Internal("failed to credit customer account", err)
+				}
+				roundingToAccount = kept
+			}
 		}
 
 		receiptNo, err := saleRepo.NextReceiptNo(ctx)
@@ -556,11 +595,12 @@ func (s *Service) Create(ctx context.Context, in CreateInput, cashierID int64) (
 			Tax:           taxTotal,
 			Total:         total,
 			// Money actually received — the on-account part is a debt, not a payment.
-			PaidAmount:  tender.Paid,
-			ChangeGiven: change,
-			Status:      status,
-			CashierID:   cashierID,
-			Notes:       in.Notes,
+			PaidAmount:        tender.Paid,
+			ChangeGiven:       change,
+			RoundingToAccount: roundingToAccount,
+			Status:            status,
+			CashierID:         cashierID,
+			Notes:             in.Notes,
 		})
 		if err != nil {
 			return apperr.Internal("failed to save sale", err)

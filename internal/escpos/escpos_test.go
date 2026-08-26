@@ -50,6 +50,38 @@ func sampleDetail() sales.Detail {
 	}
 }
 
+// A sale where the customer left surplus behind: paid 2000 on a 1400 bill but
+// only took 500 change, so kept = 2000 - 500 - 1400 = 100. With no account
+// attribution the whole 100 is a walk-in rounding gain ("our money"); with
+// RoundingToAccount=100 it went onto the customer's balance instead.
+func TestDocumentShowsRounding(t *testing.T) {
+	d := decimal.RequireFromString
+
+	walkIn := sampleDetail()
+	walkIn.Sale.ChangeGiven = d("500.00") // gave back 500 of the 600 due
+	s := string(Document(walkIn, cfg("80"), Options{}))
+	if !strings.Contains(s, "CHANGE") || !strings.Contains(s, "Rs. 500.00") {
+		t.Errorf("expected CHANGE 500.00, got:\n%s", s)
+	}
+	if !strings.Contains(s, "Change kept") || !strings.Contains(s, "Rs. 100.00") {
+		t.Errorf("expected Change kept 100.00 line, got:\n%s", s)
+	}
+	if strings.Contains(s, "On account") {
+		t.Errorf("walk-in kept must not be labelled On account")
+	}
+
+	onAcct := sampleDetail()
+	onAcct.Sale.ChangeGiven = d("500.00")
+	onAcct.Sale.RoundingToAccount = d("100.00")
+	s = string(Document(onAcct, cfg("80"), Options{}))
+	if !strings.Contains(s, "On account") || !strings.Contains(s, "Rs. 100.00") {
+		t.Errorf("expected On account 100.00 line, got:\n%s", s)
+	}
+	if strings.Contains(s, "Change kept") {
+		t.Errorf("fully-attributed kept must not also show a Change kept line")
+	}
+}
+
 func cfg(width string) settings.Settings {
 	footer := "Goods sold are not returnable"
 	return settings.Settings{

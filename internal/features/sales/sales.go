@@ -26,8 +26,13 @@ type Sale struct {
 	Total         decimal.Decimal `db:"total"        json:"total"`
 	PaidAmount    decimal.Decimal `db:"paid_amount"  json:"paid_amount"`
 	ChangeGiven   decimal.Decimal `db:"change_given" json:"change_given"`
-	Status        string          `db:"status"       json:"status"`
-	CashierID     int64           `db:"cashier_id"   json:"cashier_id"`
+	// RoundingToAccount is the surplus (cash the customer left behind) that was
+	// booked to an account customer's balance as an advance instead of kept as a
+	// drawer rounding gain. The receipt derives kept = paid - change - total and
+	// splits it: this column is the on-account part, the remainder is rounding.
+	RoundingToAccount decimal.Decimal `db:"rounding_to_account" json:"rounding_to_account"`
+	Status            string          `db:"status"       json:"status"`
+	CashierID         int64           `db:"cashier_id"   json:"cashier_id"`
 	Notes         *string         `db:"notes"        json:"notes,omitempty"`
 	CreatedAt     time.Time       `db:"created_at"   json:"created_at"`
 	// joined
@@ -101,12 +106,13 @@ type saleRow struct {
 	DiscountType  string
 	DiscountValue decimal.Decimal
 	Tax           decimal.Decimal
-	Total         decimal.Decimal
-	PaidAmount    decimal.Decimal
-	ChangeGiven   decimal.Decimal
-	Status        string
-	CashierID     int64
-	Notes         *string
+	Total             decimal.Decimal
+	PaidAmount        decimal.Decimal
+	ChangeGiven       decimal.Decimal
+	RoundingToAccount decimal.Decimal
+	Status            string
+	CashierID         int64
+	Notes             *string
 }
 
 func (r *Repository) InsertSale(ctx context.Context, s saleRow) (int64, error) {
@@ -114,11 +120,11 @@ func (r *Repository) InsertSale(ctx context.Context, s saleRow) (int64, error) {
 	err := r.q.GetContext(ctx, &id, `
 		INSERT INTO sales
 			(receipt_no, customer_id, sale_type, subtotal, discount, discount_type, discount_value,
-			 tax, total, paid_amount, change_given, status, cashier_id, notes)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+			 tax, total, paid_amount, change_given, rounding_to_account, status, cashier_id, notes)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
 		RETURNING id`,
 		s.ReceiptNo, s.CustomerID, s.SaleType, s.Subtotal, s.Discount, s.DiscountType, s.DiscountValue,
-		s.Tax, s.Total, s.PaidAmount, s.ChangeGiven, s.Status, s.CashierID, s.Notes)
+		s.Tax, s.Total, s.PaidAmount, s.ChangeGiven, s.RoundingToAccount, s.Status, s.CashierID, s.Notes)
 	return id, err
 }
 
