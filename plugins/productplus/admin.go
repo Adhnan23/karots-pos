@@ -71,7 +71,6 @@ func parseField(c echo.Context) (Field, error) {
 		Searchable:     c.FormValue("searchable") != "",
 		ShowAtTill:     c.FormValue("show_at_till") != "",
 		PrintOnLabel:   c.FormValue("print_on_label") != "",
-		PrintOnReceipt: c.FormValue("print_on_receipt") != "",
 	}
 	if f.Label == "" {
 		return f, apperr.Validation("label is required")

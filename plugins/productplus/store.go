@@ -23,7 +23,6 @@ type Field struct {
 	Searchable   bool     `db:"searchable"`
 	ShowAtTill     bool   `db:"show_at_till"`
 	PrintOnLabel   bool   `db:"print_on_label"`
-	PrintOnReceipt bool   `db:"print_on_receipt"`
 	// OptionsRaw is the options JSONB as stored; exported so sqlx can scan it.
 	// Use Options (decoded) everywhere else.
 	OptionsRaw []byte   `db:"options"`
@@ -35,7 +34,7 @@ type Field struct {
 // fieldColumns is the shared SELECT list, kept in one place so a new column lands
 // in every read at once.
 const fieldColumns = `id, key, label, type, default_value, hint, required, searchable,
-	show_at_till, print_on_label, print_on_receipt, options, sort_order, is_active`
+	show_at_till, print_on_label, options, sort_order, is_active`
 
 type Store struct{ db appdb.Queryer }
 
@@ -82,10 +81,10 @@ func (s *Store) CreateField(ctx context.Context, f Field) (int64, error) {
 	var id int64
 	err := s.db.GetContext(ctx, &id, `
 		INSERT INTO pp_fields (key, label, type, default_value, hint, required, searchable,
-			show_at_till, print_on_label, print_on_receipt, options, sort_order, is_active)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,true) RETURNING id`,
+			show_at_till, print_on_label, options, sort_order, is_active)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,true) RETURNING id`,
 		f.Key, f.Label, f.Type, f.DefaultValue, f.Hint, f.Required, f.Searchable,
-		f.ShowAtTill, f.PrintOnLabel, f.PrintOnReceipt, nullJSON(opts), f.SortOrder)
+		f.ShowAtTill, f.PrintOnLabel, nullJSON(opts), f.SortOrder)
 	return id, err
 }
 
@@ -98,10 +97,10 @@ func (s *Store) UpdateField(ctx context.Context, f Field) error {
 	// (the ▲▼ buttons), so editing a field never disturbs its position.
 	_, err := s.db.ExecContext(ctx, `
 		UPDATE pp_fields SET label=$2, type=$3, default_value=$4, hint=$5, required=$6,
-		       searchable=$7, show_at_till=$8, print_on_label=$9, print_on_receipt=$10,
-		       options=$11 WHERE id=$1`,
+		       searchable=$7, show_at_till=$8, print_on_label=$9,
+		       options=$10 WHERE id=$1`,
 		f.ID, f.Label, f.Type, f.DefaultValue, f.Hint, f.Required, f.Searchable,
-		f.ShowAtTill, f.PrintOnLabel, f.PrintOnReceipt, nullJSON(opts))
+		f.ShowAtTill, f.PrintOnLabel, nullJSON(opts))
 	return err
 }
 

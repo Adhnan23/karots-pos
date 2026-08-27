@@ -175,10 +175,7 @@ templ FieldForm(f *Field) {
 						<input type="checkbox" name="show_at_till" value="1" checked?={ formBool(f, "show_at_till") } class="rounded border-slate-300"/> In the till info popup <span class="text-slate-400">(the ⓘ on a product card)</span>
 					</label>
 					<label class="inline-flex items-center gap-2 text-sm text-slate-700">
-						<input type="checkbox" name="print_on_label" value="1" checked?={ formBool(f, "print_on_label") } class="rounded border-slate-300"/> On the shelf label
-					</label>
-					<label class="inline-flex items-center gap-2 text-sm text-slate-700">
-						<input type="checkbox" name="print_on_receipt" value="1" checked?={ formBool(f, "print_on_receipt") } class="rounded border-slate-300"/> On the customer receipt
+						<input type="checkbox" name="print_on_label" value="1" checked?={ formBool(f, "print_on_label") } class="rounded border-slate-300"/> On the barcode / shelf label <span class="text-slate-400">(selectable for the top/bottom line)</span>
 					</label>
 				</div>
 			</div>
@@ -308,8 +305,6 @@ func formBool(f *Field, which string) bool {
 		return f.ShowAtTill
 	case "print_on_label":
 		return f.PrintOnLabel
-	case "print_on_receipt":
-		return f.PrintOnReceipt
 	}
 	return false
 }
