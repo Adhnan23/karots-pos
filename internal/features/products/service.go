@@ -534,6 +534,11 @@ type ImportRow struct {
 	WarrantyMonths    int
 	TrackSerial       bool
 	OpeningQty        decimal.Decimal
+	// MatchByName lets a row that carries a barcode still fall back to matching an
+	// existing product by name when the barcode doesn't match — so a drifted/changed
+	// barcode updates the right product (and is realigned) instead of duplicating.
+	// Off for routine imports; on for deliberate catalogue merges.
+	MatchByName bool
 }
 
 // ImportResult reports what a single row did, for the import summary.
@@ -580,12 +585,15 @@ func (s *Service) ImportOne(ctx context.Context, in ImportRow) (ImportResult, er
 				return ferr
 			}
 		}
-		// Only a row WITHOUT a barcode may fall back to matching by name. A row
-		// that carries its own barcode and did not match one is a different
-		// product, even if something already in the catalog shares its name —
-		// two same-named rows with different barcodes used to merge into a single
-		// mongrel holding one row's quantity and the other's barcode and price.
-		if existing == nil && w.Barcode == nil {
+		// A row WITHOUT a barcode always falls back to matching by name so
+		// barcode-less products round-trip instead of duplicating. A row that
+		// CARRIES a barcode only falls back to name when the caller opted in
+		// (MatchByName) — otherwise a barcode that matched nothing is treated as a
+		// different product, since two distinct same-named goods with different
+		// barcodes used to merge into a single mongrel holding one row's quantity
+		// and the other's barcode and price. When it does match by name here, the
+		// update below writes w.Barcode, realigning the existing product's barcode.
+		if existing == nil && (w.Barcode == nil || in.MatchByName) {
 			if p, ferr := repo.FindByName(ctx, name); ferr == nil {
 				existing = p
 			} else if !errors.Is(ferr, sql.ErrNoRows) {

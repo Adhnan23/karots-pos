@@ -96,6 +96,10 @@ type ImportConfig struct {
 	Help        []string // bullet points of import rules (may contain HTML)
 	PostURL     string   // multipart upload endpoint
 	TemplateURL string   // download-template endpoint
+	// MatchByNameLabel, when set, adds an opt-in checkbox (name="match_by_name")
+	// to the form — used by products so a row whose barcode doesn't match an
+	// existing product can still update it by name (aligning a drifted barcode).
+	MatchByNameLabel string
 }
 
 // productCatID is the selected category ID for the product form picker, or ""

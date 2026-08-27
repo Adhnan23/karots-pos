@@ -61,6 +61,9 @@ func productImportConfig() adminfragments.ImportConfig {
 			"<b>opening_qty</b> seeds stock at <b>cost_price</b> (new / empty-stock items only).",
 			"<b>supplier</b> is the preferred supplier (created if new) — no purchase or debt is recorded.",
 		},
+		MatchByNameLabel: "Match by name when the barcode doesn't match — updates an existing " +
+			"product of the same name (and aligns its barcode) instead of creating a duplicate. " +
+			"Leave off unless you're merging catalogues.",
 	}
 }
 
@@ -172,6 +175,11 @@ func (a *adminUI) ProductImport(c echo.Context) error {
 	}
 	defaultUnitID := unitsList[0].ID
 
+	// Opt-in: let a barcode-carrying row that doesn't barcode-match still update an
+	// existing same-named product (and align its barcode). Off by default so a
+	// routine import never merges two distinct same-named goods.
+	matchByName := strings.EqualFold(strings.TrimSpace(c.FormValue("match_by_name")), "true")
+
 	var sum adminfragments.ImportSummary
 	line := 1 // header was line 1
 	for _, rec := range recs {
@@ -243,6 +251,7 @@ func (a *adminUI) ProductImport(c echo.Context) error {
 			WarrantyMonths:    intCell(get("warranty_months")),
 			TrackSerial:       boolCell(get("track_serial")),
 			OpeningQty:        moneyCell(get("opening_qty")),
+			MatchByName:       matchByName,
 		}
 		res, ierr := a.s.products.ImportOne(ctx, row)
 		if ierr != nil {

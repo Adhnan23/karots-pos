@@ -38,6 +38,12 @@ templ ImportModal(cfg ImportConfig) {
 					// GTK/XFCE) sniff these files as; omitting them greys out the file
 					// chooser's OK button for otherwise-valid spreadsheets.
 					<input type="file" name="file" accept=".csv,text/csv,application/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,.ods,application/vnd.oasis.opendocument.spreadsheet,text/plain" required class="block w-full text-sm border rounded-lg p-2"/>
+					if cfg.MatchByNameLabel != "" {
+						<label class="flex items-start gap-2 mt-3 text-sm">
+							<input type="checkbox" name="match_by_name" value="true" class="mt-0.5"/>
+							<span class="text-slate-600">{ cfg.MatchByNameLabel }</span>
+						</label>
+					}
 					<div class="flex justify-end gap-3 pt-4">
 						<button type="button" class="px-4 py-2 rounded-lg border" x-on:click="$dispatch('close-modal')">Close</button>
 						<button type="submit" class="px-4 py-2 rounded-lg bg-indigo-600 text-white">Upload &amp; Import</button>
