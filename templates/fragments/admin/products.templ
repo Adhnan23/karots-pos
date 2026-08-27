@@ -307,7 +307,7 @@ templ ProductForm(p *products.Product, cats []categories.TreeNode, us []units.Un
 				</div>
 				<div class="flex justify-end gap-3 pt-2">
 					<button type="button" class="px-4 py-2 rounded-lg border" x-on:click="$dispatch('close-modal')">Cancel</button>
-					<button type="submit" x-bind:disabled="src &amp;&amp; name.trim().toLowerCase() === src.trim().toLowerCase()" class="px-4 py-2 rounded-lg bg-indigo-600 text-white disabled:opacity-40">Save</button>
+					<button type="submit" x-bind:disabled="!!src &amp;&amp; name.trim().toLowerCase() === src.trim().toLowerCase()" class="px-4 py-2 rounded-lg bg-indigo-600 text-white disabled:opacity-40">Save</button>
 				</div>
 			</form>
 		</div>
