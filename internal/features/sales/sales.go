@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"karots-pos/internal/db"
+	"karots-pos/internal/features/warranty"
 
 	"github.com/shopspring/decimal"
 )
@@ -59,13 +60,29 @@ type SaleItem struct {
 	// be a complete lot trace.
 	BatchID *int64 `db:"batch_id" json:"batch_id,omitempty"`
 	// joined
-	ProductName string `db:"product_name" json:"product_name"`
-	UnitAbbr    string `db:"unit_abbr"    json:"unit_abbr"`
-	IsService   bool   `db:"is_service"   json:"is_service"` // service line (e.g. recharge) — non-returnable, no stock
+	ProductName    string `db:"product_name"    json:"product_name"`
+	UnitAbbr       string `db:"unit_abbr"       json:"unit_abbr"`
+	IsService      bool   `db:"is_service"      json:"is_service"` // service line (e.g. recharge) — non-returnable, no stock
+	WarrantyMonths int    `db:"warranty_months" json:"warranty_months"`
 }
 
 // ReturnableQty is how much of this line can still be sent back.
 func (i SaleItem) ReturnableQty() decimal.Decimal { return i.Quantity.Sub(i.ReturnedQty) }
+
+// Gross is the line amount before its discount (qty × unit price). Subtotal
+// stores the NET (after discount); adding the discount back recovers the gross,
+// which the receipt shows struck-through beside the net.
+func (i SaleItem) Gross() decimal.Decimal { return i.Subtotal.Add(i.Discount) }
+
+// WarrantyUntil is the cover-expiry date for this line given the sale time, or
+// the zero time when the product carries no warranty. Uses the canonical
+// date-only math in the warranty package so it matches recorded serial units.
+func (i SaleItem) WarrantyUntil(soldAt time.Time) time.Time {
+	if i.WarrantyMonths <= 0 {
+		return time.Time{}
+	}
+	return warranty.Until(soldAt, i.WarrantyMonths)
+}
 
 type Payment struct {
 	ID        int64           `db:"id"        json:"id"`
@@ -276,7 +293,8 @@ func (r *Repository) FindByID(ctx context.Context, id int64) (*Sale, error) {
 func (r *Repository) Items(ctx context.Context, saleID int64) ([]SaleItem, error) {
 	var rows []SaleItem
 	err := r.q.SelectContext(ctx, &rows, `
-		SELECT si.*, p.name AS product_name, u.abbreviation AS unit_abbr, p.is_service AS is_service
+		SELECT si.*, p.name AS product_name, u.abbreviation AS unit_abbr, p.is_service AS is_service,
+		       p.warranty_months AS warranty_months
 		FROM sale_items si
 		JOIN products p ON p.id = si.product_id
 		JOIN units u    ON u.id = p.unit_id

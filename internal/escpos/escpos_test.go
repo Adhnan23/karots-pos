@@ -54,6 +54,39 @@ func sampleDetail() sales.Detail {
 // only took 500 change, so kept = 2000 - 500 - 1400 = 100. With no account
 // attribution the whole 100 is a walk-in rounding gain ("our money"); with
 // RoundingToAccount=100 it went onto the customer's balance instead.
+// TestDocumentLineDiscountAndWarranty pins the Thread-C receipt changes: a
+// discounted line prints the GROSS on the qty line (not the net) plus a
+// "Line total" line, and a warranty product prints its duration + expiry.
+func TestDocumentLineDiscountAndWarranty(t *testing.T) {
+	d := decimal.RequireFromString
+	cust := "Walk-in"
+	det := sales.Detail{
+		Sale: sales.Sale{
+			ReceiptNo: "R-0002", Subtotal: d("250.00"), Discount: d("25.00"),
+			Total: d("225.00"), PaidAmount: d("225.00"), Status: "paid",
+			CashierName: "Kamal", CustomerName: &cust,
+			CreatedAt: time.Date(2026, 6, 10, 14, 30, 0, 0, time.UTC),
+		},
+		Items: []sales.SaleItem{{
+			ProductName: "Drill", Quantity: d("1"), UnitAbbr: "pc", UnitPrice: d("250.00"),
+			Discount: d("25.00"), DiscountType: "fixed", DiscountValue: d("25.00"),
+			Subtotal: d("225.00"), WarrantyMonths: 12,
+		}},
+		Payments: []sales.Payment{{Method: "cash", Amount: d("225.00")}},
+	}
+	s := string(Document(det, cfg("80"), Options{}))
+	for _, want := range []string{"250.00", "Discount", "Line total", "225.00", "12-month warranty until 2027-06-10"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("receipt missing %q\n%s", want, s)
+		}
+	}
+	// The plain sample (no discounts, no warranty) must NOT sprout these lines.
+	plain := string(Document(sampleDetail(), cfg("80"), Options{}))
+	if strings.Contains(plain, "Line total") || strings.Contains(plain, "warranty until") {
+		t.Errorf("plain receipt should have no line-total/warranty rows\n%s", plain)
+	}
+}
+
 func TestDocumentShowsRounding(t *testing.T) {
 	d := decimal.RequireFromString
 

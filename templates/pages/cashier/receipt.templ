@@ -118,13 +118,22 @@ templ Receipt(d ReceiptData) {
 							<tr class="r-item-line">
 								<td>{ money.Display(it.Quantity) } { it.UnitAbbr } × { money.Display(it.UnitPrice) }</td>
 								<td></td>
-								<td class="r-right">{ money.Display(it.Subtotal) }</td>
+								if it.Discount.IsPositive() {
+									<td class="r-right"><span class="r-strike">{ money.Display(it.Gross()) }</span>{ money.Display(it.Subtotal) }</td>
+								} else {
+									<td class="r-right">{ money.Display(it.Subtotal) }</td>
+								}
 							</tr>
 							if it.Discount.IsPositive() {
 								<tr class="r-item-line r-small">
 									<td>{ "  Discount" + discSuffix(it.DiscountType, it.DiscountValue) }</td>
 									<td></td>
 									<td class="r-right">-{ money.Display(it.Discount) }</td>
+								</tr>
+							}
+							if until := it.WarrantyUntil(d.Detail.Sale.CreatedAt); !until.IsZero() {
+								<tr class="r-item-line r-small r-warranty">
+									<td colspan="3">{ strconv.Itoa(it.WarrantyMonths) }-month warranty · until { datetime.Date(until) }</td>
 								</tr>
 							}
 						}

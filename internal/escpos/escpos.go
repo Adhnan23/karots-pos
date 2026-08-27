@@ -210,10 +210,20 @@ func Document(d sales.Detail, cfg settings.Settings, opts Options) []byte {
 			line(&b, ln)
 		}
 		qty := money.Display(it.Quantity) + " " + ascii(it.UnitAbbr) + " x " + money.Display(it.UnitPrice)
-		line(&b, leftRight("  "+qty, money.Display(it.Subtotal), w))
+		// The qty line always shows the GROSS (qty × unit price); a discount then
+		// shows as its own reduction plus the resulting line total, so the numbers
+		// add up on paper (a printer can't strike-through like the webview does).
+		line(&b, leftRight("  "+qty, money.Display(it.Gross()), w))
 		if it.Discount.IsPositive() {
 			itemDisc = itemDisc.Add(it.Discount)
 			line(&b, leftRight("  Discount"+discSuffix(it.DiscountType, it.DiscountValue), "-"+money.Display(it.Discount), w))
+			line(&b, leftRight("  Line total", money.Display(it.Subtotal), w))
+		}
+		if until := it.WarrantyUntil(d.Sale.CreatedAt); !until.IsZero() {
+			warr := strconv.Itoa(it.WarrantyMonths) + "-month warranty until " + datetime.Date(until)
+			for _, ln := range wrap("  "+warr, w) {
+				line(&b, ln)
+			}
 		}
 		for _, sn := range opts.Serials[it.ProductID] {
 			for _, ln := range wrap(ascii(sn), w) {
