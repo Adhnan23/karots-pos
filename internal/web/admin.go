@@ -297,6 +297,7 @@ func (a *adminUI) ProductForm(c echo.Context) error {
 	}
 	var p *products.Product
 	var pid int64
+	duplicate := false
 	if idStr := c.Param("id"); idStr != "" {
 		id, err := strconv.ParseInt(idStr, 10, 64)
 		if err != nil {
@@ -306,6 +307,19 @@ func (a *adminUI) ProductForm(c echo.Context) error {
 			return err
 		}
 		pid = id
+	} else if cf := c.QueryParam("copy_from"); cf != "" {
+		// Duplicate: prefill from the source (barcode cleared, name guarded in the
+		// form) but save as a new product. pid stays the SOURCE id so the plugin
+		// sections below prefill its custom values too.
+		id, err := strconv.ParseInt(cf, 10, 64)
+		if err != nil {
+			return apperr.BadRequest("invalid id")
+		}
+		if p, err = a.s.products.Get(ctx, id); err != nil {
+			return err
+		}
+		pid = id
+		duplicate = true
 	}
 	// Plugin-contributed form sections (Product Plus custom fields). Empty when no
 	// plugin registers one; a plugin render error is logged, not fatal to the form.
@@ -318,7 +332,7 @@ func (a *adminUI) ProductForm(c echo.Context) error {
 		}
 		extra = append(extra, comp)
 	}
-	return response.RenderFragment(c, adminfragments.ProductForm(p, cats, us, sups, extra))
+	return response.RenderFragment(c, adminfragments.ProductForm(p, cats, us, sups, extra, duplicate))
 }
 
 // ProductBarcodeForm opens the small modal to add a barcode to an item that has
@@ -361,6 +375,13 @@ func (a *adminUI) ProductCreate(c echo.Context) error {
 	ctx := c.Request().Context()
 	if err := c.Request().ParseForm(); err != nil {
 		return apperr.BadRequest("invalid form")
+	}
+	// Duplicate guard: a copy must be renamed. dup_source_name is the original's
+	// name (sent only from the Duplicate form); reject an unchanged name so the copy
+	// can't silently become a same-named twin. The client blocks this too.
+	if src := strings.TrimSpace(c.FormValue("dup_source_name")); src != "" &&
+		strings.EqualFold(src, strings.TrimSpace(in.Name)) {
+		return apperr.Validation("Change the name before saving the copy")
 	}
 	for _, v := range plugin.ProductFormValidators() {
 		if err := v(ctx, c.Request().Form); err != nil {

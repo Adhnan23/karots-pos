@@ -11,6 +11,42 @@ import (
 	"karots-pos/internal/features/units"
 )
 
+// RowAction is a plugin-contributed button on a product-list row. Href builds the
+// URL for a product id; the button opens it in the admin modal (hx-get), like Edit.
+type RowAction struct {
+	Label string
+	Href  func(productID int64) string
+}
+
+// ProductRowActions is populated at boot from the plugin registry (web layer), so
+// this templates package never imports internal/plugin. Empty = no extra buttons.
+var ProductRowActions []RowAction
+
+// productFormData is the Alpine x-data for the product form: the live name (so the
+// duplicate guard can watch it) and, in duplicate mode, the source name it must
+// differ from. JSON is a valid JS object literal, and encoding escapes quotes.
+func productFormData(p *products.Product, duplicate bool) string {
+	name := ""
+	if p != nil {
+		name = p.Name
+	}
+	src := ""
+	if duplicate {
+		src = name
+	}
+	b, _ := json.Marshal(map[string]string{"name": name, "src": src})
+	return string(b)
+}
+
+// barcodeVal is the barcode prefill: blank when duplicating (a copy must get its
+// own fresh barcode), otherwise the product's own.
+func barcodeVal(p *products.Product, duplicate bool) string {
+	if duplicate {
+		return ""
+	}
+	return valOf(p, fBarcode)
+}
+
 // categoryPickerData builds the x-data init string for the categoryPicker Alpine
 // component (static/js/app.js): the category options as JSON plus the picker
 // config. Used by both the product form and the products filter.

@@ -23,6 +23,7 @@ import (
 	"karots-pos/internal/features/lockers"
 	"karots-pos/internal/features/productgroups"
 	"karots-pos/internal/features/products"
+	adminfragments "karots-pos/templates/fragments/admin"
 	"karots-pos/internal/features/purchasereturns"
 	"karots-pos/internal/features/purchases"
 	"karots-pos/internal/features/recipes"
@@ -644,6 +645,14 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 			}
 			return out
 		}
+	}
+	// Plugin-contributed product-list row actions (e.g. Product Plus "Duplicate")
+	// → adminfragments package var, so the templates package never imports plugin.
+	for _, a := range plugin.ProductRowActions() {
+		adminfragments.ProductRowActions = append(adminfragments.ProductRowActions, adminfragments.RowAction{
+			Label: a.Label,
+			Href:  a.Href,
+		})
 	}
 	reg.Mux.Mount(e.Group(""), cg, ag)
 }

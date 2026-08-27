@@ -67,6 +67,14 @@ templ ProductRow(p products.Product, symbol string, metaLine string) {
 					hx-target="#modal-container"
 					hx-swap="innerHTML"
 				>Edit</button>
+				for _, act := range ProductRowActions {
+					<button
+						class="text-slate-600 hover:underline text-sm ml-3"
+						hx-get={ act.Href(p.ID) }
+						hx-target="#modal-container"
+						hx-swap="innerHTML"
+					>{ act.Label }</button>
+				}
 				<button
 					class="text-red-600 hover:underline text-sm ml-3"
 					hx-delete={ "/admin/products/" + strconv.FormatInt(p.ID, 10) }
@@ -177,16 +185,19 @@ templ CategoryPicker(nodes []categories.TreeNode, fieldName, selected string, in
 	</div>
 }
 
-// ProductForm is the create/edit modal. A nil product means "create".
-templ ProductForm(p *products.Product, cats []categories.TreeNode, us []units.Unit, sups []suppliers.Supplier, extra []templ.Component) {
+// ProductForm is the create/edit/duplicate modal. A nil product means "create";
+// duplicate=true prefills from p (the source) but saves as a new product.
+templ ProductForm(p *products.Product, cats []categories.TreeNode, us []units.Unit, sups []suppliers.Supplier, extra []templ.Component, duplicate bool) {
 	<div
 		class="fixed inset-0 bg-black/40 flex items-center justify-center z-40 p-4"
-		x-data
+		x-data={ productFormData(p, duplicate) }
 	>
 		<div class="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-full overflow-auto">
 			<div class="flex items-center justify-between px-6 py-4 border-b">
 				<h3 class="text-lg font-semibold">
-					if p == nil {
+					if duplicate {
+						Duplicate Product
+					} else if p == nil {
 						New Product
 					} else {
 						Edit Product
@@ -196,16 +207,22 @@ templ ProductForm(p *products.Product, cats []categories.TreeNode, us []units.Un
 			</div>
 			<form
 				class="p-6 space-y-4"
-				if p == nil {
+				if p == nil || duplicate {
 					hx-post="/admin/products"
 				} else {
 					hx-put={ "/admin/products/" + strconv.FormatInt(p.ID, 10) }
 				}
 				hx-swap="none"
 			>
+				if duplicate {
+					<input type="hidden" name="dup_source_name" value={ valOf(p, fName) }/>
+				}
 				<div>
 					<label class="block text-sm font-medium mb-1">Name</label>
-					<input name="name" required value={ valOf(p, fName) } class="w-full border rounded-lg px-3 py-2"/>
+					<input name="name" required x-model="name" class="w-full border rounded-lg px-3 py-2"/>
+					if duplicate {
+						<p class="text-xs text-amber-600 mt-1" x-show="name.trim().toLowerCase() === src.trim().toLowerCase()">Change the name — a copy can't keep the original's name.</p>
+					}
 				</div>
 				<div>
 					<label class="block text-sm font-medium mb-1">Local name <span class="text-slate-400 font-normal">(optional — Sinhala / Tamil)</span></label>
@@ -239,7 +256,7 @@ templ ProductForm(p *products.Product, cats []categories.TreeNode, us []units.Un
 						<input name="wholesale_price" type="number" step="0.01" min="0" value={ valOf(p, fWholesale) } class="w-full border rounded-lg px-3 py-2"/>
 					</div>
 				</div>
-				if p != nil {
+				if p != nil && !duplicate {
 					<!-- Stock already on the shelf keeps the price it arrived with, so a price
 					     change otherwise reaches only future deliveries: the till card shows the
 					     new price while every option in the "which price?" prompt is the old one. -->
@@ -284,13 +301,13 @@ templ ProductForm(p *products.Product, cats []categories.TreeNode, us []units.Un
 				<div>
 					<label class="block text-sm font-medium mb-1">Barcode</label>
 					<div class="bc-field flex gap-2">
-						<input name="barcode" value={ valOf(p, fBarcode) } placeholder="Type, scan, or generate — scanning saves" class="flex-1 border rounded-lg px-3 py-2"/>
+						<input name="barcode" value={ barcodeVal(p, duplicate) } placeholder="Type, scan, or generate — scanning saves" class="flex-1 border rounded-lg px-3 py-2"/>
 						<button type="button" onclick="generateBarcode(this)" class="px-3 py-2 rounded-lg border text-slate-700 whitespace-nowrap disabled:opacity-40">Generate</button>
 					</div>
 				</div>
 				<div class="flex justify-end gap-3 pt-2">
 					<button type="button" class="px-4 py-2 rounded-lg border" x-on:click="$dispatch('close-modal')">Cancel</button>
-					<button type="submit" class="px-4 py-2 rounded-lg bg-indigo-600 text-white">Save</button>
+					<button type="submit" x-bind:disabled="src &amp;&amp; name.trim().toLowerCase() === src.trim().toLowerCase()" class="px-4 py-2 rounded-lg bg-indigo-600 text-white disabled:opacity-40">Save</button>
 				</div>
 			</form>
 		</div>

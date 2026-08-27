@@ -326,6 +326,14 @@ type ProductLabelFieldProvider struct {
 	Rows func(ctx context.Context, productID int64) ([]DetailRow, error)
 }
 
+// ProductRowAction is a plugin-contributed button on each admin product-list row
+// (e.g. Product Plus's "Duplicate"). Href returns the URL for a given product id;
+// the button opens it in the shared admin modal (hx-get), like Edit.
+type ProductRowAction struct {
+	Label string
+	Href  func(productID int64) string
+}
+
 // ReorderNote annotates one low-stock product on the reorder worklist. Covered
 // means an interchangeable equivalent is in stock, so the item need not be
 // reordered even though it reads low; Note is a short explanation shown on the row.
@@ -356,6 +364,7 @@ var (
 	productBadgeProviders    []ProductBadgeProvider
 	productDetailProviders   []ProductDetailContributor
 	productLabelProviders    []ProductLabelFieldProvider
+	productRowActions        []ProductRowAction
 	productReorderAnnotators []ProductReorderAnnotator
 )
 
@@ -381,6 +390,9 @@ func (r *Registry) AddProductDetailContributor(p ProductDetailContributor) {
 func (r *Registry) AddProductLabelFieldProvider(p ProductLabelFieldProvider) {
 	productLabelProviders = append(productLabelProviders, p)
 }
+func (r *Registry) AddProductRowAction(a ProductRowAction) {
+	productRowActions = append(productRowActions, a)
+}
 func (r *Registry) AddProductReorderAnnotator(a ProductReorderAnnotator) {
 	productReorderAnnotators = append(productReorderAnnotators, a)
 }
@@ -393,4 +405,5 @@ func ProductMetaProviders() []ProductMetaProvider           { return productMeta
 func ProductBadgeProviders() []ProductBadgeProvider         { return productBadgeProviders }
 func ProductDetailContributors() []ProductDetailContributor { return productDetailProviders }
 func ProductLabelFieldProviders() []ProductLabelFieldProvider { return productLabelProviders }
+func ProductRowActions() []ProductRowAction                   { return productRowActions }
 func ProductReorderAnnotators() []ProductReorderAnnotator   { return productReorderAnnotators }

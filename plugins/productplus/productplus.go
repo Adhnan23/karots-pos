@@ -8,6 +8,7 @@ package productplus
 import (
 	"context"
 	"io/fs"
+	"strconv"
 
 	"karots-pos/internal/plugin"
 	"karots-pos/plugins/productplus/migrations"
@@ -61,6 +62,16 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 
 	// Barcode label: offer the fields flagged "print on label" as top/bottom options.
 	reg.AddProductLabelFieldProvider(plugin.ProductLabelFieldProvider{Rows: p.store.LabelRows})
+
+	// Convenience: a Duplicate button on each product row → opens the create form
+	// prefilled from that product (core copy_from), so near-identical items don't
+	// need retyping. Custom fields come along because the form section prefills too.
+	reg.AddProductRowAction(plugin.ProductRowAction{
+		Label: "Duplicate",
+		Href: func(id int64) string {
+			return "/admin/products/form?copy_from=" + strconv.FormatInt(id, 10)
+		},
+	})
 }
 
 func (p *Plugin) matchProducts(ctx context.Context, q string) ([]int64, error) {
