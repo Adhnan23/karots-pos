@@ -165,14 +165,14 @@ templ labelPreviewCustom() {
 }
 
 // LabelSheetData drives the standalone, printable label sheet (product or custom).
+// Top and Bottom are the free text lines above and below the barcode (blank = omit).
 type LabelSheetData struct {
-	ShopName  string
-	Name      string
-	Code      string
-	PriceText string
-	ShowPrice bool
-	Count     int
-	Format    string
+	ShopName string
+	Top      string
+	Bottom   string
+	Code     string
+	Count    int
+	Format   string
 }
 
 templ LabelSheet(d LabelSheetData) {
@@ -180,7 +180,7 @@ templ LabelSheet(d LabelSheetData) {
 	<html lang="en">
 		<head>
 			<meta charset="UTF-8"/>
-			<title>Labels — { d.Name }</title>
+			<title>Labels — { sheetLabel(d) }</title>
 			<link rel="stylesheet" href="/static/css/app.css"/>
 			<script src="/static/vendor/jsbarcode.min.js"></script>
 		</head>
@@ -188,18 +188,18 @@ templ LabelSheet(d LabelSheetData) {
 			<div class="label-toolbar">
 				<button onclick="window.print()">🖨 Print</button>
 				<button type="button" class="label-back" onclick="window.history.length>1?window.history.back():window.close()">← Back</button>
-				<span>{ d.Name } — { strconv.Itoa(d.Count) } labels</span>
+				<span>{ sheetLabel(d) } — { strconv.Itoa(d.Count) } labels</span>
 			</div>
 			<div class="label-sheet">
 				for i := 0; i < d.Count; i++ {
 					<div class="label">
 						<div class="label-shop">{ d.ShopName }</div>
-						if d.Name != "" {
-							<div class="label-name">{ d.Name }</div>
+						if d.Top != "" {
+							<div class="label-name">{ d.Top }</div>
 						}
 						<svg class="barcode" data-code={ d.Code } data-format={ d.Format }></svg>
-						if d.ShowPrice && d.PriceText != "" {
-							<div class="label-price">{ d.PriceText }</div>
+						if d.Bottom != "" {
+							<div class="label-price">{ d.Bottom }</div>
 						}
 					</div>
 				}
@@ -216,6 +216,14 @@ templ LabelSheet(d LabelSheetData) {
 			</script>
 		</body>
 	</html>
+}
+
+// sheetLabel names the print sheet: the top line when set, else the barcode.
+func sheetLabel(d LabelSheetData) string {
+	if d.Top != "" {
+		return d.Top
+	}
+	return d.Code
 }
 
 // barcodeValue uses the product barcode when set, else a stable SKU from its id.

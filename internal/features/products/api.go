@@ -129,6 +129,29 @@ func (h *APIHandler) Detail(c echo.Context) error {
 	return response.OK(c, d)
 }
 
+// LabelFields serves the barcode-label top/bottom picker: the product's name,
+// price, and any plugin fields flagged "print on label", as selectable options.
+func (h *APIHandler) LabelFields(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	ctx := c.Request().Context()
+	p, err := h.svc.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	// Name + price are always offered; the plugin fields come after.
+	rows := []DetailRow{
+		{Label: "Name", Value: p.Name},
+		{Label: "Price", Value: p.SellingPrice.StringFixed(2)},
+	}
+	if LabelFieldProvider != nil {
+		rows = append(rows, LabelFieldProvider(ctx, p.ID)...)
+	}
+	return response.OK(c, rows)
+}
+
 func (h *APIHandler) GetByBarcode(c echo.Context) error {
 	p, err := h.svc.GetByBarcode(c.Request().Context(), c.Param("code"))
 	if err != nil {
@@ -251,6 +274,7 @@ func RegisterAPI(e *echo.Echo, db *sqlx.DB, cfg *config.Config) {
 	g.GET("", api.List)
 	g.GET("/:id", api.Get)
 	g.GET("/:id/detail", api.Detail)
+	g.GET("/:id/label-fields", api.LabelFields)
 	g.GET("/price-options", api.PriceOptions)
 	g.GET("/quick-picks", api.QuickPicks)
 	g.GET("/:id/lots", api.Lots)

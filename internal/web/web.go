@@ -626,5 +626,24 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 			return out
 		}
 	}
+	// Same bridge for barcode-label field providers → products.LabelFieldProvider.
+	if lps := plugin.ProductLabelFieldProviders(); len(lps) > 0 {
+		products.LabelFieldProvider = func(ctx context.Context, id int64) []products.DetailRow {
+			var out []products.DetailRow
+			for _, lp := range lps {
+				if lp.Rows == nil {
+					continue
+				}
+				rows, err := lp.Rows(ctx, id)
+				if err != nil {
+					continue
+				}
+				for _, r := range rows {
+					out = append(out, products.DetailRow{Label: r.Label, Value: r.Value})
+				}
+			}
+			return out
+		}
+	}
 	reg.Mux.Mount(e.Group(""), cg, ag)
 }

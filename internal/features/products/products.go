@@ -167,6 +167,11 @@ type DetailRow struct {
 // web layer from plugin detail contributors; nil = core rows only.
 var DetailContributor func(ctx context.Context, productID int64) []DetailRow
 
+// LabelFieldProvider, when non-nil, returns a product's custom fields flagged
+// "print on label" — the selectable options for the barcode label top/bottom
+// line. Set by the web layer from plugin label-field providers; nil = none.
+var LabelFieldProvider func(ctx context.Context, productID int64) []DetailRow
+
 // searchMatchIDs returns the plugin-contributed ids for a query (empty when no
 // contributor is set, no search term, or the contributor errors — it must never
 // break the core search).

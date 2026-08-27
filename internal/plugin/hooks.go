@@ -319,6 +319,13 @@ type ProductDetailContributor struct {
 	Rows func(ctx context.Context, productID int64) ([]DetailRow, error)
 }
 
+// ProductLabelFieldProvider supplies a product's custom fields flagged "print on
+// label" — the selectable options for the barcode label's top/bottom line.
+// Best-effort: an error just yields no extra options.
+type ProductLabelFieldProvider struct {
+	Rows func(ctx context.Context, productID int64) ([]DetailRow, error)
+}
+
 // ReorderNote annotates one low-stock product on the reorder worklist. Covered
 // means an interchangeable equivalent is in stock, so the item need not be
 // reordered even though it reads low; Note is a short explanation shown on the row.
@@ -348,6 +355,7 @@ var (
 	productMetaProviders     []ProductMetaProvider
 	productBadgeProviders    []ProductBadgeProvider
 	productDetailProviders   []ProductDetailContributor
+	productLabelProviders    []ProductLabelFieldProvider
 	productReorderAnnotators []ProductReorderAnnotator
 )
 
@@ -370,6 +378,9 @@ func (r *Registry) AddProductBadgeProvider(p ProductBadgeProvider) {
 func (r *Registry) AddProductDetailContributor(p ProductDetailContributor) {
 	productDetailProviders = append(productDetailProviders, p)
 }
+func (r *Registry) AddProductLabelFieldProvider(p ProductLabelFieldProvider) {
+	productLabelProviders = append(productLabelProviders, p)
+}
 func (r *Registry) AddProductReorderAnnotator(a ProductReorderAnnotator) {
 	productReorderAnnotators = append(productReorderAnnotators, a)
 }
@@ -381,4 +392,5 @@ func ProductSearchContributors() []ProductSearchContributor { return productSear
 func ProductMetaProviders() []ProductMetaProvider           { return productMetaProviders }
 func ProductBadgeProviders() []ProductBadgeProvider         { return productBadgeProviders }
 func ProductDetailContributors() []ProductDetailContributor { return productDetailProviders }
+func ProductLabelFieldProviders() []ProductLabelFieldProvider { return productLabelProviders }
 func ProductReorderAnnotators() []ProductReorderAnnotator   { return productReorderAnnotators }

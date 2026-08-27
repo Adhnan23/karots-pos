@@ -19,15 +19,14 @@ const narrow = 2
 
 // Input describes a single label run (one design, printed Count times).
 type Input struct {
-	Name      string // product / item name (top line)
-	Code      string // barcode value
-	Format    string // CODE128 | EAN13 | EAN8 | UPC | CODE39 (defaults to CODE128)
-	PriceText string // pre-formatted price (e.g. "Rs. 250.00")
-	ShowPrice bool
-	Count     int // number of copies (>=1)
-	WidthMM   int // label width  (mm)
-	HeightMM  int // label height (mm)
-	GapMM     int // gap between labels (mm)
+	Top     string // free text line above the barcode (e.g. name or a model no); blank = omit
+	Bottom  string // free text line below the barcode (e.g. price); blank = omit
+	Code    string // barcode value
+	Format  string // CODE128 | EAN13 | EAN8 | UPC | CODE39 (defaults to CODE128)
+	Count   int    // number of copies (>=1)
+	WidthMM int    // label width  (mm)
+	HeightMM int   // label height (mm)
+	GapMM   int    // gap between labels (mm)
 }
 
 // barcodeType maps the UI format name to the TSPL BARCODE type token.
@@ -86,10 +85,10 @@ func Document(in Input) []byte {
 	b.WriteString("REFERENCE 0,0\r\n")
 	b.WriteString("CLS\r\n")
 
-	// Name line (top), centered, truncated to what fits at font "2" (12 dots/char).
+	// Top line, centered, truncated to what fits at font "2" (12 dots/char).
 	const nameCharW = 12
 	nameH := 0
-	if name := ascii(in.Name); name != "" {
+	if name := ascii(in.Top); name != "" {
 		if maxChars := (widthDots - 2*marginX) / nameCharW; maxChars > 0 && len(name) > maxChars {
 			name = name[:maxChars]
 		}
@@ -98,14 +97,12 @@ func Document(in Input) []byte {
 		nameH = nameLineH
 	}
 
-	// Price line (optional, bottom). Reserve its height up front so the barcode
-	// never overlaps it.
+	// Bottom line (optional). Reserve its height up front so the barcode never
+	// overlaps it.
 	priceH := 0
-	price := ""
-	if in.ShowPrice {
-		if price = ascii(in.PriceText); price != "" {
-			priceH = priceLineH
-		}
+	price := ascii(in.Bottom)
+	if price != "" {
+		priceH = priceLineH
 	}
 
 	// Barcode (centered) fills the space between the name and the reserved bottom

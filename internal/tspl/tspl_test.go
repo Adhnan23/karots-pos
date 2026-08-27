@@ -7,15 +7,14 @@ import (
 
 func TestDocumentBasics(t *testing.T) {
 	out := string(Document(Input{
-		Name:      "Onion 1kg",
-		Code:      "4001234567890",
-		Format:    "CODE128",
-		PriceText: "Rs. 250.00",
-		ShowPrice: true,
-		Count:     3,
-		WidthMM:   50,
-		HeightMM:  25,
-		GapMM:     2,
+		Top:      "Onion 1kg",
+		Code:     "4001234567890",
+		Format:   "CODE128",
+		Bottom:   "Rs. 250.00",
+		Count:    3,
+		WidthMM:  50,
+		HeightMM: 25,
+		GapMM:    2,
 	}))
 
 	wants := []string{
@@ -36,7 +35,7 @@ func TestDocumentBasics(t *testing.T) {
 
 func TestDocumentDefaultsAndFormats(t *testing.T) {
 	// Zero sizes/count fall back to sane defaults.
-	out := string(Document(Input{Name: "x", Code: "123"}))
+	out := string(Document(Input{Top: "x", Code: "123"}))
 	if !strings.Contains(out, "SIZE 50 mm, 25 mm") {
 		t.Errorf("expected default 50x25 size, got:\n%s", out)
 	}
@@ -59,15 +58,15 @@ func TestDocumentDefaultsAndFormats(t *testing.T) {
 	}
 }
 
-func TestPriceHiddenWhenNotShown(t *testing.T) {
-	out := string(Document(Input{Code: "1", PriceText: "Rs. 9", ShowPrice: false, Count: 1}))
-	if strings.Contains(out, "Rs. 9") {
-		t.Errorf("price should be omitted when ShowPrice is false:\n%s", out)
+func TestBottomOmittedWhenBlank(t *testing.T) {
+	out := string(Document(Input{Code: "1", Bottom: "", Count: 1}))
+	if strings.Contains(out, "TEXT") && strings.Contains(out, "Rs.") {
+		t.Errorf("a blank bottom line should print nothing:\n%s", out)
 	}
 }
 
 func TestAsciiSanitisesAndEscapes(t *testing.T) {
-	out := string(Document(Input{Name: "Coke \"500\" අ", Code: "1", Count: 1}))
+	out := string(Document(Input{Top: "Coke \"500\" අ", Code: "1", Count: 1}))
 	if strings.Contains(out, "අ") {
 		t.Errorf("non-ASCII rune should be replaced:\n%s", out)
 	}

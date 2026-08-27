@@ -290,10 +290,25 @@ func truncate(s string, n int) string {
 // No booleans (a bool shows its label only when Yes). Value equal to the default
 // still shows — the till reader wants the fact, not just overrides.
 func (s *Store) TillRows(ctx context.Context, productID int64) ([]plugin.DetailRow, error) {
+	return s.rowsWhere(ctx, productID, "show_at_till", 120)
+}
+
+// LabelRows returns the custom fields flagged print_on_label for a product — the
+// selectable options for the barcode label's top/bottom line. Same shape as
+// TillRows; values are kept short since a label line is tiny.
+func (s *Store) LabelRows(ctx context.Context, productID int64) ([]plugin.DetailRow, error) {
+	return s.rowsWhere(ctx, productID, "print_on_label", 40)
+}
+
+// rowsWhere is the shared body for TillRows/LabelRows: it selects the active
+// fields whose boolean flag column `flagCol` is true and resolves each to a
+// display row (default when the product has no value, skipping blanks and No
+// bools). flagCol is a trusted constant, never user input.
+func (s *Store) rowsWhere(ctx context.Context, productID int64, flagCol string, maxLen int) ([]plugin.DetailRow, error) {
 	type row struct {
-		Label   string `db:"label"`
-		Type    string `db:"type"`
-		Default string `db:"default_value"`
+		Label   string  `db:"label"`
+		Type    string  `db:"type"`
+		Default string  `db:"default_value"`
 		Value   *string `db:"value"`
 	}
 	var rows []row
@@ -301,7 +316,7 @@ func (s *Store) TillRows(ctx context.Context, productID int64) ([]plugin.DetailR
 		SELECT f.label, f.type, f.default_value, v.value
 		FROM pp_fields f
 		LEFT JOIN pp_values v ON v.field_id = f.id AND v.product_id = $1
-		WHERE f.is_active AND f.show_at_till
+		WHERE f.is_active AND f.`+flagCol+`
 		ORDER BY f.sort_order, f.id`, productID); err != nil {
 		return nil, err
 	}
@@ -321,7 +336,7 @@ func (s *Store) TillRows(ctx context.Context, productID int64) ([]plugin.DetailR
 		if strings.TrimSpace(val) == "" {
 			continue
 		}
-		out = append(out, plugin.DetailRow{Label: r.Label, Value: truncate(val, 120)})
+		out = append(out, plugin.DetailRow{Label: r.Label, Value: truncate(val, maxLen)})
 	}
 	return out, nil
 }

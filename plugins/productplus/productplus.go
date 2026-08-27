@@ -58,6 +58,9 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 
 	// Till info popup: contribute the fields flagged "show at till" as extra rows.
 	reg.AddProductDetailContributor(plugin.ProductDetailContributor{Rows: p.store.TillRows})
+
+	// Barcode label: offer the fields flagged "print on label" as top/bottom options.
+	reg.AddProductLabelFieldProvider(plugin.ProductLabelFieldProvider{Rows: p.store.LabelRows})
 }
 
 func (p *Plugin) matchProducts(ctx context.Context, q string) ([]int64, error) {

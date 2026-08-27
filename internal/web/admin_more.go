@@ -943,9 +943,26 @@ func (a *adminUI) Labels(c echo.Context) error {
 // labelReq is the resolved label content shared by the browser sheet
 // (LabelsPrint) and the direct TSPL print (LabelsSend).
 type labelReq struct {
-	ShopName, Name, Code, Format, PriceText string
-	ShowPrice                               bool
-	Count                                   int
+	ShopName, Code, Format string
+	// Top and Bottom are the two free text lines above and below the barcode. The
+	// UI resolves them from Name / Price / a custom field and posts them with
+	// slots=1; without that flag we fall back to the legacy name-top/price-bottom.
+	Top, Bottom string
+	Count       int
+}
+
+// labelSlots resolves the top/bottom lines. With slots=1 the UI has chosen them
+// explicitly (either may be blank = that line is left off); otherwise we keep the
+// old behaviour: name on top, price on the bottom when "show price" is ticked.
+func labelSlots(c echo.Context, defTop, price string, showPrice bool) (string, string) {
+	if c.FormValue("slots") == "1" {
+		return strings.TrimSpace(c.FormValue("top")), strings.TrimSpace(c.FormValue("bottom"))
+	}
+	bottom := ""
+	if showPrice {
+		bottom = price
+	}
+	return defTop, bottom
 }
 
 // parseLabelReq reads the label form (works for GET query params and POST form
@@ -971,14 +988,14 @@ func (s *Server) parseLabelReq(c echo.Context, shopName, symbol string) (labelRe
 		if p := strings.TrimSpace(c.FormValue("price")); p != "" {
 			priceText = symbol + " " + p
 		}
+		top, bottom := labelSlots(c, strings.TrimSpace(c.FormValue("text")), priceText, showPrice && priceText != "")
 		return labelReq{
-			ShopName:  shopName,
-			Name:      strings.TrimSpace(c.FormValue("text")),
-			Code:      code,
-			Format:    format,
-			PriceText: priceText,
-			ShowPrice: showPrice && priceText != "",
-			Count:     count,
+			ShopName: shopName,
+			Code:     code,
+			Format:   format,
+			Top:      top,
+			Bottom:   bottom,
+			Count:    count,
 		}, nil
 	}
 
@@ -995,14 +1012,14 @@ func (s *Server) parseLabelReq(c echo.Context, shopName, symbol string) (labelRe
 	if p.Barcode != nil && *p.Barcode != "" {
 		code = *p.Barcode
 	}
+	top, bottom := labelSlots(c, p.Name, money.Format(symbol, p.SellingPrice), showPrice)
 	return labelReq{
-		ShopName:  shopName,
-		Name:      p.Name,
-		Code:      code,
-		Format:    "CODE128",
-		PriceText: money.Format(symbol, p.SellingPrice),
-		ShowPrice: showPrice,
-		Count:     count,
+		ShopName: shopName,
+		Code:     code,
+		Format:   "CODE128",
+		Top:      top,
+		Bottom:   bottom,
+		Count:    count,
 	}, nil
 }
 
@@ -1046,13 +1063,12 @@ func (a *adminUI) LabelsPrint(c echo.Context) error {
 		return err
 	}
 	return response.RenderPage(c, adminpages.LabelSheet(adminpages.LabelSheetData{
-		ShopName:  req.ShopName,
-		Name:      req.Name,
-		Code:      req.Code,
-		PriceText: req.PriceText,
-		ShowPrice: req.ShowPrice,
-		Count:     req.Count,
-		Format:    req.Format,
+		ShopName: req.ShopName,
+		Top:      req.Top,
+		Bottom:   req.Bottom,
+		Code:     req.Code,
+		Count:    req.Count,
+		Format:   req.Format,
 	}))
 }
 
@@ -1075,15 +1091,14 @@ func (s *Server) sendLabel(c echo.Context) error {
 	// "tcp://host:9100" network address, or empty = the OS default printer).
 	queue := cfg.LabelPrinter
 	doc := tspl.Document(tspl.Input{
-		Name:      req.Name,
-		Code:      req.Code,
-		Format:    req.Format,
-		PriceText: req.PriceText,
-		ShowPrice: req.ShowPrice,
-		Count:     req.Count,
-		WidthMM:   w,
-		HeightMM:  h,
-		GapMM:     gap,
+		Top:      req.Top,
+		Bottom:   req.Bottom,
+		Code:     req.Code,
+		Format:   req.Format,
+		Count:    req.Count,
+		WidthMM:  w,
+		HeightMM: h,
+		GapMM:    gap,
 	})
 	if err := printing.Raw(ctx, queue, doc); err != nil {
 		return apperr.Internal("could not print labels", err)
