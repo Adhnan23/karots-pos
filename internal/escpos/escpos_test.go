@@ -75,7 +75,7 @@ func TestDocumentLineDiscountAndWarranty(t *testing.T) {
 		Payments: []sales.Payment{{Method: "cash", Amount: d("225.00")}},
 	}
 	s := string(Document(det, cfg("80"), Options{}))
-	for _, want := range []string{"250.00", "Discount", "Line total", "225.00", "12-month warranty until 2027-06-10"} {
+	for _, want := range []string{"250.00", "You saved", "Line total", "-> 225.00", "225.00", "12-month warranty until 2027-06-10"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("receipt missing %q\n%s", want, s)
 		}

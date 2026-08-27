@@ -97,7 +97,8 @@ func (a *adminUI) MoneyReceiptPrint(c echo.Context) error {
 		c.Response().Header().Set("HX-Trigger", response.Toast("No receipt printer configured", "error"))
 		return c.NoContent(200)
 	}
-	if err := printing.Raw(ctx, cfg.ReceiptPrinter, buildReceiptSlip(cfg, *rec, a.s.receiptImgOptions(ctx, cfg))); err != nil {
+	eff := receiptSizeOverride(*cfg, c)
+	if err := printing.Raw(ctx, cfg.ReceiptPrinter, buildReceiptSlip(&eff, *rec, a.s.receiptImgOptions(ctx, &eff))); err != nil {
 		c.Response().Header().Set("HX-Trigger", response.Toast("Print failed: "+err.Error(), "error"))
 		return c.NoContent(200)
 	}
@@ -184,7 +185,7 @@ func buildReceiptSlip(cfg *settings.Settings, r cashflow.Receipt, opts escpos.Op
 	var b bytes.Buffer
 	escpos.Init(&b)
 	escpos.Header(&b, *cfg, opts)
-	escpos.Title(&b, receiptKindLabel(r.Kind))
+	escpos.Title(&b, receiptKindLabel(r.Kind), w)
 
 	// --- Meta (left, values right-aligned like the sale) ---
 	escpos.Left(&b)

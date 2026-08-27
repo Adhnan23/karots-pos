@@ -205,6 +205,17 @@ func (h *cashierUI) receiptOptions(ctx context.Context, cfg *settings.Settings) 
 	return h.s.receiptImgOptions(ctx, cfg)
 }
 
+// receiptSizeOverride returns cfg with its paper width replaced by an explicit
+// ?size= (58 or 80) carried from a receipt view's size switcher, so a slip PRINTS
+// at the size shown on screen — not only the saved setting. Any other value keeps
+// the saved width. Returns a copy; the caller's cfg is untouched.
+func receiptSizeOverride(cfg settings.Settings, c echo.Context) settings.Settings {
+	if sz := c.QueryParam("size"); sz == "58" || sz == "80" {
+		cfg.ReceiptWidth = sz
+	}
+	return cfg
+}
+
 // receiptImgOptions builds the logo/sub-name raster options for a thermal slip.
 // Shared by sale receipts and warranty / CR- reprints (UI-agnostic).
 func (s *Server) receiptImgOptions(ctx context.Context, cfg *settings.Settings) escpos.Options {
@@ -300,10 +311,11 @@ func (h *cashierUI) PrintReceipt(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	opts := h.receiptOptions(ctx, cfg)
+	eff := receiptSizeOverride(*cfg, c)
+	opts := h.receiptOptions(ctx, &eff)
 	opts.Serials = h.saleSerials(ctx, id)
 	opts.CustomerDue = h.customerDue(ctx, detail)
-	payload := escpos.Document(*detail, *cfg, opts)
+	payload := escpos.Document(*detail, eff, opts)
 	// ?kick=1 (the till's auto-print for a fresh cash sale) folds the drawer pulse
 	// into THIS job so the printer pops the drawer and prints in one pass — no
 	// second CUPS/USB job, no inter-job gap. Reprints never pass kick, so an old

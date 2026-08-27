@@ -193,6 +193,8 @@ html.dark body.bg-slate-100 { background-color: #0b1120 !important; color: #e2e8
 .r-small { font-size: 11px; }
 .r-strike { text-decoration: line-through; color: #888; margin-right: 4px; }
 .r-warranty { color: #555; }
+.r-saved { color: #16803c; }
+.r-saved-total { font-weight: 700; color: #16803c; }
 .r-hr { border-top: 1px dashed #000; margin: 4px 0; }
 .r-row { display: flex; justify-content: space-between; gap: 8px; }
 .r-total { font-weight: 700; font-size: 16px; margin: 6px 0; }

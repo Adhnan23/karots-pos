@@ -118,7 +118,8 @@ func (a *adminUI) WarrantyReprint(c echo.Context) error {
 		c.Response().Header().Set("HX-Trigger", response.Toast("No receipt printer configured", "error"))
 		return c.NoContent(200)
 	}
-	if err := printing.Raw(ctx, cfg.ReceiptPrinter, a.s.buildWarrantySlip(ctx, cfg, cl.OldSerial, newUnit)); err != nil {
+	eff := receiptSizeOverride(*cfg, c)
+	if err := printing.Raw(ctx, cfg.ReceiptPrinter, a.s.buildWarrantySlip(ctx, &eff, cl.OldSerial, newUnit)); err != nil {
 		c.Response().Header().Set("HX-Trigger", response.Toast("Print failed: "+err.Error(), "error"))
 		return c.NoContent(200)
 	}
@@ -212,7 +213,8 @@ func (a *adminUI) DebtReceiptPrint(c echo.Context) error {
 		c.Response().Header().Set("HX-Trigger", response.Toast("No receipt printer configured", "error"))
 		return c.NoContent(200)
 	}
-	if err := printing.Raw(ctx, cfg.ReceiptPrinter, a.s.buildDebtSlip(ctx, cfg, debtReceiptToPayment(*r), debtReceiptToCustomer(*r), cashierNameOf(*r))); err != nil {
+	eff := receiptSizeOverride(*cfg, c)
+	if err := printing.Raw(ctx, cfg.ReceiptPrinter, a.s.buildDebtSlip(ctx, &eff, debtReceiptToPayment(*r), debtReceiptToCustomer(*r), cashierNameOf(*r))); err != nil {
 		c.Response().Header().Set("HX-Trigger", response.Toast("Print failed: "+err.Error(), "error"))
 		return c.NoContent(200)
 	}

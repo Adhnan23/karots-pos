@@ -91,7 +91,7 @@ func buildSlip(cfg *settings.Settings, opts escpos.Options, d slipData) []byte {
 	var b bytes.Buffer
 	escpos.Init(&b)
 	escpos.Header(&b, *cfg, opts)
-	escpos.Title(&b, txLabel(d.Kind))
+	escpos.Title(&b, txLabel(d.Kind), w)
 
 	// --- Meta (left, values right-aligned like the sale) ---
 	escpos.Left(&b)

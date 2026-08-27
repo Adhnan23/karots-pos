@@ -62,6 +62,16 @@ func pageStyle(narrow bool) string {
 	return "@media print{@page{size:" + w + " auto;margin:0}html,body{width:" + w + ";height:auto;margin:0}}"
 }
 
+// salePrintURL is the server-side ESC/POS print endpoint carrying the size shown
+// on screen, so switching the paper size in the view and printing follows it.
+func salePrintURL(d ReceiptData) string {
+	size := "80"
+	if d.Narrow {
+		size = "58"
+	}
+	return "/cashier/print/" + strconv.FormatInt(d.Detail.Sale.ID, 10) + "?size=" + size
+}
+
 // Receipt is a self-contained thermal bill (80mm default, also fits 58mm). It
 // deliberately does NOT use the cashier chrome — it is its own minimal page so
 // it prints cleanly. The print styling lives in /static/css/app.css.
@@ -76,7 +86,7 @@ templ Receipt(d ReceiptData) {
 			@templ.Raw("<style>" + pageStyle(d.Narrow) + "</style>")
 			// Print server-side (ESC/POS) instead of window.print(): a browser
 			// print sends a PDF that a raw thermal queue mis-prints as garbage.
-			@templ.Raw("<script>function printThermal(){var m=document.getElementById('printmsg');if(m)m.textContent='Printing…';fetch('/cashier/print/" + strconv.FormatInt(d.Detail.Sale.ID, 10) + "',{method:'POST',credentials:'same-origin'}).then(function(r){if(m)m.textContent=r.ok?'✓ Sent to printer':'Print failed';}).catch(function(){if(m)m.textContent='Print failed';});}</script>")
+			@templ.Raw("<script>function printThermal(){var m=document.getElementById('printmsg');if(m)m.textContent='Printing…';fetch('" + salePrintURL(d) + "',{method:'POST',credentials:'same-origin'}).then(function(r){if(m)m.textContent=r.ok?'✓ Sent to printer':'Print failed';}).catch(function(){if(m)m.textContent='Print failed';});}</script>")
 			if d.AutoPrint {
 				@templ.Raw("<script>window.addEventListener('load',printThermal);</script>")
 			}
@@ -116,17 +126,19 @@ templ Receipt(d ReceiptData) {
 								<tr class="r-item-name"><td colspan="3">{ it.ProductName }</td></tr>
 							}
 							<tr class="r-item-line">
-								<td>{ money.Display(it.Quantity) } { it.UnitAbbr } × { money.Display(it.UnitPrice) }</td>
-								<td></td>
 								if it.Discount.IsPositive() {
+									<td>{ money.Display(it.Quantity) } { it.UnitAbbr } × <span class="r-strike">{ money.Display(it.UnitPrice) }</span>{ money.Display(it.NetUnitPrice()) }</td>
+									<td></td>
 									<td class="r-right"><span class="r-strike">{ money.Display(it.Gross()) }</span>{ money.Display(it.Subtotal) }</td>
 								} else {
+									<td>{ money.Display(it.Quantity) } { it.UnitAbbr } × { money.Display(it.UnitPrice) }</td>
+									<td></td>
 									<td class="r-right">{ money.Display(it.Subtotal) }</td>
 								}
 							</tr>
 							if it.Discount.IsPositive() {
-								<tr class="r-item-line r-small">
-									<td>{ "  Discount" + discSuffix(it.DiscountType, it.DiscountValue) }</td>
+								<tr class="r-item-line r-small r-saved">
+									<td>{ "  You saved" + discSuffix(it.DiscountType, it.DiscountValue) }</td>
 									<td></td>
 									<td class="r-right">-{ money.Display(it.Discount) }</td>
 								</tr>
@@ -144,15 +156,18 @@ templ Receipt(d ReceiptData) {
 				{{ itemDisc := sumItemDiscounts(d.Detail.Items) }}
 				{{ billDisc := d.Detail.Sale.Discount.Sub(itemDisc) }}
 				if itemDisc.IsPositive() {
-					<div class="r-row"><span>Item discounts</span><span>-{ money.Format(d.Settings.CurrencySymbol, itemDisc) }</span></div>
+					<div class="r-row"><span>Item savings</span><span>-{ money.Format(d.Settings.CurrencySymbol, itemDisc) }</span></div>
 				}
 				if billDisc.IsPositive() {
-					<div class="r-row"><span>{ "Bill discount" + discSuffix(d.Detail.Sale.DiscountType, d.Detail.Sale.DiscountValue) }</span><span>-{ money.Format(d.Settings.CurrencySymbol, billDisc) }</span></div>
+					<div class="r-row"><span>{ "Bill saving" + discSuffix(d.Detail.Sale.DiscountType, d.Detail.Sale.DiscountValue) }</span><span>-{ money.Format(d.Settings.CurrencySymbol, billDisc) }</span></div>
 				}
 				if d.Detail.Sale.Tax.IsPositive() {
 					<div class="r-row"><span>Tax</span><span>{ money.Format(d.Settings.CurrencySymbol, d.Detail.Sale.Tax) }</span></div>
 				}
 				<div class="r-row r-total"><span>TOTAL</span><span>{ money.Format(d.Settings.CurrencySymbol, d.Detail.Sale.Total) }</span></div>
+				if d.Detail.Sale.Discount.IsPositive() {
+					<div class="r-row r-saved-total"><span>★ You saved</span><span>{ money.Format(d.Settings.CurrencySymbol, d.Detail.Sale.Discount) }</span></div>
+				}
 				if len(d.Detail.Payments) > 0 {
 					for _, p := range d.Detail.Payments {
 						<div class="r-row"><span class="r-cap">{ p.Method }</span><span>{ money.Format(d.Settings.CurrencySymbol, p.Amount) }</span></div>

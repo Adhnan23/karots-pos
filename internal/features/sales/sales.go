@@ -74,6 +74,16 @@ func (i SaleItem) ReturnableQty() decimal.Decimal { return i.Quantity.Sub(i.Retu
 // which the receipt shows struck-through beside the net.
 func (i SaleItem) Gross() decimal.Decimal { return i.Subtotal.Add(i.Discount) }
 
+// NetUnitPrice is the per-unit price the customer actually paid after the line
+// discount (net line ÷ qty). The receipt shows it beside the struck-through
+// original unit price so the discount is visible on the item line itself.
+func (i SaleItem) NetUnitPrice() decimal.Decimal {
+	if i.Quantity.IsZero() {
+		return i.UnitPrice
+	}
+	return i.Subtotal.Div(i.Quantity)
+}
+
 // WarrantyUntil is the cover-expiry date for this line given the sale time, or
 // the zero time when the product carries no warranty. Uses the canonical
 // date-only math in the warranty package so it matches recorded serial units.

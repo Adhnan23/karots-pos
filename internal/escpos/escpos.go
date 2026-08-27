@@ -87,52 +87,68 @@ func Init(b *bytes.Buffer) {
 // Header writes the shared, centered branding block at the top of EVERY receipt —
 // logo, the shop name in double-width bold, the secondary-language (Sinhala/Tamil)
 // name image, address, phone and VAT no — so a sale, a money receipt and a
-// recharge slip all carry identical branding. Leaves the printer centered; the
-// caller switches to left before the body.
+// recharge slip all carry identical branding. Text is centered by space-padding
+// (see center()); the printer is left in left-align mode for the body.
 func Header(b *bytes.Buffer, cfg settings.Settings, opts Options) {
 	w := columns(cfg.ReceiptWidth)
-	b.Write([]byte{esc, 'a', 1}) // center
-	// Logo at the very top (rendered as a full-width raster, centered on canvas).
+	// A raster (logo, secondary-language name) can only be centered by the hardware
+	// justify command. Text is centered by space-padding instead — see center().
 	if len(opts.Logo) > 0 {
+		b.Write([]byte{esc, 'a', 1}) // center the raster
 		b.Write(opts.Logo)
+		b.Write([]byte{esc, 'a', 0}) // back to left for the padded text
 		line(b, "")
 	}
-	b.Write([]byte{esc, 'E', 1})   // bold on
-	b.Write([]byte{gs, '!', 0x11}) // double width + height
-	line(b, ascii(cfg.ShopName))
+	// Shop name: a double-WIDTH glyph is 2 columns, so its budget is only w/2
+	// (16 on a 58mm roll) — center it over w/2. A name wider than that runs off the
+	// edge, so drop to double-height-only (full-width glyphs, still bold and tall)
+	// and wrap, keeping a long name readable on the narrow roll instead of clipping.
+	name := ascii(cfg.ShopName)
+	b.Write([]byte{esc, 'E', 1}) // bold on
+	if len(name) <= w/2 {
+		b.Write([]byte{gs, '!', 0x11}) // double width + height
+		line(b, center(name, w/2))
+	} else {
+		b.Write([]byte{gs, '!', 0x01}) // double height only
+		for _, ln := range wrap(name, w) {
+			line(b, center(ln, w))
+		}
+	}
 	b.Write([]byte{gs, '!', 0x00}) // normal size
 	b.Write([]byte{esc, 'E', 0})   // bold off
 	// Secondary shop name (Sinhala/Tamil) is a raster image (the built-in font
 	// can't draw it); printed here at the same size the sale receipt uses.
 	if len(opts.SubName) > 0 {
+		b.Write([]byte{esc, 'a', 1}) // center the raster
 		b.Write(opts.SubName)
+		b.Write([]byte{esc, 'a', 0}) // back to left
 	}
 	line(b, "") // breathing room between the name and the address block
 	if s := deref(cfg.Address); s != "" {
 		for _, ln := range wrap(ascii(s), w) {
-			line(b, ln)
+			line(b, center(ln, w))
 		}
 	}
 	if s := deref(cfg.Phone); s != "" {
-		line(b, "Tel: "+ascii(s))
+		line(b, center("Tel: "+ascii(s), w))
 	}
 	if cfg.TaxRegistered {
 		if s := deref(cfg.TaxRegNo); s != "" {
-			line(b, "VAT: "+ascii(s))
+			line(b, center("VAT: "+ascii(s), w))
 		}
 	}
 }
 
-// Title writes a centered, bold, star-wrapped receipt title (e.g. "*** REFUND ***")
-// under the header. An empty title prints nothing — a sale needs no title line.
-// Assumes the printer is still centered (call right after Header).
-func Title(b *bytes.Buffer, title string) {
+// Title writes a bold, star-wrapped receipt title (e.g. "*** REFUND ***") under
+// the header, centered by space-padding over w columns. An empty title prints
+// nothing — a sale needs no title line.
+func Title(b *bytes.Buffer, title string, w int) {
 	if strings.TrimSpace(title) == "" {
 		return
 	}
 	line(b, "")
 	b.Write([]byte{esc, 'E', 1})
-	line(b, "*** "+strings.ToUpper(ascii(title))+" ***")
+	line(b, center("*** "+strings.ToUpper(ascii(title))+" ***", w))
 	b.Write([]byte{esc, 'E', 0})
 }
 
@@ -142,17 +158,20 @@ func Title(b *bytes.Buffer, title string) {
 // is what makes every receipt end the same way.
 func Footer(b *bytes.Buffer, cfg settings.Settings) {
 	w := columns(cfg.ReceiptWidth)
-	b.Write([]byte{esc, 'a', 1}) // center
+	// Centered by space-padding (see center()) so it lines up over the body and
+	// renders centered on any printer, the emulator, and plain text alike.
 	if s := deref(cfg.ReceiptFooter); s != "" {
 		for _, ln := range wrap(ascii(s), w) {
-			line(b, ln)
+			line(b, center(ln, w))
 		}
 	}
-	line(b, "Thank you! Come again.")
+	line(b, center("Thank you! Come again.", w))
 	line(b, "")
 	b.Write([]byte{esc, 'M', 1}) // select Font B (smaller)
-	line(b, "POS built by Adhnan")
-	line(b, "adhnanmsa@gmail.com | 0769626396")
+	// Font B is narrower (~42 cols on a 58mm roll), so pad over the wider budget.
+	fw := w * 4 / 3
+	line(b, center("POS built by Adhnan", fw))
+	line(b, center("adhnanmsa@gmail.com | 0769626396", fw))
 	b.Write([]byte{esc, 'M', 0}) // back to Font A
 	// Feed past the head-to-cutter gap (plus a little margin) before cutting.
 	b.Write([]byte{esc, 'd', feedBeforeCut})
@@ -211,12 +230,16 @@ func Document(d sales.Detail, cfg settings.Settings, opts Options) []byte {
 		}
 		qty := money.Display(it.Quantity) + " " + ascii(it.UnitAbbr) + " x " + money.Display(it.UnitPrice)
 		// The qty line always shows the GROSS (qty × unit price); a discount then
-		// shows as its own reduction plus the resulting line total, so the numbers
-		// add up on paper (a printer can't strike-through like the webview does).
+		// shows the discounted unit price (was -> now), its own reduction, and the
+		// resulting line total, so the numbers add up on paper (a printer can't
+		// strike-through like the webview does).
+		if it.Discount.IsPositive() {
+			qty += " -> " + money.Display(it.NetUnitPrice())
+		}
 		line(&b, leftRight("  "+qty, money.Display(it.Gross()), w))
 		if it.Discount.IsPositive() {
 			itemDisc = itemDisc.Add(it.Discount)
-			line(&b, leftRight("  Discount"+discSuffix(it.DiscountType, it.DiscountValue), "-"+money.Display(it.Discount), w))
+			line(&b, leftRight("  You saved"+discSuffix(it.DiscountType, it.DiscountValue), "-"+money.Display(it.Discount), w))
 			line(&b, leftRight("  Line total", money.Display(it.Subtotal), w))
 		}
 		if until := it.WarrantyUntil(d.Sale.CreatedAt); !until.IsZero() {
@@ -238,10 +261,10 @@ func Document(d sales.Detail, cfg settings.Settings, opts Options) []byte {
 	// receipt mirrors the cashier screen (item discounts shown per line above).
 	line(&b, leftRight("Subtotal", money.Format(sym, d.Sale.Subtotal), w))
 	if itemDisc.IsPositive() {
-		line(&b, leftRight("Item discounts", "-"+money.Format(sym, itemDisc), w))
+		line(&b, leftRight("Item savings", "-"+money.Format(sym, itemDisc), w))
 	}
 	if billDisc := d.Sale.Discount.Sub(itemDisc); billDisc.IsPositive() {
-		line(&b, leftRight("Bill discount"+discSuffix(d.Sale.DiscountType, d.Sale.DiscountValue), "-"+money.Format(sym, billDisc), w))
+		line(&b, leftRight("Bill saving"+discSuffix(d.Sale.DiscountType, d.Sale.DiscountValue), "-"+money.Format(sym, billDisc), w))
 	}
 	if d.Sale.Tax.IsPositive() {
 		line(&b, leftRight("Tax", money.Format(sym, d.Sale.Tax), w))
@@ -249,6 +272,9 @@ func Document(d sales.Detail, cfg settings.Settings, opts Options) []byte {
 	// TOTAL — emphasized and set off with blank lines so it stands out.
 	line(&b, "")
 	bigLine(&b, "TOTAL", money.Format(sym, d.Sale.Total), w)
+	if d.Sale.Discount.IsPositive() {
+		line(&b, leftRight("You saved", money.Format(sym, d.Sale.Discount), w))
+	}
 
 	// Payment breakdown: one line per tender (cash/card/online/...). This
 	// replaces the old single "Paid" row — the per-method lines already show it.
@@ -349,7 +375,7 @@ func ReturnDocument(rr sales.ReturnReceipt, cfg settings.Settings, opts Options)
 	var b bytes.Buffer
 	Init(&b)
 	Header(&b, cfg, opts)
-	Title(&b, "REFUND")
+	Title(&b, "REFUND", w)
 
 	// --- Meta (left) ---
 	b.Write([]byte{esc, 'a', 0})
@@ -415,7 +441,7 @@ func WarrantyDocument(s WarrantySlip, cfg settings.Settings, opts Options) []byt
 	var b bytes.Buffer
 	Init(&b)
 	Header(&b, cfg, opts)
-	Title(&b, "WARRANTY REPLACEMENT")
+	Title(&b, "WARRANTY REPLACEMENT", w)
 
 	// --- Body (left) ---
 	b.Write([]byte{esc, 'a', 0})
@@ -473,7 +499,7 @@ func DebtDocument(s DebtSlip, cfg settings.Settings, opts Options) []byte {
 	var b bytes.Buffer
 	Init(&b)
 	Header(&b, cfg, opts)
-	Title(&b, "CREDIT PAYMENT")
+	Title(&b, "CREDIT PAYMENT", w)
 	// meta
 	b.Write([]byte{esc, 'a', 0})
 	divider(&b, w)
@@ -559,6 +585,19 @@ func bigLine(b *bytes.Buffer, l, r string, w int) {
 	line(b, leftRight(l, r, w))
 	b.Write([]byte{gs, '!', 0x00}) // normal size
 	b.Write([]byte{esc, 'E', 0})   // bold off
+}
+
+// center pads s with leading spaces so its text sits centered within a w-column
+// line. Centering is baked into the characters (rather than the ESC a 1 hardware
+// justify) so it looks identical on a real printer, on the emulator's fixed-width
+// canvas, and in plain text — and it centers over the SAME w columns the body
+// uses, so the header lines up with the dividers below. A string at or past w is
+// returned unchanged.
+func center(s string, w int) string {
+	if len(s) >= w {
+		return s
+	}
+	return strings.Repeat(" ", (w-len(s))/2) + s
 }
 
 // leftRight pads a left and right label out to w columns. The left side is
