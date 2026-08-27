@@ -199,24 +199,35 @@ templ intakeLabelControls() {
 			<input type="checkbox" name="print_labels" value="1" x-model="printLabels"/> Print labels on save
 		</label>
 		<div x-show="printLabels" x-cloak class="space-y-3">
+			<div>
+				<label class="block text-sm font-medium mb-1">Number of labels</label>
+				<!--
+				  Disabled while hidden. A disabled control is skipped by form
+				  validation, so a stale value here can never silently block the
+				  save — the browser refuses to submit but cannot focus a hidden
+				  field to say why, and the item just never gets created.
+				-->
+				<input
+					name="label_qty" type="number" min="1" max="200" x-model="labelQty"
+					x-bind:disabled="!printLabels" class="w-full border rounded-lg px-3 py-2"
+				/>
+			</div>
 			<div class="grid grid-cols-2 gap-4">
 				<div>
-					<label class="block text-sm font-medium mb-1">Number of labels</label>
-					<!--
-					  Disabled while hidden. A disabled control is skipped by form
-					  validation, so a stale value here can never silently block the
-					  save — the browser refuses to submit but cannot focus a hidden
-					  field to say why, and the item just never gets created.
-					-->
-					<input
-						name="label_qty" type="number" min="1" max="200" x-model="labelQty"
-						x-bind:disabled="!printLabels" class="w-full border rounded-lg px-3 py-2"
-					/>
+					<label class="block text-sm font-medium mb-1">Top line</label>
+					<select x-model="iTop" class="w-full border rounded-lg px-3 py-2">
+						<template x-for="o in productSlotOptions()" x-bind:key="o.key">
+							<option x-bind:value="o.key" x-text="o.label"></option>
+						</template>
+					</select>
 				</div>
-				<div class="flex items-end">
-					<label class="inline-flex items-center gap-2 text-sm">
-						<input type="checkbox" name="show_price" value="1" x-model="showPrice"/> Show price
-					</label>
+				<div>
+					<label class="block text-sm font-medium mb-1">Bottom line</label>
+					<select x-model="iBottom" class="w-full border rounded-lg px-3 py-2">
+						<template x-for="o in productSlotOptions()" x-bind:key="o.key">
+							<option x-bind:value="o.key" x-text="o.label"></option>
+						</template>
+					</select>
 				</div>
 			</div>
 			@labelSizePicker()

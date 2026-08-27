@@ -3567,7 +3567,47 @@ function intake(sym) {
     qty: "",
     labelQty: "1",
     printLabels: true,
-    showPrice: true,
+    // label top/bottom line pickers (resolved against the saved item at print time)
+    iTop: "name",
+    iBottom: "price",
+    labelFields: [], // [{label,value}] custom fields flagged print_on_label (restock only)
+
+    // productSlotOptions is the Top/Bottom choice list: name, price, each
+    // label-flagged custom field (present once a restock target is picked), none.
+    productSlotOptions() {
+      const opts = [
+        { key: "name", label: "Name" },
+        { key: "price", label: "Price" },
+      ];
+      for (const f of this.labelFields) opts.push({ key: "f:" + f.label, label: f.label });
+      opts.push({ key: "none", label: "— none —" });
+      return opts;
+    },
+    // resolveSlot turns a slot key into printable text, using the saved item for
+    // name/price (authoritative + formatted by the server) and the loaded fields.
+    resolveSlot(key, item) {
+      if (key === "name") return item.name || "";
+      if (key === "price") return item.price || "";
+      if (key === "none") return "";
+      if (key.startsWith("f:")) {
+        const f = this.labelFields.find((x) => x.label === key.slice(2));
+        return f ? f.value : "";
+      }
+      return "";
+    },
+    async loadLabelFields(id) {
+      this.labelFields = [];
+      if (!id) return;
+      try {
+        const res = await fetch("/api/products/" + id + "/label-fields", {
+          credentials: "same-origin",
+        });
+        const json = await res.json();
+        if (json && json.success && Array.isArray(json.data)) this.labelFields = json.data;
+      } catch (_) {
+        /* name/price still work without fields */
+      }
+    },
     // session list
     items: [],
     seq: 0,
@@ -3621,6 +3661,7 @@ function intake(sym) {
       this.qty = "";
       this.labelQty = "1";
       this.open = false;
+      this.loadLabelFields(r.id);
       this.drawRestock();
     },
     createNew() {
@@ -3629,6 +3670,7 @@ function intake(sym) {
       this.cBarcode = "";
       this.qty = "";
       this.labelQty = "1";
+      this.labelFields = []; // a brand-new item has no custom values yet
       this.open = false;
       this.drawNew();
     },
@@ -3765,7 +3807,7 @@ function intake(sym) {
     async afterSave(item, form) {
       if (this.printLabels && item.barcode) {
         try {
-          await this.sendLabels(item.id, new FormData(form));
+          await this.sendLabels(item, new FormData(form));
         } catch (_) {
           toast("Saved, but printing failed — use Reprint", "error");
         }
@@ -3778,11 +3820,14 @@ function intake(sym) {
       this.items.unshift(item);
       this.reset();
     },
-    async sendLabels(productId, fd) {
+    async sendLabels(item, fd) {
       const p = new URLSearchParams();
-      p.set("product_id", String(productId));
+      p.set("product_id", String(item.id));
       p.set("qty", fd.get("label_qty") || "1");
-      if (fd.get("show_price")) p.set("show_price", "1");
+      // Top/bottom lines chosen in the picker, resolved against the saved item.
+      p.set("slots", "1");
+      p.set("top", this.resolveSlot(this.iTop, item));
+      p.set("bottom", this.resolveSlot(this.iBottom, item));
       p.set("label_size", fd.get("label_size") || "default");
       if (fd.get("label_w")) p.set("label_w", fd.get("label_w"));
       if (fd.get("label_h")) p.set("label_h", fd.get("label_h"));
