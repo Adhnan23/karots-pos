@@ -132,16 +132,18 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 			Active             bool   `db:"is_active"`
 			CanHandleSuppliers bool   `db:"can_handle_suppliers"`
 			CanManageCredit    bool   `db:"can_manage_credit"`
+			CanSeeCost         bool   `db:"can_see_cost"`
 			IsSystem           bool   `db:"is_system"`
 			Role               string `db:"role"`
 		}
 		if err := db.GetContext(ctx, &row,
-			`SELECT is_active, can_handle_suppliers, can_manage_credit, is_system, role FROM users WHERE id = $1`, userID); err != nil {
+			`SELECT is_active, can_handle_suppliers, can_manage_credit, can_see_cost, is_system, role FROM users WHERE id = $1`, userID); err != nil {
 			return middleware.UserFlags{}, false
 		}
 		return middleware.UserFlags{
 			CanHandleSuppliers: row.CanHandleSuppliers,
 			CanManageCredit:    row.CanManageCredit,
+			CanSeeCost:         row.CanSeeCost,
 			// Admin or the hidden support account may escape the kiosk; a cashier
 			// never can.
 			CanExitKiosk: row.IsSystem || row.Role == "admin",
@@ -600,6 +602,25 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 				}
 				for id, badges := range m {
 					out[id] = append(out[id], badges...)
+				}
+			}
+			return out
+		}
+	}
+	// Same bridge for till info-popup detail contributors → products.DetailContributor.
+	if dcs := plugin.ProductDetailContributors(); len(dcs) > 0 {
+		products.DetailContributor = func(ctx context.Context, id int64) []products.DetailRow {
+			var out []products.DetailRow
+			for _, dc := range dcs {
+				if dc.Rows == nil {
+					continue
+				}
+				rows, err := dc.Rows(ctx, id)
+				if err != nil {
+					continue
+				}
+				for _, r := range rows {
+					out = append(out, products.DetailRow{Label: r.Label, Value: r.Value})
 				}
 			}
 			return out

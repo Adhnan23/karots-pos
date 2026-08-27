@@ -304,6 +304,21 @@ type ProductBadgeProvider struct {
 	Batch func(ctx context.Context, productIDs []int64) (map[int64][]string, error)
 }
 
+// DetailRow is one labeled line a plugin contributes to the till product-info
+// popup.
+type DetailRow struct {
+	Label string
+	Value string
+}
+
+// ProductDetailContributor supplies extra labeled rows for the till product-info
+// popup (e.g. a plugin's custom fields marked "show at till"). Rows is called for
+// the single product whose info the cashier opened. Best-effort: an error just
+// drops the rows, never blocks the popup.
+type ProductDetailContributor struct {
+	Rows func(ctx context.Context, productID int64) ([]DetailRow, error)
+}
+
 // ReorderNote annotates one low-stock product on the reorder worklist. Covered
 // means an interchangeable equivalent is in stock, so the item need not be
 // reordered even though it reads low; Note is a short explanation shown on the row.
@@ -332,6 +347,7 @@ var (
 	productSearchers         []ProductSearchContributor
 	productMetaProviders     []ProductMetaProvider
 	productBadgeProviders    []ProductBadgeProvider
+	productDetailProviders   []ProductDetailContributor
 	productReorderAnnotators []ProductReorderAnnotator
 )
 
@@ -351,6 +367,9 @@ func (r *Registry) AddProductMetaProvider(p ProductMetaProvider) {
 func (r *Registry) AddProductBadgeProvider(p ProductBadgeProvider) {
 	productBadgeProviders = append(productBadgeProviders, p)
 }
+func (r *Registry) AddProductDetailContributor(p ProductDetailContributor) {
+	productDetailProviders = append(productDetailProviders, p)
+}
 func (r *Registry) AddProductReorderAnnotator(a ProductReorderAnnotator) {
 	productReorderAnnotators = append(productReorderAnnotators, a)
 }
@@ -361,4 +380,5 @@ func ProductSavedHooks() []ProductSaved                     { return productSave
 func ProductSearchContributors() []ProductSearchContributor { return productSearchers }
 func ProductMetaProviders() []ProductMetaProvider           { return productMetaProviders }
 func ProductBadgeProviders() []ProductBadgeProvider         { return productBadgeProviders }
+func ProductDetailContributors() []ProductDetailContributor { return productDetailProviders }
 func ProductReorderAnnotators() []ProductReorderAnnotator   { return productReorderAnnotators }

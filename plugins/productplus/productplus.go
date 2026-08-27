@@ -36,6 +36,7 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 	reg.Admin().POST("/productplus", a.CreateField)
 	reg.Admin().PUT("/productplus/:id", a.UpdateField)
 	reg.Admin().POST("/productplus/:id/active", a.SetActive)
+	reg.Admin().POST("/productplus/:id/move", a.MoveField)
 
 	reg.AddAdminNav(plugin.AdminNavEntry{
 		SectionLabel: "Product Plus", Icon: "🧩",
@@ -54,6 +55,9 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 
 	// Read-only display: show a product's custom values in the admin product list.
 	reg.AddProductMetaProvider(plugin.ProductMetaProvider{Batch: p.store.MetaFor})
+
+	// Till info popup: contribute the fields flagged "show at till" as extra rows.
+	reg.AddProductDetailContributor(plugin.ProductDetailContributor{Rows: p.store.TillRows})
 }
 
 func (p *Plugin) matchProducts(ctx context.Context, q string) ([]int64, error) {

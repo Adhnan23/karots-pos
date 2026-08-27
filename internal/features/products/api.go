@@ -10,6 +10,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	"github.com/labstack/echo/v4"
+	"github.com/shopspring/decimal"
 )
 
 type APIHandler struct{ svc *Service }
@@ -67,6 +68,65 @@ func (h *APIHandler) Get(c echo.Context) error {
 		}
 	}
 	return response.OK(c, p)
+}
+
+// ProductDetail is the till info-popup payload: core facts plus plugin rows.
+// Cost and margin are present only when the request may see cost (server-side
+// gate) so a forbidden cashier never receives them.
+type ProductDetail struct {
+	ID           int64       `json:"id"`
+	Name         string      `json:"name"`
+	Category     string      `json:"category"`
+	Barcode      string      `json:"barcode,omitempty"`
+	Unit         string      `json:"unit"`
+	SellingPrice string      `json:"selling_price"`
+	StockQty     string      `json:"stock_qty"`
+	Warranty     string      `json:"warranty,omitempty"`
+	ShowCost     bool        `json:"show_cost"`
+	CostPrice    string      `json:"cost_price,omitempty"`
+	MarginPct    string      `json:"margin_pct,omitempty"`
+	Rows         []DetailRow `json:"rows,omitempty"`
+}
+
+// Detail serves the till product-info popup. Any signed-in user may read the
+// facts; cost/margin are added only when MaySeeCost passes for this user.
+func (h *APIHandler) Detail(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	ctx := c.Request().Context()
+	p, err := h.svc.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	d := ProductDetail{
+		ID:           p.ID,
+		Name:         p.Name,
+		Category:     p.CategoryName,
+		Unit:         p.UnitAbbr,
+		SellingPrice: p.SellingPrice.StringFixed(2),
+		StockQty:     p.StockQty.String(),
+	}
+	if p.Barcode != nil {
+		d.Barcode = *p.Barcode
+	}
+	if p.WarrantyMonths > 0 {
+		d.Warranty = strconv.Itoa(p.WarrantyMonths) + " month warranty"
+	}
+	if middleware.MaySeeCost(middleware.CurrentRole(c), middleware.CanSeeCost(c)) {
+		d.ShowCost = true
+		d.CostPrice = p.CostPrice.StringFixed(2)
+		// Margin as a % of the selling price; skip when either side is zero.
+		if p.SellingPrice.IsPositive() && p.CostPrice.IsPositive() {
+			m := p.SellingPrice.Sub(p.CostPrice).Div(p.SellingPrice).Mul(decimal.NewFromInt(100))
+			d.MarginPct = m.StringFixed(1)
+		}
+	}
+	if DetailContributor != nil {
+		d.Rows = DetailContributor(ctx, p.ID)
+	}
+	return response.OK(c, d)
 }
 
 func (h *APIHandler) GetByBarcode(c echo.Context) error {
@@ -190,6 +250,7 @@ func RegisterAPI(e *echo.Echo, db *sqlx.DB, cfg *config.Config) {
 	g := e.Group("/api/products", jwt)
 	g.GET("", api.List)
 	g.GET("/:id", api.Get)
+	g.GET("/:id/detail", api.Detail)
 	g.GET("/price-options", api.PriceOptions)
 	g.GET("/quick-picks", api.QuickPicks)
 	g.GET("/:id/lots", api.Lots)

@@ -9,6 +9,26 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+// TestMaySeeCost pins who may see product cost/margin in the till info popup:
+// admins and managers always; a cashier only with the per-user flag.
+func TestMaySeeCost(t *testing.T) {
+	cases := []struct {
+		role    string
+		flag    bool
+		allowed bool
+	}{
+		{"admin", false, true},
+		{"manager", false, true},
+		{"cashier", false, false},
+		{"cashier", true, true},
+	}
+	for _, tc := range cases {
+		if got := MaySeeCost(tc.role, tc.flag); got != tc.allowed {
+			t.Errorf("MaySeeCost(%q, %v) = %v, want %v", tc.role, tc.flag, got, tc.allowed)
+		}
+	}
+}
+
 // TestRequireSupplierAccess pins who may reach the supplier counter routes.
 // Admins and managers always pass; a cashier passes only when the owner has
 // switched the per-user flag on.

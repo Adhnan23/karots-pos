@@ -24,6 +24,9 @@ type UserFlags struct {
 	// support account; never for a plain cashier. Computed in the validator so the
 	// route gate and the hotkey guard read one flag.
 	CanExitKiosk bool
+	// CanSeeCost lets a cashier see product cost/margin in the till info popup.
+	// Meaningless for admins and managers, who may always see it.
+	CanSeeCost bool
 }
 
 // ctxKey is unexported so nothing outside this package can collide with it.
@@ -38,6 +41,8 @@ var ctxFlagsKey = ctxKey{"user_flags"}
 const ctxCanSuppliers = "can_handle_suppliers"
 
 const ctxCanManageCredit = "can_manage_credit"
+
+const ctxCanSeeCost = "can_see_cost"
 
 // CanHandleSuppliers reports the flag for the current request. Admins and
 // managers are NOT covered here — this is the raw per-user flag.
@@ -75,6 +80,20 @@ func CanManageCreditCtx(ctx context.Context) bool {
 // MayManageCredit is the full rule: an admin or manager always may; a cashier
 // may only with the flag.
 func MayManageCredit(role string, flag bool) bool {
+	return role == "admin" || role == "manager" || flag
+}
+
+// CanSeeCost reports the raw per-user flag for the current request. Admins and
+// managers are NOT covered here — this is the raw per-user flag.
+func CanSeeCost(c echo.Context) bool {
+	b, _ := c.Get(ctxCanSeeCost).(bool)
+	return b
+}
+
+// MaySeeCost is the full rule: an admin or manager always may; a cashier may
+// only with the flag. Used by the till detail endpoint to decide whether to
+// include cost/margin in the payload.
+func MaySeeCost(role string, flag bool) bool {
 	return role == "admin" || role == "manager" || flag
 }
 

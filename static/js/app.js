@@ -457,6 +457,12 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
     // Parked carts (hold / resume).
     holds: [],
     showHolds: false,
+    // Product info popup (ⓘ on a card): the fetched detail, the product we opened
+    // it for (so the popup can add-to-cart), and a loading flag while /detail lands.
+    showInfo: false,
+    infoLoading: false,
+    infoData: {},
+    infoProduct: null,
     // Quick-add: sell an item that isn't in the catalog yet.
     showQuickItem: false,
     quickItem: { name: "", price: "", qty: 1, barcode: "", unit_id: 0 },
@@ -1002,6 +1008,28 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
         this.quickFrequent = json.data || [];
       } catch (_) {
         this.quickFrequent = [];
+      }
+    },
+    // showProductInfo opens the ⓘ popup for a card. It shows what the card already
+    // knows immediately, then fills in cost/margin/category/custom-fields from
+    // /detail (cost is server-gated, so it only arrives for allowed users).
+    async showProductInfo(p) {
+      this.infoProduct = p;
+      this.infoData = {
+        name: p.name,
+        selling_price: p.selling_price,
+        stock_qty: p.stock_qty,
+        unit: p.unit_abbr,
+      };
+      this.infoLoading = true;
+      this.showInfo = true;
+      try {
+        const json = await apiFetch("GET", "/api/products/" + p.id + "/detail", undefined, { silent: true });
+        if (json && json.data) this.infoData = json.data;
+      } catch (_) {
+        // Keep the basics already shown; the popup still works offline of /detail.
+      } finally {
+        this.infoLoading = false;
       }
     },
     // lotsFor returns the price choices for a product, but only when they are a

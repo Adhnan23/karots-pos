@@ -134,6 +134,20 @@ templ UserForm(u *auth.User) {
 					</span>
 				</label>
 			</div>
+			<div>
+				<label class="flex items-start gap-3">
+					<input
+						type="checkbox"
+						name="can_see_cost"
+						checked?={ u != nil && u.CanSeeCost }
+						class="mt-1 w-4 h-4"
+					/>
+					<span>
+						<span class="text-sm font-medium">See product cost at till</span>
+						<span class="block text-xs text-slate-500">Lets this person open a product's info (the ⓘ on a till card) and see its cost price and margin — useful when deciding a discount. Leave off to hide cost from cashiers.</span>
+					</span>
+				</label>
+			</div>
 			@modalButtons()
 		</form>
 	}

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	appdb "karots-pos/internal/db"
+	"karots-pos/internal/plugin"
 
 	"github.com/lib/pq"
 )
@@ -15,10 +16,14 @@ type Field struct {
 	ID           int64    `db:"id"`
 	Key          string   `db:"key"`
 	Label        string   `db:"label"`
-	Type         string   `db:"type"` // text | number | bool | select
+	Type         string   `db:"type"` // text | textarea | number | bool | select | date
 	DefaultValue string   `db:"default_value"`
+	Hint         string   `db:"hint"`
 	Required     bool     `db:"required"`
 	Searchable   bool     `db:"searchable"`
+	ShowAtTill     bool   `db:"show_at_till"`
+	PrintOnLabel   bool   `db:"print_on_label"`
+	PrintOnReceipt bool   `db:"print_on_receipt"`
 	// OptionsRaw is the options JSONB as stored; exported so sqlx can scan it.
 	// Use Options (decoded) everywhere else.
 	OptionsRaw []byte   `db:"options"`
@@ -26,6 +31,11 @@ type Field struct {
 	SortOrder  int      `db:"sort_order"`
 	IsActive   bool     `db:"is_active"`
 }
+
+// fieldColumns is the shared SELECT list, kept in one place so a new column lands
+// in every read at once.
+const fieldColumns = `id, key, label, type, default_value, hint, required, searchable,
+	show_at_till, print_on_label, print_on_receipt, options, sort_order, is_active`
 
 type Store struct{ db appdb.Queryer }
 
@@ -41,8 +51,7 @@ func (f *Field) decodeOptions() {
 func (s *Store) Fields(ctx context.Context, includeDisabled bool) ([]Field, error) {
 	var rows []Field
 	err := s.db.SelectContext(ctx, &rows, `
-		SELECT id, key, label, type, default_value, required, searchable,
-		       options, sort_order, is_active
+		SELECT `+fieldColumns+`
 		FROM pp_fields
 		WHERE ($1 OR is_active)
 		ORDER BY sort_order, id`, includeDisabled)
@@ -57,8 +66,7 @@ func (s *Store) ActiveFields(ctx context.Context) ([]Field, error) { return s.Fi
 func (s *Store) Field(ctx context.Context, id int64) (*Field, error) {
 	var f Field
 	if err := s.db.GetContext(ctx, &f, `
-		SELECT id, key, label, type, default_value, required, searchable,
-		       options, sort_order, is_active
+		SELECT `+fieldColumns+`
 		FROM pp_fields WHERE id=$1`, id); err != nil {
 		return nil, err
 	}
@@ -73,9 +81,11 @@ func (s *Store) CreateField(ctx context.Context, f Field) (int64, error) {
 	}
 	var id int64
 	err := s.db.GetContext(ctx, &id, `
-		INSERT INTO pp_fields (key, label, type, default_value, required, searchable, options, sort_order, is_active)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,true) RETURNING id`,
-		f.Key, f.Label, f.Type, f.DefaultValue, f.Required, f.Searchable, nullJSON(opts), f.SortOrder)
+		INSERT INTO pp_fields (key, label, type, default_value, hint, required, searchable,
+			show_at_till, print_on_label, print_on_receipt, options, sort_order, is_active)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,true) RETURNING id`,
+		f.Key, f.Label, f.Type, f.DefaultValue, f.Hint, f.Required, f.Searchable,
+		f.ShowAtTill, f.PrintOnLabel, f.PrintOnReceipt, nullJSON(opts), f.SortOrder)
 	return id, err
 }
 
@@ -84,15 +94,70 @@ func (s *Store) UpdateField(ctx context.Context, f Field) error {
 	if len(f.Options) > 0 {
 		opts, _ = json.Marshal(f.Options)
 	}
+	// sort_order is deliberately NOT updated here — it's managed by MoveField
+	// (the ▲▼ buttons), so editing a field never disturbs its position.
 	_, err := s.db.ExecContext(ctx, `
-		UPDATE pp_fields SET label=$2, type=$3, default_value=$4, required=$5,
-		       searchable=$6, options=$7, sort_order=$8 WHERE id=$1`,
-		f.ID, f.Label, f.Type, f.DefaultValue, f.Required, f.Searchable, nullJSON(opts), f.SortOrder)
+		UPDATE pp_fields SET label=$2, type=$3, default_value=$4, hint=$5, required=$6,
+		       searchable=$7, show_at_till=$8, print_on_label=$9, print_on_receipt=$10,
+		       options=$11 WHERE id=$1`,
+		f.ID, f.Label, f.Type, f.DefaultValue, f.Hint, f.Required, f.Searchable,
+		f.ShowAtTill, f.PrintOnLabel, f.PrintOnReceipt, nullJSON(opts))
 	return err
 }
 
 func (s *Store) SetFieldActive(ctx context.Context, id int64, active bool) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE pp_fields SET is_active=$2 WHERE id=$1`, id, active)
+	return err
+}
+
+// FieldCount returns how many fields exist (active or not) — used to append a new
+// field at the end of the order.
+func (s *Store) FieldCount(ctx context.Context) (int, error) {
+	var n int
+	err := s.db.GetContext(ctx, &n, `SELECT count(*) FROM pp_fields`)
+	return n, err
+}
+
+// MoveField shifts a field one step up or down in display order. It renumbers
+// every field to its position in the swapped sequence, so ties (many fields left
+// at the default sort_order 0, ordered by id) resolve deterministically and a
+// swap always has a visible effect. No-op at the edges.
+//
+// ponytail: rewrites every row per move — fine for a short admin field list.
+func (s *Store) MoveField(ctx context.Context, id int64, up bool) error {
+	fields, err := s.Fields(ctx, true) // full list, in (sort_order, id) order
+	if err != nil {
+		return err
+	}
+	idx := -1
+	for i := range fields {
+		if fields[i].ID == id {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return nil
+	}
+	j := idx + 1
+	if up {
+		j = idx - 1
+	}
+	if j < 0 || j >= len(fields) {
+		return nil // already at the edge
+	}
+	fields[idx], fields[j] = fields[j], fields[idx]
+	for i := range fields {
+		if err := s.SetSortOrder(ctx, fields[i].ID, i); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// SetSortOrder writes one field's position.
+func (s *Store) SetSortOrder(ctx context.Context, id int64, n int) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE pp_fields SET sort_order=$2 WHERE id=$1`, id, n)
 	return err
 }
 
@@ -193,7 +258,7 @@ func (s *Store) MetaFor(ctx context.Context, productIDs []int64) (map[int64]stri
 			if strings.TrimSpace(r.Value) == "" {
 				continue
 			}
-			label = r.Label + ": " + r.Value
+			label = r.Label + ": " + truncate(r.Value, 40)
 		}
 		parts[r.ProductID] = append(parts[r.ProductID], label)
 	}
@@ -209,4 +274,55 @@ func nullJSON(b []byte) any {
 		return nil
 	}
 	return b
+}
+
+// truncate shortens a value for a compact summary line (long textarea text would
+// otherwise blow up the admin list / info popup). Rune-safe, adds an ellipsis.
+func truncate(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return strings.TrimSpace(string(r[:n])) + "…"
+}
+
+// TillRows returns the custom-field rows to show in the till info popup for a
+// product: only fields flagged show_at_till, in sort order, skipping blanks and
+// No booleans (a bool shows its label only when Yes). Value equal to the default
+// still shows — the till reader wants the fact, not just overrides.
+func (s *Store) TillRows(ctx context.Context, productID int64) ([]plugin.DetailRow, error) {
+	type row struct {
+		Label   string `db:"label"`
+		Type    string `db:"type"`
+		Default string `db:"default_value"`
+		Value   *string `db:"value"`
+	}
+	var rows []row
+	if err := s.db.SelectContext(ctx, &rows, `
+		SELECT f.label, f.type, f.default_value, v.value
+		FROM pp_fields f
+		LEFT JOIN pp_values v ON v.field_id = f.id AND v.product_id = $1
+		WHERE f.is_active AND f.show_at_till
+		ORDER BY f.sort_order, f.id`, productID); err != nil {
+		return nil, err
+	}
+	out := make([]plugin.DetailRow, 0, len(rows))
+	for _, r := range rows {
+		val := r.Default
+		if r.Value != nil {
+			val = *r.Value
+		}
+		if r.Type == "bool" {
+			if val != "1" {
+				continue
+			}
+			out = append(out, plugin.DetailRow{Label: r.Label, Value: "Yes"})
+			continue
+		}
+		if strings.TrimSpace(val) == "" {
+			continue
+		}
+		out = append(out, plugin.DetailRow{Label: r.Label, Value: truncate(val, 120)})
+	}
+	return out, nil
 }

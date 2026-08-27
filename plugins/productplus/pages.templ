@@ -85,7 +85,9 @@ templ FieldsTable(fields []Field, showDisabled bool) {
 							}
 						</td>
 						<td class="px-4 py-3 text-right whitespace-nowrap">
-							<button hx-get={ "/admin/productplus/form/" + strconv.FormatInt(f.ID, 10) } hx-target="#modal-container" hx-swap="innerHTML" class="text-indigo-600 hover:underline">Edit</button>
+							<button hx-post={ "/admin/productplus/" + strconv.FormatInt(f.ID, 10) + "/move" } hx-vals='{"dir":"up"}' hx-swap="none" title="Move up" class="text-slate-400 hover:text-slate-700 px-1">▲</button>
+							<button hx-post={ "/admin/productplus/" + strconv.FormatInt(f.ID, 10) + "/move" } hx-vals='{"dir":"down"}' hx-swap="none" title="Move down" class="text-slate-400 hover:text-slate-700 px-1">▼</button>
+							<button hx-get={ "/admin/productplus/form/" + strconv.FormatInt(f.ID, 10) } hx-target="#modal-container" hx-swap="innerHTML" class="ml-2 text-indigo-600 hover:underline">Edit</button>
 							if f.IsActive {
 								<button hx-post={ "/admin/productplus/" + strconv.FormatInt(f.ID, 10) + "/active" } hx-vals='{"active":""}' hx-swap="none" class="ml-3 text-rose-600 hover:underline">Disable</button>
 							} else {
@@ -103,12 +105,16 @@ func fieldTypeLabel(f Field) string {
 	switch f.Type {
 	case "text":
 		return "Text"
+	case "textarea":
+		return "Long text"
 	case "number":
 		return "Number"
 	case "bool":
 		return "Yes / No"
 	case "select":
 		return "Dropdown (" + strconv.Itoa(len(f.Options)) + ")"
+	case "date":
+		return "Date"
 	}
 	return f.Type
 }
@@ -130,20 +136,16 @@ templ FieldForm(f *Field) {
 				<label class="block text-sm font-medium text-slate-600 mb-1">Label</label>
 				<input type="text" name="label" required value={ formLabel(f) } placeholder="Model No" class="w-full border rounded-lg px-3 py-2.5"/>
 			</div>
-			<div class="grid grid-cols-2 gap-3">
-				<div>
-					<label class="block text-sm font-medium text-slate-600 mb-1">Type</label>
-					<select name="type" x-model="type" class="w-full border rounded-lg px-3 py-2.5">
-						<option value="text" selected?={ formType(f) == "text" }>Text</option>
-						<option value="number" selected?={ formType(f) == "number" }>Number</option>
-						<option value="bool" selected?={ formType(f) == "bool" }>Yes / No</option>
-						<option value="select" selected?={ formType(f) == "select" }>Dropdown</option>
-					</select>
-				</div>
-				<div>
-					<label class="block text-sm font-medium text-slate-600 mb-1">Order</label>
-					<input type="number" name="sort_order" value={ formSort(f) } class="w-full border rounded-lg px-3 py-2.5"/>
-				</div>
+			<div>
+				<label class="block text-sm font-medium text-slate-600 mb-1">Type</label>
+				<select name="type" x-model="type" class="w-full border rounded-lg px-3 py-2.5">
+					<option value="text" selected?={ formType(f) == "text" }>Text</option>
+					<option value="textarea" selected?={ formType(f) == "textarea" }>Long text</option>
+					<option value="number" selected?={ formType(f) == "number" }>Number</option>
+					<option value="bool" selected?={ formType(f) == "bool" }>Yes / No</option>
+					<option value="select" selected?={ formType(f) == "select" }>Dropdown</option>
+					<option value="date" selected?={ formType(f) == "date" }>Date</option>
+				</select>
 			</div>
 			<div x-show="type==='select'" x-cloak>
 				<label class="block text-sm font-medium text-slate-600 mb-1">Options (one per line)</label>
@@ -154,6 +156,10 @@ templ FieldForm(f *Field) {
 				<input type="text" name="default_value" value={ formDefault(f) } placeholder="left blank for most" class="w-full border rounded-lg px-3 py-2.5"/>
 				<p class="text-xs text-slate-400 mt-1">Products without a value read this. A required field should have one so existing products stay valid.</p>
 			</div>
+			<div>
+				<label class="block text-sm font-medium text-slate-600 mb-1">Help text <span class="text-slate-400 font-normal">(optional)</span></label>
+				<input type="text" name="hint" value={ formHint(f) } placeholder="a short note shown under the input on the product form" class="w-full border rounded-lg px-3 py-2.5"/>
+			</div>
 			<div class="flex gap-6">
 				<label class="inline-flex items-center gap-2 text-sm text-slate-700">
 					<input type="checkbox" name="required" value="1" checked?={ formBool(f, "required") } class="rounded border-slate-300"/> Required
@@ -161,6 +167,20 @@ templ FieldForm(f *Field) {
 				<label class="inline-flex items-center gap-2 text-sm text-slate-700">
 					<input type="checkbox" name="searchable" value="1" checked?={ formBool(f, "searchable") } class="rounded border-slate-300"/> Searchable
 				</label>
+			</div>
+			<div>
+				<p class="text-sm font-medium text-slate-600 mb-1">Show this field</p>
+				<div class="flex flex-col gap-2">
+					<label class="inline-flex items-center gap-2 text-sm text-slate-700">
+						<input type="checkbox" name="show_at_till" value="1" checked?={ formBool(f, "show_at_till") } class="rounded border-slate-300"/> In the till info popup <span class="text-slate-400">(the ⓘ on a product card)</span>
+					</label>
+					<label class="inline-flex items-center gap-2 text-sm text-slate-700">
+						<input type="checkbox" name="print_on_label" value="1" checked?={ formBool(f, "print_on_label") } class="rounded border-slate-300"/> On the shelf label
+					</label>
+					<label class="inline-flex items-center gap-2 text-sm text-slate-700">
+						<input type="checkbox" name="print_on_receipt" value="1" checked?={ formBool(f, "print_on_receipt") } class="rounded border-slate-300"/> On the customer receipt
+					</label>
+				</div>
 			</div>
 			<div class="flex justify-end gap-3 pt-2">
 				<button type="button" class="px-4 py-2 rounded-lg border" x-on:click="$dispatch('close-modal')">Cancel</button>
@@ -208,8 +228,15 @@ templ ProductFieldsFragment(rows []FieldValue) {
 						</select>
 					case "number":
 						<input type="number" step="any" name={ "pp_" + r.Field.Key } value={ r.Value } required?={ r.Field.Required } class="w-full border rounded-lg px-3 py-2.5"/>
+					case "textarea":
+						<textarea name={ "pp_" + r.Field.Key } rows="3" required?={ r.Field.Required } class="w-full border rounded-lg px-3 py-2.5">{ r.Value }</textarea>
+					case "date":
+						<input type="date" name={ "pp_" + r.Field.Key } value={ r.Value } required?={ r.Field.Required } class="w-full border rounded-lg px-3 py-2.5"/>
 					default:
 						<input type="text" name={ "pp_" + r.Field.Key } value={ r.Value } required?={ r.Field.Required } class="w-full border rounded-lg px-3 py-2.5"/>
+				}
+				if r.Field.Hint != "" {
+					<p class="text-xs text-slate-400 mt-1">{ r.Field.Hint }</p>
 				}
 			</div>
 		}
@@ -256,24 +283,33 @@ func formDefault(f *Field) string {
 	}
 	return f.DefaultValue
 }
-func formSort(f *Field) string {
-	if f == nil {
-		return "0"
-	}
-	return strconv.Itoa(f.SortOrder)
-}
 func formOptions(f *Field) string {
 	if f == nil {
 		return ""
 	}
 	return strings.Join(f.Options, "\n")
 }
+func formHint(f *Field) string {
+	if f == nil {
+		return ""
+	}
+	return f.Hint
+}
 func formBool(f *Field, which string) bool {
 	if f == nil {
 		return false
 	}
-	if which == "required" {
+	switch which {
+	case "required":
 		return f.Required
+	case "searchable":
+		return f.Searchable
+	case "show_at_till":
+		return f.ShowAtTill
+	case "print_on_label":
+		return f.PrintOnLabel
+	case "print_on_receipt":
+		return f.PrintOnReceipt
 	}
-	return f.Searchable
+	return false
 }

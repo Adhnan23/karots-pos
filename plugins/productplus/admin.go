@@ -63,18 +63,21 @@ func (a *adminUI) FieldForm(c echo.Context) error {
 // key (create slugs a new one; edit keeps the existing key).
 func parseField(c echo.Context) (Field, error) {
 	f := Field{
-		Label:        strings.TrimSpace(c.FormValue("label")),
-		Type:         strings.TrimSpace(c.FormValue("type")),
-		DefaultValue: strings.TrimSpace(c.FormValue("default_value")),
-		Required:     c.FormValue("required") != "",
-		Searchable:   c.FormValue("searchable") != "",
+		Label:          strings.TrimSpace(c.FormValue("label")),
+		Type:           strings.TrimSpace(c.FormValue("type")),
+		DefaultValue:   strings.TrimSpace(c.FormValue("default_value")),
+		Hint:           strings.TrimSpace(c.FormValue("hint")),
+		Required:       c.FormValue("required") != "",
+		Searchable:     c.FormValue("searchable") != "",
+		ShowAtTill:     c.FormValue("show_at_till") != "",
+		PrintOnLabel:   c.FormValue("print_on_label") != "",
+		PrintOnReceipt: c.FormValue("print_on_receipt") != "",
 	}
-	f.SortOrder, _ = strconv.Atoi(strings.TrimSpace(c.FormValue("sort_order")))
 	if f.Label == "" {
 		return f, apperr.Validation("label is required")
 	}
 	switch f.Type {
-	case "text", "number", "bool", "select":
+	case "text", "textarea", "number", "bool", "select", "date":
 	default:
 		return f, apperr.Validation("choose a field type")
 	}
@@ -107,6 +110,11 @@ func (a *adminUI) CreateField(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	// New fields append to the end of the order (existing fields are numbered
+	// 0..n-1 by the ▲▼ reorder, so n places this last).
+	if f.SortOrder, err = a.p.store.FieldCount(ctx); err != nil {
+		return err
+	}
 	if _, err := a.p.store.CreateField(ctx, f); err != nil {
 		return err
 	}
@@ -131,6 +139,20 @@ func (a *adminUI) UpdateField(c echo.Context) error {
 	}
 	a.audit(c, audit.ActionUpdate, f.Key, "updated custom field "+f.Label)
 	c.Response().Header().Set("HX-Trigger", response.ToastAnd(f.Label+" saved", "success", "reload-ppfields", "close-modal"))
+	return response.NoContent(c)
+}
+
+// MoveField shifts a field up or down one place in the order (the ▲▼ buttons),
+// then reloads the table via the shared reload-ppfields event.
+func (a *adminUI) MoveField(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	if err := a.p.store.MoveField(c.Request().Context(), id, c.FormValue("dir") == "up"); err != nil {
+		return err
+	}
+	c.Response().Header().Set("HX-Trigger", "reload-ppfields")
 	return response.NoContent(c)
 }
 

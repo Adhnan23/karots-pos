@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"karots-pos/internal/apperr"
 
@@ -72,6 +73,10 @@ func (p *Plugin) validateProductForm(ctx context.Context, form url.Values) error
 		case "select":
 			if !slices.Contains(f.Options, val) {
 				return apperr.Validation(val + " is not a valid " + f.Label + " option")
+			}
+		case "date":
+			if _, err := time.Parse("2006-01-02", val); err != nil {
+				return apperr.Validation(f.Label + " must be a date")
 			}
 		}
 	}

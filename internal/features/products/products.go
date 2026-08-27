@@ -156,6 +156,17 @@ var SearchContributor func(ctx context.Context, query string) ([]int64, error)
 // (set by the web layer from plugin badge providers). nil = no badges.
 var BadgeProvider func(ctx context.Context, productIDs []int64) map[int64][]string
 
+// DetailRow is one labeled line in the till product-info popup.
+type DetailRow struct {
+	Label string `json:"label"`
+	Value string `json:"value"`
+}
+
+// DetailContributor, when non-nil, returns extra labeled rows for the till
+// product-info popup (a plugin's custom fields marked "show at till"). Set by the
+// web layer from plugin detail contributors; nil = core rows only.
+var DetailContributor func(ctx context.Context, productID int64) []DetailRow
+
 // searchMatchIDs returns the plugin-contributed ids for a query (empty when no
 // contributor is set, no search term, or the contributor errors — it must never
 // break the core search).

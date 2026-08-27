@@ -106,3 +106,60 @@ func TestStoreFieldValueMatch(t *testing.T) {
 		}
 	}
 }
+
+// TestMoveField proves the ▲▼ reorder flips the relative order of adjacent fields.
+// Runs inside a rolled-back tx; the three test fields sort at the end (high
+// sort_order) so live dev fields don't interfere with their relative order.
+func TestMoveField(t *testing.T) {
+	conn := testDB(t)
+	defer conn.Close()
+	ctx := context.Background()
+	tx, err := conn.BeginTxx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+	s := &Store{db: tx}
+
+	keys := []string{"zz_move_a", "zz_move_b", "zz_move_c"}
+	ids := make(map[string]int64)
+	for i, k := range keys {
+		id, err := s.CreateField(ctx, Field{Key: k, Label: k, Type: "text", SortOrder: 9000 + i, IsActive: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids[k] = id
+	}
+
+	// relOrder returns the keys of our three test fields in current display order.
+	relOrder := func() []string {
+		fields, err := s.Fields(ctx, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, f := range fields {
+			if _, ours := ids[f.Key]; ours {
+				out = append(out, f.Key)
+			}
+		}
+		return out
+	}
+
+	if got := relOrder(); len(got) != 3 || got[0] != "zz_move_a" || got[1] != "zz_move_b" || got[2] != "zz_move_c" {
+		t.Fatalf("initial order = %v, want [a b c]", got)
+	}
+	// Move B up → [b a c].
+	if err := s.MoveField(ctx, ids["zz_move_b"], true); err != nil {
+		t.Fatal(err)
+	}
+	if got := relOrder(); got[0] != "zz_move_b" || got[1] != "zz_move_a" || got[2] != "zz_move_c" {
+		t.Fatalf("after move-up B, order = %v, want [b a c]", got)
+	}
+	// Move B down twice → [a c b]; a second-from-edge then edge no-op stays put.
+	_ = s.MoveField(ctx, ids["zz_move_b"], false)
+	_ = s.MoveField(ctx, ids["zz_move_b"], false)
+	if got := relOrder(); got[0] != "zz_move_a" || got[1] != "zz_move_c" || got[2] != "zz_move_b" {
+		t.Fatalf("after moving B to the end, order = %v, want [a c b]", got)
+	}
+}

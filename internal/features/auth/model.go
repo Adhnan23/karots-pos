@@ -28,6 +28,8 @@ type User struct {
 	CanHandleSuppliers bool  `db:"can_handle_suppliers" json:"can_handle_suppliers"`
 	// CanManageCredit lets a cashier override/raise credit limits at the till.
 	CanManageCredit bool  `db:"can_manage_credit" json:"can_manage_credit"`
+	// CanSeeCost lets a cashier see product cost/margin in the till info popup.
+	CanSeeCost bool  `db:"can_see_cost" json:"can_see_cost"`
 	CreatedAt     time.Time `db:"created_at" json:"created_at"`
 }
 
@@ -67,6 +69,8 @@ type CreateUserInput struct {
 	CanHandleSuppliers string `json:"can_handle_suppliers" form:"can_handle_suppliers" validate:"omitempty"`
 	// CanManageCredit arrives as an HTML checkbox — see CanHandleSuppliers.
 	CanManageCredit string `json:"can_manage_credit" form:"can_manage_credit" validate:"omitempty"`
+	// CanSeeCost arrives as an HTML checkbox — see CanHandleSuppliers.
+	CanSeeCost string `json:"can_see_cost" form:"can_see_cost" validate:"omitempty"`
 }
 
 // UpdateUserInput edits a user's profile/role and optionally resets the PIN
@@ -83,6 +87,9 @@ type UpdateUserInput struct {
 	// CanManageCredit arrives as an HTML checkbox — see CreateUserInput. An absent
 	// value revokes, which is what a browser sends for an unticked box.
 	CanManageCredit string `json:"can_manage_credit" form:"can_manage_credit" validate:"omitempty"`
+	// CanSeeCost arrives as an HTML checkbox — see CreateUserInput. An absent value
+	// revokes, which is what a browser sends for an unticked box.
+	CanSeeCost string `json:"can_see_cost" form:"can_see_cost" validate:"omitempty"`
 }
 
 // checkboxOn reads an HTML checkbox value. Browsers omit unticked boxes and

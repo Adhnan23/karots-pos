@@ -89,6 +89,7 @@ func JWTAuth(secret string) echo.MiddlewareFunc {
 			c.Set(ctxLocked, claims.Locked)
 			c.Set(ctxCanSuppliers, flags.CanHandleSuppliers)
 			c.Set(ctxCanManageCredit, flags.CanManageCredit)
+			c.Set(ctxCanSeeCost, flags.CanSeeCost)
 			// Templates read the flags from the request context (see flags.go),
 			// which response.render hands to templ.
 			c.SetRequest(c.Request().WithContext(

@@ -146,16 +146,19 @@ templ POS(d POSData) {
 									<div class="text-xs font-medium text-slate-500 mb-1">⭐ Frequently sold</div>
 									<div class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3">
 										<template x-for="p in quickFrequent" x-bind:key="'qf'+p.id">
-											<button x-on:click="addToCart(p)" class="text-left p-3 rounded-xl bg-white shadow-sm hover:ring-2 hover:ring-indigo-400">
-												<div class="font-medium text-sm leading-tight"><span x-show="p.emoji" x-text="p.emoji" class="mr-1"></span><span x-text="p.name"></span></div>
-												<div class="text-indigo-600 font-semibold mt-1" x-text="sym + ' ' + money(p.selling_price)"></div>
-												<div class="text-xs text-slate-400 mt-0.5">
-													<span x-bind:class="Number(p.stock_qty) <= 0 ? 'text-amber-600 font-medium' : ''">
-														<span x-text="'Stock: ' + money3(p.stock_qty)"></span>
-														<span x-text="p.unit_abbr"></span>
-													</span>
-												</div>
-											</button>
+											<div class="relative">
+												<button x-on:click="addToCart(p)" class="w-full text-left p-3 pr-8 rounded-xl bg-white shadow-sm hover:ring-2 hover:ring-indigo-400">
+													<div class="font-medium text-sm leading-tight"><span x-show="p.emoji" x-text="p.emoji" class="mr-1"></span><span x-text="p.name"></span></div>
+													<div class="text-indigo-600 font-semibold mt-1" x-text="sym + ' ' + money(p.selling_price)"></div>
+													<div class="text-xs text-slate-400 mt-0.5">
+														<span x-bind:class="Number(p.stock_qty) <= 0 ? 'text-amber-600 font-medium' : ''">
+															<span x-text="'Stock: ' + money3(p.stock_qty)"></span>
+															<span x-text="p.unit_abbr"></span>
+														</span>
+													</div>
+												</button>
+												@infoIcon()
+											</div>
 										</template>
 									</div>
 								</div>
@@ -191,33 +194,36 @@ templ POS(d POSData) {
 							</template>
 						<div x-show="menuMode==='cards'" class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3">
 							<template x-for="p in products" x-bind:key="p.id">
-								<button
-									x-on:click="addToCart(p)"
-									class="text-left p-3 rounded-xl bg-white shadow-sm hover:ring-2 hover:ring-indigo-400"
-								>
-									<div class="font-medium text-sm leading-tight"><span x-show="p.emoji" x-text="p.emoji" class="mr-1"></span><span x-text="p.name"></span></div>
-									<template x-if="p.badges && p.badges.length">
-										<span class="inline-flex flex-wrap gap-1 mt-0.5">
-											<template x-for="b in p.badges" x-bind:key="b">
-												<span class="px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-100 text-indigo-700" x-text="b"></span>
-											</template>
-										</span>
-									</template>
-									<div class="text-indigo-600 font-semibold mt-1" x-text="sym + ' ' + money(p.selling_price)"></div>
-									<div class="text-xs text-slate-400 mt-0.5">
-										<template x-if="p.is_service">
-											<span class="text-emerald-600">Made to order</span>
-										</template>
-										<template x-if="!p.is_service">
-											<!-- Out of stock is no longer a wall: the cashier can sell an
-											     item the customer is holding (found-at-till). Flag it amber. -->
-											<span x-bind:class="Number(p.stock_qty) <= 0 ? 'text-amber-600 font-medium' : ''">
-												<span x-text="'Stock: ' + money3(p.stock_qty)"></span>
-												<span x-text="p.unit_abbr"></span>
+								<div class="relative">
+									<button
+										x-on:click="addToCart(p)"
+										class="w-full text-left p-3 pr-8 rounded-xl bg-white shadow-sm hover:ring-2 hover:ring-indigo-400"
+									>
+										<div class="font-medium text-sm leading-tight"><span x-show="p.emoji" x-text="p.emoji" class="mr-1"></span><span x-text="p.name"></span></div>
+										<template x-if="p.badges && p.badges.length">
+											<span class="inline-flex flex-wrap gap-1 mt-0.5">
+												<template x-for="b in p.badges" x-bind:key="b">
+													<span class="px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-100 text-indigo-700" x-text="b"></span>
+												</template>
 											</span>
 										</template>
-									</div>
-								</button>
+										<div class="text-indigo-600 font-semibold mt-1" x-text="sym + ' ' + money(p.selling_price)"></div>
+										<div class="text-xs text-slate-400 mt-0.5">
+											<template x-if="p.is_service">
+												<span class="text-emerald-600">Made to order</span>
+											</template>
+											<template x-if="!p.is_service">
+												<!-- Out of stock is no longer a wall: the cashier can sell an
+												     item the customer is holding (found-at-till). Flag it amber. -->
+												<span x-bind:class="Number(p.stock_qty) <= 0 ? 'text-amber-600 font-medium' : ''">
+													<span x-text="'Stock: ' + money3(p.stock_qty)"></span>
+													<span x-text="p.unit_abbr"></span>
+												</span>
+											</template>
+										</div>
+									</button>
+									@infoIcon()
+								</div>
 							</template>
 							<template x-if="!inGroups && products.length === 0">
 								<div class="col-span-full text-center text-slate-400 py-10">No products found.</div>
@@ -531,6 +537,40 @@ templ POS(d POSData) {
 							<p class="text-sm text-slate-400 py-6 text-center">No held sales.</p>
 						</template>
 					</div>
+				</div>
+			</div>
+
+			<!-- Product info popup -->
+			<div x-show="showInfo" x-cloak class="fixed inset-0 bg-black/40 z-40 flex items-center justify-center p-4" x-on:click.self="showInfo=false">
+				<div class="bg-white rounded-2xl shadow-xl w-full max-w-sm max-h-full overflow-auto p-6">
+					<div class="flex items-start justify-between mb-3 gap-3">
+						<h3 class="text-lg font-semibold leading-tight" x-text="infoData.name || 'Product'"></h3>
+						<button x-on:click="showInfo=false" class="text-slate-400 shrink-0">✕</button>
+					</div>
+					<dl class="text-sm divide-y divide-slate-100">
+						<div class="flex justify-between py-2 gap-3"><dt class="text-slate-500">Price</dt><dd class="font-semibold text-indigo-600" x-text="sym+' '+money(infoData.selling_price)"></dd></div>
+						<template x-if="infoData.show_cost">
+							<div class="flex justify-between py-2 gap-3"><dt class="text-slate-500">Cost</dt><dd class="font-medium" x-text="sym+' '+money(infoData.cost_price)"></dd></div>
+						</template>
+						<template x-if="infoData.show_cost && infoData.margin_pct">
+							<div class="flex justify-between py-2 gap-3"><dt class="text-slate-500">Margin</dt><dd class="font-medium text-emerald-600" x-text="infoData.margin_pct+'%'"></dd></div>
+						</template>
+						<div class="flex justify-between py-2 gap-3"><dt class="text-slate-500">Stock</dt><dd x-text="money3(infoData.stock_qty)+' '+(infoData.unit||'')"></dd></div>
+						<div class="flex justify-between py-2 gap-3"><dt class="text-slate-500">Category</dt><dd class="text-right" x-text="infoData.category||'—'"></dd></div>
+						<template x-if="infoData.barcode">
+							<div class="flex justify-between py-2 gap-3"><dt class="text-slate-500">Barcode</dt><dd class="font-mono text-xs self-center" x-text="infoData.barcode"></dd></div>
+						</template>
+						<template x-if="infoData.warranty">
+							<div class="flex justify-between py-2 gap-3"><dt class="text-slate-500">Warranty</dt><dd class="text-right" x-text="infoData.warranty"></dd></div>
+						</template>
+						<template x-for="r in (infoData.rows||[])" x-bind:key="r.label">
+							<div class="flex justify-between py-2 gap-3"><dt class="text-slate-500 shrink-0" x-text="r.label"></dt><dd class="text-right" x-text="r.value"></dd></div>
+						</template>
+					</dl>
+					<template x-if="infoLoading">
+						<p class="text-xs text-slate-400 pt-2 text-center">Loading more…</p>
+					</template>
+					<button x-on:click="if(infoProduct){ addToCart(infoProduct); } showInfo=false" class="w-full mt-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium">Add to cart</button>
 				</div>
 			</div>
 
@@ -896,4 +936,14 @@ templ POS(d POSData) {
 			</div>
 		</div>
 	}
+}
+
+// infoIcon is the ⓘ pill in a product card's top-right corner. It sits as a
+// sibling of the add-to-cart button (a button can't nest in a button), reads the
+// x-for scope's `p`, and stops propagation so it opens the info popup instead of
+// adding to the cart.
+templ infoIcon() {
+	<button type="button" title="Product info"
+		x-on:click.stop="showProductInfo(p)"
+		class="absolute top-1.5 right-1.5 w-6 h-6 flex items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-indigo-600 leading-none">ⓘ</button>
 }
