@@ -504,6 +504,30 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
       setInterval(() => this.loadPriceOptions(), 90000);
       window.addEventListener("focus", () => this.loadPriceOptions());
       if (!this.session) await this.loadDrawerSections("open");
+      // Recover an interrupted opening count. The float count lives only in
+      // memory, so an accidental reload / tab close / navigation while counting
+      // would lose everything typed. Save a draft on the way out and restore it
+      // next time — but only while the register is still closed, and only if it's
+      // recent (a day-old count is stale; the cashier can "Count fresh").
+      if (!this.session) {
+        try {
+          const d = JSON.parse(localStorage.getItem("till.openDraft") || "null");
+          if (d && d.c && Object.keys(d.c).length && Date.now() - (d.t || 0) < 12 * 3600 * 1000) {
+            this.openCounts = d.c;
+            if (d.l) this.openLockerId = d.l;
+            toast("Recovered your opening count", "success");
+          }
+        } catch (_) { /* ignore unreadable draft */ }
+        const persistOpen = () => {
+          try {
+            if (this.session) return localStorage.removeItem("till.openDraft");
+            localStorage.setItem("till.openDraft", JSON.stringify({ c: this.openCounts, l: this.openLockerId, t: Date.now() }));
+          } catch (_) { /* storage unavailable */ }
+        };
+        window.addEventListener("beforeunload", persistOpen);
+        window.addEventListener("pagehide", persistOpen);
+        document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") persistOpen(); });
+      }
       // Logout was blocked because the till is still open: jump straight to the
       // count/close dialog. If the session somehow closed already, just finish
       // logging out so the user isn't stranded.
@@ -1115,6 +1139,7 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
       this.session = json.data;
       this.openCounts = {};
       this.openLockerId = "";
+      try { localStorage.removeItem("till.openDraft"); } catch (_) { /* ignore */ }
       await this.loadSummary();
       await this.loadLockers();
       await this.saveDrawerSections("open");
