@@ -3382,15 +3382,57 @@ function labels(sym) {
     pName: "",
     pCode: "",
     pPrice: "",
-    pShowPrice: true,
     pHasBarcode: false,
     pGenBusy: false,
     // custom form
     cCode: "",
-    cText: "",
-    cPrice: "",
     cFormat: "CODE128",
-    cShowPrice: false,
+    cTop: "",
+    cBottom: "",
+    // top/bottom line pickers (product form): which source fills each line.
+    labelFields: [], // [{label,value}] custom fields flagged print_on_label
+    pTop: "name",
+    pBottom: "price",
+
+    // productSlotOptions is the choice list for the Top/Bottom dropdowns: name,
+    // price, each label-flagged custom field, then "none". Values are read live
+    // so they track the picked product.
+    productSlotOptions() {
+      const opts = [
+        { key: "name", label: "Name", value: this.pName },
+        { key: "price", label: "Price", value: this.pPrice },
+      ];
+      for (const f of this.labelFields) {
+        opts.push({ key: "f:" + f.label, label: f.label, value: f.value });
+      }
+      opts.push({ key: "none", label: "— none —", value: "" });
+      return opts;
+    },
+    slotValue(key) {
+      const o = this.productSlotOptions().find((x) => x.key === key);
+      return o ? o.value : "";
+    },
+    pTopText() {
+      return this.slotValue(this.pTop);
+    },
+    pBottomText() {
+      return this.slotValue(this.pBottom);
+    },
+    async loadLabelFields(id) {
+      this.labelFields = [];
+      if (!id) return;
+      try {
+        const res = await fetch("/api/products/" + id + "/label-fields", {
+          credentials: "same-origin",
+        });
+        const json = await res.json();
+        if (json && json.success && Array.isArray(json.data)) {
+          this.labelFields = json.data;
+        }
+      } catch (_) {
+        /* no fields is fine — name/price still work */
+      }
+    },
 
     onProduct(ev) {
       const o = ev.target.selectedOptions[0];
@@ -3412,12 +3454,14 @@ function labels(sym) {
         this.pCode = "";
         this.pPrice = "";
         this.pHasBarcode = false;
+        this.labelFields = [];
         return;
       }
       this.pId = item.id || 0;
       this.pName = item.name || "";
       this.pHasBarcode = !!item.barcode;
       this.pCode = item.barcode || "";
+      this.loadLabelFields(this.pId);
       this.pPrice =
         this.sym +
         " " +

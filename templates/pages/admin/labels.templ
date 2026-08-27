@@ -32,19 +32,26 @@ templ LabelsPage(d LabelsData) {
 						<p class="text-slate-500 mb-2">This product has no barcode yet — generate one so the printed label scans at the till.</p>
 						<button type="button" x-on:click="generateProductBarcode()" x-bind:disabled="pGenBusy" class="px-4 py-2 rounded-lg bg-indigo-600 text-white font-semibold disabled:opacity-40">Generate &amp; save barcode</button>
 					</div>
+					<div>
+						<label class="block text-sm font-medium mb-1">Number of labels</label>
+						<input name="qty" type="number" min="1" max="200" value="12" x-ref="pQty" class="w-full border rounded-lg px-3 py-2"/>
+					</div>
 					<div class="grid grid-cols-2 gap-4">
 						<div>
-							<label class="block text-sm font-medium mb-1">Number of labels</label>
-							<input name="qty" type="number" min="1" max="200" value="12" x-ref="pQty" class="w-full border rounded-lg px-3 py-2"/>
+							<label class="block text-sm font-medium mb-1">Top line</label>
+							@slotSelect("pTop")
 						</div>
-						<div class="flex items-end">
-							<label class="inline-flex items-center gap-2 text-sm">
-								<input type="checkbox" name="show_price" value="1" x-model="pShowPrice"/> Show price
-							</label>
+						<div>
+							<label class="block text-sm font-medium mb-1">Bottom line</label>
+							@slotSelect("pBottom")
 						</div>
 					</div>
+					<p class="text-xs text-slate-400">Choose what prints above and below the barcode — name, price, or a custom field. Tag fields for the label under Product Plus.</p>
+					<input type="hidden" name="slots" value="1"/>
+					<input type="hidden" name="top" x-bind:value="pTopText()"/>
+					<input type="hidden" name="bottom" x-bind:value="pBottomText()"/>
 					@labelSizePicker()
-					@labelPreview("pName", "preview-product", "pPrice", "pShowPrice", "pCode")
+					@labelPreview("pTopText()", "preview-product", "pBottomText()", "pCode")
 					<div class="flex flex-wrap gap-2">
 						<button type="button" x-bind:disabled="!pCode" hx-post="/admin/labels/send" hx-swap="none" class="px-5 py-2.5 rounded-lg bg-indigo-600 text-white font-semibold disabled:opacity-40">🖨 Print to label printer</button>
 						<button type="submit" x-bind:disabled="!pCode" class="px-5 py-2.5 rounded-lg border text-slate-700 font-semibold disabled:opacity-40">Generate sheet ↗</button>
@@ -55,9 +62,12 @@ templ LabelsPage(d LabelsData) {
 			<!-- Custom barcode -->
 			<div class="bg-white rounded-2xl shadow-sm p-6">
 				<h2 class="text-lg font-semibold mb-1">Custom barcode</h2>
-				<p class="text-sm text-slate-500 mb-4">Type any barcode value (and optional label text) and print it — handy for items without a product record.</p>
+				<p class="text-sm text-slate-500 mb-4">Type any barcode value and whatever should sit above/below it — handy for items without a product record, or for testing.</p>
 				<form method="get" action="/admin/labels/print" target="_blank" class="space-y-4">
 					<input type="hidden" name="custom" value="1"/>
+					<input type="hidden" name="slots" value="1"/>
+					<input type="hidden" name="top" x-bind:value="cTop"/>
+					<input type="hidden" name="bottom" x-bind:value="cBottom"/>
 					<div>
 						<label class="block text-sm font-medium mb-1">Barcode value</label>
 						<div class="bc-field flex gap-2">
@@ -67,8 +77,8 @@ templ LabelsPage(d LabelsData) {
 					</div>
 					<div class="grid grid-cols-2 gap-4">
 						<div>
-							<label class="block text-sm font-medium mb-1">Label text (optional)</label>
-							<input name="text" x-model="cText" placeholder="Item name" class="w-full border rounded-lg px-3 py-2"/>
+							<label class="block text-sm font-medium mb-1">Top line <span class="text-slate-400 font-normal">(optional)</span></label>
+							<input x-model="cTop" placeholder="e.g. Item name / model no" class="w-full border rounded-lg px-3 py-2"/>
 						</div>
 						<div>
 							<label class="block text-sm font-medium mb-1">Format</label>
@@ -83,19 +93,16 @@ templ LabelsPage(d LabelsData) {
 					</div>
 					<div class="grid grid-cols-2 gap-4">
 						<div>
-							<label class="block text-sm font-medium mb-1">Price (optional)</label>
-							<input name="price" x-model="cPrice" placeholder="e.g. 250.00" class="w-full border rounded-lg px-3 py-2"/>
+							<label class="block text-sm font-medium mb-1">Bottom line <span class="text-slate-400 font-normal">(optional)</span></label>
+							<input x-model="cBottom" placeholder="e.g. Rs. 250.00" class="w-full border rounded-lg px-3 py-2"/>
 						</div>
 						<div>
 							<label class="block text-sm font-medium mb-1">Number of labels</label>
 							<input name="qty" type="number" min="1" max="200" value="12" class="w-full border rounded-lg px-3 py-2"/>
 						</div>
 					</div>
-					<label class="inline-flex items-center gap-2 text-sm">
-						<input type="checkbox" name="show_price" value="1" x-model="cShowPrice"/> Show price on label
-					</label>
 					@labelSizePicker()
-					@labelPreviewCustom()
+					@labelPreview("cTop", "preview-custom", "cBottom", "cCode")
 					<div class="flex flex-wrap gap-2">
 						<button type="button" x-bind:disabled="!cCode" hx-post="/admin/labels/send" hx-swap="none" class="px-5 py-2.5 rounded-lg bg-indigo-600 text-white font-semibold disabled:opacity-40">🖨 Print to label printer</button>
 						<button type="submit" x-bind:disabled="!cCode" class="px-5 py-2.5 rounded-lg border text-slate-700 font-semibold disabled:opacity-40">Generate sheet ↗</button>
@@ -138,29 +145,27 @@ templ labelSizePicker() {
 	</div>
 }
 
-// labelPreview renders a single live preview label for the product form.
-templ labelPreview(nameVar, svgID, priceVar, showVar, codeVar string) {
+// slotSelect is one Top/Bottom dropdown for the product form; both share the same
+// live option list (name / price / label fields / none) via productSlotOptions().
+templ slotSelect(model string) {
+	<select x-model={ model } class="w-full border rounded-lg px-3 py-2">
+		<template x-for="o in productSlotOptions()" x-bind:key="o.key">
+			<option x-bind:value="o.key" x-text="o.label"></option>
+		</template>
+	</select>
+}
+
+// labelPreview renders a single live preview label. topExpr/bottomExpr are Alpine
+// expressions resolving to the two text lines around the barcode (blank = hidden).
+templ labelPreview(topExpr, svgID, bottomExpr, codeVar string) {
 	<div class="border-t pt-4">
 		<div class="text-xs text-slate-400 mb-2">Preview</div>
 		<div class="inline-flex flex-col items-center gap-1 border rounded-lg px-4 py-3 min-w-[180px]" x-show={ codeVar } x-cloak>
-			<div class="text-sm font-medium" x-text={ nameVar }></div>
+			<div class="text-sm font-medium" x-show={ topExpr } x-text={ topExpr }></div>
 			<svg id={ svgID }></svg>
-			<div class="text-sm font-semibold" x-show={ showVar } x-text={ priceVar }></div>
+			<div class="text-sm font-semibold" x-show={ bottomExpr } x-text={ bottomExpr }></div>
 		</div>
-		<div class="text-sm text-slate-400" x-show={ "!" + codeVar }>Select a product to preview.</div>
-	</div>
-}
-
-// labelPreviewCustom renders the live preview for the custom form.
-templ labelPreviewCustom() {
-	<div class="border-t pt-4">
-		<div class="text-xs text-slate-400 mb-2">Preview</div>
-		<div class="inline-flex flex-col items-center gap-1 border rounded-lg px-4 py-3 min-w-[180px]" x-show="cCode" x-cloak>
-			<div class="text-sm font-medium" x-text="cText"></div>
-			<svg id="preview-custom"></svg>
-			<div class="text-sm font-semibold" x-show="cShowPrice && cPrice" x-text="sym + ' ' + cPrice"></div>
-		</div>
-		<div class="text-sm text-slate-400" x-show="!cCode">Type a barcode value to preview.</div>
+		<div class="text-sm text-slate-400" x-show={ "!" + codeVar }>Pick a product or type a barcode to preview.</div>
 	</div>
 }
 
