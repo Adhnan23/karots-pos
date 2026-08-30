@@ -106,6 +106,35 @@ func clampToBalance(amount, balance decimal.Decimal) decimal.Decimal {
 	return amount
 }
 
+// parseWaterfall reads the simple admin pay form — one amount plus a pay/old
+// mode — and cascades it across the supplier's open invoices and old debt via
+// Distribute. Used when the "specific invoices" detail was left untouched, so
+// the admin can settle everything by typing a single figure.
+func parseWaterfall(c echo.Context, invoices []purchases.Purchase, opening decimal.Decimal) (supplierpay.PayInput, error) {
+	amt, err := money.Parse(strings.TrimSpace(c.FormValue("amount")))
+	if err != nil || amt.IsNegative() {
+		return supplierpay.PayInput{}, apperr.Validation("invalid amount")
+	}
+	in := supplierpay.Distribute(invoices, opening, amt, c.FormValue("pay_mode"))
+	in.Method = c.FormValue("method")
+	in.Reference = strings.TrimSpace(c.FormValue("reference"))
+	in.Note = strings.TrimSpace(c.FormValue("note"))
+	return in, nil
+}
+
+// hasExplicitAllocation reports whether the admin used the "specific invoices"
+// detail (any per-invoice box, the advance box, or the old-debt box). When they
+// did, the precise allocation is honoured; otherwise the single amount waterfalls.
+func hasExplicitAllocation(c echo.Context, invoices []purchases.Purchase) bool {
+	for _, pu := range invoices {
+		if strings.TrimSpace(c.FormValue("alloc_"+strconv.FormatInt(pu.ID, 10))) != "" {
+			return true
+		}
+	}
+	return strings.TrimSpace(c.FormValue("advance")) != "" ||
+		strings.TrimSpace(c.FormValue("pay_opening")) != ""
+}
+
 // parseAllocations reads the per-invoice allocation inputs a pay form rendered
 // (alloc_<id>), falling back to a plain unallocated amount for a supplier who
 // carries a balance with no open invoices. Shared so the admin and counter

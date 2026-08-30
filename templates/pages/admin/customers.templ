@@ -144,11 +144,14 @@ templ CustomerPaymentForm(d CustomerPayData) {
 		<form class="p-6 space-y-4" x-data="{ method: 'cash' }" hx-post={ "/admin/customers/" + strconv.FormatInt(d.Customer.ID, 10) + "/payment" } hx-swap="none">
 			<p class="text-sm text-slate-600">{ d.Customer.Name } — outstanding <span class="font-semibold">{ money.Format(d.Symbol, d.Customer.OutstandingBalance) }</span></p>
 			if d.Customer.OpeningUnlinked.IsPositive() {
-				<fieldset class="flex flex-wrap items-center gap-4 text-sm rounded-lg border border-slate-200 p-3">
-					<span class="font-medium">Apply to</span>
-					<label class="flex items-center gap-1"><input type="radio" name="apply_to_opening" value="false" checked/> Current credit</label>
-					<label class="flex items-center gap-1"><input type="radio" name="apply_to_opening" value="true"/> Old debt ({ money.Format(d.Symbol, d.Customer.OpeningUnlinked) })</label>
-				</fieldset>
+				<div class="rounded-lg border border-slate-200 p-3">
+					<div class="flex flex-wrap items-center gap-4 text-sm">
+						<span class="font-medium">Erase</span>
+						<label class="flex items-center gap-1"><input type="radio" name="apply_to_opening" value="false" checked/> Pay current first</label>
+						<label class="flex items-center gap-1"><input type="radio" name="apply_to_opening" value="true"/> Pay old debt first</label>
+					</div>
+					<p class="text-xs text-slate-500 mt-1">Old debt remaining <span class="font-semibold">{ money.Format(d.Symbol, d.Customer.OpeningUnlinked) }</span>. Anything over the total owed becomes an advance.</p>
+				</div>
 			}
 			<div class="grid grid-cols-2 gap-4">
 				<div>

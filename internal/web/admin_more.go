@@ -311,17 +311,26 @@ func (a *adminUI) SupplierPay(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	sup, err := a.s.suppliers.Get(ctx, id)
+	if err != nil {
+		return err
+	}
 
-	in, err := parseAllocations(c, invoices)
+	// Default: one amount waterfalls across invoices/old debt/advance. Only when
+	// the "specific invoices" detail was filled in do we honour precise per-invoice
+	// allocation.
+	var in supplierpay.PayInput
+	if hasExplicitAllocation(c, invoices) {
+		in, err = parseAllocations(c, invoices)
+	} else {
+		in, err = parseWaterfall(c, invoices, sup.OpeningUnlinked)
+	}
 	if err != nil {
 		return err
 	}
 
 	userID := middleware.CurrentUserID(c)
-	name := ""
-	if sup, gerr := a.s.suppliers.Get(ctx, id); gerr == nil {
-		name = sup.Name
-	}
+	name := sup.Name
 
 	// The payment leaves the chosen cash location (locker or till) and produces a
 	// receipt — booked atomically with the payment. Cash must say where from; a
