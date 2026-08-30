@@ -53,6 +53,9 @@ type PayInput struct {
 	Note        string
 	Allocations []Alloc
 	Unallocated decimal.Decimal
+	// Opening pays down the supplier's old (pre-system) debt directly, separate
+	// from invoice allocations and the unallocated advance. Admin-only.
+	Opening decimal.Decimal
 }
 
 // Result summarises a recorded payment for the caller (e.g. the cash mirror).
@@ -151,6 +154,10 @@ func validatePay(in PayInput) (method string, total decimal.Decimal, err error) 
 		}
 		total = total.Add(a.Amount)
 	}
+	if in.Opening.IsNegative() {
+		return "", decimal.Zero, apperr.Validation("old-debt amount must not be negative")
+	}
+	total = total.Add(in.Opening)
 	if !total.IsPositive() {
 		return "", decimal.Zero, apperr.Validation("payment amount must be greater than zero")
 	}
@@ -235,9 +242,21 @@ func (s *Service) PayTx(ctx context.Context, tx *sqlx.Tx, supplierID int64, in P
 		}
 	}
 
-	// Drop the supplier's aggregate payable by the full amount paid.
-	if err := supRepo.AddBalance(ctx, sup.ID, total.Neg()); err != nil {
-		return nil, apperr.Internal("failed to update supplier balance", err)
+	// Old-debt portion pays the opening down directly (not linked-first).
+	if in.Opening.IsPositive() {
+		if in.Opening.GreaterThan(sup.OpeningUnlinked) {
+			return nil, apperr.Validation("payment exceeds the old debt; use the invoice or advance fields for the rest")
+		}
+		if err := supRepo.PayOpening(ctx, sup.ID, in.Opening); err != nil {
+			return nil, apperr.Internal("failed to pay old debt", err)
+		}
+	}
+	// Everything else (invoice allocations + advance) drops the aggregate,
+	// settling the linked part first as before.
+	if rest := total.Sub(in.Opening); rest.IsPositive() {
+		if err := supRepo.AddBalance(ctx, sup.ID, rest.Neg()); err != nil {
+			return nil, apperr.Internal("failed to update supplier balance", err)
+		}
 	}
 
 	return &Result{PaymentID: paymentID, Total: total, Method: method}, nil
