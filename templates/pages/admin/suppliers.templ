@@ -207,6 +207,13 @@ templ SupplierPaymentForm(d SupplierPayData) {
 			} else {
 				<p class="text-sm text-slate-600">{ d.Supplier.Name } — currently owed <span class="font-semibold">{ money.Format(d.Symbol, d.Supplier.OutstandingBalance) }</span></p>
 			}
+			if d.Supplier.OpeningUnlinked.IsPositive() {
+				<div class="rounded-lg border border-amber-200 bg-amber-50 p-3">
+					<label class="block text-sm font-medium mb-1">Old debt (before system)</label>
+					<p class="text-xs text-slate-500 mb-2">Pay down the pre-system balance directly — remaining <span class="font-semibold">{ money.Format(d.Symbol, d.Supplier.OpeningUnlinked) }</span>.</p>
+					<input name="pay_opening" type="number" step="0.01" min="0" max={ d.Supplier.OpeningUnlinked.String() } placeholder="0.00" class="w-40 border rounded-lg px-3 py-2 text-right"/>
+				</div>
+			}
 			if len(d.Invoices) > 0 {
 				<div>
 					<label class="block text-sm font-medium mb-1">Pay invoices (oldest first)</label>
@@ -253,7 +260,16 @@ templ SupplierPaymentForm(d SupplierPayData) {
 				<div>
 					<label class="block text-sm font-medium mb-1">Payment Amount</label>
 					<p class="text-xs text-slate-500 mb-2">No open invoices — this is an advance and is spent automatically on their next delivery.</p>
-					<input name="amount" type="number" step="0.01" min="0" required class="w-full border rounded-lg px-3 py-2"/>
+					<input
+						name="amount"
+						type="number"
+						step="0.01"
+						min="0"
+						if !d.Supplier.OpeningUnlinked.IsPositive() {
+							required
+						}
+						class="w-full border rounded-lg px-3 py-2"
+					/>
 				</div>
 			}
 			<div class="grid grid-cols-2 gap-4">

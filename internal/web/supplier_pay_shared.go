@@ -149,6 +149,15 @@ func parseAllocations(c echo.Context, invoices []purchases.Purchase) (supplierpa
 		}
 		in.Unallocated = amt
 	}
+	// Old-debt portion: pays the pre-system opening down directly. Only the admin
+	// form renders this field, so the cashier flow leaves in.Opening zero.
+	if raw := strings.TrimSpace(c.FormValue("pay_opening")); raw != "" {
+		amt, err := money.Parse(raw)
+		if err != nil || amt.IsNegative() {
+			return in, apperr.Validation("invalid old-debt amount")
+		}
+		in.Opening = amt
+	}
 	return in, nil
 }
 
