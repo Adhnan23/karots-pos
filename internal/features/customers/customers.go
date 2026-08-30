@@ -572,7 +572,14 @@ func (s *Service) RecordPaymentTx(ctx context.Context, tx *sqlx.Tx, id int64, in
 	}
 	before := cust.OutstandingBalance
 	after := before.Sub(amt)
-	if err := r.AddBalance(ctx, id, amt.Neg()); err != nil {
+	if in.ApplyToOpening {
+		if amt.GreaterThan(cust.OpeningUnlinked) {
+			return nil, apperr.Validation("payment exceeds the old debt; use Current credit for the rest")
+		}
+		if err := r.PayOpening(ctx, id, amt); err != nil {
+			return nil, apperr.Internal("failed to record payment", err)
+		}
+	} else if err := r.AddBalance(ctx, id, amt.Neg()); err != nil {
 		return nil, apperr.Internal("failed to record payment", err)
 	}
 	var cb *int64
