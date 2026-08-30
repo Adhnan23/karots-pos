@@ -573,11 +573,25 @@ func (s *Service) RecordPaymentTx(ctx context.Context, tx *sqlx.Tx, id int64, in
 	before := cust.OutstandingBalance
 	after := before.Sub(amt)
 	if in.ApplyToOpening {
-		if amt.GreaterThan(cust.OpeningUnlinked) {
-			return nil, apperr.Validation("payment exceeds the old debt; use Current credit for the rest")
+		// "Old" first: pay the old debt down, then let any overflow settle the
+		// linked balance and — beyond that — leave the customer in credit (an
+		// advance). No cap: it simply waterfalls.
+		openingPay := amt
+		if openingPay.GreaterThan(cust.OpeningUnlinked) {
+			openingPay = cust.OpeningUnlinked
 		}
-		if err := r.PayOpening(ctx, id, amt); err != nil {
-			return nil, apperr.Internal("failed to record payment", err)
+		if openingPay.IsNegative() {
+			openingPay = decimal.Zero
+		}
+		if openingPay.IsPositive() {
+			if err := r.PayOpening(ctx, id, openingPay); err != nil {
+				return nil, apperr.Internal("failed to record payment", err)
+			}
+		}
+		if rest := amt.Sub(openingPay); rest.IsPositive() {
+			if err := r.AddBalance(ctx, id, rest.Neg()); err != nil {
+				return nil, apperr.Internal("failed to record payment", err)
+			}
 		}
 	} else if err := r.AddBalance(ctx, id, amt.Neg()); err != nil {
 		return nil, apperr.Internal("failed to record payment", err)

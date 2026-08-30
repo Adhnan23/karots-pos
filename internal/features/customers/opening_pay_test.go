@@ -115,9 +115,20 @@ func TestRecordPaymentTargetsOpening(t *testing.T) {
 		t.Fatalf("linked = %s, want 5000.00", got)
 	}
 
-	// Overpaying the old debt (7,000 left) is rejected.
+	// "Old" waterfalls: paying 8,000 clears the 7,000 old debt, then the extra
+	// 1,000 spills onto the linked balance (5,000 -> 4,000). No rejection.
 	if err := svc.RecordPayment(ctx, cust.ID,
-		PaymentInput{Amount: "8000", Method: "cash", ApplyToOpening: true}, 0); err == nil {
-		t.Fatal("expected rejection paying more than the old debt")
+		PaymentInput{Amount: "8000", Method: "cash", ApplyToOpening: true}, 0); err != nil {
+		t.Fatal(err)
+	}
+	c, _ = svc.Get(ctx, cust.ID)
+	if got := c.OpeningUnlinked.StringFixed(2); got != "0.00" {
+		t.Fatalf("opening after waterfall = %s, want 0.00", got)
+	}
+	if got := c.LinkedBalance().StringFixed(2); got != "4000.00" {
+		t.Fatalf("linked after waterfall = %s, want 4000.00", got)
+	}
+	if got := c.OutstandingBalance.StringFixed(2); got != "4000.00" {
+		t.Fatalf("outstanding after waterfall = %s, want 4000.00", got)
 	}
 }
