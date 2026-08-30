@@ -180,6 +180,20 @@ func (r *Repository) AddBalance(ctx context.Context, id int64, delta decimal.Dec
 	return err
 }
 
+// PayOpening reduces the old (opening) debt directly: outstanding_balance and
+// opening_unlinked each drop by amt (capped at the old debt still owed), leaving
+// the gross opening_balance and the linked part untouched. Callers guard against
+// overpaying; the clamp here is a safety net. Reducing both columns by the SAME
+// capped amount preserves linked — clamping outstanding alone would wipe it out.
+func (r *Repository) PayOpening(ctx context.Context, id int64, amt decimal.Decimal) error {
+	_, err := r.q.ExecContext(ctx, `
+		UPDATE suppliers SET
+			outstanding_balance = outstanding_balance - GREATEST(LEAST($1, opening_unlinked), 0),
+			opening_unlinked    = opening_unlinked    - GREATEST(LEAST($1, opening_unlinked), 0)
+		WHERE id=$2`, amt, id)
+	return err
+}
+
 // AdjustOpening sets the still-unpaid opening (old pre-system debt) to newOpening
 // and shifts both the outstanding payable and the gross opening figure by the same
 // delta, so the transactional (linked) part is left untouched. newOpening must be
