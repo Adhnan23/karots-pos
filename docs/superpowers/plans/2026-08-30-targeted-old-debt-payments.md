@@ -354,10 +354,13 @@ Add after `AddBalance` in `suppliers.go`:
 // opening_balance and the linked part untouched. Callers guard against
 // overpaying; the clamp here is a safety net.
 func (r *Repository) PayOpening(ctx context.Context, id int64, amt decimal.Decimal) error {
+	// Reduce both columns by the SAME capped amount (never more than the old debt
+	// still owed) so the linked part is preserved — clamping outstanding on its
+	// own would wipe out linked on an overpay.
 	_, err := r.q.ExecContext(ctx, `
 		UPDATE suppliers SET
-			outstanding_balance = GREATEST(outstanding_balance - $1, 0),
-			opening_unlinked    = GREATEST(opening_unlinked    - $1, 0)
+			outstanding_balance = outstanding_balance - GREATEST(LEAST($1, opening_unlinked), 0),
+			opening_unlinked    = opening_unlinked    - GREATEST(LEAST($1, opening_unlinked), 0)
 		WHERE id = $2`, amt, id)
 	return err
 }

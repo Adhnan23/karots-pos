@@ -67,6 +67,9 @@ type PaymentInput struct {
 	Method    string  `json:"method"    form:"method"`
 	Reference *string `json:"reference" form:"reference"`
 	Note      *string `json:"note"      form:"note"`
+	// ApplyToOpening routes the payment against the old (opening) debt instead of
+	// the transactional balance. Admin-only; the cashier flow leaves it false.
+	ApplyToOpening bool `json:"apply_to_opening" form:"apply_to_opening"`
 }
 
 // CustomerPayment is one recorded credit repayment (the statement ledger).
@@ -173,6 +176,23 @@ func (r *Repository) AddBalance(ctx context.Context, id int64, delta decimal.Dec
 		SET outstanding_balance = outstanding_balance + $1,
 		    opening_unlinked = LEAST(opening_unlinked, GREATEST(outstanding_balance + $1, 0))
 		WHERE id = $2`, delta, id)
+	return err
+}
+
+// PayOpening reduces the old (opening) debt directly: outstanding_balance and
+// opening_unlinked each drop by amt (clamped at zero), leaving the gross
+// opening_balance and the linked (transactional) part untouched. Contrast
+// AddBalance, which settles the linked part first. Callers must guard against
+// overpaying the opening; the clamp here is a safety net, not the policy.
+func (r *Repository) PayOpening(ctx context.Context, id int64, amt decimal.Decimal) error {
+	// Reduce both columns by the SAME capped amount (never more than the old debt
+	// still owed) so the linked part is preserved — clamping outstanding on its
+	// own would wipe out linked on an overpay.
+	_, err := r.q.ExecContext(ctx, `
+		UPDATE customers SET
+			outstanding_balance = outstanding_balance - GREATEST(LEAST($1, opening_unlinked), 0),
+			opening_unlinked    = opening_unlinked    - GREATEST(LEAST($1, opening_unlinked), 0)
+		WHERE id = $2`, amt, id)
 	return err
 }
 
