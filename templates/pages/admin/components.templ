@@ -44,10 +44,11 @@ type OpeningAdjustData struct {
 	Opening     decimal.Decimal // the editable still-unpaid old debt
 }
 
-// openingXData seeds the Alpine state so "New total outstanding" updates live as
-// the admin edits the open figure.
+// openingXData seeds the Alpine state so the previews update live. mode is
+// "add" (add an amount to the current old debt) or "set" (type the exact new
+// total); entry is what the admin types; current is today's old-debt figure.
 func openingXData(d OpeningAdjustData) string {
-	return fmt.Sprintf("{ open: %s, linked: %s, sym: %q }",
+	return fmt.Sprintf("{ current: %s, linked: %s, sym: %q, mode: 'add', entry: '' }",
 		d.Opening.StringFixed(2), d.Linked.StringFixed(2), d.Symbol)
 }
 
@@ -71,17 +72,38 @@ templ OpeningAdjustForm(d OpeningAdjustData) {
 					<span class="text-slate-500">Locked (from transactions)</span>
 					<span>{ money.Format(d.Symbol, d.Linked) }</span>
 				</div>
+				<div class="flex justify-between px-3 py-2">
+					<span class="text-slate-500">Old debt (current)</span>
+					<span>{ money.Format(d.Symbol, d.Opening) }</span>
+				</div>
 			</div>
 			<div>
 				<label class="block text-sm font-medium mb-1">
-					Open / old debt
-					<span class="text-slate-400 font-normal">(from before this system — editable)</span>
+					Change old debt
+					<span class="text-slate-400 font-normal">(from before this system — no money moves)</span>
 				</label>
-				<input name="opening" type="number" step="0.01" x-model="open" class="w-full border rounded-lg px-3 py-2"/>
+				<div class="flex gap-4 text-sm mb-2">
+					<label class="flex items-center gap-1"><input type="radio" x-model="mode" value="add"/> Add amount</label>
+					<label class="flex items-center gap-1"><input type="radio" x-model="mode" value="set"/> Set exact total</label>
+				</div>
+				<input
+					type="number"
+					step="0.01"
+					x-model="entry"
+					:placeholder="mode === 'add' ? 'amount to add' : 'exact new total'"
+					class="w-full border rounded-lg px-3 py-2"
+				/>
+				<input type="hidden" name="opening" :value="(mode === 'add' ? (current + (parseFloat(entry)||0)) : (parseFloat(entry)||0)).toFixed(2)"/>
 			</div>
-			<div class="flex justify-between text-sm px-1">
-				<span class="text-slate-500">New total outstanding</span>
-				<span class="font-semibold" x-text="sym + ' ' + (linked + (parseFloat(open)||0)).toFixed(2)"></span>
+			<div class="space-y-1">
+				<div class="flex justify-between text-sm px-1">
+					<span class="text-slate-500">New old debt</span>
+					<span class="font-semibold" x-text="sym + ' ' + (mode === 'add' ? (current + (parseFloat(entry)||0)) : (parseFloat(entry)||0)).toFixed(2)"></span>
+				</div>
+				<div class="flex justify-between text-sm px-1">
+					<span class="text-slate-500">New total outstanding</span>
+					<span class="font-semibold" x-text="sym + ' ' + (linked + (mode === 'add' ? (current + (parseFloat(entry)||0)) : (parseFloat(entry)||0))).toFixed(2)"></span>
+				</div>
 			</div>
 			<div>
 				<label class="block text-sm font-medium mb-1">Note <span class="text-slate-400 font-normal">(optional)</span></label>
