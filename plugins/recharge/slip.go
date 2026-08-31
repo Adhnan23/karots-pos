@@ -25,6 +25,7 @@ type slipData struct {
 	ReceiptNo     string // e.g. RB-000001 (bill) / RL-000001 (reload) — shown in the header
 	Carrier       string
 	Device        string
+	BillType      string // kind of bill (Electricity, ...) — shown on bill-pay slips
 	Reference     string
 	Amount        decimal.Decimal
 	ServiceCharge decimal.Decimal
@@ -71,7 +72,7 @@ func (p *Plugin) reprintBill(ctx context.Context, t BillTxRow) error {
 		return nil
 	}
 	return printing.Raw(ctx, cfg.ReceiptPrinter, buildSlip(cfg, receiptimg.SlipOptions(ctx, cfg, poststatic.Files), slipData{
-		Kind: t.Type, ReceiptNo: billNo(t.ID), Carrier: t.Bank, Amount: t.Amount,
+		Kind: t.Type, ReceiptNo: billNo(t.ID), BillType: derefStr(t.BillType), Amount: t.Amount,
 		ServiceCharge: t.ServiceCharge, CashGiven: derefDec(t.CashGiven),
 		Reference: refText(t.Reference), Operator: t.Operator, When: t.CreatedAt,
 	}))
@@ -100,9 +101,12 @@ func buildSlip(cfg *settings.Settings, opts escpos.Options, d slipData) []byte {
 		escpos.Line(&b, escpos.LeftRight("Receipt:", d.ReceiptNo, w))
 	}
 	escpos.Line(&b, escpos.LeftRight("Date:", d.When.Format("2006-01-02 15:04"), w))
-	// Bill-pay / get-money name the bank; everything else names a carrier.
+	// Bill-pay / get-money are customer receipts: name the kind of bill, never the
+	// shop's internal account. A reload names its carrier.
 	if d.Kind == "billpay" || d.Kind == "getmoney" {
-		escpos.Line(&b, escpos.LeftRight("Bank:", escpos.ASCII(d.Carrier), w))
+		if bt := strings.TrimSpace(d.BillType); bt != "" {
+			escpos.Line(&b, escpos.LeftRight("Bill:", escpos.ASCII(bt), w))
+		}
 	} else {
 		escpos.Line(&b, escpos.LeftRight("Carrier:", escpos.ASCII(d.Carrier), w))
 	}
@@ -153,6 +157,15 @@ func derefDec(d *decimal.Decimal) decimal.Decimal {
 		return decimal.Zero
 	}
 	return *d
+}
+
+// derefStr unwraps a nullable text column to a plain string (NULL → ""), so an
+// absent value simply omits its slip line rather than printing a placeholder.
+func derefStr(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 // txLabel is the human label for a transaction type.

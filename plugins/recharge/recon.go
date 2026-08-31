@@ -712,6 +712,7 @@ type BillTxInput struct {
 	Amount        decimal.Decimal
 	ServiceCharge decimal.Decimal
 	CashGiven     decimal.Decimal // cash the customer handed over (bill-pay only); zero = not recorded
+	BillType      string          // free-text kind of bill (Electricity, Water, ...); billpay only
 	Reference     string
 	Note          string
 	CreatedBy     int64
@@ -723,12 +724,21 @@ func (s *Store) RecordBillTx(ctx context.Context, in BillTxInput) (int64, error)
 	err := s.db.GetContext(ctx, &id, `
 		INSERT INTO recharge_bill_tx
 		  (session_id, bank_locker_id, device_id, customer_id, bank_name, type, amount,
-		   service_charge, cash_given, reference, note, created_by)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+		   service_charge, cash_given, bill_type, reference, note, created_by)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
 		in.SessionID, nullInt64(in.BankLockerID), nullInt64(in.DeviceID), nullInt64(in.CustomerID),
 		in.BankName, in.Type, in.Amount, in.ServiceCharge,
-		nullDec(in.CashGiven), nullStr(in.Reference), nullStr(in.Note), in.CreatedBy)
+		nullDec(in.CashGiven), nullStr(in.BillType), nullStr(in.Reference), nullStr(in.Note), in.CreatedBy)
 	return id, err
+}
+
+// DistinctBillTypes returns every bill type already recorded, so the cashier
+// form can suggest them in a datalist (mirrors the core expense-category combo).
+func (s *Store) DistinctBillTypes(ctx context.Context) ([]string, error) {
+	var rows []string
+	err := s.db.SelectContext(ctx, &rows,
+		`SELECT DISTINCT bill_type FROM recharge_bill_tx WHERE bill_type <> '' ORDER BY bill_type`)
+	return rows, err
 }
 
 // BillTxRow is one bill-payment ledger entry (operator name joined) for the slip
@@ -741,6 +751,7 @@ type BillTxRow struct {
 	Amount        decimal.Decimal  `db:"amount"`
 	ServiceCharge decimal.Decimal  `db:"service_charge"`
 	CashGiven     *decimal.Decimal `db:"cash_given"`
+	BillType      *string          `db:"bill_type"`
 	Reference     *string          `db:"reference"`
 	Operator      string           `db:"operator"`
 }
@@ -750,7 +761,7 @@ func (s *Store) BillTxByID(ctx context.Context, id int64) (BillTxRow, error) {
 	var t BillTxRow
 	err := s.db.GetContext(ctx, &t, `
 		SELECT t.id, t.created_at, t.bank_name, t.type, t.amount, t.service_charge,
-		       t.cash_given, t.reference, COALESCE(u.name,'') AS operator
+		       t.cash_given, t.bill_type, t.reference, COALESCE(u.name,'') AS operator
 		FROM recharge_bill_tx t
 		LEFT JOIN users u ON u.id = t.created_by
 		WHERE t.id = $1`, id)
@@ -761,7 +772,7 @@ func (s *Store) BillTxByID(ctx context.Context, id int64) (BillTxRow, error) {
 func (s *Store) BillLedger(ctx context.Context, f LedgerFilter) ([]BillTxRow, error) {
 	q := `
 		SELECT t.id, t.created_at, t.bank_name, t.type, t.amount, t.service_charge,
-		       t.cash_given, t.reference, COALESCE(u.name,'') AS operator
+		       t.cash_given, t.bill_type, t.reference, COALESCE(u.name,'') AS operator
 		FROM recharge_bill_tx t
 		LEFT JOIN users u ON u.id = t.created_by
 		WHERE 1=1`

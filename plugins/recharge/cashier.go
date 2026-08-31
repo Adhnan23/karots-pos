@@ -90,6 +90,7 @@ type ReconData struct {
 	Carriers      []Carrier
 	Devices       []Device
 	Banks         []lockers.Locker
+	BillTypes     []string // distinct bill types already used, for the bill-pay combo
 	// LogoutMode is set when the page was reached via /cashier/recharge?logout=1 —
 	// the user tried to log out with a float still open. The page then shows a
 	// banner and, once the last float is closed, routes on to /logout.
@@ -134,6 +135,9 @@ func (h *cashierUI) reconData(c echo.Context) (ReconData, error) {
 		return d, err
 	}
 	if d.Banks, err = h.p.bankLockers(ctx); err != nil {
+		return d, err
+	}
+	if d.BillTypes, err = h.p.store.DistinctBillTypes(ctx); err != nil {
 		return d, err
 	}
 	return d, nil
@@ -600,9 +604,17 @@ func (h *cashierUI) BankTx(c echo.Context) error {
 	}
 	ref := strings.TrimSpace(c.FormValue("reference"))
 	note := strings.TrimSpace(c.FormValue("note"))
+	// Kind of bill (Electricity, Water, …) — only meaningful when paying a bill.
+	billType := strings.TrimSpace(c.FormValue("bill_type"))
+	if typ != "billpay" {
+		billType = ""
+	}
 	total := amt.Add(svc)
 
 	reason := txLabel(typ)
+	if billType != "" {
+		reason += " (" + billType + ")"
+	}
 	if ref != "" {
 		reason += " #" + ref
 	}
@@ -666,7 +678,7 @@ func (h *cashierUI) BankTx(c echo.Context) error {
 	billID, err := h.p.store.RecordBillTx(ctx, BillTxInput{
 		SessionID: &sess.ID, BankLockerID: bankID, DeviceID: deviceID, CustomerID: creditID(onCredit, custID),
 		BankName: acctName, Type: typ, Amount: amt, ServiceCharge: svc, CashGiven: cashGiven,
-		Reference: ref, Note: note, CreatedBy: uid,
+		BillType: billType, Reference: ref, Note: note, CreatedBy: uid,
 	})
 	if err != nil {
 		return err

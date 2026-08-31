@@ -53,6 +53,18 @@ templ ThermalReceipt(d ThermalData) {
 	</html>
 }
 
+// ThermalFooter renders the shared slip footer — the shop's own footer message
+// from Settings plus the thank-you line — so every receipt WEBVIEW shows the same
+// footer the printed ESC/POS slip does (see escpos.Footer) and the sale receipt.
+// footer is Settings.ReceiptFooter, passed as a pointer so this package needn't
+// import settings (which would create an import cycle via middleware).
+templ ThermalFooter(footer *string) {
+	if footer != nil && *footer != "" {
+		<div class="r-center r-small">{ *footer }</div>
+	}
+	<div class="r-center r-small">Thank you! Come again.</div>
+}
+
 // ThermalHeader renders the shop logo/name/contact block shared by every slip,
 // plus the title strip (e.g. "CREDIT PAYMENT" and the receipt number). Pointer
 // args are the optional Settings fields, passed directly so this package needn't

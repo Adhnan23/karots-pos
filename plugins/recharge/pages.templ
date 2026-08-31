@@ -528,8 +528,7 @@ templ TxSlipPage(cfg settings.Settings, thermal shared.ThermalData, t TxRow) {
 		if t.Operator != "" {
 			<div class="r-row r-small"><span>Served by</span><span>{ t.Operator }</span></div>
 		}
-		<div class="r-hr"></div>
-		<div class="r-center r-small">Thank you!</div>
+		@shared.ThermalFooter(cfg.ReceiptFooter)
 	}
 }
 
@@ -538,7 +537,9 @@ templ BillSlipPage(cfg settings.Settings, thermal shared.ThermalData, t BillTxRo
 	@shared.ThermalReceipt(thermal) {
 		@shared.ThermalHeader(cfg.ShopName, cfg.LogoSrc(), cfg.ShopNameSi, cfg.Address, cfg.Phone, strings.ToUpper(txLabel(t.Type)), billNo(t.ID))
 		<div class="r-row r-small"><span>Date:</span><span>{ datetime.DateTime(t.CreatedAt) }</span></div>
-		<div class="r-row r-small"><span>Bank:</span><span class="r-right">{ t.Bank }</span></div>
+		if t.BillType != nil && *t.BillType != "" {
+			<div class="r-row r-small"><span>Bill:</span><span class="r-right">{ *t.BillType }</span></div>
+		}
 		if t.Reference != nil && *t.Reference != "" {
 			<div class="r-row r-small"><span>Reference:</span><span class="r-right">{ *t.Reference }</span></div>
 		}
@@ -559,8 +560,7 @@ templ BillSlipPage(cfg settings.Settings, thermal shared.ThermalData, t BillTxRo
 		if t.Operator != "" {
 			<div class="r-row r-small"><span>Served by</span><span>{ t.Operator }</span></div>
 		}
-		<div class="r-hr"></div>
-		<div class="r-center r-small">Thank you!</div>
+		@shared.ThermalFooter(cfg.ReceiptFooter)
 	}
 }
 

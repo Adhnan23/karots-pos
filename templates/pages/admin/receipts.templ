@@ -286,7 +286,7 @@ templ RcDebtReceiptPage(d RcDebtViewData) {
 			<div class="r-row r-small"><span>Served by</span><span>{ *d.Receipt.CashierName }</span></div>
 		}
 		<div class="r-hr"></div>
-		<div class="r-center r-small">Thank you!</div>
+		@shared.ThermalFooter(d.Settings.ReceiptFooter)
 	}
 }
 
@@ -338,5 +338,6 @@ templ RcWarrantyReceiptPage(d RcWarrantyViewData) {
 		<div class="r-row r-small"><span>Handled by</span><span>{ d.Claim.HandledByName }</span></div>
 		<div class="r-hr"></div>
 		<div class="r-center r-small">Replacement slip - please retain.</div>
+			@shared.ThermalFooter(d.Settings.ReceiptFooter)
 	}
 }

@@ -82,6 +82,6 @@ templ DebtReceiptPage(d DebtReceiptViewData) {
 			<div class="r-row r-small"><span>Served by</span><span>{ *d.Receipt.CashierName }</span></div>
 		}
 		<div class="r-hr"></div>
-		<div class="r-center r-small">Thank you!</div>
+		@shared.ThermalFooter(d.Settings.ReceiptFooter)
 	}
 }

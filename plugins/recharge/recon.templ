@@ -230,9 +230,18 @@ templ bankTxForm(d ReconData) {
 				<p x-show="Number(cash)>0 && Number(cash) >= Number(amount||0)+Number(svc||0)" class="text-xs text-emerald-600 mt-1">Change: <span class="font-semibold tabular-nums" x-text="(Number(cash)-(Number(amount||0)+Number(svc||0))).toFixed(2)"></span></p>
 				<p x-show="Number(cash)>0 && Number(cash) < Number(amount||0)+Number(svc||0)" class="text-xs text-rose-500 mt-1">Still owed: <span class="font-semibold tabular-nums" x-text="((Number(amount||0)+Number(svc||0))-Number(cash)).toFixed(2)"></span></p>
 			</div>
+			<div x-show="type==='billpay'">
+				<label class="block text-sm font-medium text-slate-600 mb-1">Bill type</label>
+				<input type="text" name="bill_type" list="bill-types" placeholder="e.g. Electricity" class="w-full border rounded-lg px-3 py-2.5"/>
+				<datalist id="bill-types">
+					for _, bt := range d.BillTypes {
+						<option value={ bt }></option>
+					}
+				</datalist>
+			</div>
 			<div>
 				<label class="block text-sm font-medium text-slate-600 mb-1">Reference (optional)</label>
-				<input type="text" name="reference" placeholder="bill / txn no." class="w-full border rounded-lg px-3 py-2.5"/>
+				<input type="text" name="reference" placeholder="bill / account no." class="w-full border rounded-lg px-3 py-2.5"/>
 			</div>
 			<div class="flex items-end">
 				<button type="submit" x-bind:disabled="!ready()" class="w-full py-2.5 rounded-lg bg-emerald-600 text-white font-semibold hover:bg-emerald-700 disabled:opacity-40">Record &amp; print</button>

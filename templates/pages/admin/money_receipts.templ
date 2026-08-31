@@ -117,6 +117,8 @@ templ MoneyReceiptPage(d MoneyReceiptData) {
 		}
 		<div class="r-hr"></div>
 		<div class="r-row r-total"><span>Amount</span><span>{ money.Format(d.Settings.CurrencySymbol, d.Receipt.Amount) }</span></div>
+			<div class="r-hr"></div>
+			@shared.ThermalFooter(d.Settings.ReceiptFooter)
 	}
 }
 
