@@ -41,6 +41,16 @@ A different project uses its **own seed label** (e.g.
 identical. The authenticator app stores these parameters per project, so one app
 serves many projects.
 
+**Generator vs validator — which parameters each side needs.** Only three
+parameters go into *producing* a code: **seed label, window seconds, digits**.
+Those are all the authenticator (Karots PIN Vault) asks for, and getting the seed
+label wrong is the usual cause of a "right length, right rotation, wrong number"
+mismatch — Vault defaults the label to `karots-pos/support/seed/v1|`, so for any
+other project you must change it. **Validation skew is a server-only parameter**:
+it only affects how many neighbouring windows the server's `valid()` will *accept*
+(±1 here), and never changes the numbers the generator produces — so the
+authenticator has no skew field, and it is not part of matching a code.
+
 ## Normalisation
 
 Before use, normalise the install ID so an operator reading it aloud and a

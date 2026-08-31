@@ -192,6 +192,25 @@ machine (it carries `POS_SUPPORT_SECRET`) and
 PIN derived again; the only way back into one is `POS_SYSTEM_PIN` in that shop's
 own `.env`, which overrides the baked credential.
 
+**Reading the PIN from the phone — Karots PIN Vault.** `make support-pin` is the
+developer-machine way; the [Karots PIN Vault](../../flutter/karots_pin_vault)
+app is the on-the-phone way, and the same app serves every project. Add karots-pos
+as a project, store the master secret under it, register each shop by its install
+id, and it shows the current PIN with a rotation countdown. The scheme values:
+
+| Vault field (Scheme ▸ advanced) | Value |
+|---|---|
+| Seed label | `karots-pos/support/seed/v1|` (keep the trailing `|`) |
+| Window seconds | `3600` |
+| Digits | `6` |
+
+These are Vault's **defaults**, so for karots-pos you leave the Scheme section
+alone — just fill in the name and secret. (Other projects, e.g. karots-wholesale,
+use their own seed label and you *must* change that field, or every PIN comes out
+wrong.) There is no "skew" field in Vault: skew is server-side only (how many
+neighbouring windows the server accepts, ±1 here) and never changes the numbers
+Vault generates. Full protocol: [`docs/support-pin-scheme.md`](docs/support-pin-scheme.md).
+
 `-seed` is the **development/demo** dataset (staff users, "Karots Super Mart"
 identity, a nested category tree, 8 stocked products, suppliers and customers) —
 **do not run it on a production install.** Both commands are idempotent (they skip

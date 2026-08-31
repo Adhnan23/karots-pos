@@ -224,7 +224,10 @@ stop cashiers changing their own PIN there).
 > properly built (bootstrapped) shop binary the code is derived per-install: the
 > shop reads its **Install ID** off the login screen and reads it to you, and you
 > compute the current PIN on your machine with `make support-pin ID=<install-id>`
-> (valid for the current hour ± one). For a shop that wants a **fixed** code
+> (valid for the current hour ± one). You can also read it on your phone from the **Karots PIN
+> Vault** app — for karots-pos leave Vault's Scheme section on its defaults (seed
+> label `karots-pos/support/seed/v1|`, window 3600, digits 6); there is no "skew"
+> field, that's server-side only. For a shop that wants a **fixed** code
 > instead, set `POS_SYSTEM_PIN` (and optionally `POS_SYSTEM_PHONE`) in its `.env` —
 > that overrides the rotating one. A plain `go build` (not `make bootstrap`) has no
 > per-shop secret and falls back to a shared PIN **`2273`**; the server prints which
