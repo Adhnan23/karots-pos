@@ -39,6 +39,7 @@ func (h *APIHandler) List(c echo.Context) error {
 			}
 		}
 	}
+	applySuggestions(ctx, rows)
 	return response.Paged(c, rows, response.NewPageMeta(q.Page, q.Limit, total))
 }
 
@@ -66,6 +67,11 @@ func (h *APIHandler) Get(c echo.Context) error {
 		if m := BadgeProvider(c.Request().Context(), []int64{p.ID}); m != nil {
 			p.Badges = m[p.ID]
 		}
+	}
+	if p != nil {
+		one := []Product{*p}
+		applySuggestions(c.Request().Context(), one)
+		p.Suggestion = one[0].Suggestion
 	}
 	return response.OK(c, p)
 }
@@ -170,6 +176,7 @@ func (h *APIHandler) QuickPicks(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	applySuggestions(c.Request().Context(), picks)
 	return response.OK(c, picks)
 }
 

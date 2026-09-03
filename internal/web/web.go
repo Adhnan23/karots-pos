@@ -610,6 +610,31 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 			return out
 		}
 	}
+	// Same bridge for till sale-suggestion providers → products.SaleSuggestionProvider.
+	if sps := plugin.ProductSaleSuggestionProviders(); len(sps) > 0 {
+		products.SaleSuggestionProvider = func(ctx context.Context, ids []int64) map[int64]products.SaleSuggestion {
+			out := map[int64]products.SaleSuggestion{}
+			for _, sp := range sps {
+				if sp.Batch == nil {
+					continue
+				}
+				m, err := sp.Batch(ctx, ids)
+				if err != nil {
+					continue
+				}
+				for id, s := range m {
+					if _, taken := out[id]; taken {
+						continue // first provider wins; in practice only one registers
+					}
+					out[id] = products.SaleSuggestion{
+						DiscountType: s.DiscountType, DiscountValue: s.DiscountValue,
+						Label: s.Label, Prompt: s.Prompt,
+					}
+				}
+			}
+			return out
+		}
+	}
 	// Same bridge for till info-popup detail contributors → products.DetailContributor.
 	if dcs := plugin.ProductDetailContributors(); len(dcs) > 0 {
 		products.DetailContributor = func(ctx context.Context, id int64) []products.DetailRow {

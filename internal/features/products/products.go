@@ -46,6 +46,9 @@ type Product struct {
 	PreferredSupplierName *string         `db:"preferred_supplier_name" json:"preferred_supplier_name,omitempty"`
 	// Plugin-contributed, not persisted: till-card badge pins (e.g. quality tier).
 	Badges []string `db:"-" json:"badges,omitempty"`
+	// Plugin-contributed, not persisted: an optional till line-discount suggestion
+	// (e.g. a clearance markdown) the cashier is prompted to apply.
+	Suggestion *SaleSuggestion `db:"-" json:"suggestion,omitempty"`
 }
 
 // IsLowStock reports whether on-hand quantity is at or below the reorder level.
@@ -155,6 +158,41 @@ var SearchContributor func(ctx context.Context, query string) ([]int64, error)
 // BadgeProvider, when non-nil, returns per-product badge labels for the till card
 // (set by the web layer from plugin badge providers). nil = no badges.
 var BadgeProvider func(ctx context.Context, productIDs []int64) map[int64][]string
+
+// SaleSuggestion mirrors plugin.SaleSuggestion (products must not import plugin;
+// the web layer converts and wires SaleSuggestionProvider from plugin hooks).
+type SaleSuggestion struct {
+	DiscountType  string `json:"discount_type"`
+	DiscountValue string `json:"discount_value"`
+	Label         string `json:"label"`
+	Prompt        string `json:"prompt"`
+}
+
+// SaleSuggestionProvider, when non-nil, returns a per-product till discount
+// suggestion (set by the web layer from plugin providers). nil = none.
+var SaleSuggestionProvider func(ctx context.Context, productIDs []int64) map[int64]SaleSuggestion
+
+// applySuggestions stamps each row's Suggestion from the provider (no-op when
+// unset — a core-only build). Best-effort: skips silently on a nil map.
+func applySuggestions(ctx context.Context, rows []Product) {
+	if SaleSuggestionProvider == nil || len(rows) == 0 {
+		return
+	}
+	ids := make([]int64, len(rows))
+	for i := range rows {
+		ids[i] = rows[i].ID
+	}
+	m := SaleSuggestionProvider(ctx, ids)
+	if m == nil {
+		return
+	}
+	for i := range rows {
+		if s, ok := m[rows[i].ID]; ok {
+			sc := s
+			rows[i].Suggestion = &sc
+		}
+	}
+}
 
 // DetailRow is one labeled line in the till product-info popup.
 type DetailRow struct {
