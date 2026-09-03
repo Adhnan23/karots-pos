@@ -1400,7 +1400,27 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
         warranty_months: Number(p.warranty_months) || 0,
         serials: [],
       });
-      this.syncSerials(this.cart[this.cart.length - 1]);
+      const line = this.cart[this.cart.length - 1];
+      this.syncSerials(line);
+      // Clearance / promo suggestion: offer the plugin-proposed markdown once,
+      // when the product carries one and this caller can answer it.
+      if (p.suggestion && !(opts && opts.noPrompt)) {
+        const s = p.suggestion;
+        const unit = this.unitPriceFor(p);
+        const off =
+          s.discount_type === "percent"
+            ? unit * (1 - (Number(s.discount_value) || 0) / 100)
+            : unit - (Number(s.discount_value) || 0);
+        this.suggestionPrompt = {
+          key: line._key,
+          name: p.name,
+          prompt: s.prompt || "Apply the suggested discount?",
+          type: s.discount_type,
+          value: s.discount_value,
+          oldPrice: unit,
+          newPrice: Math.max(0, off),
+        };
+      }
     },
     // --- "Which price?" prompt -------------------------------------------
     // qtyText prints a quantity without money's forced 2 decimals, so a count of
@@ -2002,6 +2022,21 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
     },
     cancelOversell() {
       this.oversellPrompt = null;
+    },
+    // --- plugin sale suggestion (e.g. clearance markdown) apply/skip ---
+    suggestionPrompt: null,
+    applySuggestion() {
+      const sp = this.suggestionPrompt;
+      if (!sp) return;
+      const line = this.cart.find((x) => x._key === sp.key);
+      if (line) {
+        line.discount = String(sp.value || 0);
+        line.discountType = sp.type === "percent" ? "percent" : "fixed";
+      }
+      this.suggestionPrompt = null;
+    },
+    skipSuggestion() {
+      this.suggestionPrompt = null;
     },
     // --- consumable found-at-till (a job's material reads short) ---
     // Reactive, unlike the product oversell prompt: a service line carries MAX

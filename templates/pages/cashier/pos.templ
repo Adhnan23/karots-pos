@@ -934,6 +934,24 @@ templ POS(d POSData) {
 					</div>
 				</div>
 			</div>
+			<div x-show="suggestionPrompt" x-cloak x-on:keydown.escape.window="skipSuggestion()" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+				<div class="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 space-y-3">
+					<h3 class="text-lg font-semibold text-indigo-700">Clearance markdown</h3>
+					<p class="text-sm text-slate-600">
+						<span class="font-medium" x-text="suggestionPrompt && suggestionPrompt.name"></span> —
+						<span x-text="suggestionPrompt && suggestionPrompt.prompt"></span>
+					</p>
+					<p class="text-sm">
+						<span class="line-through text-slate-400" x-text="suggestionPrompt && (sym + ' ' + money(suggestionPrompt.oldPrice))"></span>
+						<span class="mx-1">→</span>
+						<span class="font-semibold text-emerald-600" x-text="suggestionPrompt && (sym + ' ' + money(suggestionPrompt.newPrice))"></span>
+					</p>
+					<div class="flex gap-2 pt-1">
+						<button type="button" x-on:click="skipSuggestion()" class="flex-1 px-4 py-2.5 rounded-lg border font-semibold">Full price</button>
+						<button type="button" x-on:click="applySuggestion()" class="flex-1 px-4 py-2.5 rounded-lg bg-indigo-600 text-white font-semibold">Apply discount</button>
+					</div>
+				</div>
+			</div>
 		</div>
 	}
 }
