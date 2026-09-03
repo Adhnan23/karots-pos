@@ -19,7 +19,10 @@
 - **Committed `cmd/server/enabled_plugins.go` stays core-only.** A local dev import to test Clearance is temporary and must not be committed as a permanent default. The bootstrapper (`cmd/bootstrap`) selects plugins per-shop from `plugins/*/plugin.json`.
 - **Plugin table/migration prefix is `clearance`** (goose version table `goose_db_version_clearance`).
 - **Money/security logic gets a runnable test** (Go `_test.go`, `assert`-style, no new frameworks). Front-end wiring is verified with `node --check` + manual steps.
-- Regenerate templ after editing any `.templ`: `templ generate templates/... plugins/clearance`. Commit only `.templ` source (generated `*_templ.go` are gitignored), EXCEPT plugin `pages_templ.go` — check the repo: existing plugins commit their generated `pages_templ.go` (e.g. `plugins/alternatives/pages_templ.go` is tracked), so commit `plugins/clearance/pages_templ.go` too.
+- Regenerate templ after editing any `.templ`: `templ generate templates/... plugins/clearance`. Commit only `.templ` source — generated `*_templ.go` are gitignored, including plugin ones (verified: `plugins/alternatives/pages_templ.go` is NOT tracked). Do NOT `git add` `plugins/clearance/pages_templ.go`.
+- Plugin admin pages render via `response.RenderPage(c, PageTempl(...))` (verified pattern in `plugins/alternatives/admin.go`), never `c.Render`.
+- A plugin reads the currency symbol from `p.core.Settings.Get(ctx)` → `cfg.CurrencySymbol` (verified in `plugins/recharge`), NOT `core.Cfg`.
+- The till has NO promise-returning `confirm()`. Yes/no prompts use a state-object + a themed modal in `pos.templ`, resolved by two methods — the `oversellPrompt` / `approveOversell` / `cancelOversell` pattern (`static/js/app.js` ~1996, `pos.templ` ~919). Task 3 follows this exactly.
 
 ---
 
@@ -326,16 +329,37 @@ git commit -m "feat(products): attach optional plugin sale suggestion to till pa
 
 **Files:**
 - Modify: `static/js/app.js`
+- Modify: `templates/pages/cashier/pos.templ`
 
 **Interfaces:**
 - Consumes: `product.suggestion` = `{ discount_type, discount_value, label, prompt }` on the till product payload (Task 2).
 - The cart line already carries `discount` (string) and `discountType` (`"fixed"|"percent"`); this sets them.
+- Follows the `oversellPrompt` state-object + modal pattern (no promise-confirm in this codebase).
 
-- [ ] **Step 1: Apply the suggestion when a new line is created**
+- [ ] **Step 1: Add the `suggestionPrompt` state + apply/skip methods**
 
-In `static/js/app.js`, in `addToCart`, the new line is `this.cart.push({... discount: "", discountType: "fixed", ...})`. Immediately AFTER the `this.cart.push({...})` block and its `this.syncSerials(...)` line, add a suggestion prompt. Replace the tail of `addToCart`:
+In `static/js/app.js`, next to `oversellPrompt: null,` (~line 1996) add:
 
-Find:
+```js
+    suggestionPrompt: null,
+    applySuggestion() {
+      const sp = this.suggestionPrompt;
+      if (!sp) return;
+      const line = this.cart.find((x) => x._key === sp.key);
+      if (line) {
+        line.discount = String(sp.value || 0);
+        line.discountType = sp.type === "percent" ? "percent" : "fixed";
+      }
+      this.suggestionPrompt = null;
+    },
+    skipSuggestion() {
+      this.suggestionPrompt = null;
+    },
+```
+
+- [ ] **Step 2: Raise the prompt when a new line with a suggestion is created**
+
+In `addToCart`, find the tail:
 
 ```js
       this.syncSerials(this.cart[this.cart.length - 1]);
@@ -348,48 +372,67 @@ Replace with:
       const line = this.cart[this.cart.length - 1];
       this.syncSerials(line);
       // Clearance / promo suggestion: offer the plugin-proposed markdown once,
-      // when the product carries one and we didn't already prompt for this line.
+      // when the product carries one and this caller can answer it.
       if (p.suggestion && !(opts && opts.noPrompt)) {
-        this.offerSuggestion(line, p);
+        const s = p.suggestion;
+        const unit = this.unitPriceFor(p);
+        const off =
+          s.discount_type === "percent"
+            ? unit * (1 - (Number(s.discount_value) || 0) / 100)
+            : unit - (Number(s.discount_value) || 0);
+        this.suggestionPrompt = {
+          key: line._key,
+          name: p.name,
+          prompt: s.prompt || "Apply the suggested discount?",
+          type: s.discount_type,
+          value: s.discount_value,
+          oldPrice: unit,
+          newPrice: Math.max(0, off),
+        };
       }
-    },
-    // offerSuggestion asks the cashier whether to apply a plugin-suggested line
-    // discount (e.g. a clearance markdown). Apply sets the line's existing
-    // discount fields; Skip leaves it full price. Uses the same themed confirm
-    // the rest of the till uses.
-    offerSuggestion(line, p) {
-      const s = p.suggestion;
-      const unit = this.unitPriceFor(p);
-      const off =
-        s.discount_type === "percent"
-          ? unit * (1 - (Number(s.discount_value) || 0) / 100)
-          : unit - (Number(s.discount_value) || 0);
-      const msg =
-        (s.prompt || "Apply the suggested discount?") +
-        "  (" + this.sym + " " + this.money(unit) + " → " + this.sym + " " + this.money(Math.max(0, off)) + ")";
-      this.confirm(msg).then((ok) => {
-        if (!ok) return;
-        line.discount = String(s.discount_value || 0);
-        line.discountType = s.discount_type === "percent" ? "percent" : "fixed";
-      });
     },
 ```
 
-> Note: verify `this.confirm(...)` returns a Promise<boolean> in this file (the themed confirm helper). If the helper has a different name/signature, use the existing one — grep `confirm(` in `app.js`. If none returns a promise, fall back to `window.confirm(msg)` synchronously and set the fields directly.
+- [ ] **Step 3: Add the modal to `pos.templ`**
 
-- [ ] **Step 2: Verify JS parses**
+In `templates/pages/cashier/pos.templ`, immediately AFTER the `oversellPrompt` modal's closing `</div>` (the one at ~line 936, before the template's final `</div>` and closing brace), add a sibling modal:
 
-Run: `node --check static/js/app.js`
-Expected: no output (valid).
+```html
+			<div x-show="suggestionPrompt" x-cloak x-on:keydown.escape.window="skipSuggestion()" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+				<div class="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 space-y-3">
+					<h3 class="text-lg font-semibold text-indigo-700">Clearance markdown</h3>
+					<p class="text-sm text-slate-600">
+						<span class="font-medium" x-text="suggestionPrompt && suggestionPrompt.name"></span> —
+						<span x-text="suggestionPrompt && suggestionPrompt.prompt"></span>
+					</p>
+					<p class="text-sm">
+						<span class="line-through text-slate-400" x-text="suggestionPrompt && (sym + ' ' + money(suggestionPrompt.oldPrice))"></span>
+						<span class="mx-1">→</span>
+						<span class="font-semibold text-emerald-600" x-text="suggestionPrompt && (sym + ' ' + money(suggestionPrompt.newPrice))"></span>
+					</p>
+					<div class="flex gap-2 pt-1">
+						<button type="button" x-on:click="skipSuggestion()" class="flex-1 px-4 py-2.5 rounded-lg border font-semibold">Full price</button>
+						<button type="button" x-on:click="applySuggestion()" class="flex-1 px-4 py-2.5 rounded-lg bg-indigo-600 text-white font-semibold">Apply discount</button>
+					</div>
+				</div>
+			</div>
+```
 
-- [ ] **Step 3: Manual verification note (record in commit body)**
+> Note: verify `sym` and `money(...)` are in scope in this Alpine component (the oversell modal and cart rows use them — they are). Match the exact nesting depth of the `oversellPrompt` block you're inserting beside.
 
-Cannot unit-test (no JS harness). After the plugin exists (Task 7), manual check: add a clearance product at the till → popup shows old→new price → Apply sets the line discount (cart shows the struck price) → Skip leaves full price.
+- [ ] **Step 4: Regenerate templ + verify JS parses**
 
-- [ ] **Step 4: Commit**
+Run: `templ generate templates/pages/cashier && node --check static/js/app.js`
+Expected: templ regenerates; JS valid (no output).
+
+- [ ] **Step 5: Manual verification note (record in commit body)**
+
+No JS harness. After the plugin exists (Task 7): add a clearance product → modal shows old→new price → "Apply discount" sets the line discount (struck price in cart) → "Full price" leaves it; re-adding the same product bumps qty without re-prompting (existing-line path returns before the push).
+
+- [ ] **Step 6: Commit**
 
 ```bash
-git add static/js/app.js
+git add static/js/app.js templates/pages/cashier/pos.templ
 git commit -m "feat(till): prompt to apply a plugin sale suggestion on add-to-cart"
 ```
 
@@ -975,6 +1018,7 @@ import (
 
 	"karots-pos/internal/middleware"
 	"karots-pos/internal/money"
+	"karots-pos/internal/response"
 
 	"github.com/labstack/echo/v4"
 	"github.com/shopspring/decimal"
@@ -992,7 +1036,10 @@ func (a *adminUI) Page(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	symbol := a.p.core.Cfg.CurrencySymbol // adjust to the real settings-symbol accessor if different
+	symbol := "Rs."
+	if sc, serr := a.p.core.Settings.Get(ctx); serr == nil && sc != nil {
+		symbol = sc.CurrencySymbol
+	}
 	rows := make([]Row, 0, len(items))
 	for _, it := range items {
 		pct := suggestPercent(it.Price, it.Cost, cfg.DefaultPercent, cfg.MinMarginPercent)
@@ -1022,7 +1069,7 @@ func (a *adminUI) Page(c echo.Context) error {
 			ApprovedPct: apct,
 		})
 	}
-	return c.Render(http.StatusOK, "", Page(PageData{
+	return response.RenderPage(c, Page(PageData{
 		UserName:         middleware.CurrentUserName(c),
 		Symbol:           symbol,
 		Rows:             rows,
@@ -1111,9 +1158,10 @@ Run the dev server; open `/admin/clearance`. Expected: settings bar + a table of
 
 ```bash
 templ generate plugins/clearance
-git add plugins/clearance/admin.go plugins/clearance/pages.templ plugins/clearance/pages_templ.go plugins/clearance/clearance.go
+git add plugins/clearance/admin.go plugins/clearance/pages.templ plugins/clearance/clearance.go
 git commit -m "feat(clearance): admin review page — approve/adjust/dismiss + settings"
 ```
+(pages_templ.go is gitignored — do not add it.)
 
 ---
 
