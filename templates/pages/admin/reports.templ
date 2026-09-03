@@ -39,7 +39,13 @@ templ LowStockPage(d LowStockData) {
 	@layouts.Admin("Low Stock", d.UserName, "low-stock") {
 		<div class="flex items-center justify-between mb-6">
 			<h1 class="text-2xl font-bold">Low Stock / Reorder</h1>
-			<a href="/admin/purchases/new" class="text-sm text-slate-500 hover:underline">Manual purchase order →</a>
+			<div class="flex items-center gap-3 text-sm">
+				if len(d.Rows) > 0 {
+					<a href={ templ.SafeURL(lowStockPrintURL(d, false)) } target="_blank" class="text-slate-600 hover:underline">🖨 Print page</a>
+					<a href={ templ.SafeURL(lowStockPrintURL(d, true)) } target="_blank" class="text-slate-600 hover:underline">🖨 Print all / PDF</a>
+				}
+				<a href="/admin/purchases/new" class="text-slate-500 hover:underline">Manual purchase order →</a>
+			</div>
 		</div>
 		<div class="bg-white rounded-2xl shadow-sm p-6" x-data={ "poBuilder(" + lowStockConfigJSON(d.Rows, d.Demand, d.Notes) + ")" } x-init="init()">
 			@lowStockFilters(d)
@@ -107,6 +113,101 @@ templ LowStockPage(d LowStockData) {
 				@rptPager(lowStockQuery(d), d.Page, d.PageSize, d.Total)
 			}
 		</div>
+	}
+}
+
+// LowStockPrintData feeds the printable A4 low-stock sheet.
+type LowStockPrintData struct {
+	ShopName string
+	Symbol   string
+	Rows     []products.Product
+	Demand   map[int64]ReorderInfo
+	Notes    map[int64]string
+	Total    int
+	// All is true for the "print everything" scope; otherwise the sheet is the
+	// single result-page the report was on.
+	All            bool
+	Page, PageSize int
+	// Human-readable active filters, for the printed header.
+	Search   string
+	Category string
+	Supplier string
+	Alt      bool
+}
+
+// LowStockPrintPage is the reorder worklist as a clean A4 sheet — print it, or
+// Save as PDF, from the browser dialog (any paper size). It honours whatever the
+// report was filtered to, and either the current page or every match.
+templ LowStockPrintPage(d LowStockPrintData) {
+	@layouts.Report("Low Stock / Reorder", d.ShopName) {
+		<div class="flex items-baseline justify-between mb-1">
+			<h1 class="text-xl font-bold">Low Stock / Reorder</h1>
+			<span class="text-sm text-slate-500">
+				if d.All {
+					All { strconv.Itoa(d.Total) } items
+				} else {
+					Page { strconv.Itoa(d.Page) } · { strconv.Itoa(len(d.Rows)) } of { strconv.Itoa(d.Total) } items
+				}
+			</span>
+		</div>
+		if d.Search != "" || d.Category != "" || d.Supplier != "" || d.Alt {
+			<p class="text-xs text-slate-500 mb-3">
+				Filters:
+				if d.Search != "" {
+					<span>name “{ d.Search }”</span>
+				}
+				if d.Category != "" {
+					<span> · category { d.Category }</span>
+				}
+				if d.Supplier != "" {
+					<span> · supplier { d.Supplier }</span>
+				}
+				if d.Alt {
+					<span> · alternatives-covered hidden</span>
+				}
+			</p>
+		}
+		if len(d.Rows) == 0 {
+			<p class="py-6 text-center text-slate-500">No low-stock items match these filters.</p>
+		} else {
+			<table class="w-full text-sm border-t">
+				<thead class="text-left text-slate-500 border-b">
+					<tr>
+						<th class="py-2 pr-3">Product</th>
+						<th class="py-2 px-3 text-right">On hand</th>
+						<th class="py-2 px-3 text-right">Sold wk</th>
+						<th class="py-2 px-3 text-right">Sold mo</th>
+						<th class="py-2 px-3 text-right">Sold yr</th>
+						<th class="py-2 px-3 text-right">Order qty</th>
+						<th class="py-2 pl-3">Supplier</th>
+					</tr>
+				</thead>
+				<tbody>
+					for _, r := range lowStockPrintRows(d.Rows, d.Demand, d.Notes) {
+						<tr class="border-b last:border-0">
+							<td class="py-2 pr-3 font-medium">
+								{ r.Name }
+								if r.Note != "" {
+									<span class="block text-xs font-normal text-slate-500">{ r.Note }</span>
+								}
+							</td>
+							<td class="py-2 px-3 text-right">{ r.OnHand } <span class="text-slate-400">{ r.Unit }</span></td>
+							<td class="py-2 px-3 text-right text-slate-500">{ r.SoldWeek }</td>
+							<td class="py-2 px-3 text-right text-slate-500">{ r.SoldMonth }</td>
+							<td class="py-2 px-3 text-right text-slate-500">{ r.SoldYear }</td>
+							<td class="py-2 px-3 text-right font-semibold">{ r.Suggested }</td>
+							<td class="py-2 pl-3">
+								if r.Supplier != "" {
+									{ r.Supplier }
+								} else {
+									<span class="text-slate-400">—</span>
+								}
+							</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+		}
 	}
 }
 

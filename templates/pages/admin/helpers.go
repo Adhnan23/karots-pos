@@ -150,6 +150,56 @@ func lowStockConfigJSON(rows []products.Product, demand map[int64]ReorderInfo, n
 	return string(b)
 }
 
+// LowStockPrintRow is one already-resolved line for the printable low-stock
+// sheet — the same values the interactive report shows, computed server-side so
+// the A4 print carries them without any Alpine.
+type LowStockPrintRow struct {
+	Name      string
+	Note      string
+	OnHand    string
+	Unit      string
+	Suggested string
+	SoldWeek  string
+	SoldMonth string
+	SoldYear  string
+	Supplier  string
+}
+
+// lowStockPrintRows resolves rows for the print sheet, mirroring
+// lowStockConfigJSON's suggested-qty fallback (demand-based when there's sales
+// history, else ≈ 2× reorder level − on-hand).
+func lowStockPrintRows(rows []products.Product, demand map[int64]ReorderInfo, notes map[int64]string) []LowStockPrintRow {
+	orZero := func(s string) string {
+		if s == "" {
+			return "0"
+		}
+		return s
+	}
+	out := make([]LowStockPrintRow, 0, len(rows))
+	for _, p := range rows {
+		info := demand[p.ID]
+		suggested := info.Suggested
+		if suggested == "" {
+			need := decimal.NewFromInt(int64(p.ReorderLevel * 2)).Sub(p.StockQty).Ceil()
+			if need.IsNegative() {
+				need = decimal.Zero
+			}
+			suggested = need.String()
+		}
+		supplier := ""
+		if p.PreferredSupplierName != nil {
+			supplier = *p.PreferredSupplierName
+		}
+		out = append(out, LowStockPrintRow{
+			Name: p.Name, Note: notes[p.ID], OnHand: p.StockQty.String(), Unit: p.UnitAbbr,
+			Suggested: suggested,
+			SoldWeek:  orZero(info.SoldLastWeek), SoldMonth: orZero(info.SoldLastMonth), SoldYear: orZero(info.SoldLastYear),
+			Supplier: supplier,
+		})
+	}
+	return out
+}
+
 // daysSince renders the whole-days elapsed since t (em-dash when t is nil), used
 // for the customer-dues aging column.
 func daysSince(t *time.Time) string {
@@ -217,6 +267,30 @@ func lowStockQuery(d LowStockData) string {
 		q.Set("alt", "1")
 	}
 	return q.Encode()
+}
+
+// lowStockPrintURL builds the print-sheet link carrying the report's active
+// filters. all=true prints every match; otherwise just the page being viewed.
+func lowStockPrintURL(d LowStockData, all bool) string {
+	q := url.Values{}
+	if d.Search != "" {
+		q.Set("search", d.Search)
+	}
+	if d.CategoryID != "" {
+		q.Set("category_id", d.CategoryID)
+	}
+	if d.SupplierID != "" {
+		q.Set("supplier_id", d.SupplierID)
+	}
+	if d.Alt {
+		q.Set("alt", "1")
+	}
+	if all {
+		q.Set("scope", "all")
+	} else {
+		q.Set("page", strconv.Itoa(d.Page))
+	}
+	return "/admin/reports/low-stock/print?" + q.Encode()
 }
 
 // invQuery is the Inventory report's filter state as a query string, so the

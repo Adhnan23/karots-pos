@@ -1465,39 +1465,88 @@ func (a *adminUI) BatchPriceSet(c echo.Context) error {
 
 // ============================ Reports: low-stock ============================
 
-func (a *adminUI) LowStockReport(c echo.Context) error {
+// lowStockResult carries a filtered low-stock query's rows plus the parsed
+// filter values, shared by the on-screen report and the printable A4 sheet.
+type lowStockResult struct {
+	Rows       []products.Product
+	Notes      map[int64]string
+	Total      int
+	Alt        bool
+	Search     string
+	CatParam   string
+	SupParam   string
+	CategoryID *int64
+	SupplierID *int64
+}
+
+// lowStockQueryRows applies the low-stock filters (search / category / supplier /
+// alternatives) plus the alternatives-plugin annotation. When all is true it
+// pages past List's 100-row cap to gather every match (for "Print all");
+// otherwise it returns the single requested page (pageParam).
+//
+// ponytail: the alternatives coverage/LowMembers pass runs over whatever rows
+// this call holds — the whole set when all, else the current page (as the
+// on-screen list always has). Fine for the bounded low-stock worklist.
+func (a *adminUI) lowStockQueryRows(c echo.Context, all bool) (lowStockResult, error) {
 	ctx := c.Request().Context()
-	// Limit 200 used to clamp to 50, quietly hiding low-stock items from the
-	// reorder worklist. Page through at the real maximum instead, and keep the
-	// total so the page can say how many there are.
-	page := pageParam(c)
-	search := strings.TrimSpace(c.QueryParam("search"))
-	catParam := strings.TrimSpace(c.QueryParam("category_id"))
-	supParam := strings.TrimSpace(c.QueryParam("supplier_id"))
-	q := products.ListQuery{LowStock: true, Limit: reportPageSize, Page: page, Search: search}
-	if id, err := strconv.ParseInt(catParam, 10, 64); err == nil && id > 0 {
-		q.CategoryID = &id
+	res := lowStockResult{
+		Notes:    map[int64]string{},
+		Search:   strings.TrimSpace(c.QueryParam("search")),
+		CatParam: strings.TrimSpace(c.QueryParam("category_id")),
+		SupParam: strings.TrimSpace(c.QueryParam("supplier_id")),
+		Alt:      c.QueryParam("alt") != "",
 	}
-	if id, err := strconv.ParseInt(supParam, 10, 64); err == nil && id > 0 {
-		q.PreferredSupplierID = &id
+	base := products.ListQuery{LowStock: true, Search: res.Search}
+	if id, err := strconv.ParseInt(res.CatParam, 10, 64); err == nil && id > 0 {
+		base.CategoryID = &id
+		res.CategoryID = &id
 	}
-	rows, total, err := a.s.products.List(ctx, q)
-	if err != nil {
-		return err
+	if id, err := strconv.ParseInt(res.SupParam, 10, 64); err == nil && id > 0 {
+		base.PreferredSupplierID = &id
+		res.SupplierID = &id
 	}
+
+	var rows []products.Product
+	total := 0
+	if all {
+		// Page past the 100-row List cap so the whole filtered worklist prints.
+		q := base
+		q.Limit = products.MaxListLimit
+		q.Page = 1
+		for {
+			batch, t, err := a.s.products.List(ctx, q)
+			if err != nil {
+				return res, err
+			}
+			total = t
+			rows = append(rows, batch...)
+			if len(batch) == 0 || len(rows) >= total {
+				break
+			}
+			q.Page++
+		}
+	} else {
+		q := base
+		q.Limit = reportPageSize
+		q.Page = pageParam(c)
+		batch, t, err := a.s.products.List(ctx, q)
+		if err != nil {
+			return res, err
+		}
+		rows, total = batch, t
+	}
+	res.Total = total
+
 	// Alternatives (plugin) annotation: mark low SKUs whose interchangeable tier is
 	// still stocked as "covered", and (when the filter is on) drop them from the
 	// worklist so you only reorder what the whole tier is short of. Inert when no
-	// plugin registers an annotator. ponytail: filters the current page only — the
-	// total/pager still count covered rows; fine for the bounded low-stock list.
-	alt := c.QueryParam("alt") != ""
+	// plugin registers an annotator.
 	annotators := plugin.ProductReorderAnnotators()
-	notes := map[int64]string{}
 	if len(annotators) > 0 {
 		// When filtering, pull in members of tiers that are low AS A WHOLE — even if
 		// the individual product isn't below its own reorder level — so the whole low
 		// group is orderable. Skips ids already present.
-		if alt {
+		if res.Alt {
 			present := map[int64]bool{}
 			for _, p := range rows {
 				present[p.ID] = true
@@ -1540,14 +1589,14 @@ func (a *adminUI) LowStockReport(c echo.Context) error {
 				}
 				for id, n := range m {
 					if n.Note != "" {
-						notes[id] = n.Note
+						res.Notes[id] = n.Note
 					}
 					if n.Covered {
 						covered[id] = true
 					}
 				}
 			}
-			if alt {
+			if res.Alt {
 				kept := rows[:0]
 				for _, p := range rows {
 					if !covered[p.ID] {
@@ -1557,6 +1606,16 @@ func (a *adminUI) LowStockReport(c echo.Context) error {
 				rows = kept
 			}
 		}
+	}
+	res.Rows = rows
+	return res, nil
+}
+
+func (a *adminUI) LowStockReport(c echo.Context) error {
+	ctx := c.Request().Context()
+	res, err := a.lowStockQueryRows(c, false)
+	if err != nil {
+		return err
 	}
 	sups, err := a.s.suppliers.List(ctx, "")
 	if err != nil {
@@ -1568,9 +1627,9 @@ func (a *adminUI) LowStockReport(c echo.Context) error {
 	}
 	// Seed the supplier picker's text with the selected supplier's name.
 	supName := ""
-	if q.PreferredSupplierID != nil {
+	if res.SupplierID != nil {
 		for _, s := range sups {
-			if s.ID == *q.PreferredSupplierID {
+			if s.ID == *res.SupplierID {
 				supName = s.Name
 				break
 			}
@@ -1579,20 +1638,60 @@ func (a *adminUI) LowStockReport(c echo.Context) error {
 	return response.RenderPage(c, adminpages.LowStockPage(adminpages.LowStockData{
 		UserName:     middleware.CurrentUserName(c),
 		Symbol:       a.symbol(ctx),
-		Rows:         rows,
+		Rows:         res.Rows,
 		Suppliers:    sups,
 		Categories:   cats,
-		Demand:       a.reorderDemand(ctx, rows),
-		Total:        total,
-		Page:         page,
+		Demand:       a.reorderDemand(ctx, res.Rows),
+		Total:        res.Total,
+		Page:         pageParam(c),
 		PageSize:     reportPageSize,
-		Search:       search,
-		CategoryID:   catParam,
-		SupplierID:   supParam,
+		Search:       res.Search,
+		CategoryID:   res.CatParam,
+		SupplierID:   res.SupParam,
 		SupplierName: supName,
-		Alt:          alt,
-		AltAvailable: len(annotators) > 0,
-		Notes:        notes,
+		Alt:          res.Alt,
+		AltAvailable: len(plugin.ProductReorderAnnotators()) > 0,
+		Notes:        res.Notes,
+	}))
+}
+
+// LowStockPrint renders the reorder worklist as a clean A4 sheet for print /
+// Save-as-PDF. scope=all prints every filtered match (paging past the List cap);
+// otherwise just the page the report was on. Filters ride the query string.
+func (a *adminUI) LowStockPrint(c echo.Context) error {
+	ctx := c.Request().Context()
+	all := c.QueryParam("scope") == "all"
+	res, err := a.lowStockQueryRows(c, all)
+	if err != nil {
+		return err
+	}
+	// Resolve filter names for the printed header.
+	supName := ""
+	if res.SupplierID != nil {
+		if s, gerr := a.s.suppliers.Get(ctx, *res.SupplierID); gerr == nil && s != nil {
+			supName = s.Name
+		}
+	}
+	catName := ""
+	if res.CategoryID != nil {
+		if cat, gerr := a.s.categories.Get(ctx, *res.CategoryID); gerr == nil && cat != nil {
+			catName = cat.Name
+		}
+	}
+	return response.RenderPage(c, adminpages.LowStockPrintPage(adminpages.LowStockPrintData{
+		ShopName: a.shopName(ctx),
+		Symbol:   a.symbol(ctx),
+		Rows:     res.Rows,
+		Demand:   a.reorderDemand(ctx, res.Rows),
+		Notes:    res.Notes,
+		Total:    res.Total,
+		All:      all,
+		Page:     pageParam(c),
+		PageSize: reportPageSize,
+		Search:   res.Search,
+		Category: catName,
+		Supplier: supName,
+		Alt:      res.Alt,
 	}))
 }
 

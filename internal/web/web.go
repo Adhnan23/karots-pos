@@ -478,6 +478,7 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	ag.GET("/reports/inventory", admin.InventoryReport)
 	ag.GET("/reports/batches", admin.BatchReport)
 	ag.GET("/reports/low-stock", admin.LowStockReport)
+	ag.GET("/reports/low-stock/print", admin.LowStockPrint)
 
 	// Categories management
 	ag.GET("/categories", admin.Categories)
