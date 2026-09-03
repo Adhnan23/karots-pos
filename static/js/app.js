@@ -2526,6 +2526,7 @@ function grn(symbol, config) {
     supQuery: "",
     supResults: [],
     expectedDate: config.expectedDate || "",
+    invoiceNo: config.invoiceNo || "", // supplier's invoice/bill no. (Receive now)
     notes: config.notes || "",
     lines: [],
     busy: false,
@@ -2738,6 +2739,7 @@ function grn(symbol, config) {
         supplier_id: Number(this.supplierId),
         discount: "0",
         expected_date: this.expectedDate || "",
+        invoice_no: this.invoiceNo || null,
         notes: this.notes || null,
         items: items,
       };
