@@ -304,6 +304,24 @@ type ProductBadgeProvider struct {
 	Batch func(ctx context.Context, productIDs []int64) (map[int64][]string, error)
 }
 
+// SaleSuggestion is an optional line discount a plugin proposes when a product
+// is added at the till (e.g. a clearance markdown). The cashier is prompted to
+// apply or skip it; applying sets the line's existing discount fields.
+type SaleSuggestion struct {
+	DiscountType  string // "percent" | "fixed" (matches sale_items.discount_type)
+	DiscountValue string // percent (e.g. "20") or fixed per-unit amount
+	Label         string // short badge/summary, e.g. "Clearance -20%"
+	Prompt        string // popup body, e.g. "Clearance item — apply 20% off?"
+}
+
+// ProductSaleSuggestionProvider supplies a line-discount suggestion per product
+// for the till. Batch is called with the visible product ids and returns each
+// id's suggestion (omit an id for none). Best-effort: an error drops the
+// suggestion, never breaks the payload. One query per page — no per-row calls.
+type ProductSaleSuggestionProvider struct {
+	Batch func(ctx context.Context, productIDs []int64) (map[int64]SaleSuggestion, error)
+}
+
 // DetailRow is one labeled line a plugin contributes to the till product-info
 // popup.
 type DetailRow struct {
@@ -362,6 +380,7 @@ var (
 	productSearchers         []ProductSearchContributor
 	productMetaProviders     []ProductMetaProvider
 	productBadgeProviders    []ProductBadgeProvider
+	productSaleSuggesters    []ProductSaleSuggestionProvider
 	productDetailProviders   []ProductDetailContributor
 	productLabelProviders    []ProductLabelFieldProvider
 	productRowActions        []ProductRowAction
@@ -384,6 +403,9 @@ func (r *Registry) AddProductMetaProvider(p ProductMetaProvider) {
 func (r *Registry) AddProductBadgeProvider(p ProductBadgeProvider) {
 	productBadgeProviders = append(productBadgeProviders, p)
 }
+func (r *Registry) AddProductSaleSuggestionProvider(p ProductSaleSuggestionProvider) {
+	productSaleSuggesters = append(productSaleSuggesters, p)
+}
 func (r *Registry) AddProductDetailContributor(p ProductDetailContributor) {
 	productDetailProviders = append(productDetailProviders, p)
 }
@@ -403,6 +425,9 @@ func ProductSavedHooks() []ProductSaved                     { return productSave
 func ProductSearchContributors() []ProductSearchContributor { return productSearchers }
 func ProductMetaProviders() []ProductMetaProvider           { return productMetaProviders }
 func ProductBadgeProviders() []ProductBadgeProvider         { return productBadgeProviders }
+func ProductSaleSuggestionProviders() []ProductSaleSuggestionProvider {
+	return productSaleSuggesters
+}
 func ProductDetailContributors() []ProductDetailContributor { return productDetailProviders }
 func ProductLabelFieldProviders() []ProductLabelFieldProvider { return productLabelProviders }
 func ProductRowActions() []ProductRowAction                   { return productRowActions }
