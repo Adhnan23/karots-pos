@@ -1,0 +1,7 @@
+{
+  "key": "clearance",
+  "name": "Clearance",
+  "import": "karots-pos/plugins/clearance",
+  "version": "1.0.0",
+  "description": "Flags stale stock (has stock, no sale in N days), suggests a margin-safe markdown the owner approves, and offers to apply it at the till."
+}
