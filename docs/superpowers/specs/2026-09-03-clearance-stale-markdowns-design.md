@@ -195,6 +195,27 @@ gross + net line price already prints on the receipt.
 
 **New plugin (`plugins/clearance/`):** `clearance.go`, `store.go`,
 `store_test.go`, `admin.go`, `pages.templ`, `migrations/0001_*.sql`,
-`plugin.json`; compiled in by adding a blank import
-`_ "karots-pos/plugins/clearance"` to `cmd/server/enabled_plugins.go` (same
-place `alternatives` is listed).
+`plugin.json`.
+
+## Bootstrapper integration
+
+The bootstrapper (`cmd/bootstrap`) auto-discovers plugins from
+`plugins/*/plugin.json`, so **shipping a well-formed `plugin.json` is all that
+is required for Clearance to appear as a selectable option in the per-shop build
+menu** — no bootstrapper code change. At build time it rewrites
+`cmd/server/enabled_plugins.go` with the chosen plugins' blank imports and
+restores the file afterward; the committed default stays core-only.
+
+Concretely:
+- `plugins/clearance/plugin.json` — `key: "clearance"`, `name: "Clearance"`,
+  `import: "karots-pos/plugins/clearance"`, `version`, and a one-line
+  `description` (this is the text the bootstrap picker shows).
+- **No `env.sample`** — Clearance has no environment config; its settings
+  (stale window, default %, min margin) are runtime DB values edited on the
+  admin page, not build/env values. (The bootstrapper merges each plugin's
+  `env.sample` into the shop `.env.sample` when present; Clearance simply omits
+  it.)
+- **Local dev only:** temporarily add `_ "karots-pos/plugins/clearance"` to
+  `cmd/server/enabled_plugins.go` to run/test it in this repo. Do not commit
+  that line as a permanent default — the committed file is core-only by design,
+  and the bootstrapper manages imports for real builds.
