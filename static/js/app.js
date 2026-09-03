@@ -2604,6 +2604,7 @@ function grn(symbol, config) {
           // quantity survives a short delivery.
           ordered: l.ordered || "",
           quantity: Number(l.quantity) || 0,
+          free_qty: Number(l.free_qty) || 0,
           cost_price: Number(l.cost_price) || 0,
           selling_price: Number(l.selling_price) || 0,
           expiry_date: l.expiry_date || "",
@@ -2619,7 +2620,7 @@ function grn(symbol, config) {
       return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     },
     addLine() {
-      this.lines.push({ product_id: 0, product_name: "", barcode: "", ordered: "", quantity: 0, cost_price: 0, selling_price: 0, expiry_date: "", _open: false, _results: [] });
+      this.lines.push({ product_id: 0, product_name: "", barcode: "", ordered: "", quantity: 0, free_qty: 0, cost_price: 0, selling_price: 0, expiry_date: "", _open: false, _results: [] });
     },
     removeLine(i) {
       this.lines.splice(i, 1);
@@ -2715,6 +2716,7 @@ function grn(symbol, config) {
         .map((l) => ({
           product_id: Number(l.product_id),
           quantity: String(l.quantity),
+          free_qty: String(l.free_qty || 0),
           ordered_qty: l.ordered ? String(l.ordered) : "",
           cost_price: String(l.cost_price || 0),
           selling_price: String(l.selling_price || 0),
@@ -2779,6 +2781,7 @@ function grnReceive(symbol, config) {
       product_name: l.product_name || "",
       ordered: l.ordered || "0",
       quantity: Number(l.quantity) || 0,
+      free_qty: Number(l.free_qty) || 0,
       cost_price: Number(l.cost_price) || 0,
       selling_price: Number(l.selling_price) || 0,
       expiry_date: l.expiry_date || "",
@@ -2798,7 +2801,7 @@ function grnReceive(symbol, config) {
     // addNewLine lets you receive a forgotten/extra item that wasn't on the draft.
     addNewLine() {
       this.lines.push({
-        product_id: 0, product_name: "", ordered: "", quantity: 1,
+        product_id: 0, product_name: "", ordered: "", quantity: 1, free_qty: 0,
         cost_price: 0, selling_price: 0, expiry_date: "",
         cur_cost: 0, cur_sell: 0, _new: true, _open: false, _results: [],
       });
@@ -2853,6 +2856,7 @@ function grnReceive(symbol, config) {
         .map((l) => ({
           product_id: Number(l.product_id),
           quantity: String(l.quantity),
+          free_qty: String(l.free_qty || 0),
           ordered_qty: l._new ? "" : String(l.ordered || 0),
           cost_price: String(l.cost_price || 0),
           selling_price: String(l.selling_price || 0),

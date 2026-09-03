@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"strconv"
+	"strings"
 	"time"
 
 	"karots-pos/internal/apperr"
@@ -56,8 +57,11 @@ type Service struct {
 func NewService(db *sqlx.DB) *Service { return &Service{db: db, repo: NewRepository(db)} }
 
 type ItemInput struct {
-	ProductID    int64  `json:"product_id"    validate:"required,gt=0"`
-	Quantity     string `json:"quantity"      validate:"required"`
+	ProductID int64  `json:"product_id"    validate:"required,gt=0"`
+	Quantity  string `json:"quantity"      validate:"required"`
+	// FreeQty is bonus units the supplier added at no charge. Optional; blank or
+	// "0" means none. It adds stock but nothing to the payable — see parseLines.
+	FreeQty      string `json:"free_qty"`
 	CostPrice    string `json:"cost_price"    validate:"required"`
 	SellingPrice string `json:"selling_price"`
 	ExpiryDate   string `json:"expiry_date"`
@@ -172,6 +176,23 @@ func receivedStatus(paid, total decimal.Decimal) string {
 	}
 }
 
+// lotCost is the per-unit inventory cost of a received lot. With no free units
+// it is exactly the list cost (no divide, no rounding drift, and a zero list
+// cost still lets the batch inherit the product's own cost). With bonus units
+// it is what was actually paid (paidSubtotal) spread across every unit that
+// arrived (gotQty = paid + free), so the freebie surfaces as margin on sale.
+// ponytail: rounds to 4dp, so blended×gotQty can drift a fraction from paid;
+// per-unit costing lives with that — bump precision only if valuation demands.
+func lotCost(paidSubtotal, gotQty, freeQty, listCost decimal.Decimal) decimal.Decimal {
+	if !freeQty.IsPositive() {
+		return listCost
+	}
+	if !gotQty.IsPositive() {
+		return decimal.Zero
+	}
+	return paidSubtotal.DivRound(gotQty, 4)
+}
+
 // parseLines validates item inputs into purchase lines and returns their subtotal.
 func parseLines(items []ItemInput) ([]PurchaseItem, decimal.Decimal, error) {
 	subtotal := decimal.Zero
@@ -180,6 +201,13 @@ func parseLines(items []ItemInput) ([]PurchaseItem, decimal.Decimal, error) {
 		qty, err := money.Parse(it.Quantity)
 		if err != nil || !qty.IsPositive() {
 			return nil, decimal.Zero, apperr.Validation("quantity must be greater than zero")
+		}
+		free := decimal.Zero
+		if strings.TrimSpace(it.FreeQty) != "" {
+			free, err = money.Parse(it.FreeQty)
+			if err != nil || free.IsNegative() {
+				return nil, decimal.Zero, apperr.Validation("free quantity is invalid")
+			}
 		}
 		cost, err := money.Parse(it.CostPrice)
 		if err != nil || cost.IsNegative() {
@@ -197,10 +225,13 @@ func parseLines(items []ItemInput) ([]PurchaseItem, decimal.Decimal, error) {
 			}
 			expiry = &e
 		}
+		// Free units are deliberately absent from the payable: the subtotal is
+		// paid qty × cost only, so nothing about a freebie reaches the supplier
+		// balance, invoice total, or payment section.
 		lineSub := qty.Mul(cost).Round(2)
 		subtotal = subtotal.Add(lineSub)
 		lines = append(lines, PurchaseItem{
-			ProductID: it.ProductID, Quantity: qty, CostPrice: cost,
+			ProductID: it.ProductID, Quantity: qty, FreeQty: free, CostPrice: cost,
 			SellingPrice: selling, ExpiryDate: expiry, Subtotal: lineSub,
 		})
 	}
@@ -218,16 +249,27 @@ func applyReceivedLines(ctx context.Context, repo *Repository, stk *stock.Reposi
 		if err != nil {
 			return apperr.Internal("failed to save purchase item", err)
 		}
-		if err := stk.Increment(ctx, ln.ProductID, ln.Quantity); err != nil {
+		// Free bonus units physically arrive, so stock, the batch, and the
+		// movement all count paid + free. Only the payable (subtotal, above) left
+		// them out.
+		gotQty := ln.Quantity.Add(ln.FreeQty)
+		if err := stk.Increment(ctx, ln.ProductID, gotQty); err != nil {
 			return apperr.Internal("failed to update stock", err)
 		}
 		// Create the batch (carries expiry + cost) for FEFO depletion later. The
 		// GRN line's selling price rides along so THIS lot keeps ringing up at the
 		// price it was received at, even after a later delivery moves the shelf
 		// price on. Blank (zero) leaves the lot following the product, as before.
+		//
+		// The lot's cost is what was actually paid spread across every unit
+		// received — buy 10 @ 100 + 2 free values all 12 at 1000/12, so the
+		// freebie surfaces as margin when the units sell, not as a phantom that
+		// vanishes into COGS. lotCost stays the list cost when there are no free
+		// units, and zero (a free/unpriced line) still lets the batch inherit the
+		// product's own cost.
 		if _, err := stk.InsertBatch(ctx, stock.NewBatch{
 			ProductID: ln.ProductID, PurchaseItemID: &itemID, ExpiryDate: ln.ExpiryDate,
-			Quantity: ln.Quantity, CostPrice: ln.CostPrice,
+			Quantity: gotQty, CostPrice: lotCost(ln.Subtotal, gotQty, ln.FreeQty, ln.CostPrice),
 			SellingPrice: ln.SellingPrice, Source: "purchase",
 		}); err != nil {
 			return apperr.Internal("failed to create stock batch", err)
@@ -240,11 +282,14 @@ func applyReceivedLines(ctx context.Context, repo *Repository, stk *stock.Reposi
 		ref := "purchase"
 		pid := purchaseID
 		if err := stk.InsertMovement(ctx, stock.MovementInput{
-			ProductID: ln.ProductID, Type: stock.MovePurchase, Quantity: ln.Quantity,
+			ProductID: ln.ProductID, Type: stock.MovePurchase, Quantity: gotQty,
 			ReferenceID: &pid, ReferenceType: &ref, UserID: userID,
 		}); err != nil {
 			return apperr.Internal("failed to record stock movement", err)
 		}
+		// Master cost tracks the list price paid per unit, NOT the blended lot
+		// cost — it is the replacement cost the info popup and reorder use. Zero
+		// (a free line) leaves it untouched via the guard in RefreshProductPricing.
 		if err := repo.RefreshProductPricing(ctx, ln.ProductID, ln.CostPrice, ln.SellingPrice); err != nil {
 			return apperr.Internal("failed to refresh product pricing", err)
 		}

@@ -47,6 +47,7 @@ type PurchaseItem struct {
 	PurchaseID   int64            `db:"purchase_id"   json:"purchase_id"`
 	ProductID    int64            `db:"product_id"    json:"product_id"`
 	Quantity     decimal.Decimal  `db:"quantity"      json:"quantity"`
+	FreeQty      decimal.Decimal  `db:"free_qty"      json:"free_qty"`
 	OrderedQty   *decimal.Decimal `db:"ordered_qty"   json:"ordered_qty,omitempty"`
 	CostPrice    decimal.Decimal  `db:"cost_price"    json:"cost_price"`
 	SellingPrice decimal.Decimal  `db:"selling_price" json:"selling_price"`
@@ -98,9 +99,9 @@ func (r *Repository) InsertItem(ctx context.Context, purchaseID int64, it Purcha
 func (r *Repository) InsertItemReturningID(ctx context.Context, purchaseID int64, it PurchaseItem) (int64, error) {
 	var id int64
 	err := r.q.GetContext(ctx, &id, `
-		INSERT INTO purchase_items (purchase_id, product_id, quantity, ordered_qty, cost_price, selling_price, expiry_date, subtotal)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
-		purchaseID, it.ProductID, it.Quantity, it.OrderedQty, it.CostPrice, it.SellingPrice, it.ExpiryDate, it.Subtotal)
+		INSERT INTO purchase_items (purchase_id, product_id, quantity, free_qty, ordered_qty, cost_price, selling_price, expiry_date, subtotal)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+		purchaseID, it.ProductID, it.Quantity, it.FreeQty, it.OrderedQty, it.CostPrice, it.SellingPrice, it.ExpiryDate, it.Subtotal)
 	return id, err
 }
 
@@ -110,12 +111,15 @@ func (r *Repository) MarkHasExpiry(ctx context.Context, productID int64) error {
 	return err
 }
 
-// RefreshProductPricing updates a product's cost (always) and selling price
-// (only when a positive new price was supplied on the GRN line).
+// RefreshProductPricing updates a product's cost and selling price, each only
+// when a positive new value was supplied on the GRN line. A zero cost means a
+// free line (bonus goods, or a free different item) — it must NOT clobber the
+// product's real cost, which the info popup shows and the COGS zero-cost rescue
+// falls back to. Zero on either field leaves that field untouched.
 func (r *Repository) RefreshProductPricing(ctx context.Context, productID int64, cost, selling decimal.Decimal) error {
 	_, err := r.q.ExecContext(ctx, `
 		UPDATE products
-		SET cost_price = $1,
+		SET cost_price    = CASE WHEN $1 > 0 THEN $1 ELSE cost_price END,
 		    selling_price = CASE WHEN $2 > 0 THEN $2 ELSE selling_price END
 		WHERE id = $3`, cost, selling, productID)
 	return err

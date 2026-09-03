@@ -325,6 +325,7 @@ templ SupplierReceive(d SupplierReceiveData) {
 							<tr>
 								<th class="py-2">Product</th>
 								<th class="py-2 w-32">Qty</th>
+								<th class="py-2 w-24" title="Bonus units the supplier gave free. Not added to what you pay — they just lower the real cost per unit.">Free</th>
 								<th class="py-2 w-28">Cost</th>
 								<th class="py-2 w-28">Sell</th>
 								<th class="py-2 w-36">Expiry</th>
@@ -366,6 +367,7 @@ templ SupplierReceive(d SupplierReceiveData) {
 											<button type="button" x-on:click="incLine(l)" class="px-2 text-slate-500 hover:bg-slate-100" aria-label="Increase quantity">+</button>
 										</div>
 									</td>
+									<td class="py-1 pr-2"><input type="number" step="0.001" min="0" x-model.number="l.free_qty" placeholder="0" class="w-full border rounded px-2 py-1 text-center"/></td>
 									<td class="py-1 pr-2"><input type="number" step="0.01" min="0" x-model.number="l.cost_price" class="w-full border rounded px-2 py-1 text-right"/></td>
 									<td class="py-1 pr-2"><input type="number" step="0.01" min="0" x-model.number="l.selling_price" class="w-full border rounded px-2 py-1 text-right"/></td>
 									<td class="py-1 pr-2"><input type="date" x-model="l.expiry_date" class="w-full border rounded px-2 py-1"/></td>
