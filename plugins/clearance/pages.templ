@@ -1,0 +1,104 @@
+package clearance
+
+import (
+	"strconv"
+
+	"karots-pos/templates/layouts"
+)
+
+type Row struct {
+	ProductID   int64
+	Name        string
+	Unit        string
+	OnHand      string
+	Cost        string // pre-formatted money
+	Price       string // pre-formatted money
+	DaysLabel   string // "42 days" or "never sold"
+	SuggestPct  string // "12.5"
+	NewPrice    string // pre-formatted money
+	Approved    bool
+	ApprovedPct string
+}
+
+type PageData struct {
+	UserName         string
+	Symbol           string
+	Rows             []Row
+	StaleDays        int
+	DefaultPercent   string
+	MinMarginPercent string
+}
+
+templ Page(d PageData) {
+	@layouts.Admin("Clearance", d.UserName, "clearance") {
+		<div class="flex items-center justify-between mb-6">
+			<div>
+				<h1 class="text-2xl font-bold">Clearance / Stale stock</h1>
+				<p class="text-sm text-slate-500">Items with stock that haven't sold lately. Approve a markdown and it's offered at the till.</p>
+			</div>
+		</div>
+		<form method="post" action="/admin/clearance/settings" class="bg-white rounded-2xl shadow-sm p-4 mb-6 flex flex-wrap items-end gap-4">
+			<div>
+				<label class="block text-xs text-slate-500 mb-1">Stale after (days)</label>
+				<input type="number" name="stale_days" value={ strconv.Itoa(d.StaleDays) } min="1" class="border rounded-lg px-3 py-1.5 w-28"/>
+			</div>
+			<div>
+				<label class="block text-xs text-slate-500 mb-1">Default discount %</label>
+				<input type="number" step="0.5" name="default_percent" value={ d.DefaultPercent } min="0" class="border rounded-lg px-3 py-1.5 w-28"/>
+			</div>
+			<div>
+				<label class="block text-xs text-slate-500 mb-1">Min margin % over cost</label>
+				<input type="number" step="0.5" name="min_margin_percent" value={ d.MinMarginPercent } min="0" class="border rounded-lg px-3 py-1.5 w-28"/>
+			</div>
+			<button class="px-4 py-1.5 rounded-lg bg-indigo-600 text-white text-sm font-medium">Save</button>
+		</form>
+		<div class="bg-white rounded-2xl shadow-sm p-6">
+			if len(d.Rows) == 0 {
+				<p class="py-6 text-center text-slate-500">No stale items — everything is selling. 🎉</p>
+			} else {
+				<table class="w-full text-sm">
+					<thead class="text-left text-slate-500 border-b">
+						<tr>
+							<th class="py-2 px-2">Product</th>
+							<th class="py-2 px-2 text-right">On hand</th>
+							<th class="py-2 px-2 text-right">Last sold</th>
+							<th class="py-2 px-2 text-right">Cost</th>
+							<th class="py-2 px-2 text-right">Price</th>
+							<th class="py-2 px-2 text-right">New price</th>
+							<th class="py-2 px-2 text-right">Discount %</th>
+							<th class="py-2 px-2"></th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, r := range d.Rows {
+							<tr class="border-b last:border-0">
+								<td class="py-2 px-2 font-medium">
+									{ r.Name }
+									if r.Approved {
+										<span class="ml-2 text-xs text-emerald-600">approved -{ r.ApprovedPct }%</span>
+									}
+								</td>
+								<td class="py-2 px-2 text-right">{ r.OnHand } <span class="text-slate-400">{ r.Unit }</span></td>
+								<td class="py-2 px-2 text-right text-slate-500">{ r.DaysLabel }</td>
+								<td class="py-2 px-2 text-right">{ r.Cost }</td>
+								<td class="py-2 px-2 text-right">{ r.Price }</td>
+								<td class="py-2 px-2 text-right font-semibold text-emerald-700">{ r.NewPrice }</td>
+								<td class="py-2 px-2 text-right whitespace-nowrap">
+									<form method="post" action={ templ.SafeURL("/admin/clearance/" + strconv.FormatInt(r.ProductID, 10) + "/approve") } class="inline-flex items-center gap-1">
+										<input type="number" step="0.5" name="percent" value={ r.SuggestPct } min="0" max="100" class="border rounded px-2 py-1 w-20 text-right"/>
+										<button class="px-3 py-1 rounded-lg bg-emerald-600 text-white text-xs font-medium">Approve</button>
+									</form>
+								</td>
+								<td class="py-2 px-2 text-right whitespace-nowrap">
+									<form method="post" action={ templ.SafeURL("/admin/clearance/" + strconv.FormatInt(r.ProductID, 10) + "/dismiss") } class="inline">
+										<button class="px-3 py-1 rounded-lg border text-slate-600 text-xs font-medium">Dismiss</button>
+									</form>
+								</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		</div>
+	}
+}

@@ -5,6 +5,7 @@
 package clearance
 
 import (
+	"context"
 	"io/fs"
 
 	"karots-pos/internal/plugin"
@@ -24,5 +25,29 @@ func (p *Plugin) Migrations() (fs.FS, string) { return migrations.FS, "clearance
 func (p *Plugin) Setup(reg *plugin.Registry) {
 	p.core = reg.Core
 	p.store = NewStore(reg.Core.DB)
-	// routes + hooks wired in Task 6 and Task 7.
+
+	a := &adminUI{p: p}
+	reg.Admin().GET("/clearance", a.Page)
+	reg.Admin().POST("/clearance/settings", a.SaveSettings)
+	reg.Admin().POST("/clearance/:pid/approve", a.Approve)
+	reg.Admin().POST("/clearance/:pid/dismiss", a.Dismiss)
+
+	reg.AddAdminNav(plugin.AdminNavEntry{
+		SectionLabel: "Clearance", Icon: "🏷️",
+		Href: "/admin/clearance", Label: "Stale stock", Key: "clearance",
+		Desc: "Markdowns for slow-moving stock",
+	})
+
+	// Till-card pin + the add-to-cart markdown suggestion + info-popup row.
+	reg.AddProductBadgeProvider(plugin.ProductBadgeProvider{Batch: p.store.BadgesFor})
+	reg.AddProductSaleSuggestionProvider(plugin.ProductSaleSuggestionProvider{Batch: p.store.SuggestionsFor})
+	reg.AddProductDetailContributor(plugin.ProductDetailContributor{
+		Rows: func(ctx context.Context, id int64) ([]plugin.DetailRow, error) {
+			m, err := p.store.SuggestionsFor(ctx, []int64{id})
+			if err != nil || len(m) == 0 {
+				return nil, err
+			}
+			return []plugin.DetailRow{{Label: "Clearance", Value: m[id].Label}}, nil
+		},
+	})
 }
