@@ -502,10 +502,12 @@ func (a *adminUI) PurchaseEntry(c echo.Context) error {
 		return err
 	}
 	return response.RenderPage(c, adminpages.PurchaseEntryPage(adminpages.PurchaseEntryData{
-		UserName:   middleware.CurrentUserName(c),
-		Symbol:     a.symbol(ctx),
-		Suppliers:  sups,
-		ConfigJSON: "null",
+		UserName:  middleware.CurrentUserName(c),
+		Symbol:    a.symbol(ctx),
+		Suppliers: sups,
+		// receiveUrl enables the "Receive now" action — take a walk-in delivery
+		// straight into stock (on account) instead of saving a draft order.
+		ConfigJSON: `{"receiveUrl":"/admin/purchases/receive"}`,
 	}))
 }
 

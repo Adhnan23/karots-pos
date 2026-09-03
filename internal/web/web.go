@@ -391,6 +391,7 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	ag.GET("/purchases", admin.Purchases)
 	ag.GET("/purchases/new", admin.PurchaseEntry)
 	ag.POST("/purchases", admin.PurchaseEntryCreate)
+	ag.POST("/purchases/receive", admin.PurchaseReceiveNow)
 	ag.POST("/purchases/draft", admin.PurchaseDraftCreate)
 	ag.GET("/purchases/po/print", admin.DraftPOPrint)
 	ag.GET("/purchases/:id/grn", admin.GRNPrint)

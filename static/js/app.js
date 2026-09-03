@@ -2532,6 +2532,9 @@ function grn(symbol, config) {
     // Counter mode: a fixed supplier, a different endpoint, and an optional
     // "paying now" block. Absent config leaves the admin draft flow untouched.
     postUrl: config.postUrl || "",
+    // Admin only: a second endpoint that receives the delivery instantly (adds
+    // stock now, on account) instead of saving a draft order. Absent elsewhere.
+    receiveUrl: config.receiveUrl || "",
     redirect: config.redirect || "/admin/purchases",
     savedMsg: config.savedMsg || "",
     withPayment: !!config.withPayment,
@@ -2726,9 +2729,11 @@ function grn(symbol, config) {
         toast("Add at least one line", "error");
         return;
       }
-      const url = this.postUrl
-        ? this.postUrl
-        : this.editId > 0 ? "/admin/purchases/" + this.editId + "/edit" : "/admin/purchases";
+      const url = receiveNow && this.receiveUrl
+        ? this.receiveUrl
+        : this.postUrl
+          ? this.postUrl
+          : this.editId > 0 ? "/admin/purchases/" + this.editId + "/edit" : "/admin/purchases";
       const body = {
         supplier_id: Number(this.supplierId),
         discount: "0",
@@ -2744,6 +2749,14 @@ function grn(symbol, config) {
       this.busy = true;
       try {
         const res = await apiFetch("POST", url, body);
+        // Receiving lands stock now and jumps to the new purchase; saving stays
+        // on the draft flow.
+        if (receiveNow && this.receiveUrl) {
+          toast("Goods received", "success");
+          const pid = res && res.data && res.data.purchase && res.data.purchase.id;
+          window.location = pid ? "/admin/purchases/" + pid : this.redirect;
+          return;
+        }
         toast(this.savedMsg || (this.editId > 0 ? "Purchase order updated" : "Purchase order saved"), "success");
         // An order taken at the counter prints a slip the supplier takes away.
         const printUrl = res && res.data && res.data.print_url;

@@ -240,7 +240,7 @@ templ PurchaseEntryPage(d PurchaseEntryData) {
 
 			<table class="w-full text-sm mb-3">
 				<thead class="text-left text-slate-500 border-b">
-					<tr><th class="py-2">Product</th><th class="py-2 w-32">Qty</th><th class="py-2 w-28">Cost</th><th class="py-2 w-28">Sell</th><th class="py-2 w-36">Expiry</th><th class="py-2 text-right w-28">Subtotal</th><th></th></tr>
+					<tr><th class="py-2">Product</th><th class="py-2 w-32">Qty</th><th class="py-2 w-24" title="Bonus units the supplier gave free. Only used when you 'Receive now' — not added to what you pay, they just lower the real cost per unit.">Free</th><th class="py-2 w-28">Cost</th><th class="py-2 w-28">Sell</th><th class="py-2 w-36">Expiry</th><th class="py-2 text-right w-28">Subtotal</th><th></th></tr>
 				</thead>
 				<tbody>
 					<template x-for="(l, i) in lines" x-bind:key="i">
@@ -260,6 +260,7 @@ templ PurchaseEntryPage(d PurchaseEntryData) {
 									<button type="button" x-on:click="incLine(l)" class="px-2 text-slate-500 hover:bg-slate-100" aria-label="Increase quantity">+</button>
 								</div>
 							</td>
+							<td class="py-1 pr-2"><input type="number" step="0.001" min="0" x-model.number="l.free_qty" placeholder="0" class="w-full border rounded px-2 py-1 text-center"/></td>
 							<td class="py-1 pr-2"><input type="number" step="0.01" min="0" x-model.number="l.cost_price" class="w-full border rounded px-2 py-1 text-right"/></td>
 							<td class="py-1 pr-2"><input type="number" step="0.01" min="0" x-model.number="l.selling_price" class="w-full border rounded px-2 py-1 text-right"/></td>
 							<td class="py-1 pr-2"><input type="date" x-model="l.expiry_date" class="w-full border rounded px-2 py-1"/></td>
@@ -274,13 +275,18 @@ templ PurchaseEntryPage(d PurchaseEntryData) {
 			<div class="flex items-center justify-end border-t pt-4">
 				<div class="text-right">
 					<div class="text-xl font-bold">Est. total <span x-text="sym + ' ' + money(subtotal())"></span></div>
-					<button type="button" x-on:click="submit()" x-bind:disabled="busy" class="mt-3 px-5 py-2.5 rounded-lg bg-indigo-600 text-white font-semibold disabled:opacity-40">
-						if d.EditID > 0 {
-							Update Purchase Order <span class="opacity-70">(F10)</span>
-						} else {
-							Save Purchase Order <span class="opacity-70">(F10)</span>
+					<div class="mt-3 flex items-center justify-end gap-2">
+						<button type="button" x-on:click="submit()" x-bind:disabled="busy" class="px-5 py-2.5 rounded-lg bg-indigo-600 text-white font-semibold disabled:opacity-40">
+							if d.EditID > 0 {
+								Update Purchase Order <span class="opacity-70">(F10)</span>
+							} else {
+								Save Purchase Order <span class="opacity-70">(F10)</span>
+							}
+						</button>
+						if d.EditID == 0 {
+							<button type="button" x-on:click="submit(true)" x-bind:disabled="busy" class="px-5 py-2.5 rounded-lg bg-emerald-600 text-white font-semibold disabled:opacity-40" title="Supplier delivered now — add stock straight away and put the invoice on their account. Pay later from the supplier screen.">Receive now (adds stock)</button>
 						}
-					</button>
+					</div>
 				</div>
 			</div>
 		</div>

@@ -41,6 +41,39 @@ func (a *adminUI) PurchaseEntryCreate(c echo.Context) error {
 	return response.Created(c, d)
 }
 
+// PurchaseReceiveNow takes in a delivery that had no prior order — the admin
+// equivalent of the counter walk-in receive. Stock and the payable land in one
+// step (goods on account); paying happens later on the supplier payment screen.
+// Any advance/credit the supplier already holds is spent against the invoice.
+func (a *adminUI) PurchaseReceiveNow(c echo.Context) error {
+	ctx := c.Request().Context()
+	var in purchases.CreateInput
+	if err := c.Bind(&in); err != nil {
+		return apperr.BadRequest("invalid request body")
+	}
+	if err := c.Validate(&in); err != nil {
+		return err
+	}
+	userID := middleware.CurrentUserID(c)
+	var d *purchases.Detail
+	err := appdb.WithTx(ctx, a.db, func(tx *sqlx.Tx) error {
+		got, txErr := purchases.CreateTx(ctx, tx, in, userID)
+		if txErr != nil {
+			return txErr
+		}
+		d = got
+		// Spend anything the supplier already holds for us against this invoice
+		// (mirrors the counter walk-in); we don't take a fresh payment here.
+		_, txErr = owedAfterSettlement(ctx, tx, d.Purchase.ID)
+		return txErr
+	})
+	if err != nil {
+		return err
+	}
+	a.s.logAudit(c, audit.ActionCreate, "purchase", strconv.FormatInt(d.Purchase.ID, 10), "received delivery (no prior order)")
+	return response.OK(c, d)
+}
+
 // PurchaseDraftCreate builds one draft Purchase Order per supplier from the
 // low-stock reorder picker. Returns the new draft IDs for the print step.
 func (a *adminUI) PurchaseDraftCreate(c echo.Context) error {
