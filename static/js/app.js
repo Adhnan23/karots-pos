@@ -2697,7 +2697,7 @@ function grn(symbol, config) {
     payAll() {
       this.payAmount = Number(this.subtotal().toFixed(2));
     },
-    async submit() {
+    async submit(receiveNow = false) {
       if (this.busy) return;
       if (!this.supplierId) {
         toast("Select a supplier", "error");
