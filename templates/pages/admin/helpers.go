@@ -98,6 +98,25 @@ func agingBar(b [4]decimal.Decimal) []financeSeg {
 // loss-making product's margin).
 func fmtPct1(f float64) string { return strconv.FormatFloat(f, 'f', 1, 64) + "%" }
 
+// expiryBadge classifies a batch's expiry into a short urgency label + colour
+// classes: expired (rose), within 30 days (amber), else empty (no badge). nil
+// expiry (non-perishable) returns empty.
+func expiryBadge(exp *time.Time) (label, class string) {
+	if exp == nil {
+		return "", ""
+	}
+	now := time.Now()
+	days := int(exp.Sub(now).Hours() / 24)
+	switch {
+	case exp.Before(now):
+		return "expired", "text-rose-600 bg-rose-50"
+	case days <= 30:
+		return strconv.Itoa(days)+"d left", "text-amber-600 bg-amber-50"
+	default:
+		return "", ""
+	}
+}
+
 // pctFloat is part/whole as a percent float (0 when whole is non-positive) —
 // for sizing in-row bars off two decimals.
 func pctFloat(part, whole decimal.Decimal) float64 {
