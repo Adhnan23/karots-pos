@@ -14,6 +14,7 @@ import (
 	adminpages "karots-pos/templates/pages/admin"
 
 	"github.com/labstack/echo/v4"
+	"github.com/shopspring/decimal"
 )
 
 // shopName returns the configured shop name (falling back to a generic label).
@@ -311,29 +312,86 @@ func (a *adminUI) TopProductsReport(c echo.Context) error {
 		return err
 	}
 	orderBy := c.QueryParam("order")
-	if orderBy != "qty" {
+	switch orderBy {
+	case "qty", "profit":
+	default:
 		orderBy = "revenue"
 	}
 	rows, err := a.s.reports.TopProducts(ctx, from, to, orderBy, 50)
 	if err != nil {
 		return err
 	}
+	// The metric the ranking (and the in-row bars + Pareto share) is built on.
+	metric := func(r reports.ProductRevenue) decimal.Decimal {
+		switch orderBy {
+		case "qty":
+			return r.Qty
+		case "profit":
+			return r.Profit
+		default:
+			return r.Revenue
+		}
+	}
 	d := adminpages.TopProductsData{
 		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx),
-		From: fromStr, To: toStr, Preset: preset, Order: orderBy, Rows: rows,
+		From: fromStr, To: toStr, Preset: preset, Order: orderBy, Count: len(rows),
 	}
+	var total decimal.Decimal
 	for _, r := range rows {
 		d.TotalQty = d.TotalQty.Add(r.Qty)
 		d.TotalRevenue = d.TotalRevenue.Add(r.Revenue)
 		d.TotalProfit = d.TotalProfit.Add(r.Profit)
+		total = total.Add(metric(r))
+	}
+	if d.TotalRevenue.GreaterThan(decimal.Zero) {
+		d.OverallMargin = d.TotalProfit.Div(d.TotalRevenue).InexactFloat64() * 100
+	}
+	switch orderBy {
+	case "qty":
+		d.MetricLabel = "units"
+	case "profit":
+		d.MetricLabel = "profit"
+	default:
+		d.MetricLabel = "revenue"
+	}
+	// Rows are ORDER BY metric DESC, so the first row's metric is the max — the
+	// bar scale. Cumulative share drives the Pareto (80/20) callout.
+	maxF, totalF := 0.0, total.InexactFloat64()
+	if len(rows) > 0 {
+		maxF = metric(rows[0]).InexactFloat64()
+	}
+	var run decimal.Decimal
+	d.Rows = make([]adminpages.TopProductRow, len(rows))
+	for i, r := range rows {
+		run = run.Add(metric(r))
+		tr := adminpages.TopProductRow{Rank: i + 1, R: r}
+		if r.Revenue.GreaterThan(decimal.Zero) {
+			tr.Margin = r.Profit.Div(r.Revenue).InexactFloat64() * 100
+		}
+		if maxF > 0 {
+			if f := metric(r).InexactFloat64() / maxF * 100; f > 0 {
+				tr.BarPct = f
+			}
+		}
+		if totalF > 0 {
+			tr.CumPct = run.InexactFloat64() / totalF * 100
+			if d.ParetoN == 0 && tr.CumPct >= 80 {
+				d.ParetoN = i + 1
+			}
+		}
+		d.Rows[i] = tr
 	}
 	if wantsCSV(c) {
 		out := make([][]string, 0, len(rows))
 		for _, r := range rows {
-			out = append(out, []string{r.ProductName, r.Qty.String(), csvMoney(r.Revenue), csvMoney(r.Profit)})
+			m := "0"
+			if r.Revenue.GreaterThan(decimal.Zero) {
+				m = r.Profit.Div(r.Revenue).Mul(decimal.NewFromInt(100)).StringFixed(1)
+			}
+			out = append(out, []string{r.ProductName, r.Qty.String(), csvMoney(r.Revenue), csvMoney(r.Profit), m})
 		}
 		return writeCSV(c, "top_products_"+fromStr+"_"+toStr,
-			[]string{"Product", "Qty sold", "Revenue", "Profit"}, out)
+			[]string{"Product", "Qty sold", "Revenue", "Profit", "Margin %"}, out)
 	}
 	return response.RenderPage(c, adminpages.TopProductsReport(d))
 }

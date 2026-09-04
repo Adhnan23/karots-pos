@@ -69,6 +69,21 @@ func financeBar(pl reports.PL, _ string) []financeSeg {
 // pctLabel renders a segment's share as a whole-number percent.
 func pctLabel(f float64) string { return strconv.Itoa(int(f+0.5)) + "%" }
 
+// fmtPct1 renders a percentage with one decimal (handles negatives — e.g. a
+// loss-making product's margin).
+func fmtPct1(f float64) string { return strconv.FormatFloat(f, 'f', 1, 64) + "%" }
+
+// barWidth is the inline style for an in-row bar, clamped to [0,100].
+func barWidth(pct float64) string {
+	if pct < 0 {
+		pct = 0
+	}
+	if pct > 100 {
+		pct = 100
+	}
+	return "width:" + strconv.FormatFloat(pct, 'f', 1, 64) + "%"
+}
+
 // deltaInfo compares a current figure with the previous period's and returns a
 // display string plus a direction (1 up, -1 down, 0 flat) for the ▲▼ badge.
 func deltaInfo(cur, prev decimal.Decimal) (string, int) {

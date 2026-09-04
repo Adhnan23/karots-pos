@@ -651,10 +651,21 @@ templ TenderReport(d TenderReportData) {
 
 // ============================ Top products ============================
 
+// TopProductRow is one ranked product with the derived display values:
+// margin, the in-row bar width (share of the top product's metric) and the
+// running cumulative share that drives the Pareto callout.
+type TopProductRow struct {
+	Rank                  int
+	R                     reports.ProductRevenue
+	Margin, BarPct, CumPct float64
+}
+
 type TopProductsData struct {
-	ShopName, Symbol, From, To, Preset, Order string
-	Rows                                      []reports.ProductRevenue
-	TotalQty, TotalRevenue, TotalProfit       decimal.Decimal
+	ShopName, Symbol, From, To, Preset, Order, MetricLabel string
+	Rows                                                   []TopProductRow
+	Count, ParetoN                                         int
+	TotalQty, TotalRevenue, TotalProfit                    decimal.Decimal
+	OverallMargin                                          float64
 }
 
 templ TopProductsReport(d TopProductsData) {
@@ -664,6 +675,7 @@ templ TopProductsReport(d TopProductsData) {
 				<label class="block text-xs text-slate-500 mb-1">Rank by</label>
 				<select name="order" class="border rounded-lg px-3 py-1.5">
 					@statusOpt("revenue", "Revenue", d.Order)
+					@statusOpt("profit", "Profit", d.Order)
 					@statusOpt("qty", "Quantity", d.Order)
 				</select>
 			</div>
@@ -673,22 +685,54 @@ templ TopProductsReport(d TopProductsData) {
 			>Download CSV</a>
 		}
 		@rptPeriodLine(d.From, d.To)
+		<div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+			@kpiCard("Products", strconv.Itoa(d.Count))
+			@kpiCard("Revenue", money.Format(d.Symbol, d.TotalRevenue))
+			@kpiCard("Profit", money.Format(d.Symbol, d.TotalProfit))
+			@kpiCard("Margin", fmtPct1(d.OverallMargin))
+		</div>
+		if d.ParetoN > 0 && d.ParetoN < d.Count {
+			<div class="no-print text-sm text-slate-600 bg-indigo-50 rounded-xl px-4 py-2 mb-4">
+				Top <span class="font-semibold">{ strconv.Itoa(d.ParetoN) }</span> of { strconv.Itoa(d.Count) } products make up <span class="font-semibold">80%</span> of { d.MetricLabel } — focus stock &amp; cash there.
+			</div>
+		}
 		<table class="w-full text-sm">
 			<thead class="text-left text-slate-500 border-b">
-				<tr><th class="py-1.5 w-8">#</th><th class="py-1.5">Product</th><th class="py-1.5 text-right">Qty sold</th><th class="py-1.5 text-right">Revenue</th><th class="py-1.5 text-right">Profit</th></tr>
+				<tr>
+					<th class="py-1.5 w-8">#</th>
+					<th class="py-1.5">Product</th>
+					<th class="py-1.5 text-right">Qty sold</th>
+					<th class="py-1.5 text-right">Revenue</th>
+					<th class="py-1.5 text-right">Margin</th>
+					<th class="py-1.5 text-right">Profit</th>
+					<th class="py-1.5 text-right">Cum. %</th>
+				</tr>
 			</thead>
 			<tbody>
-				for i, r := range d.Rows {
+				for _, r := range d.Rows {
 					<tr class="border-b last:border-0">
-						<td class="py-1.5 text-slate-400">{ strconv.Itoa(i + 1) }</td>
-						<td class="py-1.5 font-medium">{ r.ProductName }</td>
-						<td class="py-1.5 text-right">{ money.Display(r.Qty) }</td>
-						<td class="py-1.5 text-right">{ money.Format(d.Symbol, r.Revenue) }</td>
-						<td class="py-1.5 text-right">{ money.Format(d.Symbol, r.Profit) }</td>
+						<td class="py-1.5 text-slate-400 align-top">{ strconv.Itoa(r.Rank) }</td>
+						<td class="py-1.5">
+							<div class="font-medium">{ r.R.ProductName }</div>
+							<div class="mt-1 h-1.5 rounded bg-indigo-100">
+								<div class="h-1.5 rounded bg-indigo-500" style={ barWidth(r.BarPct) }></div>
+							</div>
+						</td>
+						<td class="py-1.5 text-right align-top">{ money.Display(r.R.Qty) }</td>
+						<td class="py-1.5 text-right align-top">{ money.Format(d.Symbol, r.R.Revenue) }</td>
+						<td class="py-1.5 text-right align-top">
+							if r.Margin < 0 {
+								<span class="text-rose-600">{ fmtPct1(r.Margin) }</span>
+							} else {
+								{ fmtPct1(r.Margin) }
+							}
+						</td>
+						<td class="py-1.5 text-right align-top">{ money.Format(d.Symbol, r.R.Profit) }</td>
+						<td class="py-1.5 text-right align-top text-slate-500">{ fmtPct1(r.CumPct) }</td>
 					</tr>
 				}
 				if len(d.Rows) == 0 {
-					<tr><td colspan="5" class="py-6 text-center text-slate-400">No sales in this period.</td></tr>
+					<tr><td colspan="7" class="py-6 text-center text-slate-400">No sales in this period.</td></tr>
 				}
 			</tbody>
 			<tfoot class="border-t-2 font-semibold">
@@ -696,7 +740,9 @@ templ TopProductsReport(d TopProductsData) {
 					<td class="py-2" colspan="2">Total (top { strconv.Itoa(len(d.Rows)) })</td>
 					<td class="py-2 text-right">{ money.Display(d.TotalQty) }</td>
 					<td class="py-2 text-right">{ money.Format(d.Symbol, d.TotalRevenue) }</td>
+					<td class="py-2 text-right">{ fmtPct1(d.OverallMargin) }</td>
 					<td class="py-2 text-right">{ money.Format(d.Symbol, d.TotalProfit) }</td>
+					<td class="py-2"></td>
 				</tr>
 			</tfoot>
 		</table>

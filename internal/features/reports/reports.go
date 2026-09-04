@@ -330,8 +330,11 @@ func (s *Service) ExpensesByCategory(ctx context.Context, from, to time.Time) ([
 // to a sane range. order is chosen from a whitelist, so concatenating it is safe.
 func (s *Service) TopProducts(ctx context.Context, from, to time.Time, orderBy string, limit int) ([]ProductRevenue, error) {
 	order := "revenue"
-	if orderBy == "qty" {
+	switch orderBy {
+	case "qty":
 		order = "qty"
+	case "profit":
+		order = "profit"
 	}
 	if limit <= 0 || limit > 200 {
 		limit = 50
