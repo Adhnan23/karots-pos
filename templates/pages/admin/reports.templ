@@ -77,11 +77,14 @@ templ LowStockPage(d LowStockData) {
 								<td class="py-2 px-3"><input type="checkbox" x-bind:checked="l.selected" x-on:change="l.selected = $event.target.checked; toggleLine(l)"/></td>
 								<td class="py-2 px-3 font-medium">
 									<span x-text="l.name"></span>
+									<template x-if="Number(l.on_hand) <= 0">
+										<span class="ml-1 text-[10px] font-semibold uppercase tracking-wide text-rose-600 bg-rose-50 rounded px-1 py-0.5 align-middle">out</span>
+									</template>
 									<template x-if="l.note">
 										<span class="block text-xs font-normal text-indigo-500" x-text="l.note"></span>
 									</template>
 								</td>
-								<td class="py-2 px-3 text-right"><span x-text="l.on_hand"></span> <span class="text-slate-400" x-text="l.unit"></span></td>
+								<td class="py-2 px-3 text-right"><span x-bind:class="Number(l.on_hand) <= 0 ? 'text-rose-600 font-semibold' : ''" x-text="l.on_hand"></span> <span class="text-slate-400" x-text="l.unit"></span></td>
 								<td class="py-2 px-3 text-right text-slate-500" x-text="l.sold_last_week"></td>
 								<td class="py-2 px-3 text-right text-slate-500" x-text="l.sold_last_month"></td>
 								<td class="py-2 px-3 text-right text-slate-500" x-text="l.sold_last_year"></td>
