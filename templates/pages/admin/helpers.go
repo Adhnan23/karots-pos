@@ -69,6 +69,31 @@ func financeBar(pl reports.PL, _ string) []financeSeg {
 // pctLabel renders a segment's share as a whole-number percent.
 func pctLabel(f float64) string { return strconv.Itoa(int(f+0.5)) + "%" }
 
+// agingBar turns the four AR aging buckets (0–30 / 31–60 / 61–90 / 90+ days)
+// into proportion-bar segments, reusing the Finance bar's look. Returns nil when
+// nothing is owed. Colours run green→red as debt gets staler.
+func agingBar(b [4]decimal.Decimal) []financeSeg {
+	total := b[0].Add(b[1]).Add(b[2]).Add(b[3])
+	if !total.IsPositive() {
+		return nil
+	}
+	labels := [4]string{"0–30 days", "31–60 days", "61–90 days", "90+ days"}
+	colors := [4]string{"#10b981", "#f59e0b", "#fb923c", "#ef4444"}
+	hundred := decimal.NewFromInt(100)
+	segs := make([]financeSeg, 4)
+	for i := 0; i < 4; i++ {
+		f, _ := b[i].Div(total).Mul(hundred).Float64()
+		if f < 0 {
+			f = 0
+		}
+		if f > 100 {
+			f = 100
+		}
+		segs[i] = financeSeg{labels[i], b[i], f, colors[i]}
+	}
+	return segs
+}
+
 // fmtPct1 renders a percentage with one decimal (handles negatives — e.g. a
 // loss-making product's margin).
 func fmtPct1(f float64) string { return strconv.FormatFloat(f, 'f', 1, 64) + "%" }
