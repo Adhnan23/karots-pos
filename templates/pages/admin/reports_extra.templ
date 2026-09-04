@@ -117,11 +117,21 @@ func periodLabel(t time.Time, gran string) string {
 
 // ============================ Returns / refunds report ============================
 
+// ReturnProductRow is one product in the "most returned" breakdown, with the
+// in-row bar (share of the worst offender's refund value) and share of total.
+type ReturnProductRow struct {
+	Name             string
+	Qty, Refund      decimal.Decimal
+	BarPct, SharePct float64
+}
+
 type ReturnsReportData struct {
 	ShopName, Symbol, From, To, Preset string
 	Rows                               []reports.ReturnRow
-	TotalRefund                        decimal.Decimal
-	// TotalRefund covers the whole range; Rows is page Page of Total rows.
+	TopProducts                        []ReturnProductRow
+	TotalRefund, TotalQty              decimal.Decimal
+	Receipts                           int
+	// TotalRefund/TotalQty/Receipts cover the whole range; Rows is page Page of Total rows.
 	Total, Page, PageSize int
 }
 
@@ -134,6 +144,35 @@ templ ReturnsReport(d ReturnsReportData) {
 			>Download CSV</a>
 		}
 		@rptPeriodLine(d.From, d.To)
+		<div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+			@kpiCard("Refunded", money.Format(d.Symbol, d.TotalRefund))
+			@kpiCard("Returned lines", strconv.Itoa(d.Total))
+			@kpiCard("Units returned", money.Display(d.TotalQty))
+			@kpiCard("Receipts affected", strconv.Itoa(d.Receipts))
+		</div>
+		if len(d.TopProducts) > 0 {
+			<div class="bg-white rounded-2xl shadow-sm p-4 mb-6">
+				<div class="text-xs text-slate-500 mb-3">Most returned products — chase quality or supplier issues here</div>
+				<table class="w-full text-sm">
+					<tbody>
+						for _, r := range d.TopProducts {
+							<tr class="border-b last:border-0">
+								<td class="py-1.5 w-1/2">
+									<div class="font-medium">{ r.Name }</div>
+									<div class="mt-1 h-1.5 rounded bg-rose-100">
+										<div class="h-1.5 rounded bg-rose-500" style={ barWidth(r.BarPct) }></div>
+									</div>
+								</td>
+								<td class="py-1.5 text-right align-top text-slate-500">{ money.Display(r.Qty) } units</td>
+								<td class="py-1.5 text-right align-top">{ money.Format(d.Symbol, r.Refund) }</td>
+								<td class="py-1.5 text-right align-top text-slate-500 w-16">{ fmtPct1(r.SharePct) }</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			</div>
+		}
+		<div class="text-xs text-slate-500 mb-2">All returned lines</div>
 		<table class="w-full text-sm">
 			<thead class="text-left text-slate-500 border-b">
 				<tr><th class="py-1.5">Date</th><th class="py-1.5">Receipt</th><th class="py-1.5">Product</th><th class="py-1.5">Customer</th><th class="py-1.5 text-right">Qty</th><th class="py-1.5 text-right">Refund</th></tr>

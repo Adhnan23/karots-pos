@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"net/http"
+	"sort"
 	"strconv"
 	"time"
 
@@ -515,9 +516,49 @@ func (a *adminUI) ReturnsReport(c echo.Context) error {
 		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx), From: fromStr, To: toStr, Preset: preset,
 		Total: len(rows), Page: pageParam(c), PageSize: reportPageSize,
 	}
+	// Summarise the whole range (not just the page) + rank the worst-offending
+	// products, all from the rows already in hand — no extra query.
+	type retAgg struct {
+		qty, refund decimal.Decimal
+	}
+	byProduct := map[string]*retAgg{}
+	receipts := map[string]struct{}{}
 	for _, r := range rows {
 		d.TotalRefund = d.TotalRefund.Add(r.RefundValue)
+		d.TotalQty = d.TotalQty.Add(r.Qty)
+		receipts[r.ReceiptNo] = struct{}{}
+		g := byProduct[r.ProductName]
+		if g == nil {
+			g = &retAgg{}
+			byProduct[r.ProductName] = g
+		}
+		g.qty = g.qty.Add(r.Qty)
+		g.refund = g.refund.Add(r.RefundValue)
 	}
+	d.Receipts = len(receipts)
+	top := make([]adminpages.ReturnProductRow, 0, len(byProduct))
+	for name, g := range byProduct {
+		top = append(top, adminpages.ReturnProductRow{Name: name, Qty: g.qty, Refund: g.refund})
+	}
+	sort.Slice(top, func(i, j int) bool { return top[i].Refund.GreaterThan(top[j].Refund) })
+	if len(top) > 10 {
+		top = top[:10]
+	}
+	totalRefundF := d.TotalRefund.InexactFloat64()
+	maxRefundF := 0.0
+	if len(top) > 0 {
+		maxRefundF = top[0].Refund.InexactFloat64()
+	}
+	for i := range top {
+		v := top[i].Refund.InexactFloat64()
+		if maxRefundF > 0 && v > 0 {
+			top[i].BarPct = v / maxRefundF * 100
+		}
+		if totalRefundF > 0 {
+			top[i].SharePct = v / totalRefundF * 100
+		}
+	}
+	d.TopProducts = top
 	if wantsCSV(c) {
 		out := make([][]string, 0, len(rows))
 		for _, r := range rows {
