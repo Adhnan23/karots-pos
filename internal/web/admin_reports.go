@@ -1220,12 +1220,21 @@ func (a *adminUI) RecipeVarianceReport(c echo.Context) error {
 		return writeCSV(c, "recipe_variance_"+fromStr+"_"+toStr,
 			[]string{"Ingredient", "Unit", "Expected", "Actual", "Difference", "Drift %"}, out)
 	}
+	// Count materially-drifting ingredients over ALL rows (not just the page) —
+	// >10% is the same threshold varianceTone paints rose.
+	drifting := 0
+	ten := decimal.NewFromInt(10)
+	for _, r := range rows {
+		if r.DriftPct().Abs().GreaterThan(ten) {
+			drifting++
+		}
+	}
 	page := pageParam(c)
 	return response.RenderPage(c, adminpages.RecipeVarianceReport(adminpages.RecipeVarianceData{
 		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx),
 		From: fromStr, To: toStr, Preset: preset,
-		Rows:  paginate(rows, page, reportPageSize),
-		Total: len(rows), Page: page, PageSize: reportPageSize,
+		Rows:     paginate(rows, page, reportPageSize),
+		Total:    len(rows), Drifting: drifting, Page: page, PageSize: reportPageSize,
 	}))
 }
 

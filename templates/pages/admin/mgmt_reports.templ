@@ -1289,7 +1289,8 @@ type RecipeVarianceData struct {
 	ShopName, Symbol      string
 	From, To, Preset      string
 	Rows                  []recipes.VarianceRow
-	Total, Page, PageSize int
+	Total, Drifting       int
+	Page, PageSize        int
 }
 
 templ RecipeVarianceReport(d RecipeVarianceData) {
@@ -1297,6 +1298,11 @@ templ RecipeVarianceReport(d RecipeVarianceData) {
 		<p class="text-sm text-slate-500 mb-5">
 			{ d.From } to { d.To } · what the recipes expected to use, against what stock actually moved.
 		</p>
+		<div class="grid grid-cols-2 lg:grid-cols-3 gap-3 mb-4">
+			@kpiCard("Ingredients tracked", strconv.Itoa(d.Total))
+			@invStat("Drifting >10%", strconv.Itoa(d.Drifting), ternary(d.Drifting > 0, "text-rose-600", "text-slate-900"))
+			@kpiCard("Within tolerance", strconv.Itoa(d.Total-d.Drifting))
+		</div>
 		<div class="no-print flex flex-wrap items-end justify-between gap-3 mb-5">
 			@filterPresetRow(rangeQuery(d.Preset, d.From, d.To), d.Preset)
 			<a class="px-4 py-1.5 rounded-lg border text-sm" href={ templ.SafeURL(pgHref(rangeQuery(d.Preset, d.From, d.To), 1) + "&format=csv") }>Download CSV</a>
@@ -1391,16 +1397,27 @@ templ ServiceProfitReport(d ServiceProfitData) {
 				</tr>
 			</thead>
 			<tbody>
+				{{ maxRev := decimal.Zero }}
+				for _, r := range d.Rows {
+					if r.Revenue.GreaterThan(maxRev) {
+						{{ maxRev = r.Revenue }}
+					}
+				}
 				for _, r := range d.Rows {
 					<tr class="border-b last:border-0">
-						<td class="py-1.5 font-medium">{ r.Name }</td>
-						<td class="py-1.5 text-right">{ money.Display(r.Units) }</td>
-						<td class="py-1.5 text-right">{ money.Format(d.Symbol, r.Revenue) }</td>
-						<td class="py-1.5 text-right text-slate-500">{ money.Format(d.Symbol, r.COGS) }</td>
-						<td class="py-1.5 text-right">{ money.Format(d.Symbol, r.GrossProfit()) }</td>
-						<td class="py-1.5 text-right text-amber-600">{ money.Format(d.Symbol, r.Expenses) }</td>
-						<td class={ "py-1.5 text-right font-medium " + spTone(r.NetProfit()) }>{ money.Format(d.Symbol, r.NetProfit()) }</td>
-						<td class={ "py-1.5 text-right " + spTone(r.NetProfit()) }>{ r.MarginPct().String() }%</td>
+						<td class="py-1.5">
+							<div class="font-medium">{ r.Name }</div>
+							<div class="mt-1 h-1.5 rounded bg-indigo-100">
+								<div class="h-1.5 rounded bg-indigo-500" style={ barWidth(pctFloat(r.Revenue, maxRev)) }></div>
+							</div>
+						</td>
+						<td class="py-1.5 text-right align-top">{ money.Display(r.Units) }</td>
+						<td class="py-1.5 text-right align-top">{ money.Format(d.Symbol, r.Revenue) }</td>
+						<td class="py-1.5 text-right align-top text-slate-500">{ money.Format(d.Symbol, r.COGS) }</td>
+						<td class="py-1.5 text-right align-top">{ money.Format(d.Symbol, r.GrossProfit()) }</td>
+						<td class="py-1.5 text-right align-top text-amber-600">{ money.Format(d.Symbol, r.Expenses) }</td>
+						<td class={ "py-1.5 text-right font-medium align-top " + spTone(r.NetProfit()) }>{ money.Format(d.Symbol, r.NetProfit()) }</td>
+						<td class={ "py-1.5 text-right align-top " + spTone(r.NetProfit()) }>{ r.MarginPct().String() }%</td>
 					</tr>
 				}
 				if len(d.Rows) == 0 {
