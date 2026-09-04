@@ -104,6 +104,48 @@ func (a *adminUI) WarrantyReplace(c echo.Context) error {
 	return response.RenderFragment(c, cashierpages.WarrantyResult(detail, newUnit.SerialNo, "/admin"), trig)
 }
 
+// WarrantyByReceipt / WarrantyByReceiptReplace are the admin-shell mirror of the
+// cashier receipt-warranty flow (non-serial items claimed by receipt number).
+func (a *adminUI) WarrantyByReceipt(c echo.Context) error {
+	ctx := c.Request().Context()
+	receipt := strings.TrimSpace(c.QueryParam("receipt"))
+	if receipt == "" {
+		return response.RenderFragment(c, cashierpages.WarrantyReceiptResult(nil, receipt, "/admin"))
+	}
+	detail, err := a.s.warranty.LookupByReceipt(ctx, receipt)
+	if err != nil {
+		if ae, ok := apperr.As(err); ok && ae.Status == http.StatusNotFound {
+			return response.RenderFragment(c, cashierpages.WarrantyReceiptResult(nil, receipt, "/admin"))
+		}
+		return err
+	}
+	return response.RenderFragment(c, cashierpages.WarrantyReceiptResult(detail, receipt, "/admin"))
+}
+
+func (a *adminUI) WarrantyByReceiptReplace(c echo.Context) error {
+	ctx := c.Request().Context()
+	saleID, err := strconv.ParseInt(c.FormValue("sale_id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid sale")
+	}
+	productID, err := strconv.ParseInt(c.FormValue("product_id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid product")
+	}
+	receipt := strings.TrimSpace(c.FormValue("receipt"))
+	claimID, err := a.s.warranty.RecordReceiptReplacement(ctx, saleID, productID, c.FormValue("reason"), middleware.CurrentUserID(c))
+	if err != nil {
+		return err
+	}
+	a.s.logAudit(c, audit.ActionUpdate, "warranty", strconv.FormatInt(claimID, 10), "receipt warranty replacement "+receipt)
+	detail, err := a.s.warranty.LookupByReceipt(ctx, receipt)
+	if err != nil {
+		return err
+	}
+	return response.RenderFragment(c, cashierpages.WarrantyReceiptResult(detail, receipt, "/admin"),
+		response.ToastAnd("Replacement recorded", "success", "reload-warranty"))
+}
+
 // ============================ Damage report ============================
 
 func (a *adminUI) damageData(c echo.Context) (adminpages.DamageReportData, error) {

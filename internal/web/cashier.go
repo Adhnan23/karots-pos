@@ -823,6 +823,50 @@ func (h *cashierUI) WarrantyReplace(c echo.Context) error {
 	return response.RenderFragment(c, cashierpages.WarrantyResult(detail, newUnit.SerialNo, "/cashier"), trig)
 }
 
+// WarrantyByReceipt looks up a receipt's non-serial warranted lines (the claim
+// path for items with a warranty but no serial, e.g. lights).
+func (h *cashierUI) WarrantyByReceipt(c echo.Context) error {
+	ctx := c.Request().Context()
+	receipt := strings.TrimSpace(c.QueryParam("receipt"))
+	if receipt == "" {
+		return response.RenderFragment(c, cashierpages.WarrantyReceiptResult(nil, receipt, "/cashier"))
+	}
+	detail, err := h.s.warranty.LookupByReceipt(ctx, receipt)
+	if err != nil {
+		if ae, ok := apperr.As(err); ok && ae.Status == http.StatusNotFound {
+			return response.RenderFragment(c, cashierpages.WarrantyReceiptResult(nil, receipt, "/cashier"))
+		}
+		return err
+	}
+	return response.RenderFragment(c, cashierpages.WarrantyReceiptResult(detail, receipt, "/cashier"))
+}
+
+// WarrantyByReceiptReplace hands out a free replacement for a non-serial line and
+// returns the refreshed receipt card.
+func (h *cashierUI) WarrantyByReceiptReplace(c echo.Context) error {
+	ctx := c.Request().Context()
+	saleID, err := strconv.ParseInt(c.FormValue("sale_id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid sale")
+	}
+	productID, err := strconv.ParseInt(c.FormValue("product_id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid product")
+	}
+	receipt := strings.TrimSpace(c.FormValue("receipt"))
+	claimID, err := h.s.warranty.RecordReceiptReplacement(ctx, saleID, productID, c.FormValue("reason"), middleware.CurrentUserID(c))
+	if err != nil {
+		return err
+	}
+	h.s.logAudit(c, audit.ActionUpdate, "warranty", strconv.FormatInt(claimID, 10), "receipt warranty replacement "+receipt)
+	detail, err := h.s.warranty.LookupByReceipt(ctx, receipt)
+	if err != nil {
+		return err
+	}
+	return response.RenderFragment(c, cashierpages.WarrantyReceiptResult(detail, receipt, "/cashier"),
+		response.ToastAnd("Replacement recorded", "success", "reload-warranty"))
+}
+
 // ============================ Conversions ============================
 
 // Conversions is the till-side view of product conversions: RUN ONLY.

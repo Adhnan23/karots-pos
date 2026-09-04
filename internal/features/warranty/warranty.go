@@ -78,8 +78,14 @@ type NewUnit struct {
 	Source         string
 }
 
+// selectUnit lists columns explicitly (not wu.*) so serial_no can be COALESCEd:
+// non-serial units store NULL there, and scanning NULL into the string field
+// would fail. Everything downstream sees "" for a non-serial unit.
 const selectUnit = `
-	SELECT wu.*, p.name AS product_name, c.name AS customer_name, s.receipt_no AS receipt_no
+	SELECT wu.id, wu.product_id, COALESCE(wu.serial_no,'') AS serial_no, wu.sale_id,
+	       wu.customer_id, wu.sold_at, wu.warranty_months, wu.warranty_until, wu.source,
+	       wu.status, wu.replaced_by_unit_id, wu.created_at,
+	       p.name AS product_name, c.name AS customer_name, s.receipt_no AS receipt_no
 	FROM warranty_units wu
 	JOIN products p        ON p.id = wu.product_id
 	LEFT JOIN customers c  ON c.id = wu.customer_id
@@ -95,10 +101,12 @@ func (r *Repository) InsertUnit(ctx context.Context, u NewUnit) (int64, error) {
 		source = "sale"
 	}
 	var id int64
+	// NULLIF stores a non-serial unit (empty serial) as NULL, keeping serial_no a
+	// true identity for serial-tracked items only.
 	err := r.q.GetContext(ctx, &id, `
 		INSERT INTO warranty_units
 			(product_id, serial_no, sale_id, customer_id, sold_at, warranty_months, warranty_until, source)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+		VALUES ($1,NULLIF($2,''),$3,$4,$5,$6,$7,$8)
 		RETURNING id`,
 		u.ProductID, u.SerialNo, u.SaleID, u.CustomerID, u.SoldAt, u.WarrantyMonths, u.WarrantyUntil, source)
 	return id, err
@@ -130,9 +138,11 @@ func (r *Repository) FindUnitBySerial(ctx context.Context, serial string) (*Unit
 }
 
 // UnitsForSale returns the serials recorded against a sale, for the receipt.
+// Non-serial (receipt-warranty) units are excluded — the receipt only lists
+// captured serial numbers.
 func (r *Repository) UnitsForSale(ctx context.Context, saleID int64) ([]Unit, error) {
 	var rows []Unit
-	err := r.q.SelectContext(ctx, &rows, selectUnit+` WHERE wu.sale_id = $1 ORDER BY wu.id`, saleID)
+	err := r.q.SelectContext(ctx, &rows, selectUnit+` WHERE wu.sale_id = $1 AND wu.serial_no IS NOT NULL ORDER BY wu.id`, saleID)
 	return rows, err
 }
 
@@ -163,7 +173,8 @@ func (r *Repository) ListUnits(ctx context.Context, status, search string, limit
 		LEFT JOIN warranty_claims wcl ON wcl.unit_id = wu.id AND wcl.resolution = 'replaced'
 		LEFT JOIN stock_movements mv  ON mv.reference_type = 'warranty' AND mv.reference_id = wcl.id
 		LEFT JOIN loss_recoveries lr  ON lr.source_type = 'warranty' AND lr.source_id = wu.id
-		WHERE ($1::text IS NULL OR wu.serial_no ILIKE '%' || $1 || '%' OR p.name ILIKE '%' || $1 || '%')
+		WHERE wu.serial_no IS NOT NULL
+		  AND ($1::text IS NULL OR wu.serial_no ILIKE '%' || $1 || '%' OR p.name ILIKE '%' || $1 || '%')
 		  AND (
 		    $2 = 'all'
 		    OR ($2 = 'active'   AND wu.status = 'active'   AND wu.warranty_until >= CURRENT_DATE)
@@ -201,7 +212,7 @@ type ClaimFilter struct {
 // unit's serial.
 const claimSelect = `
 	SELECT wc.*, u.name AS handled_by_name,
-	       ou.serial_no AS old_serial,
+	       COALESCE(ou.serial_no,'') AS old_serial,
 	       p.name AS product_name,
 	       c.name AS customer_name,
 	       ru.serial_no AS replacement_serial
@@ -266,4 +277,86 @@ func (r *Repository) ProductWarrantyMonths(ctx context.Context, productID int64)
 	var months int
 	err := r.q.GetContext(ctx, &months, `SELECT warranty_months FROM products WHERE id = $1`, productID)
 	return months, err
+}
+
+func (r *Repository) MarkUnitReplacedNoUnit(ctx context.Context, unitID int64) error {
+	_, err := r.q.ExecContext(ctx,
+		`UPDATE warranty_units SET status = 'replaced', replaced_by_unit_id = NULL WHERE id = $1`, unitID)
+	return err
+}
+
+// --- non-serial warranty by receipt ---
+
+// ReceiptSale is the header for a by-receipt warranty lookup.
+type ReceiptSale struct {
+	SaleID       int64     `db:"sale_id"`
+	ReceiptNo    string    `db:"receipt_no"`
+	SoldAt       time.Time `db:"sold_at"`
+	CustomerID   *int64    `db:"customer_id"`
+	CustomerName *string   `db:"customer_name"`
+}
+
+// ReceiptLine is one non-serial warranted product on a receipt. Qty is the total
+// sold across the sale's lines for that product; Replaced is how many have
+// already been handed out under warranty. WarrantyUntil / UnderWarranty /
+// Remaining are derived by the service.
+type ReceiptLine struct {
+	ProductID      int64           `db:"product_id"`
+	ProductName    string          `db:"product_name"`
+	UnitAbbr       string          `db:"unit_abbr"`
+	Qty            decimal.Decimal `db:"qty"`
+	WarrantyMonths int             `db:"warranty_months"`
+	SoldAt         time.Time       `db:"sold_at"`
+	CustomerID     *int64          `db:"customer_id"`
+	Replaced       int             `db:"replaced"`
+	WarrantyUntil  time.Time       `db:"-"`
+	UnderWarranty  bool            `db:"-"`
+	Remaining      decimal.Decimal `db:"-"`
+}
+
+func (r *Repository) FindSaleByReceipt(ctx context.Context, receiptNo string) (*ReceiptSale, error) {
+	var s ReceiptSale
+	err := r.q.GetContext(ctx, &s, `
+		SELECT s.id AS sale_id, s.receipt_no, s.created_at AS sold_at,
+		       s.customer_id, c.name AS customer_name
+		FROM sales s LEFT JOIN customers c ON c.id = s.customer_id
+		WHERE s.receipt_no = $1 AND s.status <> 'void'
+		LIMIT 1`, receiptNo)
+	if err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
+
+// nonSerialLinesSQL selects the non-serial warranted lines of a sale, grouped by
+// product (a product on two lines is one claimable row), with a per-product count
+// of replacements already handed out. $2, when >0, narrows to one product.
+const nonSerialLinesSQL = `
+	SELECT si.product_id, p.name AS product_name, u.abbreviation AS unit_abbr,
+	       SUM(si.quantity) AS qty, p.warranty_months AS warranty_months, s.created_at AS sold_at,
+	       s.customer_id AS customer_id,
+	       (SELECT COUNT(*) FROM warranty_units wu
+	          WHERE wu.sale_id = s.id AND wu.product_id = si.product_id
+	            AND wu.serial_no IS NULL AND wu.status = 'replaced') AS replaced
+	FROM sale_items si
+	JOIN products p ON p.id = si.product_id
+	JOIN units u    ON u.id = p.unit_id
+	JOIN sales s    ON s.id = si.sale_id
+	WHERE si.sale_id = $1 AND p.track_serial = false AND p.warranty_months > 0
+	  AND ($2::bigint = 0 OR si.product_id = $2)
+	GROUP BY si.product_id, p.name, u.abbreviation, p.warranty_months, s.created_at, s.id
+	ORDER BY p.name`
+
+func (r *Repository) NonSerialWarrantyLines(ctx context.Context, saleID int64) ([]ReceiptLine, error) {
+	var rows []ReceiptLine
+	err := r.q.SelectContext(ctx, &rows, nonSerialLinesSQL, saleID, 0)
+	return rows, err
+}
+
+func (r *Repository) NonSerialLine(ctx context.Context, saleID, productID int64) (*ReceiptLine, error) {
+	var row ReceiptLine
+	if err := r.q.GetContext(ctx, &row, nonSerialLinesSQL, saleID, productID); err != nil {
+		return nil, err
+	}
+	return &row, nil
 }

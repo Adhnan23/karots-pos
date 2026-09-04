@@ -243,6 +243,8 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	cg.GET("/warranty/table", cashier.WarrantyTable)
 	cg.GET("/warranty/lookup", cashier.WarrantyLookup)
 	cg.POST("/warranty/replace", cashier.WarrantyReplace)
+	cg.GET("/warranty/by-receipt", cashier.WarrantyByReceipt)
+	cg.POST("/warranty/by-receipt/replace", cashier.WarrantyByReceiptReplace)
 
 	// Suppliers at the counter (per-user permission; admins/managers always pass).
 	// A supplier turning up while the cashier is alone used to mean calling the
@@ -453,6 +455,8 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	ag.GET("/warranty/table", admin.WarrantyTable)
 	ag.GET("/warranty/lookup", admin.WarrantyLookup)
 	ag.POST("/warranty/replace", admin.WarrantyReplace)
+	ag.GET("/warranty/by-receipt", admin.WarrantyByReceipt)
+	ag.POST("/warranty/by-receipt/replace", admin.WarrantyByReceiptReplace)
 	ag.GET("/damage", redirectTo("/admin/reports/losses")) // merged into Losses & Recovery
 	ag.GET("/damage/table", admin.DamageTable)             // fragment reused by the Losses page
 	ag.GET("/recovery/form", admin.RecoveryForm)

@@ -57,6 +57,19 @@ templ warrantyInner(d WarrantyData) {
 				</form>
 				<div id="warranty-result" class="mt-4"></div>
 			</div>
+			<!-- By receipt (non-serial warranty items) -->
+			<div class="bg-white rounded-xl shadow-sm p-4">
+				<div class="text-sm font-medium mb-2">By receipt <span class="font-normal text-slate-400">— items with a warranty but no serial (lights, etc.)</span></div>
+				<form hx-get={ d.Base + "/warranty/by-receipt" } hx-target="#warranty-receipt-result" hx-swap="innerHTML" class="flex gap-2">
+					<input
+						name="receipt"
+						placeholder="Scan or type the receipt number"
+						class="flex-1 border rounded-lg px-3 py-2"
+					/>
+					<button type="submit" class="px-5 py-2 rounded-lg bg-indigo-600 text-white font-medium">Find</button>
+				</form>
+				<div id="warranty-receipt-result" class="mt-4"></div>
+			</div>
 			<!-- Recent units -->
 			<div>
 				<div class="flex items-center gap-2 mb-3 text-sm">
@@ -230,6 +243,65 @@ templ WarrantyResult(detail *warranty.Detail, query, base string) {
 					<button type="submit" class="px-5 py-2 rounded-lg bg-rose-600 text-white font-medium">Record replacement</button>
 				</form>
 			}
+		</div>
+	}
+}
+
+// WarrantyReceiptResult lists the non-serial warranted lines of a receipt, each
+// with a one-click "Replace one" that hands out a free unit (like the serial
+// flow). A nil detail means the receipt wasn't found.
+templ WarrantyReceiptResult(detail *warranty.ReceiptDetail, receiptNo, base string) {
+	if detail == nil {
+		if receiptNo != "" {
+			<div class="rounded-lg border border-dashed p-4 text-sm text-slate-500">
+				No sale found for receipt <span class="font-medium">{ receiptNo }</span>.
+			</div>
+		}
+	} else if len(detail.Lines) == 0 {
+		<div class="rounded-lg border border-dashed p-4 text-sm text-slate-500">
+			Receipt <span class="font-medium">{ detail.Sale.ReceiptNo }</span> has no non-serial warranty items. (Serial items are looked up by serial above.)
+		</div>
+	} else {
+		<div class="rounded-lg border p-4 space-y-3">
+			<div class="flex items-center justify-between text-sm">
+				<div class="font-semibold">Receipt { detail.Sale.ReceiptNo }</div>
+				<div class="text-slate-500">{ strOrDash(detail.Sale.CustomerName) } · { datetime.Date(detail.Sale.SoldAt) }</div>
+			</div>
+			for _, l := range detail.Lines {
+				<div class="border-t pt-3 flex flex-wrap items-end justify-between gap-3">
+					<div class="text-sm">
+						<div class="font-medium">{ l.ProductName }</div>
+						<div class="text-slate-500">
+							Bought { money.Display(l.Qty) } { l.UnitAbbr } ·
+							if l.UnderWarranty {
+								<span class="text-emerald-700">warranty until { datetime.Date(l.WarrantyUntil) }</span>
+							} else {
+								<span class="text-amber-700">expired { datetime.Date(l.WarrantyUntil) }</span>
+							}
+							· { strconv.Itoa(l.Replaced) } replaced
+						</div>
+					</div>
+					if l.UnderWarranty && l.Remaining.GreaterThanOrEqual(decimal.NewFromInt(1)) {
+						<form
+							hx-post={ base + "/warranty/by-receipt/replace" }
+							hx-target="#warranty-receipt-result"
+							hx-swap="innerHTML"
+							class="flex items-end gap-2"
+						>
+							<input type="hidden" name="receipt" value={ detail.Sale.ReceiptNo }/>
+							<input type="hidden" name="sale_id" value={ strconv.FormatInt(detail.Sale.SaleID, 10) }/>
+							<input type="hidden" name="product_id" value={ strconv.FormatInt(l.ProductID, 10) }/>
+							<input name="reason" placeholder="fault (optional)" class="border rounded-lg px-2 py-1.5 text-sm w-40"/>
+							<button type="submit" class="px-4 py-1.5 rounded-lg bg-rose-600 text-white text-sm font-medium">Replace one</button>
+						</form>
+					} else if !l.UnderWarranty {
+						<span class="text-xs px-2 py-1 rounded-full bg-amber-100 text-amber-700">out of warranty</span>
+					} else {
+						<span class="text-xs px-2 py-1 rounded-full bg-slate-100 text-slate-600">all replaced</span>
+					}
+				</div>
+			}
+			<p class="text-xs text-slate-400 border-t pt-2">Replacing hands over one unit from stock as a warranty cost (shows in Losses &amp; Recovery). The warranty keeps its original expiry.</p>
 		</div>
 	}
 }
