@@ -98,6 +98,16 @@ func agingBar(b [4]decimal.Decimal) []financeSeg {
 // loss-making product's margin).
 func fmtPct1(f float64) string { return strconv.FormatFloat(f, 'f', 1, 64) + "%" }
 
+// pctFloat is part/whole as a percent float (0 when whole is non-positive) —
+// for sizing in-row bars off two decimals.
+func pctFloat(part, whole decimal.Decimal) float64 {
+	if !whole.IsPositive() {
+		return 0
+	}
+	f, _ := part.Div(whole).Mul(decimal.NewFromInt(100)).Float64()
+	return f
+}
+
 // barWidth is the inline style for an in-row bar, clamped to [0,100].
 func barWidth(pct float64) string {
 	if pct < 0 {

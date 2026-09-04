@@ -1082,22 +1082,33 @@ templ InventoryReport(d InventoryReportData) {
 				</tr>
 			</thead>
 			<tbody>
+				{{ maxCV := decimal.Zero }}
+				for _, r := range d.Val.Children {
+					if r.CostValue.GreaterThan(maxCV) {
+						{{ maxCV = r.CostValue }}
+					}
+				}
 				for _, r := range d.Val.Children {
 					<tr class="border-b last:border-0">
-						<td class="py-1.5 font-medium">
-							if r.Direct {
-								<span class="text-slate-500 font-normal">directly in { r.Name }</span>
-							} else if r.HasChildren {
-								<a class="text-indigo-600 hover:underline" href={ templ.SafeURL("/admin/reports/inventory?category_id=" + strconv.FormatInt(r.CategoryID, 10)) }>{ r.Name } ▸</a>
-							} else {
-								<a class="text-indigo-600 hover:underline" href={ templ.SafeURL("/admin/reports/inventory?category_id=" + strconv.FormatInt(r.CategoryID, 10)) }>{ r.Name }</a>
-							}
+						<td class="py-1.5 align-top">
+							<div class="font-medium">
+								if r.Direct {
+									<span class="text-slate-500 font-normal">directly in { r.Name }</span>
+								} else if r.HasChildren {
+									<a class="text-indigo-600 hover:underline" href={ templ.SafeURL("/admin/reports/inventory?category_id=" + strconv.FormatInt(r.CategoryID, 10)) }>{ r.Name } ▸</a>
+								} else {
+									<a class="text-indigo-600 hover:underline" href={ templ.SafeURL("/admin/reports/inventory?category_id=" + strconv.FormatInt(r.CategoryID, 10)) }>{ r.Name }</a>
+								}
+							</div>
+							<div class="mt-1 h-1.5 rounded bg-indigo-100">
+								<div class="h-1.5 rounded bg-indigo-500" style={ barWidth(pctFloat(r.CostValue, maxCV)) }></div>
+							</div>
 						</td>
-						<td class="py-1.5 text-right">{ strconv.Itoa(r.InStock) } / { strconv.Itoa(r.SKUs) }</td>
-						<td class="py-1.5 text-right">{ r.Units.Format() }</td>
-						<td class="py-1.5 text-right">{ money.Format(d.Symbol, r.CostValue) }</td>
-						<td class="py-1.5 text-right">{ money.Format(d.Symbol, r.RetailValue) }</td>
-						<td class="py-1.5 text-right text-slate-500">{ pctOf(r.CostValue, d.Val.CostValue) }%</td>
+						<td class="py-1.5 text-right align-top">{ strconv.Itoa(r.InStock) } / { strconv.Itoa(r.SKUs) }</td>
+						<td class="py-1.5 text-right align-top">{ r.Units.Format() }</td>
+						<td class="py-1.5 text-right align-top">{ money.Format(d.Symbol, r.CostValue) }</td>
+						<td class="py-1.5 text-right align-top">{ money.Format(d.Symbol, r.RetailValue) }</td>
+						<td class="py-1.5 text-right align-top text-slate-500">{ pctOf(r.CostValue, d.Val.CostValue) }%</td>
 					</tr>
 				}
 				if len(d.Val.Children) == 0 {
