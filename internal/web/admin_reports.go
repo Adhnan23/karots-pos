@@ -570,11 +570,34 @@ func (a *adminUI) ProfitByCategoryReport(c echo.Context) error {
 	}
 	d := adminpages.CategoryProfitData{
 		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx), From: fromStr, To: toStr, Preset: preset,
-		Rows: rows, AllCats: allCats, SelCats: cats,
+		AllCats: allCats, SelCats: cats,
 	}
 	for _, r := range rows {
 		d.TotalRevenue = d.TotalRevenue.Add(r.Revenue)
 		d.TotalProfit = d.TotalProfit.Add(r.Profit)
+	}
+	if d.TotalRevenue.IsPositive() {
+		d.TotalMargin = d.TotalProfit.Div(d.TotalRevenue).InexactFloat64() * 100
+	}
+	// Rows are ORDER BY profit DESC, so the first is the biggest earner — the bar
+	// scale. In-row bars replace the old SVG chart, which shrank to nothing once
+	// there were many categories.
+	maxProfitF := 0.0
+	if len(rows) > 0 {
+		maxProfitF = rows[0].Profit.InexactFloat64()
+	}
+	d.Rows = make([]adminpages.CategoryProfitRow, len(rows))
+	for i, r := range rows {
+		cr := adminpages.CategoryProfitRow{R: r}
+		if r.Revenue.IsPositive() {
+			cr.Margin = r.Profit.Div(r.Revenue).InexactFloat64() * 100
+		}
+		if maxProfitF > 0 {
+			if f := r.Profit.InexactFloat64() / maxProfitF * 100; f > 0 {
+				cr.BarPct = f
+			}
+		}
+		d.Rows[i] = cr
 	}
 	if wantsCSV(c) {
 		out := make([][]string, 0, len(rows))

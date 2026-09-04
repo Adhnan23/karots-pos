@@ -79,6 +79,8 @@ func catFilterLabel(sel []string) string {
 }
 
 // catBars builds horizontal-bar chart input (profit per category) for the chart.
+// catBars maps category rows to horizontal-bar chart data (used by the Finance
+// and dashboard summaries; Profit by Category uses in-row bars instead).
 func catBars(rows []reports.CategoryProfit, symbol string) []shared.ChartBar {
 	bars := make([]shared.ChartBar, 0, len(rows))
 	for _, r := range rows {
@@ -203,12 +205,21 @@ templ ReturnsReport(d ReturnsReportData) {
 
 // ============================ Profit by category ============================
 
+// CategoryProfitRow is one category with the derived margin and the in-row bar
+// (share of the top category's profit).
+type CategoryProfitRow struct {
+	R      reports.CategoryProfit
+	Margin float64
+	BarPct float64
+}
+
 type CategoryProfitData struct {
 	ShopName, Symbol, From, To, Preset string
-	Rows                       []reports.CategoryProfit
-	TotalRevenue, TotalProfit  decimal.Decimal
-	AllCats                    []string
-	SelCats                    []string
+	Rows                               []CategoryProfitRow
+	TotalRevenue, TotalProfit          decimal.Decimal
+	TotalMargin                        float64
+	AllCats                            []string
+	SelCats                            []string
 }
 
 templ ProfitByCategoryReport(d CategoryProfitData) {
@@ -236,11 +247,12 @@ templ ProfitByCategoryReport(d CategoryProfitData) {
 			</div>
 		}
 		@rptPeriodLine(d.From, d.To)
-		if len(d.Rows) > 0 {
-			<div class="mb-6">
-				@shared.HBarChart(catBars(d.Rows, d.Symbol))
-			</div>
-		}
+		<div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+			@kpiCard("Categories", strconv.Itoa(len(d.Rows)))
+			@kpiCard("Net revenue", money.Format(d.Symbol, d.TotalRevenue))
+			@kpiCard("Profit", money.Format(d.Symbol, d.TotalProfit))
+			@kpiCard("Margin", fmtPct1(d.TotalMargin))
+		</div>
 		<table class="w-full text-sm">
 			<thead class="text-left text-slate-500 border-b">
 				<tr><th class="py-1.5">Category</th><th class="py-1.5 text-right">Net revenue</th><th class="py-1.5 text-right">COGS</th><th class="py-1.5 text-right">Profit</th><th class="py-1.5 text-right">Margin</th></tr>
@@ -248,11 +260,22 @@ templ ProfitByCategoryReport(d CategoryProfitData) {
 			<tbody>
 				for _, r := range d.Rows {
 					<tr class="border-b last:border-0">
-						<td class="py-1.5 font-medium">{ r.Category }</td>
-						<td class="py-1.5 text-right">{ money.Format(d.Symbol, r.Revenue) }</td>
-						<td class="py-1.5 text-right">{ money.Format(d.Symbol, r.COGS) }</td>
-						<td class="py-1.5 text-right">{ money.Format(d.Symbol, r.Profit) }</td>
-						<td class="py-1.5 text-right">{ pctOf(r.Profit, r.Revenue) }%</td>
+						<td class="py-1.5">
+							<div class="font-medium">{ r.R.Category }</div>
+							<div class="mt-1 h-1.5 rounded bg-emerald-100">
+								<div class="h-1.5 rounded bg-emerald-500" style={ barWidth(r.BarPct) }></div>
+							</div>
+						</td>
+						<td class="py-1.5 text-right align-top">{ money.Format(d.Symbol, r.R.Revenue) }</td>
+						<td class="py-1.5 text-right align-top">{ money.Format(d.Symbol, r.R.COGS) }</td>
+						<td class="py-1.5 text-right align-top">
+							if r.R.Profit.IsNegative() {
+								<span class="text-rose-600">{ money.Format(d.Symbol, r.R.Profit) }</span>
+							} else {
+								{ money.Format(d.Symbol, r.R.Profit) }
+							}
+						</td>
+						<td class="py-1.5 text-right align-top">{ fmtPct1(r.Margin) }</td>
 					</tr>
 				}
 				if len(d.Rows) == 0 {
@@ -265,7 +288,7 @@ templ ProfitByCategoryReport(d CategoryProfitData) {
 					<td class="py-2 text-right">{ money.Format(d.Symbol, d.TotalRevenue) }</td>
 					<td class="py-2"></td>
 					<td class="py-2 text-right">{ money.Format(d.Symbol, d.TotalProfit) }</td>
-					<td class="py-2 text-right">{ pctOf(d.TotalProfit, d.TotalRevenue) }%</td>
+					<td class="py-2 text-right">{ fmtPct1(d.TotalMargin) }</td>
 				</tr>
 			</tfoot>
 		</table>
