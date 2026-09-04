@@ -17,6 +17,7 @@ package main
 
 import (
 	_ "karots-pos/plugins/alternatives"
+	_ "karots-pos/plugins/clearance"
 	_ "karots-pos/plugins/documents"
 	_ "karots-pos/plugins/productplus"
 	_ "karots-pos/plugins/recharge"
