@@ -441,6 +441,35 @@ func (s *Service) CategoryNames(ctx context.Context) ([]string, error) {
 	return names, nil
 }
 
+// SupplierSpendRow is one supplier's purchasing tally for the spend report.
+type SupplierSpendRow struct {
+	Supplier string          `db:"supplier" json:"supplier"`
+	Orders   int             `db:"orders"   json:"orders"`
+	Spend    decimal.Decimal `db:"spend"    json:"spend"`
+	Paid     decimal.Decimal `db:"paid"     json:"paid"`
+	Due      decimal.Decimal `db:"due"      json:"due"`
+}
+
+// SupplierSpend ranks suppliers by what you bought from them over a period
+// (received GRNs, drafts excluded) — the supplier twin of Top Products, and the
+// "who do we buy most from" cut neither Purchases (per-GRN) nor Supplier Dues
+// (current payables) gives.
+func (s *Service) SupplierSpend(ctx context.Context, from, to time.Time) ([]SupplierSpendRow, error) {
+	var rows []SupplierSpendRow
+	if err := s.db.SelectContext(ctx, &rows, `
+		SELECT sup.name AS supplier, COUNT(*) AS orders,
+		       COALESCE(SUM(pu.total),0) AS spend,
+		       COALESCE(SUM(pu.paid_amount),0) AS paid,
+		       COALESCE(SUM(pu.total - pu.paid_amount),0) AS due
+		FROM purchases pu JOIN suppliers sup ON sup.id = pu.supplier_id
+		WHERE pu.status <> 'draft' AND pu.created_at >= $1 AND pu.created_at < $2
+		GROUP BY sup.name
+		ORDER BY spend DESC`, from, to); err != nil {
+		return nil, apperr.Internal("failed to compute supplier spend", err)
+	}
+	return rows, nil
+}
+
 // DayRow is one day's net sales for the trend report.
 type DayRow struct {
 	Day     time.Time       `db:"day"     json:"day"`

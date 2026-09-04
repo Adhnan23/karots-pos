@@ -11,6 +11,7 @@ import (
 	"karots-pos/internal/features/products"
 	"karots-pos/internal/features/reports"
 	"karots-pos/internal/features/sales"
+	"karots-pos/internal/features/suppliers"
 	"karots-pos/internal/middleware"
 	"karots-pos/internal/response"
 	adminpages "karots-pos/templates/pages/admin"
@@ -914,9 +915,53 @@ func (a *adminUI) SupplierDuesReport(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	d := adminpages.SupplierDuesData{ShopName: a.shopName(ctx), Symbol: a.symbol(ctx), Rows: rows}
-	for _, r := range rows {
+	d := adminpages.SupplierDuesData{
+		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx), Count: len(rows),
+	}
+	now := time.Now()
+	ageDays := func(r suppliers.OwingRow) int {
+		if r.OldestUnpaid == nil {
+			return 0
+		}
+		return int(now.Sub(*r.OldestUnpaid).Hours() / 24)
+	}
+	// Rows are ORDER BY outstanding DESC, so the first is the biggest we owe.
+	maxDueF := 0.0
+	if len(rows) > 0 {
+		maxDueF = rows[0].OutstandingBalance.InexactFloat64()
+	}
+	d.Rows = make([]adminpages.SupplierDueRow, len(rows))
+	for i, r := range rows {
+		age := ageDays(r)
 		d.TotalDue = d.TotalDue.Add(r.OutstandingBalance)
+		if age > d.OldestDays {
+			d.OldestDays = age
+		}
+		// Overdue = unpaid past the supplier's payment terms (credit days).
+		overdue := r.CreditDays > 0 && r.OldestUnpaid != nil && age > r.CreditDays
+		if overdue {
+			d.OverdueCount++
+			d.OverdueAmount = d.OverdueAmount.Add(r.OutstandingBalance)
+		}
+		// AP aging: bucket the whole balance by the oldest unpaid invoice's age.
+		// ponytail: supplier-level aging (oldest date, not per-invoice).
+		switch {
+		case age <= 30:
+			d.Buckets[0] = d.Buckets[0].Add(r.OutstandingBalance)
+		case age <= 60:
+			d.Buckets[1] = d.Buckets[1].Add(r.OutstandingBalance)
+		case age <= 90:
+			d.Buckets[2] = d.Buckets[2].Add(r.OutstandingBalance)
+		default:
+			d.Buckets[3] = d.Buckets[3].Add(r.OutstandingBalance)
+		}
+		row := adminpages.SupplierDueRow{R: r, AgeDays: age, Overdue: overdue}
+		if maxDueF > 0 {
+			if f := r.OutstandingBalance.InexactFloat64() / maxDueF * 100; f > 0 {
+				row.BarPct = f
+			}
+		}
+		d.Rows[i] = row
 	}
 	if wantsCSV(c) {
 		out := make([][]string, 0, len(rows))
@@ -931,12 +976,66 @@ func (a *adminUI) SupplierDuesReport(c echo.Context) error {
 			}
 			out = append(out, []string{
 				r.Name, phone, strconv.Itoa(r.CreditDays), csvMoney(r.OutstandingBalance), oldest,
+				strconv.Itoa(ageDays(r)),
 			})
 		}
 		return writeCSV(c, "supplier_dues",
-			[]string{"Supplier", "Phone", "Credit days", "Outstanding", "Oldest unpaid"}, out)
+			[]string{"Supplier", "Phone", "Credit days", "Outstanding", "Oldest unpaid", "Age (days)"}, out)
 	}
 	return response.RenderPage(c, adminpages.SupplierDuesReport(d))
+}
+
+// SupplierSpendReport ranks suppliers by purchase spend over a range — the
+// supplier twin of Top Products.
+func (a *adminUI) SupplierSpendReport(c echo.Context) error {
+	ctx := c.Request().Context()
+	from, to, fromStr, toStr, preset, err := rangeStrings(c)
+	if err != nil {
+		return err
+	}
+	rows, err := a.s.reports.SupplierSpend(ctx, from, to)
+	if err != nil {
+		return err
+	}
+	d := adminpages.SupplierSpendData{
+		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx), From: fromStr, To: toStr, Preset: preset,
+		Count: len(rows),
+	}
+	for _, r := range rows {
+		d.TotalSpend = d.TotalSpend.Add(r.Spend)
+		d.TotalPaid = d.TotalPaid.Add(r.Paid)
+		d.TotalDue = d.TotalDue.Add(r.Due)
+		d.Orders += r.Orders
+	}
+	// Rows are ORDER BY spend DESC, so the first is the biggest supplier.
+	maxSpendF, totalSpendF := 0.0, d.TotalSpend.InexactFloat64()
+	if len(rows) > 0 {
+		maxSpendF = rows[0].Spend.InexactFloat64()
+	}
+	d.Rows = make([]adminpages.SupplierSpendDisplay, len(rows))
+	for i, r := range rows {
+		sr := adminpages.SupplierSpendDisplay{R: r}
+		if maxSpendF > 0 {
+			if f := r.Spend.InexactFloat64() / maxSpendF * 100; f > 0 {
+				sr.BarPct = f
+			}
+		}
+		if totalSpendF > 0 {
+			sr.SharePct = r.Spend.InexactFloat64() / totalSpendF * 100
+		}
+		d.Rows[i] = sr
+	}
+	if wantsCSV(c) {
+		out := make([][]string, 0, len(rows))
+		for _, r := range rows {
+			out = append(out, []string{
+				r.Supplier, strconv.Itoa(r.Orders), csvMoney(r.Spend), csvMoney(r.Paid), csvMoney(r.Due),
+			})
+		}
+		return writeCSV(c, "supplier_spend_"+fromStr+"_"+toStr,
+			[]string{"Supplier", "Orders", "Spend", "Paid", "Due"}, out)
+	}
+	return response.RenderPage(c, adminpages.SupplierSpendReport(d))
 }
 
 func (a *adminUI) TaxReport(c echo.Context) error {

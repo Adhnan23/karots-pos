@@ -171,6 +171,7 @@ func reportHubGroups(taxRegistered bool) []reportHubGroup {
 			{"/admin/reports/low-stock", "Low Stock", "Items at or below reorder level"},
 			{"/admin/reports/batches", "Batches / Expiry", "Live batches and expiry dates"},
 			{"/admin/reports/purchases", "Purchases", "GRNs received in a period"},
+			{"/admin/reports/supplier-spend", "Spend by Supplier", "Who you buy the most from in a period"},
 			{"/admin/reports/supplier-dues", "Supplier Dues", "Payables — who you owe money"},
 			{"/admin/reports/recipe-variance", "Recipe Variance", "Expected vs actual ingredient use"},
 			{"/admin/reports/service-profit", "Service Profit", "Income, ingredients & costs per service"},

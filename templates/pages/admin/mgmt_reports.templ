@@ -771,10 +771,21 @@ templ CustomerDuesReport(d CustomerDuesData) {
 	}
 }
 
+// SupplierDueRow is one payable with the in-row bar (share of the biggest
+// balance), the debt age in days and whether it's past the supplier's terms.
+type SupplierDueRow struct {
+	R       suppliers.OwingRow
+	AgeDays int
+	BarPct  float64
+	Overdue bool
+}
+
 type SupplierDuesData struct {
-	ShopName, Symbol string
-	Rows             []suppliers.OwingRow
-	TotalDue         decimal.Decimal
+	ShopName, Symbol             string
+	Rows                         []SupplierDueRow
+	Buckets                      [4]decimal.Decimal // AP aging: 0-30 / 31-60 / 61-90 / 90+
+	TotalDue, OverdueAmount      decimal.Decimal
+	Count, OverdueCount, OldestDays int
 }
 
 templ SupplierDuesReport(d SupplierDuesData) {
@@ -782,6 +793,41 @@ templ SupplierDuesReport(d SupplierDuesData) {
 		<div class="no-print mb-4">
 			<a class="px-4 py-1.5 rounded-lg border text-sm" href="/admin/reports/supplier-dues?format=csv">Download CSV</a>
 		</div>
+		<div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+			@kpiCard("Total payable", money.Format(d.Symbol, d.TotalDue))
+			@kpiCard("Suppliers owed", strconv.Itoa(d.Count))
+			@kpiCard("Overdue", money.Format(d.Symbol, d.OverdueAmount))
+			@kpiCard("Oldest unpaid", strconv.Itoa(d.OldestDays)+" days")
+		</div>
+		// AP aging — how overdue what you owe is.
+		{{ segs := agingBar(d.Buckets) }}
+		if segs != nil {
+			<div class="bg-white rounded-2xl shadow-sm p-4 mb-6">
+				<div class="flex items-center justify-between mb-2 text-xs">
+					<span class="text-slate-500 font-medium">How old the money you owe is</span>
+					<span class="text-slate-400">the redder it runs, the more overdue</span>
+				</div>
+				<div class="flex w-full h-5 rounded-lg overflow-hidden bg-slate-100">
+					for _, s := range segs {
+						if s.Pct > 0 {
+							<div style={ "width:" + pctLabel(s.Pct) + ";background:" + s.Color } title={ s.Label }></div>
+						}
+					}
+				</div>
+				<div class="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-3 mt-4">
+					for _, s := range segs {
+						<div class="flex items-start gap-2">
+							<span class="inline-block w-3 h-3 rounded mt-1 shrink-0" style={ "background:" + s.Color }></span>
+							<div>
+								<div class="text-xs text-slate-500">{ s.Label }</div>
+								<div class="text-sm font-semibold text-slate-800">{ money.Format(d.Symbol, s.Amount) }</div>
+								<div class="text-xs text-slate-400">{ pctLabel(s.Pct) } of dues</div>
+							</div>
+						</div>
+					}
+				</div>
+			</div>
+		}
 		<table class="w-full text-sm">
 			<thead class="text-left text-slate-500 border-b">
 				<tr><th class="py-1.5">Supplier</th><th class="py-1.5">Phone</th><th class="py-1.5 text-center">Credit days</th><th class="py-1.5 text-right">Outstanding</th><th class="py-1.5 text-right">Oldest unpaid</th><th class="py-1.5 text-right">Age (days)</th></tr>
@@ -789,18 +835,28 @@ templ SupplierDuesReport(d SupplierDuesData) {
 			<tbody>
 				for _, s := range d.Rows {
 					<tr class="border-b last:border-0">
-						<td class="py-1.5 font-medium">{ s.Name }</td>
-						<td class="py-1.5 text-slate-500">{ strOrEmpty(s.Phone) }</td>
-						<td class="py-1.5 text-center">{ strconv.Itoa(s.CreditDays) }</td>
-						<td class="py-1.5 text-right font-medium">{ money.Format(d.Symbol, s.OutstandingBalance) }</td>
-						<td class="py-1.5 text-right text-slate-500">
-							if s.OldestUnpaid != nil {
-								{ s.OldestUnpaid.Format("2006-01-02") }
+						<td class="py-1.5 align-top">
+							<div class="font-medium">
+								{ s.R.Name }
+								if s.Overdue {
+									<span class="ml-1 text-[10px] font-semibold uppercase tracking-wide text-rose-600 bg-rose-50 rounded px-1 py-0.5 align-middle">overdue</span>
+								}
+							</div>
+							<div class="mt-1 h-1.5 rounded bg-indigo-100">
+								<div class="h-1.5 rounded bg-indigo-500" style={ barWidth(s.BarPct) }></div>
+							</div>
+						</td>
+						<td class="py-1.5 text-slate-500 align-top">{ strOrEmpty(s.R.Phone) }</td>
+						<td class="py-1.5 text-center align-top">{ strconv.Itoa(s.R.CreditDays) }</td>
+						<td class="py-1.5 text-right font-medium align-top">{ money.Format(d.Symbol, s.R.OutstandingBalance) }</td>
+						<td class="py-1.5 text-right text-slate-500 align-top">
+							if s.R.OldestUnpaid != nil {
+								{ s.R.OldestUnpaid.Format("2006-01-02") }
 							} else {
 								—
 							}
 						</td>
-						<td class="py-1.5 text-right">{ daysSince(s.OldestUnpaid) }</td>
+						<td class="py-1.5 text-right align-top">{ strconv.Itoa(s.AgeDays) }</td>
 					</tr>
 				}
 				if len(d.Rows) == 0 {
@@ -809,6 +865,84 @@ templ SupplierDuesReport(d SupplierDuesData) {
 			</tbody>
 			<tfoot class="border-t-2 font-semibold">
 				<tr><td class="py-2" colspan="3">Total payable</td><td class="py-2 text-right">{ money.Format(d.Symbol, d.TotalDue) }</td><td colspan="2"></td></tr>
+			</tfoot>
+		</table>
+	}
+}
+
+// ============================ Spend by supplier ============================
+
+// SupplierSpendDisplay is one supplier with the in-row bar (share of the top
+// supplier's spend) and its share of total spend.
+type SupplierSpendDisplay struct {
+	R                reports.SupplierSpendRow
+	BarPct, SharePct float64
+}
+
+type SupplierSpendData struct {
+	ShopName, Symbol, From, To, Preset  string
+	Rows                                []SupplierSpendDisplay
+	Count, Orders                       int
+	TotalSpend, TotalPaid, TotalDue     decimal.Decimal
+}
+
+templ SupplierSpendReport(d SupplierSpendData) {
+	@layouts.Report("Spend by Supplier", d.ShopName) {
+		@rptRangeForm("/admin/reports/supplier-spend", d.Preset, d.From, d.To) {
+			<a
+				class="no-print px-4 py-1.5 rounded-lg border text-sm"
+				href={ templ.SafeURL("/admin/reports/supplier-spend?format=csv&from=" + d.From + "&to=" + d.To) }
+			>Download CSV</a>
+		}
+		@rptPeriodLine(d.From, d.To)
+		<div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+			@kpiCard("Suppliers", strconv.Itoa(d.Count))
+			@kpiCard("Total spend", money.Format(d.Symbol, d.TotalSpend))
+			@kpiCard("Paid", money.Format(d.Symbol, d.TotalPaid))
+			@kpiCard("Still due", money.Format(d.Symbol, d.TotalDue))
+		</div>
+		<table class="w-full text-sm">
+			<thead class="text-left text-slate-500 border-b">
+				<tr>
+					<th class="py-1.5 w-8">#</th>
+					<th class="py-1.5">Supplier</th>
+					<th class="py-1.5 text-right">Orders</th>
+					<th class="py-1.5 text-right">Spend</th>
+					<th class="py-1.5 text-right">Paid</th>
+					<th class="py-1.5 text-right">Due</th>
+					<th class="py-1.5 text-right">Share</th>
+				</tr>
+			</thead>
+			<tbody>
+				for i, r := range d.Rows {
+					<tr class="border-b last:border-0">
+						<td class="py-1.5 text-slate-400 align-top">{ strconv.Itoa(i + 1) }</td>
+						<td class="py-1.5">
+							<div class="font-medium">{ r.R.Supplier }</div>
+							<div class="mt-1 h-1.5 rounded bg-indigo-100">
+								<div class="h-1.5 rounded bg-indigo-500" style={ barWidth(r.BarPct) }></div>
+							</div>
+						</td>
+						<td class="py-1.5 text-right align-top">{ strconv.Itoa(r.R.Orders) }</td>
+						<td class="py-1.5 text-right align-top font-medium">{ money.Format(d.Symbol, r.R.Spend) }</td>
+						<td class="py-1.5 text-right align-top text-slate-500">{ money.Display(r.R.Paid) }</td>
+						<td class="py-1.5 text-right align-top">{ money.Display(r.R.Due) }</td>
+						<td class="py-1.5 text-right align-top text-slate-500">{ fmtPct1(r.SharePct) }</td>
+					</tr>
+				}
+				if len(d.Rows) == 0 {
+					<tr><td colspan="7" class="py-6 text-center text-slate-400">No purchases in this period.</td></tr>
+				}
+			</tbody>
+			<tfoot class="border-t-2 font-semibold">
+				<tr>
+					<td class="py-2" colspan="2">Total</td>
+					<td class="py-2 text-right">{ strconv.Itoa(d.Orders) }</td>
+					<td class="py-2 text-right">{ money.Format(d.Symbol, d.TotalSpend) }</td>
+					<td class="py-2 text-right">{ money.Display(d.TotalPaid) }</td>
+					<td class="py-2 text-right">{ money.Display(d.TotalDue) }</td>
+					<td class="py-2"></td>
+				</tr>
 			</tfoot>
 		</table>
 	}
