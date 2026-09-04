@@ -317,11 +317,30 @@ func (a *adminUI) ExpensesReport(c echo.Context) error {
 		return err
 	}
 	d := adminpages.ExpensesReportData{
-		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx), From: fromStr, To: toStr, Preset: preset, Rows: rows,
+		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx), From: fromStr, To: toStr, Preset: preset,
 	}
 	for _, r := range rows {
 		d.Count += r.Count
 		d.Total = d.Total.Add(r.Total)
+	}
+	// Rows are ORDER BY total DESC, so the first is the biggest spend — the bar
+	// scale and share denominator.
+	maxTotalF, totalF := 0.0, d.Total.InexactFloat64()
+	if len(rows) > 0 {
+		maxTotalF = rows[0].Total.InexactFloat64()
+	}
+	d.Rows = make([]adminpages.ExpenseCatDisplay, len(rows))
+	for i, r := range rows {
+		er := adminpages.ExpenseCatDisplay{R: r}
+		if maxTotalF > 0 {
+			if f := r.Total.InexactFloat64() / maxTotalF * 100; f > 0 {
+				er.BarPct = f
+			}
+		}
+		if totalF > 0 {
+			er.SharePct = r.Total.InexactFloat64() / totalF * 100
+		}
+		d.Rows[i] = er
 	}
 	if wantsCSV(c) {
 		out := make([][]string, 0, len(rows))

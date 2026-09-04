@@ -850,9 +850,16 @@ templ CashierSalesReport(d CashierSalesData) {
 
 // ============================ Expenses by category ============================
 
+// ExpenseCatDisplay is one expense category with the in-row bar (share of the
+// biggest category's spend) and its share of total spend.
+type ExpenseCatDisplay struct {
+	R                reports.ExpenseCatRow
+	BarPct, SharePct float64
+}
+
 type ExpensesReportData struct {
 	ShopName, Symbol, From, To, Preset string
-	Rows                               []reports.ExpenseCatRow
+	Rows                               []ExpenseCatDisplay
 	Count                              int
 	Total                              decimal.Decimal
 }
@@ -866,17 +873,27 @@ templ ExpensesReport(d ExpensesReportData) {
 			>Download CSV</a>
 		}
 		@rptPeriodLine(d.From, d.To)
+		<div class="grid grid-cols-2 lg:grid-cols-3 gap-3 mb-4">
+			@kpiCard("Total spent", money.Format(d.Symbol, d.Total))
+			@kpiCard("Categories", strconv.Itoa(len(d.Rows)))
+			@kpiCard("Entries", strconv.Itoa(d.Count))
+		</div>
 		<table class="w-full text-sm">
 			<thead class="text-left text-slate-500 border-b">
-				<tr><th class="py-1.5">Category</th><th class="py-1.5 text-right">Count</th><th class="py-1.5 text-right">Total</th><th class="py-1.5 text-right">Share</th></tr>
+				<tr><th class="py-1.5">Category</th><th class="py-1.5 text-right">Entries</th><th class="py-1.5 text-right">Total</th><th class="py-1.5 text-right">Share</th></tr>
 			</thead>
 			<tbody>
 				for _, r := range d.Rows {
 					<tr class="border-b last:border-0">
-						<td class="py-1.5 font-medium">{ r.Category }</td>
-						<td class="py-1.5 text-right">{ strconv.Itoa(r.Count) }</td>
-						<td class="py-1.5 text-right">{ money.Format(d.Symbol, r.Total) }</td>
-						<td class="py-1.5 text-right text-slate-500">{ pctOf(r.Total, d.Total) }%</td>
+						<td class="py-1.5">
+							<div class="font-medium">{ r.R.Category }</div>
+							<div class="mt-1 h-1.5 rounded bg-amber-100">
+								<div class="h-1.5 rounded bg-amber-500" style={ barWidth(r.BarPct) }></div>
+							</div>
+						</td>
+						<td class="py-1.5 text-right align-top">{ strconv.Itoa(r.R.Count) }</td>
+						<td class="py-1.5 text-right align-top font-medium">{ money.Format(d.Symbol, r.R.Total) }</td>
+						<td class="py-1.5 text-right align-top text-slate-500">{ fmtPct1(r.SharePct) }</td>
 					</tr>
 				}
 				if len(d.Rows) == 0 {
