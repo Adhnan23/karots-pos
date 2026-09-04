@@ -330,36 +330,123 @@ templ FinanceReport(d FinanceReportData) {
 			>Download CSV</a>
 		}
 		@rptPeriodLine(d.From, d.To)
-		<table class="w-full text-sm">
-			<tbody>
-				@plRow("Sales count", strconv.Itoa(d.PL.SalesCount))
-				@plMoney(d.Symbol, "Gross revenue", d.PL.GrossRevenue, false)
-				@plMoney(d.Symbol, "Returns", d.PL.Returns, true)
-				@plMoney(d.Symbol, "Net revenue", d.PL.Revenue, false)
-				@plMoney(d.Symbol, "Cost of goods sold (COGS)", d.PL.COGS, true)
-				@plMoney(d.Symbol, "Gross profit", d.PL.GrossProfit, false)
-				@plRow("Gross margin", money.Display(d.PL.GrossMargin)+"%")
-				@plMoney(d.Symbol, "Operating expenses", d.PL.Expenses, true)
-				@plMoney(d.Symbol, "Stock losses (damage + warranty)", d.PL.Losses, true)
-				@plMoney(d.Symbol, "Shop own use", d.PL.OwnUse, true)
-				@plMoney(d.Symbol, "Staff welfare", d.PL.StaffWelfare, true)
-				@plMoney(d.Symbol, "Stock corrections (count)", d.PL.StockCorrections, true)
-					@plMoney(d.Symbol, "Other income (interest)", d.PL.OtherIncome, false)
-					@plMoney(d.Symbol, "Supplier recoveries", d.PL.Recoveries, false)
+		// Hero numbers — the four an owner actually looks for; net profit is the star.
+		<div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+			@kpiCard("Net revenue", money.Format(d.Symbol, d.PL.Revenue))
+			<div class="bg-white rounded-2xl shadow-sm p-4">
+				<div class="text-xs text-slate-500">Gross profit</div>
+				<div class="text-lg font-bold text-slate-800">{ money.Format(d.Symbol, d.PL.GrossProfit) }</div>
+				<div class="text-xs text-slate-400">{ money.Display(d.PL.GrossMargin) }% margin</div>
+			</div>
+			<div class="bg-white rounded-2xl shadow-sm p-4">
+				<div class="text-xs text-slate-500">Net profit</div>
+				if d.NetWithPlugin().IsNegative() {
+					<div class="text-lg font-bold text-rose-600">{ money.Format(d.Symbol, d.NetWithPlugin()) }</div>
+				} else {
+					<div class="text-lg font-bold text-emerald-600">{ money.Format(d.Symbol, d.NetWithPlugin()) }</div>
+				}
+				<div class="text-xs text-slate-400">{ strconv.Itoa(d.PL.SalesCount) } sales</div>
+			</div>
+			@kpiCard("Cash received", money.Format(d.Symbol, d.PL.Received))
+		</div>
+		// "Where every rupee went" — the glanceable picture the table can't give.
+		{{ segs := financeBar(d.PL, d.Symbol) }}
+		if segs != nil {
+			<div class="bg-white rounded-2xl shadow-sm p-4 mb-6">
+				<div class="flex items-center justify-between mb-2 text-xs">
+					<span class="text-slate-500 font-medium">Where every rupee of sales revenue went</span>
+					<span class="text-slate-400">on { money.Format(d.Symbol, d.PL.Revenue) } net revenue</span>
+				</div>
+				<div class="flex w-full h-5 rounded-lg overflow-hidden bg-slate-100">
+					for _, s := range segs {
+						if s.Pct > 0 {
+							<div style={ "width:" + pctLabel(s.Pct) + ";background:" + s.Color } title={ s.Label }></div>
+						}
+					}
+				</div>
+				<div class="flex flex-wrap gap-x-5 gap-y-1 mt-3 text-xs">
+					for _, s := range segs {
+						<div class="flex items-center gap-1.5">
+							<span class="inline-block w-3 h-3 rounded" style={ "background:" + s.Color }></span>
+							<span class="text-slate-600">{ s.Label }</span>
+							<span class="font-medium">{ money.Format(d.Symbol, s.Amount) }</span>
+							<span class="text-slate-400">{ pctLabel(s.Pct) }</span>
+						</div>
+					}
+				</div>
+			</div>
+		}
+		if len(d.PluginIncome) > 0 {
+			<div class="mb-6 rounded-2xl bg-indigo-50 border border-indigo-100 p-4">
+				<div class="text-xs font-semibold uppercase tracking-wide text-indigo-500 mb-2">Add-on income (plugins) — added to net profit</div>
 				for _, l := range d.PluginIncome {
-					@plMoney(d.Symbol, l.Label, l.Amount, false)
+					<div class="flex justify-between text-sm"><span class="text-slate-600">{ l.Label }</span><span class="font-medium">{ money.Format(d.Symbol, l.Amount) }</span></div>
 				}
-				@plMoney(d.Symbol, "Net profit", d.NetWithPlugin(), false)
-				@plMoney(d.Symbol, "Sale tender (paid at sale)", d.PL.Received, false)
-				@plMoney(d.Symbol, "Receivables (customer dues)", d.PL.Receivables, false)
-				@plMoney(d.Symbol, "Payables (supplier dues)", d.PL.Payables, false)
-				if d.PL.SupplierCredit.IsPositive() {
-					@plMoney(d.Symbol, "Supplier credit (they owe us)", d.PL.SupplierCredit, false)
+				<p class="text-xs text-slate-400 mt-1">Real margin only (e.g. recharge service charge + float commission); pass-through face value is excluded.</p>
+			</div>
+		}
+		// Detail split into readable sections instead of one wall.
+		<div class="grid lg:grid-cols-2 gap-6 items-start">
+			<div>
+				@plSectionHead("Profit &amp; Loss")
+				<table class="w-full text-sm">
+					<tbody>
+						@plMoney(d.Symbol, "Gross revenue", d.PL.GrossRevenue, false)
+						@plMoney(d.Symbol, "Returns", d.PL.Returns, true)
+						@plMoney(d.Symbol, "Net revenue", d.PL.Revenue, false)
+						@plMoney(d.Symbol, "Cost of goods sold", d.PL.COGS, true)
+						@plSubtotal(d.Symbol, "Gross profit ("+money.Display(d.PL.GrossMargin)+"%)", d.PL.GrossProfit, false)
+						@plMoney(d.Symbol, "Operating expenses", d.PL.Expenses, true)
+						@plMoney(d.Symbol, "Stock losses (damage + warranty)", d.PL.Losses, true)
+						@plMoney(d.Symbol, "Shop own use", d.PL.OwnUse, true)
+						@plMoney(d.Symbol, "Staff welfare", d.PL.StaffWelfare, true)
+						@plMoney(d.Symbol, "Stock corrections (count)", d.PL.StockCorrections, true)
+						@plMoney(d.Symbol, "Other income (interest)", d.PL.OtherIncome, false)
+						@plMoney(d.Symbol, "Supplier recoveries", d.PL.Recoveries, false)
+						for _, l := range d.PluginIncome {
+							@plMoney(d.Symbol, l.Label, l.Amount, false)
+						}
+						@plSubtotal(d.Symbol, "Net profit", d.NetWithPlugin(), true)
+					</tbody>
+				</table>
+			</div>
+			<div class="space-y-6">
+				<div>
+					@plSectionHead("What you're owed / owe")
+					<table class="w-full text-sm">
+						<tbody>
+							@plMoney(d.Symbol, "Receivables (customers owe you)", d.PL.Receivables, false)
+							@plMoney(d.Symbol, "Payables (you owe suppliers)", d.PL.Payables, false)
+							if d.PL.SupplierCredit.IsPositive() {
+								@plMoney(d.Symbol, "Supplier credit (they owe you)", d.PL.SupplierCredit, false)
+							}
+						</tbody>
+					</table>
+				</div>
+				<div>
+					@plSectionHead("Cash &amp; till")
+					<table class="w-full text-sm">
+						<tbody>
+							@plMoney(d.Symbol, "Sale tender (paid at sale)", d.PL.Received, false)
+							@plMoney(d.Symbol, "Cash withdrawn (drawer)", d.PL.CashWithdrawn, false)
+							@plMoney(d.Symbol, "Register over/short", d.PL.RegisterDiff, false)
+						</tbody>
+					</table>
+				</div>
+				if len(d.PL.ByPayment) > 0 {
+					<div>
+						@plSectionHead("Money taken by method")
+						<table class="w-full text-sm">
+							<tbody>
+								for _, m := range d.PL.ByPayment {
+									@plMoney(d.Symbol, tenderLabel(m.Method), m.Total, false)
+								}
+							</tbody>
+						</table>
+					</div>
 				}
-				@plMoney(d.Symbol, "Cash withdrawn (drawer)", d.PL.CashWithdrawn, false)
-				@plMoney(d.Symbol, "Register over/short", d.PL.RegisterDiff, false)
-			</tbody>
-		</table>
+			</div>
+		</div>
 		if d.PL.ZeroCostLines > 0 {
 			<!-- Those lines read as pure profit. Saying so beside the number beats
 			     letting the owner act on a margin that is quietly too good. -->
@@ -391,6 +478,25 @@ templ FinanceReport(d FinanceReportData) {
 
 templ plRow(label, value string) {
 	<tr class="border-b last:border-0"><td class="py-1.5">{ label }</td><td class="py-1.5 text-right font-medium">{ value }</td></tr>
+}
+
+// plSectionHead is a small heading above one of the grouped Finance tables.
+templ plSectionHead(title string) {
+	<h3 class="text-sm font-semibold text-slate-500 uppercase tracking-wide mb-2">@templ.Raw(title)</h3>
+}
+
+// plSubtotal is a bold, ruled subtotal/total row (Gross profit, Net profit).
+templ plSubtotal(symbol, label string, v decimal.Decimal, hero bool) {
+	<tr class="border-t-2 font-bold">
+		<td class="py-2">{ label }</td>
+		if hero && v.IsNegative() {
+			<td class="py-2 text-right text-rose-600">{ money.Format(symbol, v) }</td>
+		} else if hero {
+			<td class="py-2 text-right text-emerald-700">{ money.Format(symbol, v) }</td>
+		} else {
+			<td class="py-2 text-right">{ money.Format(symbol, v) }</td>
+		}
+	</tr>
 }
 
 templ plMoney(symbol, label string, v decimal.Decimal, negate bool) {

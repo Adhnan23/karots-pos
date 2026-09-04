@@ -8,6 +8,7 @@ import (
 
 	"karots-pos/internal/datetime"
 	"karots-pos/internal/features/products"
+	"karots-pos/internal/features/reports"
 	"karots-pos/internal/features/suppliers"
 	"karots-pos/internal/money"
 	"karots-pos/templates/layouts"
@@ -18,6 +19,55 @@ import (
 // datetimeDisplay renders a sale timestamp in the shop's local timezone (the DB
 // stores UTC; showing it raw was the old "times look 5h30m off" bug).
 func datetimeDisplay(t time.Time) string { return datetime.DateTime(t) }
+
+// financeSeg is one segment of the Finance "where every rupee went" bar.
+type financeSeg struct {
+	Label  string
+	Amount decimal.Decimal
+	Pct    float64 // width %, clamped to [0,100]
+	Color  string  // CSS colour
+}
+
+// financeBar splits net sales revenue into cost-of-goods, expenses, other costs
+// and the remainder (operating profit) as bar segments. Returns nil when there
+// is no revenue to divide. Recharge/plugin earnings are NOT part of this bar —
+// they are separate income shown alongside — so the bar reads "of sales revenue".
+func financeBar(pl reports.PL, _ string) []financeSeg {
+	base := pl.Revenue
+	if !base.IsPositive() {
+		return nil
+	}
+	other := pl.Losses.Add(pl.OwnUse).Add(pl.StaffWelfare).Add(pl.StockCorrections)
+	if other.IsNegative() {
+		other = decimal.Zero // a stock-count gain isn't a "cost" for the bar
+	}
+	hundred := decimal.NewFromInt(100)
+	pct := func(v decimal.Decimal) float64 {
+		f, _ := v.Div(base).Mul(hundred).Float64()
+		if f < 0 {
+			f = 0
+		}
+		if f > 100 {
+			f = 100
+		}
+		return f
+	}
+	cogsP, expP, othP := pct(pl.COGS), pct(pl.Expenses), pct(other)
+	profP := 100 - cogsP - expP - othP
+	if profP < 0 {
+		profP = 0
+	}
+	profit := base.Sub(pl.COGS).Sub(pl.Expenses).Sub(other)
+	return []financeSeg{
+		{"Cost of goods", pl.COGS, cogsP, "#94a3b8"},
+		{"Expenses", pl.Expenses, expP, "#f59e0b"},
+		{"Other costs", other, othP, "#fb7185"},
+		{"Profit", profit, profP, "#10b981"},
+	}
+}
+
+// pctLabel renders a segment's share as a whole-number percent.
+func pctLabel(f float64) string { return strconv.Itoa(int(f+0.5)) + "%" }
 
 // deltaInfo compares a current figure with the previous period's and returns a
 // display string plus a direction (1 up, -1 down, 0 flat) for the ▲▼ badge.
