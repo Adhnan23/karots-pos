@@ -640,53 +640,6 @@ templ ProductSalesReport(d ProductSalesData) {
 	}
 }
 
-// ============================ Tender / payments ============================
-
-type TenderReportData struct {
-	ShopName, Symbol, From, To, Preset string
-	Rows                               []reports.TenderRow
-	Total                              decimal.Decimal
-	Count                              int
-}
-
-templ TenderReport(d TenderReportData) {
-	@layouts.Report("Tender / Payments", d.ShopName) {
-		@rptRangeForm("/admin/reports/tender", d.Preset, d.From, d.To) {
-			<a
-				class="no-print px-4 py-1.5 rounded-lg border text-sm"
-				href={ templ.SafeURL("/admin/reports/tender?format=csv&from=" + d.From + "&to=" + d.To) }
-			>Download CSV</a>
-		}
-		@rptPeriodLine(d.From, d.To)
-		<table class="w-full text-sm">
-			<thead class="text-left text-slate-500 border-b">
-				<tr><th class="py-1.5">Method</th><th class="py-1.5 text-right">Payments</th><th class="py-1.5 text-right">Total</th><th class="py-1.5 text-right">Share</th></tr>
-			</thead>
-			<tbody>
-				for _, r := range d.Rows {
-					<tr class="border-b last:border-0">
-						<td class="py-1.5 font-medium">{ tenderLabel(r.Method) }</td>
-						<td class="py-1.5 text-right">{ strconv.Itoa(r.Count) }</td>
-						<td class="py-1.5 text-right">{ money.Format(d.Symbol, r.Total) }</td>
-						<td class="py-1.5 text-right text-slate-500">{ pctOf(r.Total, d.Total) }%</td>
-					</tr>
-				}
-				if len(d.Rows) == 0 {
-					<tr><td colspan="4" class="py-6 text-center text-slate-400">No payments in this period.</td></tr>
-				}
-			</tbody>
-			<tfoot class="border-t-2 font-semibold">
-				<tr>
-					<td class="py-2">Total collected</td>
-					<td class="py-2 text-right">{ strconv.Itoa(d.Count) }</td>
-					<td class="py-2 text-right">{ money.Format(d.Symbol, d.Total) }</td>
-					<td class="py-2"></td>
-				</tr>
-			</tfoot>
-		</table>
-		<p class="no-print text-xs text-slate-400 mt-3">Each payment line is counted for its own amount, so a sale split across methods (e.g. part cash, part card) shows correctly under each.</p>
-	}
-}
 
 // ============================ Top products ============================
 

@@ -144,7 +144,17 @@ type reportHubGroup struct {
 // (instead of one flat alphabetical grid). Plugin-contributed cards go under a
 // trailing "More" group so the hook stays intact. Curated order within a group
 // beats alphabetical here — the common reports sit at the top.
-func reportHubGroups() []reportHubGroup {
+func reportHubGroups(taxRegistered bool) []reportHubGroup {
+	money := []reportHubCard{
+		{"/admin/reports/finance", "Finance / P&L", "Revenue, COGS, profit, dues & how money came in"},
+		{"/admin/reports/profit-by-category", "Profit by Category", "Net revenue & profit per category"},
+		{"/admin/reports/expenses", "Expenses by Category", "Operating expenses grouped by category"},
+		{"/admin/reports/cash-register", "Cash Register", "Drawer sessions with over/short"},
+	}
+	if taxRegistered {
+		// Only meaningful for a tax-registered shop; hidden otherwise (dead page).
+		money = append(money, reportHubCard{"/admin/reports/tax", "Tax Summary", "VAT/tax collected over a period"})
+	}
 	groups := []reportHubGroup{
 		{"Sales & Customers", []reportHubCard{
 			{"/admin/reports/sales", "Sales", "Receipts, profit & time-of-day, with a daily trend"},
@@ -155,14 +165,7 @@ func reportHubGroups() []reportHubGroup {
 			{"/admin/reports/returns", "Returns / Refunds", "Returned lines and refund value"},
 			{"/admin/reports/customer-dues", "Customer Dues", "Receivables — who owes you money"},
 		}},
-		{"Money & Profit", []reportHubCard{
-			{"/admin/reports/finance", "Finance / P&L", "Revenue, COGS, profit, dues for a period"},
-			{"/admin/reports/tender", "Tender / Payments", "Cash, card, wallet & credit collected"},
-			{"/admin/reports/tax", "Tax Summary", "VAT/tax collected over a period"},
-			{"/admin/reports/profit-by-category", "Profit by Category", "Net revenue & profit per category"},
-			{"/admin/reports/expenses", "Expenses by Category", "Operating expenses grouped by category"},
-			{"/admin/reports/cash-register", "Cash Register", "Drawer sessions with over/short"},
-		}},
+		{"Money & Profit", money},
 		{"Inventory & Suppliers", []reportHubCard{
 			{"/admin/reports/inventory", "Inventory Valuation", "Stock on hand at cost & retail"},
 			{"/admin/reports/low-stock", "Low Stock", "Items at or below reorder level"},

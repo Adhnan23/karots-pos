@@ -25,7 +25,8 @@ import (
 // ============================ Reports hub ============================
 
 type ReportsHubData struct {
-	UserName string
+	UserName      string
+	TaxRegistered bool
 }
 
 templ ReportsHub(d ReportsHubData) {
@@ -34,7 +35,7 @@ templ ReportsHub(d ReportsHubData) {
 			<h1 class="text-2xl font-bold">Reports</h1>
 			<p class="text-sm text-slate-500">Filterable management reports — open one, set the range, then Print / Save as PDF.</p>
 		</div>
-		for _, g := range reportHubGroups() {
+		for _, g := range reportHubGroups(d.TaxRegistered) {
 			<div class="mb-8">
 				<h2 class="text-sm font-semibold text-slate-500 uppercase tracking-wide mb-3">{ g.Label }</h2>
 				<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -436,15 +437,28 @@ templ FinanceReport(d FinanceReportData) {
 					</table>
 				</div>
 				if len(d.PL.ByPayment) > 0 {
+					{{ payTotal := decimal.Zero }}
+					for _, m := range d.PL.ByPayment {
+						{{ payTotal = payTotal.Add(m.Total) }}
+					}
 					<div>
 						@plSectionHead("Money taken by method")
 						<table class="w-full text-sm">
+							<thead class="text-left text-slate-400 text-xs">
+								<tr><th class="py-1">Method</th><th class="py-1 text-right">Payments</th><th class="py-1 text-right">Total</th><th class="py-1 text-right">Share</th></tr>
+							</thead>
 							<tbody>
 								for _, m := range d.PL.ByPayment {
-									@plMoney(d.Symbol, tenderLabel(m.Method), m.Total, false)
+									<tr class="border-b last:border-0">
+										<td class="py-1.5">{ tenderLabel(m.Method) }</td>
+										<td class="py-1.5 text-right text-slate-500">{ strconv.Itoa(m.Count) }</td>
+										<td class="py-1.5 text-right font-medium">{ money.Format(d.Symbol, m.Total) }</td>
+										<td class="py-1.5 text-right text-slate-500">{ pctOf(m.Total, payTotal) }%</td>
+									</tr>
 								}
 							</tbody>
 						</table>
+						<p class="no-print text-xs text-slate-400 mt-2">Each payment line counts for its own amount — a split cash+card sale shows under both.</p>
 					</div>
 				}
 			</div>

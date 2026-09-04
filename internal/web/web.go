@@ -472,7 +472,7 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	ag.GET("/reports/sales", admin.SalesReport)
 	ag.GET("/reports/sales/:id/lines", admin.SalesReceiptLines)
 	ag.GET("/reports/peak-hours", admin.PeakHoursReport)
-	ag.GET("/reports/tender", admin.TenderReport)
+	ag.GET("/reports/tender", redirectTo("/admin/reports/finance")) // folded into Finance's payment breakdown
 	ag.GET("/reports/returns", admin.ReturnsReport)
 	ag.GET("/reports/profit-by-category", admin.ProfitByCategoryReport)
 	// Daily Sales Trend folded into the Sales report; keep the URL working.

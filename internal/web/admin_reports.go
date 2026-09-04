@@ -63,8 +63,13 @@ func rangeStrings(c echo.Context) (from, to time.Time, fromStr, toStr, preset st
 }
 
 func (a *adminUI) ReportsHub(c echo.Context) error {
+	taxReg := false
+	if cfg, err := a.s.settings.Get(c.Request().Context()); err == nil {
+		taxReg = cfg.TaxRegistered
+	}
 	return response.RenderPage(c, adminpages.ReportsHub(adminpages.ReportsHubData{
-		UserName: middleware.CurrentUserName(c),
+		UserName:      middleware.CurrentUserName(c),
+		TaxRegistered: taxReg,
 	}))
 }
 
@@ -421,37 +426,6 @@ func (a *adminUI) TopProductsReport(c echo.Context) error {
 			[]string{"Product", "Qty sold", "Revenue", "Profit", "Margin %"}, out)
 	}
 	return response.RenderPage(c, adminpages.TopProductsReport(d))
-}
-
-// TenderReport breaks sales tender down by payment method (cash / card / online /
-// credit / wallet) over a range — the "what actually came in as cash vs card"
-// view the sales-list method filter can't give (it over-counts split payments).
-func (a *adminUI) TenderReport(c echo.Context) error {
-	ctx := c.Request().Context()
-	from, to, fromStr, toStr, preset, err := rangeStrings(c)
-	if err != nil {
-		return err
-	}
-	rows, err := a.s.reports.TenderSummary(ctx, from, to)
-	if err != nil {
-		return err
-	}
-	d := adminpages.TenderReportData{
-		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx), From: fromStr, To: toStr, Preset: preset, Rows: rows,
-	}
-	for _, r := range rows {
-		d.Total = d.Total.Add(r.Total)
-		d.Count += r.Count
-	}
-	if wantsCSV(c) {
-		out := make([][]string, 0, len(rows))
-		for _, r := range rows {
-			out = append(out, []string{r.Method, strconv.Itoa(r.Count), csvMoney(r.Total)})
-		}
-		return writeCSV(c, "tender_"+fromStr+"_"+toStr,
-			[]string{"Method", "Payments", "Total"}, out)
-	}
-	return response.RenderPage(c, adminpages.TenderReport(d))
 }
 
 func (a *adminUI) FinanceReport(c echo.Context) error {

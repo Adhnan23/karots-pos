@@ -71,6 +71,7 @@ type ProductRevenue struct {
 
 type MethodTotal struct {
 	Method string          `db:"method" json:"method"`
+	Count  int             `db:"count"  json:"count"`
 	Total  decimal.Decimal `db:"total"  json:"total"`
 }
 
@@ -260,7 +261,7 @@ func (s *Service) Compute(ctx context.Context, from, to time.Time) (*PL, error) 
 	}
 
 	if err := s.db.SelectContext(ctx, &pl.ByPayment, `
-		SELECT pmt.method, COALESCE(SUM(pmt.amount),0) AS total
+		SELECT pmt.method, COUNT(*) AS count, COALESCE(SUM(pmt.amount),0) AS total
 		FROM payments pmt JOIN sales s ON s.id = pmt.sale_id
 		WHERE s.status <> 'void' AND s.created_at >= $1 AND s.created_at < $2
 		GROUP BY pmt.method ORDER BY total DESC`, from, to); err != nil {
@@ -357,31 +358,6 @@ func (s *Service) TopProducts(ctx context.Context, from, to time.Time, orderBy s
 		LIMIT $3`
 	if err := s.db.SelectContext(ctx, &rows, q, from, to, limit); err != nil {
 		return nil, apperr.Internal("failed to compute top products", err)
-	}
-	return rows, nil
-}
-
-// TenderRow is one payment method's tally for the tender summary.
-type TenderRow struct {
-	Method string          `db:"method" json:"method"`
-	Count  int             `db:"count"  json:"count"`
-	Total  decimal.Decimal `db:"total"  json:"total"`
-}
-
-// TenderSummary totals how sales in the period were tendered, grouped by payment
-// method. It sums each payment LINE (so a split cash+card sale counts each method
-// for its real amount — unlike the sales list's method filter, which counts the
-// whole sale total under any method it touched). Void sales are excluded.
-func (s *Service) TenderSummary(ctx context.Context, from, to time.Time) ([]TenderRow, error) {
-	var rows []TenderRow
-	if err := s.db.SelectContext(ctx, &rows, `
-		SELECT p.method, COUNT(*) AS count, COALESCE(SUM(p.amount),0) AS total
-		FROM payments p
-		JOIN sales s ON s.id = p.sale_id
-		WHERE s.status <> 'void' AND s.created_at >= $1 AND s.created_at < $2
-		GROUP BY p.method
-		ORDER BY total DESC`, from, to); err != nil {
-		return nil, apperr.Internal("failed to compute tender summary", err)
 	}
 	return rows, nil
 }
