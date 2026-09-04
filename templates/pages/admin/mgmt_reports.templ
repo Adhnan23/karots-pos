@@ -45,6 +45,18 @@ templ ReportsHub(d ReportsHubData) {
 				</div>
 			</div>
 		}
+		// Signposts to live/operational pages people look for here — deliberately
+		// plain links, not report cards, so the report grid stays a clean set of
+		// date-ranged analyses (these are live views, not snapshots).
+		<div class="mt-2 pt-5 border-t border-slate-200">
+			<h2 class="text-sm font-semibold text-slate-500 uppercase tracking-wide mb-1">Live views</h2>
+			<p class="text-xs text-slate-400 mb-3">Not date-ranged reports — live operational pages.</p>
+			<div class="flex flex-wrap gap-x-6 gap-y-2 text-sm">
+				<a href="/admin/cashflow" class="text-indigo-700 hover:underline">Cash Flow <span class="text-slate-400">— live balances &amp; money in/out</span></a>
+				<a href="/admin/activity" class="text-indigo-700 hover:underline">Activity log <span class="text-slate-400">— audit trail of every action</span></a>
+				<a href="/admin/receipts" class="text-indigo-700 hover:underline">Receipts <span class="text-slate-400">— view &amp; reprint</span></a>
+			</div>
+		</div>
 	}
 }
 
