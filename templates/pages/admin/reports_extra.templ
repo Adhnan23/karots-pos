@@ -755,11 +755,20 @@ templ TopProductsReport(d TopProductsData) {
 
 // ============================ Sales by cashier ============================
 
+// CashierRow is one cashier with derived display values: average basket, the
+// in-row bar (share of the top earner's net) and share of total net takings.
+type CashierRow struct {
+	Rank            int
+	R               reports.CashierSalesRow
+	AvgBasket       decimal.Decimal
+	BarPct, SharePct float64
+}
+
 type CashierSalesData struct {
 	ShopName, Symbol, From, To, Preset string
-	Rows                               []reports.CashierSalesRow
+	Rows                               []CashierRow
 	Count                              int
-	Gross, Discount, Net               decimal.Decimal
+	Gross, Discount, Net, AvgBasket    decimal.Decimal
 }
 
 templ CashierSalesReport(d CashierSalesData) {
@@ -771,31 +780,53 @@ templ CashierSalesReport(d CashierSalesData) {
 			>Download CSV</a>
 		}
 		@rptPeriodLine(d.From, d.To)
+		<div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+			@kpiCard("Cashiers", strconv.Itoa(len(d.Rows)))
+			@kpiCard("Sales", strconv.Itoa(d.Count))
+			@kpiCard("Net takings", money.Format(d.Symbol, d.Net))
+			@kpiCard("Avg basket", money.Format(d.Symbol, d.AvgBasket))
+		</div>
 		<table class="w-full text-sm">
 			<thead class="text-left text-slate-500 border-b">
-				<tr><th class="py-1.5">Cashier</th><th class="py-1.5 text-right">Sales</th><th class="py-1.5 text-right">Gross</th><th class="py-1.5 text-right">Discount</th><th class="py-1.5 text-right">Net</th></tr>
+				<tr>
+					<th class="py-1.5 w-8">#</th>
+					<th class="py-1.5">Cashier</th>
+					<th class="py-1.5 text-right">Sales</th>
+					<th class="py-1.5 text-right">Avg basket</th>
+					<th class="py-1.5 text-right">Discount</th>
+					<th class="py-1.5 text-right">Net</th>
+					<th class="py-1.5 text-right">Share</th>
+				</tr>
 			</thead>
 			<tbody>
 				for _, r := range d.Rows {
 					<tr class="border-b last:border-0">
-						<td class="py-1.5 font-medium">{ r.Cashier }</td>
-						<td class="py-1.5 text-right">{ strconv.Itoa(r.Count) }</td>
-						<td class="py-1.5 text-right">{ money.Format(d.Symbol, r.Gross) }</td>
-						<td class="py-1.5 text-right">{ money.Display(r.Discount) }</td>
-						<td class="py-1.5 text-right">{ money.Format(d.Symbol, r.Net) }</td>
+						<td class="py-1.5 text-slate-400 align-top">{ strconv.Itoa(r.Rank) }</td>
+						<td class="py-1.5">
+							<div class="font-medium">{ r.R.Cashier }</div>
+							<div class="mt-1 h-1.5 rounded bg-indigo-100">
+								<div class="h-1.5 rounded bg-indigo-500" style={ barWidth(r.BarPct) }></div>
+							</div>
+						</td>
+						<td class="py-1.5 text-right align-top">{ strconv.Itoa(r.R.Count) }</td>
+						<td class="py-1.5 text-right align-top">{ money.Format(d.Symbol, r.AvgBasket) }</td>
+						<td class="py-1.5 text-right align-top">{ money.Display(r.R.Discount) }</td>
+						<td class="py-1.5 text-right align-top">{ money.Format(d.Symbol, r.R.Net) }</td>
+						<td class="py-1.5 text-right align-top text-slate-500">{ fmtPct1(r.SharePct) }</td>
 					</tr>
 				}
 				if len(d.Rows) == 0 {
-					<tr><td colspan="5" class="py-6 text-center text-slate-400">No sales in this period.</td></tr>
+					<tr><td colspan="7" class="py-6 text-center text-slate-400">No sales in this period.</td></tr>
 				}
 			</tbody>
 			<tfoot class="border-t-2 font-semibold">
 				<tr>
-					<td class="py-2">Total</td>
+					<td class="py-2" colspan="2">Total</td>
 					<td class="py-2 text-right">{ strconv.Itoa(d.Count) }</td>
-					<td class="py-2 text-right">{ money.Format(d.Symbol, d.Gross) }</td>
+					<td class="py-2 text-right">{ money.Format(d.Symbol, d.AvgBasket) }</td>
 					<td class="py-2 text-right">{ money.Display(d.Discount) }</td>
 					<td class="py-2 text-right">{ money.Format(d.Symbol, d.Net) }</td>
+					<td class="py-2"></td>
 				</tr>
 			</tfoot>
 		</table>

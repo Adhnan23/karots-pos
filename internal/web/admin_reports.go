@@ -251,7 +251,7 @@ func (a *adminUI) CashierSalesReport(c echo.Context) error {
 		return err
 	}
 	d := adminpages.CashierSalesData{
-		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx), From: fromStr, To: toStr, Preset: preset, Rows: rows,
+		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx), From: fromStr, To: toStr, Preset: preset,
 	}
 	for _, r := range rows {
 		d.Count += r.Count
@@ -259,15 +259,40 @@ func (a *adminUI) CashierSalesReport(c echo.Context) error {
 		d.Discount = d.Discount.Add(r.Discount)
 		d.Net = d.Net.Add(r.Net)
 	}
+	if d.Count > 0 {
+		d.AvgBasket = d.Net.Div(decimal.NewFromInt(int64(d.Count)))
+	}
+	// Rows are ORDER BY net DESC, so the first is the top earner — the bar scale.
+	maxNetF, totalNetF := 0.0, d.Net.InexactFloat64()
+	if len(rows) > 0 {
+		maxNetF = rows[0].Net.InexactFloat64()
+	}
+	d.Rows = make([]adminpages.CashierRow, len(rows))
+	for i, r := range rows {
+		cr := adminpages.CashierRow{Rank: i + 1, R: r}
+		if r.Count > 0 {
+			cr.AvgBasket = r.Net.Div(decimal.NewFromInt(int64(r.Count)))
+		}
+		if maxNetF > 0 {
+			if f := r.Net.InexactFloat64() / maxNetF * 100; f > 0 {
+				cr.BarPct = f
+			}
+		}
+		if totalNetF > 0 {
+			cr.SharePct = r.Net.InexactFloat64() / totalNetF * 100
+		}
+		d.Rows[i] = cr
+	}
 	if wantsCSV(c) {
 		out := make([][]string, 0, len(rows))
-		for _, r := range rows {
+		for _, r := range d.Rows {
 			out = append(out, []string{
-				r.Cashier, strconv.Itoa(r.Count), csvMoney(r.Gross), csvMoney(r.Discount), csvMoney(r.Net),
+				r.R.Cashier, strconv.Itoa(r.R.Count), csvMoney(r.R.Gross), csvMoney(r.R.Discount),
+				csvMoney(r.AvgBasket), csvMoney(r.R.Net),
 			})
 		}
 		return writeCSV(c, "sales_by_cashier_"+fromStr+"_"+toStr,
-			[]string{"Cashier", "Sales", "Gross", "Discount", "Net"}, out)
+			[]string{"Cashier", "Sales", "Gross", "Discount", "Avg basket", "Net"}, out)
 	}
 	return response.RenderPage(c, adminpages.CashierSalesReport(d))
 }
