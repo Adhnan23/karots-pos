@@ -749,6 +749,9 @@ func (a *adminUI) CashRegisterReport(c echo.Context) error {
 		}
 		if s.Difference != nil {
 			d.OverShort = d.OverShort.Add(*s.Difference)
+			if s.Difference.IsNegative() {
+				d.ShortCount++
+			}
 		}
 	}
 	if wantsCSV(c) {

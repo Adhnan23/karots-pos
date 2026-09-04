@@ -534,6 +534,7 @@ type CashReportData struct {
 	ShopName, Symbol, From, To, Preset    string
 	Rows                                  []cashregister.SessionRow
 	Opening, Expected, Counted, OverShort decimal.Decimal
+	ShortCount                            int
 	Total, Page, PageSize                 int
 }
 
@@ -546,6 +547,12 @@ templ CashRegisterReport(d CashReportData) {
 			>Download CSV</a>
 		}
 		@rptPeriodLine(d.From, d.To)
+		<div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+			@kpiCard("Sessions", strconv.Itoa(d.Total))
+			@kpiCard("Cash counted", money.Format(d.Symbol, d.Counted))
+			@kpiCard("Net over / short", money.Format(d.Symbol, d.OverShort))
+			@kpiCard("Short sessions", strconv.Itoa(d.ShortCount))
+		</div>
 		<table class="w-full text-sm">
 			<thead class="text-left text-slate-500 border-b">
 				<tr><th class="py-1.5">Cashier</th><th class="py-1.5">Opened</th><th class="py-1.5">Closed</th><th class="py-1.5 text-right">Opening</th><th class="py-1.5 text-right">Expected</th><th class="py-1.5 text-right">Counted</th><th class="py-1.5 text-right">Over/Short</th></tr>
@@ -553,7 +560,9 @@ templ CashRegisterReport(d CashReportData) {
 			<tbody>
 				for _, s := range d.Rows {
 					<tr class="border-b last:border-0">
-						<td class="py-1.5 font-medium">{ s.UserName }</td>
+						<td class="py-1.5 font-medium">
+							<a class="text-indigo-700 hover:underline" href={ templ.SafeURL("/admin/cash-register/" + strconv.FormatInt(s.ID, 10)) } title="Open this session — movements &amp; Z-report">{ s.UserName }</a>
+						</td>
 						<td class="py-1.5 text-slate-500">{ s.OpenedAt.Format("01-02 15:04") }</td>
 						<td class="py-1.5 text-slate-500">
 							if s.ClosedAt != nil {
@@ -565,7 +574,15 @@ templ CashRegisterReport(d CashReportData) {
 						<td class="py-1.5 text-right">{ money.Format(d.Symbol, s.OpeningCash) }</td>
 						<td class="py-1.5 text-right">{ optMoney(d.Symbol, s.ExpectedCash) }</td>
 						<td class="py-1.5 text-right">{ optMoney(d.Symbol, s.ClosingCash) }</td>
-						<td class="py-1.5 text-right">{ optMoney(d.Symbol, s.Difference) }</td>
+						<td class="py-1.5 text-right">
+							if s.Difference != nil && s.Difference.IsNegative() {
+								<span class="text-rose-600 font-medium">{ optMoney(d.Symbol, s.Difference) }</span>
+							} else if s.Difference != nil && s.Difference.IsPositive() {
+								<span class="text-emerald-600">{ optMoney(d.Symbol, s.Difference) }</span>
+							} else {
+								{ optMoney(d.Symbol, s.Difference) }
+							}
+						</td>
 					</tr>
 				}
 				if len(d.Rows) == 0 {
