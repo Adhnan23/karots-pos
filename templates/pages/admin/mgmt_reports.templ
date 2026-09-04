@@ -635,6 +635,12 @@ templ PurchasesReport(d PurchasesReportData) {
 			>Download CSV</a>
 		}
 		@rptPeriodLine(d.From, d.To)
+		<div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+			@kpiCard("Purchases", strconv.Itoa(d.Count))
+			@kpiCard("Total received", money.Format(d.Symbol, d.Total))
+			@kpiCard("Paid", money.Format(d.Symbol, d.Paid))
+			@kpiCard("Still due", money.Format(d.Symbol, d.Due))
+		</div>
 		<table class="w-full text-sm">
 			<thead class="text-left text-slate-500 border-b">
 				<tr><th class="py-1.5">Date</th><th class="py-1.5">Supplier</th><th class="py-1.5">Invoice</th><th class="py-1.5">Status</th><th class="py-1.5 text-right">Total</th><th class="py-1.5 text-right">Paid</th><th class="py-1.5 text-right">Due</th></tr>
@@ -643,12 +649,21 @@ templ PurchasesReport(d PurchasesReportData) {
 				for _, p := range d.Rows {
 					<tr class="border-b last:border-0">
 						<td class="py-1.5 text-slate-500">{ p.CreatedAt.Format("2006-01-02") }</td>
-						<td class="py-1.5 font-medium">{ p.SupplierName }</td>
+						<td class="py-1.5 font-medium">
+							<a class="text-indigo-700 hover:underline" href={ templ.SafeURL("/admin/purchases/" + strconv.FormatInt(p.ID, 10) + "/grn") } target="_blank" title="View goods-received note">{ p.SupplierName }</a>
+						</td>
 						<td class="py-1.5">{ strOrEmpty(p.InvoiceNo) }</td>
 						<td class="py-1.5 capitalize">{ p.Status }</td>
 						<td class="py-1.5 text-right">{ money.Format(d.Symbol, p.Total) }</td>
 						<td class="py-1.5 text-right">{ money.Display(p.PaidAmount) }</td>
-						<td class="py-1.5 text-right">{ money.Display(p.Total.Sub(p.PaidAmount)) }</td>
+						<td class="py-1.5 text-right">
+							{{ due := p.Total.Sub(p.PaidAmount) }}
+							if due.IsPositive() {
+								<span class="text-rose-600 font-medium">{ money.Display(due) }</span>
+							} else {
+								{ money.Display(due) }
+							}
+						</td>
 					</tr>
 				}
 				if len(d.Rows) == 0 {
