@@ -1,6 +1,7 @@
 package adminpages
 
 import (
+	"fmt"
 	"strconv"
 
 	"karots-pos/internal/features/cashregister"
@@ -16,6 +17,7 @@ import (
 	"karots-pos/internal/money"
 	adminfragments "karots-pos/templates/fragments/admin"
 	"karots-pos/templates/layouts"
+	"karots-pos/templates/shared"
 
 	"github.com/shopspring/decimal"
 )
@@ -32,11 +34,16 @@ templ ReportsHub(d ReportsHubData) {
 			<h1 class="text-2xl font-bold">Reports</h1>
 			<p class="text-sm text-slate-500">Filterable management reports — open one, set the range, then Print / Save as PDF.</p>
 		</div>
-		<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-			for _, c := range reportHubCards() {
-				@reportCard(c.Href, c.Title, c.Desc)
-			}
-		</div>
+		for _, g := range reportHubGroups() {
+			<div class="mb-8">
+				<h2 class="text-sm font-semibold text-slate-500 uppercase tracking-wide mb-3">{ g.Label }</h2>
+				<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+					for _, c := range g.Cards {
+						@reportCard(c.Href, c.Title, c.Desc)
+					}
+				</div>
+			</div>
+		}
 	}
 }
 
@@ -92,15 +99,16 @@ templ rptPeriodLine(from, to string) {
 
 // ============================ Sales report ============================
 
-// SalesReportData carries range-wide totals (Count/Gross/Discount/Net, from a
-// SQL aggregate) plus one page of receipts. Never re-derive the totals from
-// Rows — that is exactly the bug this shape exists to prevent.
+// SalesReportData carries range-wide totals (Sum, from a SQL aggregate) plus one
+// page of receipts, the previous equal period (Prev, for ▲▼ deltas) and the
+// folded day-by-day trend. Never re-derive the totals from Rows.
 type SalesReportData struct {
 	ShopName, Symbol, From, To, Status, Method, Preset string
-	Rows                                              []sales.Sale
-	Count                                             int
-	Gross, Discount, Net                              decimal.Decimal
-	Page, PageSize                                    int
+	FromHour, ToHour                                   string // hour-of-day window (blank = any)
+	Rows                                               []sales.Sale
+	Sum, Prev                                          sales.ListSummary
+	Trend                                              []reports.DayRow
+	Page, PageSize                                     int
 }
 
 templ SalesReport(d SalesReportData) {
@@ -126,42 +134,165 @@ templ SalesReport(d SalesReportData) {
 					@statusOpt("wallet", "Wallet", d.Method)
 				</select>
 			</div>
+			<div>
+				<label class="block text-xs text-slate-500 mb-1">From hour</label>
+				@hourSelect("from_hour", d.FromHour)
+			</div>
+			<div>
+				<label class="block text-xs text-slate-500 mb-1">To hour</label>
+				@hourSelect("to_hour", d.ToHour)
+			</div>
 			<a
 				class="no-print px-4 py-1.5 rounded-lg border text-sm"
-				href={ templ.SafeURL("/admin/reports/sales?format=csv&from=" + d.From + "&to=" + d.To + "&status=" + d.Status + "&method=" + d.Method) }
+				href={ templ.SafeURL("/admin/reports/sales?format=csv&" + salesQuery(d)) }
 			>Download CSV</a>
 		}
 		@rptPeriodLine(d.From, d.To)
+		// Summary cards — deltas on the two headline numbers (sales total, profit).
+		<div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
+			@kpiCard("Sales", strconv.Itoa(d.Sum.Count))
+			@kpiCardDelta("Sales total", money.Format(d.Symbol, d.Sum.Net), d.Sum.Net, d.Prev.Net)
+			@kpiCardDelta("Profit", money.Format(d.Symbol, d.Sum.Profit), d.Sum.Profit, d.Prev.Profit)
+			@kpiCard("Margin", money.Display(d.Sum.Margin())+"%")
+			@kpiCard("Avg basket", money.Format(d.Symbol, d.Sum.AvgBasket()))
+			@kpiCard("Discount", money.Format(d.Symbol, d.Sum.Discount))
+		</div>
+		if len(d.Trend) > 1 {
+			<div class="bg-white rounded-2xl shadow-sm p-4 mb-6">
+				<div class="text-xs text-slate-500 mb-2">Daily trend — net revenue &amp; profit</div>
+				{{ labels, series := trendChartData(d.Trend, d.Symbol, "day") }}
+				@shared.LineChart(labels, series)
+			</div>
+		}
 		<table class="w-full text-sm">
 			<thead class="text-left text-slate-500 border-b">
-				<tr><th class="py-1.5">Receipt</th><th class="py-1.5">Date</th><th class="py-1.5">Type</th><th class="py-1.5">Status</th><th class="py-1.5 text-right">Discount</th><th class="py-1.5 text-right">Total</th></tr>
+				<tr>
+					<th class="py-1.5">Receipt</th>
+					<th class="py-1.5">Date</th>
+					<th class="py-1.5">Type</th>
+					<th class="py-1.5">Status</th>
+					<th class="py-1.5 text-right">Discount</th>
+					<th class="py-1.5 text-right">Total</th>
+					<th class="py-1.5 text-right">Profit</th>
+					<th class="py-1.5 text-right">Margin</th>
+				</tr>
 			</thead>
 			<tbody>
 				for _, s := range d.Rows {
-					<tr class="border-b last:border-0">
-						<td class="py-1.5 font-medium">{ s.ReceiptNo }</td>
-						<td class="py-1.5 text-slate-500">{ s.CreatedAt.Format("2006-01-02 15:04") }</td>
+					{{ id := strconv.FormatInt(s.ID, 10) }}
+					<tr class="border-b last:border-0 hover:bg-slate-50">
+						<td class="py-1.5">
+							<button
+								type="button"
+								class="font-medium text-indigo-700 hover:underline"
+								hx-get={ "/admin/reports/sales/" + id + "/lines" }
+								hx-target={ "#det-" + id }
+								hx-swap="innerHTML"
+								hx-trigger="click once"
+								onclick="toggleReceiptDet(this)"
+								data-det={ "detrow-" + id }
+							>{ s.ReceiptNo }</button>
+						</td>
+						<td class="py-1.5 text-slate-500">{ datetimeDisplay(s.CreatedAt) }</td>
 						<td class="py-1.5 capitalize">{ s.SaleType }</td>
 						<td class="py-1.5 capitalize">{ s.Status }</td>
 						<td class="py-1.5 text-right">{ money.Display(s.Discount) }</td>
 						<td class="py-1.5 text-right">{ money.Format(d.Symbol, s.Total) }</td>
+						<td class="py-1.5 text-right">{ money.Format(d.Symbol, s.Profit) }</td>
+						<td class="py-1.5 text-right">{ money.Display(s.Margin) }%</td>
+					</tr>
+					<tr id={ "detrow-" + id } hidden>
+						<td colspan="8" class="p-0"><div id={ "det-" + id } class="bg-slate-50"></div></td>
 					</tr>
 				}
 				if len(d.Rows) == 0 {
-					<tr><td colspan="6" class="py-6 text-center text-slate-400">No sales in this period.</td></tr>
+					<tr><td colspan="8" class="py-6 text-center text-slate-400">No sales in this period.</td></tr>
 				}
 			</tbody>
 			<tfoot class="border-t-2 font-semibold">
 				<tr>
-					<td class="py-2" colspan="4">{ strconv.Itoa(d.Count) } sales</td>
-					<td class="py-2 text-right">{ money.Display(d.Discount) }</td>
-					<td class="py-2 text-right">{ money.Format(d.Symbol, d.Net) }</td>
+					<td class="py-2" colspan="4">{ strconv.Itoa(d.Sum.Count) } sales</td>
+					<td class="py-2 text-right">{ money.Display(d.Sum.Discount) }</td>
+					<td class="py-2 text-right">{ money.Format(d.Symbol, d.Sum.Net) }</td>
+					<td class="py-2 text-right">{ money.Format(d.Symbol, d.Sum.Profit) }</td>
+					<td class="py-2 text-right">{ money.Display(d.Sum.Margin()) }%</td>
 				</tr>
 			</tfoot>
 		</table>
-		@rptTruncNote(len(d.Rows), d.Count)
-		@rptPager(salesQuery(d), d.Page, d.PageSize, d.Count)
+		@rptTruncNote(len(d.Rows), d.Sum.Count)
+		@rptPager(salesQuery(d), d.Page, d.PageSize, d.Sum.Count)
+		<script>
+			function toggleReceiptDet(btn){
+				var r = document.getElementById(btn.getAttribute('data-det'));
+				if (r) r.hidden = !r.hidden;
+			}
+		</script>
 	}
+}
+
+// hourSelect is a cross-browser hour-of-day picker (00–23) — a plain <select>,
+// identical in every browser, matching the report's hour buckets.
+templ hourSelect(name, cur string) {
+	<select name={ name } class="border rounded-lg px-3 py-1.5">
+		if cur == "" {
+			<option value="" selected>Any</option>
+		} else {
+			<option value="">Any</option>
+		}
+		for h := 0; h < 24; h++ {
+			if strconv.Itoa(h) == cur {
+				<option value={ strconv.Itoa(h) } selected>{ fmt.Sprintf("%02d:00", h) }</option>
+			} else {
+				<option value={ strconv.Itoa(h) }>{ fmt.Sprintf("%02d:00", h) }</option>
+			}
+		}
+	</select>
+}
+
+templ kpiCard(label, value string) {
+	<div class="bg-white rounded-2xl shadow-sm p-4">
+		<div class="text-xs text-slate-500">{ label }</div>
+		<div class="text-lg font-bold text-slate-800">{ value }</div>
+	</div>
+}
+
+templ kpiCardDelta(label, value string, cur, prev decimal.Decimal) {
+	<div class="bg-white rounded-2xl shadow-sm p-4">
+		<div class="text-xs text-slate-500">{ label }</div>
+		<div class="text-lg font-bold text-slate-800">{ value }</div>
+		{{ txt, dir := deltaInfo(cur, prev) }}
+		switch dir {
+			case 1:
+				<div class="text-xs text-emerald-600">▲ { txt } <span class="text-slate-400">vs prev</span></div>
+			case -1:
+				<div class="text-xs text-rose-600">▼ { txt } <span class="text-slate-400">vs prev</span></div>
+			default:
+				<div class="text-xs text-slate-400">{ txt } vs prev</div>
+		}
+	</div>
+}
+
+// SalesReceiptLines is the drill-in partial: the line items of one receipt,
+// loaded lazily under its row.
+templ SalesReceiptLines(symbol string, items []sales.SaleItem) {
+	<div class="px-4 py-3">
+		<table class="w-full text-xs">
+			<thead class="text-left text-slate-400">
+				<tr><th class="py-1">Item</th><th class="py-1 text-right">Qty</th><th class="py-1 text-right">Price</th><th class="py-1 text-right">Disc</th><th class="py-1 text-right">Line total</th></tr>
+			</thead>
+			<tbody>
+				for _, it := range items {
+					<tr>
+						<td class="py-1">{ it.ProductName }</td>
+						<td class="py-1 text-right">{ money.Display(it.Quantity) } { it.UnitAbbr }</td>
+						<td class="py-1 text-right">{ money.Format(symbol, it.UnitPrice) }</td>
+						<td class="py-1 text-right">{ money.Display(it.Discount) }</td>
+						<td class="py-1 text-right">{ money.Format(symbol, it.Subtotal) }</td>
+					</tr>
+				}
+			</tbody>
+		</table>
+	</div>
 }
 
 templ statusOpt(val, label, cur string) {

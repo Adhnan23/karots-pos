@@ -128,6 +128,30 @@ func (a *adminUI) DamageReport(c echo.Context) error {
 	return response.RenderPage(c, adminpages.DamageReport(d))
 }
 
+// LossesReport is the merged Damage + Warranty view: a range-scoped losses &
+// recovery summary, followed by the actionable damage write-off detail (the
+// former standalone Damage report, whose recovery flow is unchanged).
+func (a *adminUI) LossesReport(c echo.Context) error {
+	ctx := c.Request().Context()
+	from, to, fromStr, toStr, preset, err := rangeStrings(c)
+	if err != nil {
+		return err
+	}
+	sum, err := a.s.reports.WarrantyAndRecovery(ctx, from, to)
+	if err != nil {
+		return err
+	}
+	losses, err := a.s.recovery.DamageLosses(ctx)
+	if err != nil {
+		return err
+	}
+	return response.RenderPage(c, adminpages.LossesReport(adminpages.LossesReportData{
+		ShopName: a.shopName(ctx), UserName: middleware.CurrentUserName(c), Base: "/admin",
+		Symbol: a.symbol(ctx), From: fromStr, To: toStr, Preset: preset,
+		Summary: *sum, Losses: losses,
+	}))
+}
+
 func (a *adminUI) DamageTable(c echo.Context) error {
 	d, err := a.damageData(c)
 	if err != nil {

@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"net/http"
 	"strconv"
 	"time"
 
@@ -64,6 +65,27 @@ func (a *adminUI) ReportsHub(c echo.Context) error {
 	}))
 }
 
+// prevPeriod returns the equal-length period immediately before [from,to): a
+// 7-day range compares against the 7 days before it. Used for ▲▼ deltas.
+func prevPeriod(from, to time.Time) (pFrom, pTo time.Time) {
+	d := to.Sub(from)
+	return from.Add(-d), from
+}
+
+// hourParam reads an hour-of-day query param (0–23), returning nil when absent
+// or out of range so the filter is simply skipped.
+func hourParam(c echo.Context, name string) *int {
+	v := c.QueryParam(name)
+	if v == "" {
+		return nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 || n > 23 {
+		return nil
+	}
+	return &n
+}
+
 func (a *adminUI) SalesReport(c echo.Context) error {
 	ctx := c.Request().Context()
 	from, to, fromStr, toStr, preset, err := rangeStrings(c)
@@ -72,7 +94,8 @@ func (a *adminUI) SalesReport(c echo.Context) error {
 	}
 	status := c.QueryParam("status")
 	method := c.QueryParam("method")
-	filter := sales.ListFilter{From: &from, To: &to, Status: status, Method: method}
+	fromHour, toHour := hourParam(c, "from_hour"), hourParam(c, "to_hour")
+	filter := sales.ListFilter{From: &from, To: &to, Status: status, Method: method, FromHour: fromHour, ToHour: toHour}
 
 	// Totals come from an aggregate over the whole range — never from the rows
 	// below, which are one page.
@@ -99,11 +122,27 @@ func (a *adminUI) SalesReport(c echo.Context) error {
 				out = append(out, []string{
 					s.ReceiptNo, s.CreatedAt.Format("2006-01-02 15:04"), s.SaleType, s.Status,
 					csvMoney(s.Subtotal), csvMoney(s.Discount), csvMoney(s.Total),
+					csvMoney(s.COGS), csvMoney(s.Profit),
 				})
 			}
 		}
 		return writeCSV(c, "sales_"+fromStr+"_"+toStr,
-			[]string{"Receipt", "Date", "Type", "Status", "Gross", "Discount", "Total"}, out)
+			[]string{"Receipt", "Date", "Type", "Status", "Gross", "Discount", "Total", "COGS", "Profit"}, out)
+	}
+
+	// Previous equal-length period, same non-date filters, for the ▲▼ deltas.
+	pFrom, pTo := prevPeriod(from, to)
+	prevFilter := filter
+	prevFilter.From, prevFilter.To = &pFrom, &pTo
+	prev, err := a.s.sales.Summarize(ctx, prevFilter)
+	if err != nil {
+		return err
+	}
+
+	// Folded Daily Sales Trend: day-by-day revenue/profit strip.
+	trend, err := a.s.reports.SalesByPeriod(ctx, from, to, "day")
+	if err != nil {
+		return err
 	}
 
 	page := pageParam(c)
@@ -115,10 +154,88 @@ func (a *adminUI) SalesReport(c echo.Context) error {
 	return response.RenderPage(c, adminpages.SalesReport(adminpages.SalesReportData{
 		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx),
 		From: fromStr, To: toStr, Preset: preset, Status: status, Method: method,
+		FromHour: c.QueryParam("from_hour"), ToHour: c.QueryParam("to_hour"),
 		Rows:  rows,
-		Count: sum.Count, Gross: sum.Gross, Discount: sum.Discount, Net: sum.Net,
+		Sum:   *sum, Prev: *prev, Trend: trend,
 		Page: page, PageSize: reportPageSize,
 	}))
+}
+
+// SalesReceiptLines returns the line-items partial for one receipt, loaded lazily
+// by HTMX when a Sales-report row is expanded (drill-in).
+func (a *adminUI) SalesReceiptLines(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid id")
+	}
+	d, err := a.s.sales.Get(c.Request().Context(), id)
+	if err != nil {
+		return err
+	}
+	return response.RenderFragment(c, adminpages.SalesReceiptLines(a.symbol(c.Request().Context()), d.Items))
+}
+
+// PeakHoursReport shows sales activity by local day-of-week × hour-of-day — the
+// staffing view. The handler shapes the buckets into a 7×24 grid so the template
+// stays a plain heatmap.
+func (a *adminUI) PeakHoursReport(c echo.Context) error {
+	ctx := c.Request().Context()
+	from, to, fromStr, toStr, preset, err := rangeStrings(c)
+	if err != nil {
+		return err
+	}
+	buckets, err := a.s.reports.PeakHours(ctx, from, to)
+	if err != nil {
+		return err
+	}
+
+	if wantsCSV(c) {
+		out := make([][]string, 0, len(buckets))
+		for _, b := range buckets {
+			out = append(out, []string{
+				adminpages.WeekdayName(b.DOW), strconv.Itoa(b.Hour),
+				strconv.Itoa(b.Count), csvMoney(b.Revenue),
+			})
+		}
+		return writeCSV(c, "peak_hours_"+fromStr+"_"+toStr,
+			[]string{"Day", "Hour", "Sales", "Revenue"}, out)
+	}
+
+	d := adminpages.PeakHoursData{
+		ShopName: a.shopName(ctx), Symbol: a.symbol(ctx),
+		From: fromStr, To: toStr, Preset: preset,
+	}
+	var busiest reports.PeakBucket
+	for _, b := range buckets {
+		if b.DOW < 0 || b.DOW > 6 || b.Hour < 0 || b.Hour > 23 {
+			continue
+		}
+		d.Grid[b.DOW][b.Hour] = adminpages.PeakCell{Count: b.Count, Revenue: b.Revenue}
+		d.HourTotals[b.Hour].Count += b.Count
+		d.HourTotals[b.Hour].Revenue = d.HourTotals[b.Hour].Revenue.Add(b.Revenue)
+		d.DayTotals[b.DOW].Count += b.Count
+		d.DayTotals[b.DOW].Revenue = d.DayTotals[b.DOW].Revenue.Add(b.Revenue)
+		d.TotalCount += b.Count
+		d.TotalRevenue = d.TotalRevenue.Add(b.Revenue)
+		if b.Count > d.MaxCount {
+			d.MaxCount = b.Count
+		}
+		if b.Count > busiest.Count {
+			busiest = b
+		}
+	}
+	if busiest.Count > 0 {
+		d.BusiestLabel = adminpages.WeekdayName(busiest.DOW) + " " + fmtHour(busiest.Hour)
+	}
+	return response.RenderPage(c, adminpages.PeakHoursReport(d))
+}
+
+// fmtHour renders an hour-of-day as "07:00".
+func fmtHour(h int) string {
+	if h < 10 {
+		return "0" + strconv.Itoa(h) + ":00"
+	}
+	return strconv.Itoa(h) + ":00"
 }
 
 // CashierSalesReport ranks sales per cashier over a range (staff performance).

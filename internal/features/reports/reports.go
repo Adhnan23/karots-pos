@@ -8,6 +8,7 @@ import (
 
 	"karots-pos/internal/apperr"
 	"karots-pos/internal/config"
+	"karots-pos/internal/datetime"
 	appdb "karots-pos/internal/db"
 	"karots-pos/internal/middleware"
 	"karots-pos/internal/response"
@@ -497,6 +498,34 @@ func (s *Service) SalesByPeriod(ctx context.Context, from, to time.Time, gran st
 		) d
 		ORDER BY d.day`, from, to, gran); err != nil {
 		return nil, apperr.Internal("failed to load sales by period", err)
+	}
+	return rows, nil
+}
+
+// PeakBucket is sales activity in one day-of-week × hour-of-day cell, in the
+// shop's local timezone. DOW is Postgres' 0=Sunday … 6=Saturday.
+type PeakBucket struct {
+	DOW     int             `db:"dow"`
+	Hour    int             `db:"hour"`
+	Count   int             `db:"count"`
+	Revenue decimal.Decimal `db:"revenue"`
+}
+
+// PeakHours buckets non-void sales in [from,to) by local day-of-week and
+// hour-of-day — the staffing view (when are we busy). Timezone comes from the
+// same datetime package the rest of the app displays with.
+func (s *Service) PeakHours(ctx context.Context, from, to time.Time) ([]PeakBucket, error) {
+	tz := datetime.Location.String()
+	var rows []PeakBucket
+	if err := s.db.SelectContext(ctx, &rows, `
+		SELECT EXTRACT(DOW  FROM (created_at AT TIME ZONE $3))::int AS dow,
+		       EXTRACT(HOUR FROM (created_at AT TIME ZONE $3))::int AS hour,
+		       COUNT(*) AS count,
+		       COALESCE(SUM(total),0) AS revenue
+		FROM sales
+		WHERE status <> 'void' AND created_at >= $1 AND created_at < $2
+		GROUP BY 1, 2`, from, to, tz); err != nil {
+		return nil, apperr.Internal("failed to load peak hours", err)
 	}
 	return rows, nil
 }

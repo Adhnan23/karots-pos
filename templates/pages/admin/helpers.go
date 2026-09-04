@@ -3,55 +3,95 @@ package adminpages
 import (
 	"encoding/json"
 	"net/url"
-	"sort"
 	"strconv"
 	"time"
 
+	"karots-pos/internal/datetime"
 	"karots-pos/internal/features/products"
 	"karots-pos/internal/features/suppliers"
+	"karots-pos/internal/money"
 	"karots-pos/templates/layouts"
 
 	"github.com/shopspring/decimal"
 )
+
+// datetimeDisplay renders a sale timestamp in the shop's local timezone (the DB
+// stores UTC; showing it raw was the old "times look 5h30m off" bug).
+func datetimeDisplay(t time.Time) string { return datetime.DateTime(t) }
+
+// deltaInfo compares a current figure with the previous period's and returns a
+// display string plus a direction (1 up, -1 down, 0 flat) for the ▲▼ badge.
+func deltaInfo(cur, prev decimal.Decimal) (string, int) {
+	if prev.IsZero() {
+		if cur.IsZero() {
+			return "no change", 0
+		}
+		return "new", 1
+	}
+	pct := cur.Sub(prev).Div(prev.Abs()).Mul(decimal.NewFromInt(100))
+	switch {
+	case cur.GreaterThan(prev):
+		return money.Display(pct.Abs()) + "%", 1
+	case cur.LessThan(prev):
+		return money.Display(pct.Abs()) + "%", -1
+	default:
+		return "no change", 0
+	}
+}
 
 // reportHubCard is one card on the Reports hub (built-in or plugin-contributed).
 type reportHubCard struct {
 	Href, Title, Desc string
 }
 
-// reportHubCards returns every Reports-hub card — the built-in reports plus any
-// plugin-contributed ones — sorted alphabetically by title so the grid is easy
-// to scan.
-func reportHubCards() []reportHubCard {
-	cards := []reportHubCard{
-		{"/admin/reports/sales", "Sales", "Receipts and totals over a date range"},
-		{"/admin/reports/tender", "Tender / Payments", "Cash, card, wallet & credit collected"},
-		{"/admin/reports/finance", "Finance / P&L", "Revenue, COGS, profit, dues for a period"},
-		{"/admin/reports/tax", "Tax Summary", "VAT/tax collected over a period"},
-		{"/admin/reports/returns", "Returns / Refunds", "Returned lines and refund value"},
-		{"/admin/reports/profit-by-category", "Profit by Category", "Net revenue & profit per category"},
-		{"/admin/reports/sales-trend", "Daily Sales Trend", "Day-by-day net revenue & profit"},
-		{"/admin/reports/product-sales", "Product Sales", "One product's units over time vs last year"},
-		{"/admin/reports/top-products", "Top Products", "Best sellers by revenue or quantity"},
-		{"/admin/reports/warranty", "Warranty & Recovery", "Replacement cost vs supplier recovery"},
-		{"/admin/reports/sales-by-cashier", "Sales by Cashier", "Per-cashier takings & discounts"},
-		{"/admin/reports/expenses", "Expenses by Category", "Operating expenses grouped by category"},
-		{"/admin/reports/cash-register", "Cash Register", "Drawer sessions with over/short"},
-		{"/admin/reports/purchases", "Purchases", "GRNs received in a period"},
-		{"/admin/reports/customer-dues", "Customer Dues", "Receivables — who owes you money"},
-		{"/admin/reports/supplier-dues", "Supplier Dues", "Payables — who you owe money"},
-		{"/admin/reports/inventory", "Inventory Valuation", "Stock on hand at cost & retail"},
-		{"/admin/reports/batches", "Batches / Expiry", "Live batches and expiry dates"},
-		{"/admin/reports/recipe-variance", "Recipe Variance", "Expected vs actual ingredient use"},
-		{"/admin/reports/service-profit", "Service Profit", "Income, ingredients & costs per service"},
-		{"/admin/reports/low-stock", "Low Stock", "Items at or below reorder level"},
-		{"/admin/damage", "Damage Report", "Damaged/written-off stock & recovery"},
+// reportHubGroup is a labelled section of the Reports hub.
+type reportHubGroup struct {
+	Label string
+	Cards []reportHubCard
+}
+
+// reportHubGroups returns the Reports-hub cards organised into labelled groups
+// (instead of one flat alphabetical grid). Plugin-contributed cards go under a
+// trailing "More" group so the hook stays intact. Curated order within a group
+// beats alphabetical here — the common reports sit at the top.
+func reportHubGroups() []reportHubGroup {
+	groups := []reportHubGroup{
+		{"Sales & Customers", []reportHubCard{
+			{"/admin/reports/sales", "Sales", "Receipts, profit & time-of-day, with a daily trend"},
+			{"/admin/reports/peak-hours", "Peak Hours", "Busiest days & hours — plan staffing and breaks"},
+			{"/admin/reports/top-products", "Top Products", "Best sellers by revenue or quantity"},
+			{"/admin/reports/product-sales", "Product Sales", "One product's units over time vs last year"},
+			{"/admin/reports/sales-by-cashier", "Sales by Cashier", "Per-cashier takings & discounts"},
+			{"/admin/reports/returns", "Returns / Refunds", "Returned lines and refund value"},
+			{"/admin/reports/customer-dues", "Customer Dues", "Receivables — who owes you money"},
+		}},
+		{"Money & Profit", []reportHubCard{
+			{"/admin/reports/finance", "Finance / P&L", "Revenue, COGS, profit, dues for a period"},
+			{"/admin/reports/tender", "Tender / Payments", "Cash, card, wallet & credit collected"},
+			{"/admin/reports/tax", "Tax Summary", "VAT/tax collected over a period"},
+			{"/admin/reports/profit-by-category", "Profit by Category", "Net revenue & profit per category"},
+			{"/admin/reports/expenses", "Expenses by Category", "Operating expenses grouped by category"},
+			{"/admin/reports/cash-register", "Cash Register", "Drawer sessions with over/short"},
+		}},
+		{"Inventory & Suppliers", []reportHubCard{
+			{"/admin/reports/inventory", "Inventory Valuation", "Stock on hand at cost & retail"},
+			{"/admin/reports/low-stock", "Low Stock", "Items at or below reorder level"},
+			{"/admin/reports/batches", "Batches / Expiry", "Live batches and expiry dates"},
+			{"/admin/reports/purchases", "Purchases", "GRNs received in a period"},
+			{"/admin/reports/supplier-dues", "Supplier Dues", "Payables — who you owe money"},
+			{"/admin/reports/recipe-variance", "Recipe Variance", "Expected vs actual ingredient use"},
+			{"/admin/reports/service-profit", "Service Profit", "Income, ingredients & costs per service"},
+			{"/admin/reports/losses", "Losses & Recovery", "Damage & warranty write-offs vs supplier recovery"},
+		}},
 	}
-	for _, rc := range layouts.PluginReportCards() {
-		cards = append(cards, reportHubCard{rc.Href, rc.Label, rc.Desc})
+	if plugins := layouts.PluginReportCards(); len(plugins) > 0 {
+		more := reportHubGroup{Label: "More"}
+		for _, rc := range plugins {
+			more.Cards = append(more.Cards, reportHubCard{rc.Href, rc.Label, rc.Desc})
+		}
+		groups = append(groups, more)
 	}
-	sort.SliceStable(cards, func(i, j int) bool { return cards[i].Title < cards[j].Title })
-	return cards
+	return groups
 }
 
 // tenderLabel gives a payment-method enum value a display name for the tender
@@ -324,6 +364,8 @@ func salesQuery(d SalesReportData) string {
 	setNonEmpty(q, "to", d.To)
 	setNonEmpty(q, "status", d.Status)
 	setNonEmpty(q, "method", d.Method)
+	setNonEmpty(q, "from_hour", d.FromHour)
+	setNonEmpty(q, "to_hour", d.ToHour)
 	return q.Encode()
 }
 

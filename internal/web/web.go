@@ -43,6 +43,12 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+// redirectTo returns a handler that 302-redirects to a fixed path — used to keep
+// old report URLs working after a report is folded or merged elsewhere.
+func redirectTo(path string) echo.HandlerFunc {
+	return func(c echo.Context) error { return c.Redirect(http.StatusFound, path) }
+}
+
 // Server bundles the services the UI handlers call.
 type Server struct {
 	cfg              *config.Config
@@ -447,8 +453,8 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	ag.GET("/warranty/table", admin.WarrantyTable)
 	ag.GET("/warranty/lookup", admin.WarrantyLookup)
 	ag.POST("/warranty/replace", admin.WarrantyReplace)
-	ag.GET("/damage", admin.DamageReport)
-	ag.GET("/damage/table", admin.DamageTable)
+	ag.GET("/damage", redirectTo("/admin/reports/losses")) // merged into Losses & Recovery
+	ag.GET("/damage/table", admin.DamageTable)             // fragment reused by the Losses page
 	ag.GET("/recovery/form", admin.RecoveryForm)
 	ag.POST("/recovery", admin.RecoveryRecord)
 
@@ -460,13 +466,18 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	// Reports
 	ag.GET("/reports", admin.ReportsHub)
 	ag.GET("/reports/sales", admin.SalesReport)
+	ag.GET("/reports/sales/:id/lines", admin.SalesReceiptLines)
+	ag.GET("/reports/peak-hours", admin.PeakHoursReport)
 	ag.GET("/reports/tender", admin.TenderReport)
 	ag.GET("/reports/returns", admin.ReturnsReport)
 	ag.GET("/reports/profit-by-category", admin.ProfitByCategoryReport)
-	ag.GET("/reports/sales-trend", admin.SalesTrendReport)
+	// Daily Sales Trend folded into the Sales report; keep the URL working.
+	ag.GET("/reports/sales-trend", redirectTo("/admin/reports/sales"))
 	ag.GET("/reports/product-sales", admin.ProductSalesReport)
 	ag.GET("/reports/top-products", admin.TopProductsReport)
-	ag.GET("/reports/warranty", admin.WarrantyReport)
+	// Damage + Warranty merged into Losses & Recovery; keep old URLs working.
+	ag.GET("/reports/losses", admin.LossesReport)
+	ag.GET("/reports/warranty", redirectTo("/admin/reports/losses"))
 	ag.GET("/reports/finance", admin.FinanceReport)
 	ag.GET("/reports/tax", admin.TaxReport)
 	ag.GET("/reports/sales-by-cashier", admin.CashierSalesReport)

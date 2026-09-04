@@ -1,10 +1,12 @@
 package adminpages
 
 import (
+	"fmt"
 	"sort"
 	"strconv"
 	"time"
 
+	"karots-pos/internal/features/recovery"
 	"karots-pos/internal/features/reports"
 	"karots-pos/internal/money"
 	"karots-pos/templates/layouts"
@@ -343,6 +345,178 @@ templ WarrantyReport(d WarrantyReportData) {
 			</tfoot>
 		</table>
 	}
+}
+
+// ======================== Losses & Recovery (merged) ========================
+
+// LossesReportData merges the range-scoped warranty/damage summary with the
+// actionable damage write-off detail (formerly two separate reports).
+type LossesReportData struct {
+	ShopName, UserName, Base, Symbol, From, To, Preset string
+	Summary                                            reports.WarrantySummary
+	Losses                                             []recovery.DamageLoss
+}
+
+templ LossesReport(d LossesReportData) {
+	@layouts.Report("Losses & Recovery", d.ShopName) {
+		@rptRangeForm("/admin/reports/losses", d.Preset, d.From, d.To) {
+		}
+		@rptPeriodLine(d.From, d.To)
+		<h3 class="font-semibold mb-2">Stock losses</h3>
+		<table class="w-full text-sm mb-6">
+			<thead class="text-left text-slate-500 border-b">
+				<tr><th class="py-1.5">Type</th><th class="py-1.5 text-right">Count</th><th class="py-1.5 text-right">Worth</th></tr>
+			</thead>
+			<tbody>
+				<tr class="border-b"><td class="py-1.5">Warranty replacements</td><td class="py-1.5 text-right">{ strconv.Itoa(d.Summary.ReplacementCount) }</td><td class="py-1.5 text-right">{ money.Format(d.Symbol, d.Summary.ReplacementCost) }</td></tr>
+				<tr class="border-b"><td class="py-1.5">Damage write-offs</td><td class="py-1.5 text-right">{ strconv.Itoa(d.Summary.DamageCount) }</td><td class="py-1.5 text-right">{ money.Format(d.Symbol, d.Summary.DamageCost) }</td></tr>
+			</tbody>
+		</table>
+		<h3 class="font-semibold mb-2">Supplier recoveries</h3>
+		<table class="w-full text-sm mb-8">
+			<thead class="text-left text-slate-500 border-b">
+				<tr><th class="py-1.5">Outcome</th><th class="py-1.5 text-right">Count</th><th class="py-1.5 text-right">Loss value</th><th class="py-1.5 text-right">Recovered</th></tr>
+			</thead>
+			<tbody>
+				for _, r := range d.Summary.Recoveries {
+					<tr class="border-b last:border-0">
+						<td class="py-1.5 capitalize">{ r.Outcome }</td>
+						<td class="py-1.5 text-right">{ strconv.Itoa(r.Count) }</td>
+						<td class="py-1.5 text-right">{ money.Format(d.Symbol, r.LossValue) }</td>
+						<td class="py-1.5 text-right">{ money.Format(d.Symbol, r.Recovered) }</td>
+					</tr>
+				}
+				if len(d.Summary.Recoveries) == 0 {
+					<tr><td colspan="4" class="py-6 text-center text-slate-400">No recoveries in this period.</td></tr>
+				}
+			</tbody>
+			<tfoot class="border-t-2 font-semibold">
+				<tr><td class="py-2" colspan="3">Total recovered</td><td class="py-2 text-right">{ money.Format(d.Symbol, d.Summary.RecoveredValue) }</td></tr>
+			</tfoot>
+		</table>
+		<div class="no-print">
+			<h3 class="font-semibold mb-2">Damage write-off detail</h3>
+			<p class="text-sm text-slate-500 mb-3">Each write-off and any value reclaimed from the supplier.</p>
+			<div id="recovery-slot" class="mb-4"></div>
+			<div
+				id="damage-list"
+				hx-get={ d.Base + "/damage/table" }
+				hx-trigger="reload-damage from:body"
+				hx-swap="innerHTML"
+			>
+				@DamageTable(DamageReportData{Symbol: d.Symbol, Base: d.Base, Losses: d.Losses})
+			</div>
+		</div>
+	}
+}
+
+// ============================ Peak Hours ============================
+
+type PeakCell struct {
+	Count   int
+	Revenue decimal.Decimal
+}
+
+type PeakHoursData struct {
+	ShopName, Symbol, From, To, Preset string
+	Grid                               [7][24]PeakCell
+	HourTotals                         [24]PeakCell
+	DayTotals                          [7]PeakCell
+	MaxCount                           int
+	TotalCount                         int
+	TotalRevenue                       decimal.Decimal
+	BusiestLabel                       string
+}
+
+templ PeakHoursReport(d PeakHoursData) {
+	@layouts.Report("Peak Hours", d.ShopName) {
+		@rptRangeForm("/admin/reports/peak-hours", d.Preset, d.From, d.To) {
+			<a
+				class="no-print px-4 py-1.5 rounded-lg border text-sm"
+				href={ templ.SafeURL("/admin/reports/peak-hours?format=csv&from=" + d.From + "&to=" + d.To) }
+			>Download CSV</a>
+		}
+		@rptPeriodLine(d.From, d.To)
+		<div class="flex flex-wrap gap-6 mb-4 text-sm">
+			if d.BusiestLabel != "" {
+				<div>Busiest: <span class="font-semibold text-indigo-700">{ d.BusiestLabel }</span></div>
+			}
+			<div>Total sales: <span class="font-semibold">{ strconv.Itoa(d.TotalCount) }</span></div>
+			<div>Total revenue: <span class="font-semibold">{ money.Format(d.Symbol, d.TotalRevenue) }</span></div>
+		</div>
+		<p class="text-xs text-slate-500 mb-3 no-print">Darker = more sales in that hour. Hover a cell for its takings. Times are the shop's local clock.</p>
+		<div class="overflow-x-auto">
+			<table class="text-xs border-collapse">
+				<thead>
+					<tr>
+						<th class="p-1 sticky left-0 bg-white"></th>
+						for h := 0; h < 24; h++ {
+							<th class="p-1 text-slate-400 font-normal text-center w-8">{ fmt.Sprintf("%02d", h) }</th>
+						}
+						<th class="p-1 text-slate-500 text-right pl-2">Total</th>
+					</tr>
+				</thead>
+				<tbody>
+					for dow := 0; dow < 7; dow++ {
+						<tr>
+							<td class="p-1 pr-2 font-medium text-slate-600 sticky left-0 bg-white">{ WeekdayName(dow) }</td>
+							for h := 0; h < 24; h++ {
+								@peakCell(d.Grid[dow][h], d.MaxCount, d.Symbol)
+							}
+							<td class="p-1 pl-2 text-right font-semibold">{ strconv.Itoa(d.DayTotals[dow].Count) }</td>
+						</tr>
+					}
+				</tbody>
+				<tfoot class="border-t-2 font-semibold">
+					<tr>
+						<td class="p-1 pr-2 sticky left-0 bg-white">Total</td>
+						for h := 0; h < 24; h++ {
+							<td class="p-1 text-center text-slate-600">{ strconv.Itoa(d.HourTotals[h].Count) }</td>
+						}
+						<td class="p-1 pl-2 text-right">{ strconv.Itoa(d.TotalCount) }</td>
+					</tr>
+				</tfoot>
+			</table>
+		</div>
+	}
+}
+
+templ peakCell(cell PeakCell, max int, symbol string) {
+	if cell.Count == 0 {
+		<td class="p-1 text-center text-slate-300 border border-slate-100">·</td>
+	} else {
+		<td
+			class={ "p-1 text-center border border-slate-100 " + peakTextClass(cell.Count, max) }
+			style={ peakBgStyle(cell.Count, max) }
+			title={ money.Format(symbol, cell.Revenue) }
+		>{ strconv.Itoa(cell.Count) }</td>
+	}
+}
+
+// WeekdayName maps Postgres DOW (0=Sunday) to a short label.
+func WeekdayName(dow int) string {
+	names := []string{"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"}
+	if dow < 0 || dow > 6 {
+		return "?"
+	}
+	return names[dow]
+}
+
+// peakBgStyle shades a heatmap cell indigo by its share of the busiest cell.
+func peakBgStyle(count, max int) string {
+	alpha := 0.15
+	if max > 0 {
+		alpha = 0.15 + 0.85*float64(count)/float64(max)
+	}
+	return "background-color: rgba(79,70,229," + strconv.FormatFloat(alpha, 'f', 2, 64) + ")"
+}
+
+// peakTextClass keeps the number readable: white on the darker (hot) cells.
+func peakTextClass(count, max int) string {
+	if max > 0 && float64(count)/float64(max) > 0.5 {
+		return "text-white"
+	}
+	return "text-slate-700"
 }
 
 // pctOf returns part/whole as a rounded whole-number percent string (0 when whole<=0).
