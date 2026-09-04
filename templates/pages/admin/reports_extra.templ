@@ -713,7 +713,11 @@ templ TopProductsReport(d TopProductsData) {
 					<tr class="border-b last:border-0">
 						<td class="py-1.5 text-slate-400 align-top">{ strconv.Itoa(r.Rank) }</td>
 						<td class="py-1.5">
-							<div class="font-medium">{ r.R.ProductName }</div>
+							<a
+								class="font-medium text-indigo-700 hover:underline"
+								href={ templ.SafeURL("/admin/reports/product-sales?product=" + strconv.FormatInt(r.R.ProductID, 10) + "&from=" + d.From + "&to=" + d.To) }
+								title="See this product's trend over time"
+							>{ r.R.ProductName }</a>
 							<div class="mt-1 h-1.5 rounded bg-indigo-100">
 								<div class="h-1.5 rounded bg-indigo-500" style={ barWidth(r.BarPct) }></div>
 							</div>

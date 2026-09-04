@@ -62,6 +62,7 @@ type PL struct {
 }
 
 type ProductRevenue struct {
+	ProductID   int64           `db:"product_id"   json:"product_id"`
 	ProductName string          `db:"product_name" json:"product_name"`
 	Qty         decimal.Decimal `db:"qty"          json:"qty"`
 	Revenue     decimal.Decimal `db:"revenue"      json:"revenue"`
@@ -341,7 +342,7 @@ func (s *Service) TopProducts(ctx context.Context, from, to time.Time, orderBy s
 	}
 	var rows []ProductRevenue
 	q := `
-		SELECT p.name AS product_name,
+		SELECT p.id AS product_id, p.name AS product_name,
 		       SUM(si.quantity - si.returned_qty) AS qty,
 		       SUM( (si.subtotal / NULLIF(si.quantity,0)) * (si.quantity - si.returned_qty) ) AS revenue,
 		       SUM( (si.subtotal / NULLIF(si.quantity,0)) * (si.quantity - si.returned_qty)
@@ -350,7 +351,7 @@ func (s *Service) TopProducts(ctx context.Context, from, to time.Time, orderBy s
 		JOIN sales s ON s.id = si.sale_id
 		JOIN products p ON p.id = si.product_id
 		WHERE NOT p.pass_through AND s.status <> 'void' AND s.created_at >= $1 AND s.created_at < $2
-		GROUP BY p.name
+		GROUP BY p.id, p.name
 		HAVING SUM(si.quantity - si.returned_qty) > 0
 		ORDER BY ` + order + ` DESC
 		LIMIT $3`
