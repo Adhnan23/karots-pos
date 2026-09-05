@@ -628,20 +628,34 @@ templ POS(d POSData) {
 				The first option is the one normal rotation would sell (oldest /
 				soonest to expire), so it is highlighted and Enter takes it.
 			-->
-			<div x-show="pricePick" x-cloak x-on:keydown.escape.window="cancelPick()" x-on:keydown.window="pricePickKey($event)" class="fixed inset-0 bg-black/40 z-40 flex items-center justify-center p-4">
-				<div class="bg-white rounded-2xl shadow-xl w-96 max-w-full p-6">
-					<h3 class="text-lg font-semibold mb-1">Which price?</h3>
-					<p class="text-sm text-slate-500 mb-4">
-						<span class="font-medium" x-text="pricePick && pricePick.product.name"></span>
-						is in stock at more than one price. Check the item and tap the price on it.
-					</p>
+			<div x-show="pricePick" x-cloak x-on:keydown.escape.window="pricePick && pricePick.confirmExpired ? backToLots() : cancelPick()" x-on:keydown.window="pricePickKey($event)" class="fixed inset-0 bg-black/40 z-40 flex items-center justify-center p-4">
+				<!-- Lot list: shown while no expired lot is being confirmed -->
+				<div x-show="pricePick && !pricePick.confirmExpired" class="bg-white rounded-2xl shadow-xl w-96 max-w-full p-6">
+					<template x-if="pricePick && lotExpired(pricePick.lots[0])">
+						<div>
+							<h3 class="text-lg font-semibold mb-1 text-rose-700">⚠ Expired stock</h3>
+							<p class="text-sm text-slate-500 mb-4">
+								The lot of <span class="font-medium" x-text="pricePick && pricePick.product.name"></span>
+								due to sell first is expired. Reach for a good lot, or tap the expired one to sell it anyway or write it off.
+							</p>
+						</div>
+					</template>
+					<template x-if="pricePick && !lotExpired(pricePick.lots[0])">
+						<div>
+							<h3 class="text-lg font-semibold mb-1">Which price?</h3>
+							<p class="text-sm text-slate-500 mb-4">
+								<span class="font-medium" x-text="pricePick && pricePick.product.name"></span>
+								is in stock at more than one price. Check the item and tap the price on it.
+							</p>
+						</div>
+					</template>
 					<div class="space-y-2">
 						<template x-for="(lot, i) in (pricePick ? pricePick.lots : [])" x-bind:key="lot.batch_id">
 							<button
 								type="button"
 								x-on:click="pickLot(lot)"
 								x-bind:autofocus="i === 0"
-								x-bind:class="i === 0 ? 'border-indigo-500 bg-indigo-50' : 'border-slate-200 hover:bg-slate-50'"
+								x-bind:class="lotExpired(lot) ? 'border-rose-300 bg-rose-50' : (i === 0 ? 'border-indigo-500 bg-indigo-50' : 'border-slate-200 hover:bg-slate-50')"
 								class="w-full flex items-center justify-between gap-3 border rounded-xl px-4 py-3 text-left"
 							>
 								<div class="min-w-0">
@@ -651,11 +665,27 @@ templ POS(d POSData) {
 										<span x-text="' · ' + lotLabel(lot)"></span>
 									</div>
 								</div>
-								<span class="shrink-0 w-7 h-7 rounded-full border text-xs flex items-center justify-center text-slate-500" x-text="i + 1"></span>
+								<span x-show="lotExpired(lot)" class="shrink-0 px-1.5 py-0.5 rounded bg-rose-600 text-white text-[11px] font-semibold">EXPIRED</span>
+								<span x-show="!lotExpired(lot)" class="shrink-0 w-7 h-7 rounded-full border text-xs flex items-center justify-center text-slate-500" x-text="i + 1"></span>
 							</button>
 						</template>
 					</div>
 					<button type="button" x-on:click="cancelPick()" class="w-full mt-4 py-2 rounded-lg border text-slate-600">Cancel</button>
+				</div>
+				<!-- Expired-lot confirm: sell anyway, write off, or go back -->
+				<div x-show="pricePick && pricePick.confirmExpired" x-cloak class="bg-white rounded-2xl shadow-xl w-96 max-w-full p-6">
+					<h3 class="text-lg font-semibold mb-1 text-rose-700">This lot is expired</h3>
+					<p class="text-sm text-slate-500 mb-4">
+						<span class="font-medium" x-text="pricePick && pricePick.product.name"></span>
+						from this lot expired on
+						<span class="font-medium" x-text="pricePick && pricePick.confirmExpired && String(pricePick.confirmExpired.expiry_date).slice(0,10)"></span>.
+						What do you want to do?
+					</p>
+					<div class="space-y-2">
+						<button type="button" x-on:click="confirmExpiredLot()" class="w-full py-2.5 rounded-lg bg-rose-600 text-white font-medium">Sell it anyway</button>
+						<button type="button" x-on:click="writeOffExpired()" class="w-full py-2.5 rounded-lg border border-amber-300 bg-amber-50 text-amber-800 font-medium">Write off as damaged (<span x-text="pricePick && pricePick.confirmExpired && qtyText(pricePick.confirmExpired.qty_remaining)"></span>)</button>
+						<button type="button" x-on:click="backToLots()" class="w-full py-2 rounded-lg border text-slate-600">Back to lots</button>
+					</div>
 				</div>
 			</div>
 

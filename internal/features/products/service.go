@@ -96,16 +96,16 @@ func (s *Service) Get(ctx context.Context, id int64) (*Product, error) {
 	return p, nil
 }
 
-// PriceOptions backs the till's "which price?" prompt. It returns, for every
-// product whose live lots disagree on price, that product's options — nothing
-// else. The till loads this once at startup and refreshes it after each sale, so
-// it can decide whether to prompt however the item was added (scan, menu card,
-// search result) without a round trip per tap.
+// PriceOptions backs the till's lot prompt. It returns, for every product whose
+// live lots disagree on price OR include an expired lot, that product's options —
+// nothing else. The till loads this once at startup and refreshes it after each
+// sale, so it can decide whether to prompt however the item was added (scan, menu
+// card, search result) without a round trip per tap.
 //
-// It is empty until per-lot prices are actually entered, which is what keeps the
-// prompt invisible for shops that never use it.
+// It stays empty for a shop that never prices per lot and never lets stock
+// expire, which is what keeps the prompt invisible for them.
 func (s *Service) PriceOptions(ctx context.Context) (map[int64][]stock.PriceOption, error) {
-	return stock.NewService(s.db).MultiPriceProducts(ctx)
+	return stock.NewService(s.db).LotPromptProducts(ctx)
 }
 
 // QuickPicks backs the till's top-menu "Frequently sold" grid: the best-sellers

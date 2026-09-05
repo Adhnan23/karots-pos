@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"testing"
+	"time"
 
 	appdb "karots-pos/internal/db"
 
@@ -206,6 +207,56 @@ func TestMultiPriceProductsOnlyListsGenuineDisagreements(t *testing.T) {
 	}
 	if _, listed := all[agreeID]; listed {
 		t.Error("a product whose lots agree on price must not prompt")
+	}
+}
+
+// LotPromptProducts is the till superset: it must flag a single-priced product
+// whose lot is already expired (so the cashier is warned) while leaving a
+// single-priced product with a future/absent expiry alone.
+func TestLotPromptProductsFlagsExpiredButNotFresh(t *testing.T) {
+	conn := testDB(t)
+	defer conn.Close()
+	ctx := context.Background()
+	tx, err := conn.BeginTxx(ctx, nil)
+	must(t, err)
+	defer tx.Rollback() //nolint:errcheck
+
+	repo := NewRepository(tx)
+	var categoryID, unitID int64
+	must(t, tx.GetContext(ctx, &categoryID, `SELECT id FROM categories LIMIT 1`))
+	must(t, tx.GetContext(ctx, &unitID, `SELECT id FROM units LIMIT 1`))
+
+	newProd := func(name string) int64 {
+		var id int64
+		must(t, tx.GetContext(ctx, &id, `
+			INSERT INTO products (name, category_id, unit_id, cost_price, selling_price)
+			VALUES ($1, $2, $3, 10, 30) RETURNING id`, name, categoryID, unitID))
+		return id
+	}
+	yesterday := time.Now().AddDate(0, 0, -1)
+	nextYear := time.Now().AddDate(1, 0, 0)
+
+	expiredID := newProd("TEST expired lot")
+	_, err = repo.InsertBatch(ctx, NewBatch{
+		ProductID: expiredID, Quantity: decimal.NewFromInt(5),
+		CostPrice: decimal.NewFromInt(10), ExpiryDate: &yesterday, Source: "purchase",
+	})
+	must(t, err)
+
+	freshID := newProd("TEST fresh lot")
+	_, err = repo.InsertBatch(ctx, NewBatch{
+		ProductID: freshID, Quantity: decimal.NewFromInt(5),
+		CostPrice: decimal.NewFromInt(10), ExpiryDate: &nextYear, Source: "purchase",
+	})
+	must(t, err)
+
+	all, err := repo.LotPromptProducts(ctx)
+	must(t, err)
+	if _, listed := all[expiredID]; !listed {
+		t.Error("a product with an expired lot must prompt the cashier")
+	}
+	if _, listed := all[freshID]; listed {
+		t.Error("a single-priced product with a future expiry must not prompt")
 	}
 }
 

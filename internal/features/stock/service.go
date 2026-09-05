@@ -219,6 +219,17 @@ func (s *Service) MultiPriceProducts(ctx context.Context) (map[int64][]PriceOpti
 	return rows, nil
 }
 
+// LotPromptProducts backs the till's lot prompt: products whose lots disagree on
+// price OR have an expired live lot, with their options. Superset of
+// MultiPriceProducts (which stays price-only for the stock-take sheet).
+func (s *Service) LotPromptProducts(ctx context.Context) (map[int64][]PriceOption, error) {
+	rows, err := s.repo.LotPromptProducts(ctx)
+	if err != nil {
+		return nil, apperr.Internal("failed to load batch prices", err)
+	}
+	return rows, nil
+}
+
 // SetBatchPrice re-prices one lot from the admin batch list; zero puts it back on
 // the product's current price.
 func (s *Service) SetBatchPrice(ctx context.Context, batchID int64, price decimal.Decimal) error {

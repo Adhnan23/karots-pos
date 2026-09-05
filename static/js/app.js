@@ -1003,8 +1003,10 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
         if (!this.pricePick || this.pricePick.product.id !== productId) return;
         this.priceOptions[String(productId)] = fresh;
         const distinct = new Set(fresh.map((l) => String(l.price)));
-        // If the lots now agree on one price there is nothing left to ask: take it.
-        if (fresh.length && distinct.size === 1) {
+        // If the lots now agree on one price AND the one FEFO would sell isn't
+        // expired, there is nothing left to ask: take it. An expired first lot
+        // keeps the prompt open so the cashier still sees the warning.
+        if (fresh.length && distinct.size === 1 && !this.lotExpired(fresh[0])) {
           const product = this.pricePick.product;
           this.pricePick = null;
           this.addToCart(product, fresh[0]);
@@ -1056,14 +1058,25 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
         this.infoLoading = false;
       }
     },
-    // lotsFor returns the price choices for a product, but only when they are a
-    // real choice: two or more lots that actually differ in price. One lot, or
-    // several agreeing, is not a question worth asking the cashier.
+    // lotExpired reports whether a lot's printed expiry date is in the past. Lots
+    // with no expiry never expire. Date-only, local time (a lot is expired the day
+    // AFTER the printed date), so a "best before today" still sells.
+    lotExpired(lot) {
+      if (!lot || !lot.expiry_date) return false;
+      const today = new Date().toLocaleDateString("en-CA"); // YYYY-MM-DD, local
+      return String(lot.expiry_date).slice(0, 10) < today;
+    },
+    // lotsFor returns the lots worth prompting the cashier about before a sale:
+    // either they disagree on price (read the sticker), or the lot FEFO would sell
+    // first (lots[0], earliest expiry) is expired (warn / reach for a good lot /
+    // write it off). Same price and nothing expired is no question — return [].
     lotsFor(productId) {
       const lots = this.priceOptions[String(productId)] || [];
-      if (lots.length < 2) return [];
+      if (!lots.length) return [];
       const distinct = new Set(lots.map((l) => String(l.price)));
-      return distinct.size > 1 ? lots : [];
+      if (distinct.size > 1) return lots; // price disagreement → ask
+      if (this.lotExpired(lots[0])) return lots; // the lot about to sell is expired
+      return [];
     },
     async loadDenoms() {
       try {
@@ -1436,19 +1449,68 @@ function pos(symbol, defaultType, askToPrint, pluginRoots, drawerSections, canMa
       if (lot.batch_no) return "batch " + lot.batch_no;
       return "in " + String(lot.received_at || "").slice(0, 10);
     },
-    // pickLot resolves the prompt: add the product at the chosen lot's price.
+    // pickLot resolves the prompt. A good lot rings up straight away; an expired
+    // one is a deliberate act (clearance, owner's call), so it opens a confirm bar
+    // that also offers to write the lot off as damaged instead of selling it.
     pickLot(lot) {
+      if (this.lotExpired(lot)) {
+        if (this.pricePick) this.pricePick.confirmExpired = lot;
+        return;
+      }
+      this._commitLot(lot);
+    },
+    _commitLot(lot) {
       const p = this.pricePick && this.pricePick.product;
       this.pricePick = null;
       if (p) this.addToCart(p, lot);
+    },
+    // confirmExpiredLot: sell the expired lot anyway (after the cashier confirmed).
+    confirmExpiredLot() {
+      const lot = this.pricePick && this.pricePick.confirmExpired;
+      if (lot) this._commitLot(lot);
+    },
+    // backToLots dismisses the expired confirm and returns to the lot list, so the
+    // cashier can reach for a good lot instead.
+    backToLots() {
+      if (this.pricePick) this.pricePick.confirmExpired = null;
+    },
+    // writeOffExpired removes the expired lot from stock as damage (batch-specific)
+    // so it stops being offered, rather than selling it. Reuses the cashier damage
+    // write-off; the lot's whole remaining quantity goes.
+    async writeOffExpired() {
+      const lot = this.pricePick && this.pricePick.confirmExpired;
+      const p = this.pricePick && this.pricePick.product;
+      if (!lot || !p) return;
+      try {
+        await apiFetch("POST", "/cashier/damage", {
+          product_id: p.id,
+          quantity: String(lot.qty_remaining),
+          reason: "damage",
+          batch_id: lot.batch_id,
+          note: "expired " + String(lot.expiry_date).slice(0, 10),
+        });
+        toast("Expired stock written off", "success");
+      } catch (_) {
+        return; // apiFetch already toasted the error; keep the prompt open
+      }
+      this.pricePick = null;
+      this.loadPriceOptions(); // the lot is gone — refresh what the till prompts on
     },
     cancelPick() {
       this.pricePick = null;
     },
     // Number keys pick a lot without reaching for the mouse; Enter takes the
-    // first, which is the lot normal rotation would sell.
+    // first, which is the lot normal rotation would sell. While the expired-lot
+    // confirm is open, Enter sells it (Esc, handled on the modal, goes back).
     pricePickKey(e) {
       if (!this.pricePick) return;
+      if (this.pricePick.confirmExpired) {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          this.confirmExpiredLot();
+        }
+        return;
+      }
       const lots = this.pricePick.lots;
       if (e.key === "Enter") {
         e.preventDefault();

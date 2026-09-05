@@ -274,6 +274,43 @@ func (r *Repository) MultiPriceProducts(ctx context.Context) (map[int64][]PriceO
 	return out, nil
 }
 
+// LotPromptProducts returns, for every product the till should ask about before
+// selling, that product's live lots — nothing else. A product qualifies when its
+// lots disagree on price (the cashier reads the sticker) OR it has a live lot that
+// is already expired (the cashier is warned, and can reach for a good lot or write
+// the expired one off). Products with neither need no prompt and are omitted, so
+// a shop that never prices per lot and never lets stock expire sees nothing.
+//
+// This is the till superset of MultiPriceProducts, which stays price-only because
+// the stock-take sheet uses it to flag price-ambiguous count corrections.
+func (r *Repository) LotPromptProducts(ctx context.Context) (map[int64][]PriceOption, error) {
+	var rows []PriceOption
+	err := r.q.SelectContext(ctx, &rows, `
+		WITH live AS (
+			SELECT b.id, b.product_id, b.batch_no, b.expiry_date, b.qty_remaining, b.created_at,
+			       `+effectivePriceSQL+` AS price,
+			       (b.selling_price > 0) AS own_price
+			FROM stock_batches b
+			JOIN products p ON p.id = b.product_id
+			WHERE b.qty_remaining > 0 AND p.is_active AND NOT p.is_service
+		), flagged AS (
+			SELECT product_id FROM live GROUP BY product_id
+			HAVING COUNT(DISTINCT price) > 1
+			    OR bool_or(expiry_date IS NOT NULL AND expiry_date < CURRENT_DATE)
+		)
+		SELECT l.* FROM live l
+		JOIN flagged f ON f.product_id = l.product_id
+		ORDER BY l.product_id, l.expiry_date NULLS LAST, l.id`)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[int64][]PriceOption)
+	for _, o := range rows {
+		out[o.ProductID] = append(out[o.ProductID], o)
+	}
+	return out, nil
+}
+
 // LockBatch loads one lot FOR UPDATE, refusing a batch that is gone or belongs to
 // a different product — the till sends a batch id, so this is where a stale or
 // tampered id is caught. Runs inside the caller's transaction.
