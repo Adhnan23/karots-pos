@@ -497,6 +497,7 @@ func salesQuery(d SalesReportData) string {
 func movQuery(d StockMovementsData) string {
 	q := url.Values{}
 	setNonEmpty(q, "product_id", d.ProductID)
+	setNonEmpty(q, "user_id", d.UserID)
 	setNonEmpty(q, "type", d.MoveType)
 	if d.Preset != "" {
 		q.Set("preset", d.Preset)

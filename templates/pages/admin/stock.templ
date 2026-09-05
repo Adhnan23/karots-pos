@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"strings"
 
+	"karots-pos/internal/features/auth"
 	"karots-pos/internal/features/products"
 	"karots-pos/internal/features/stock"
 	"karots-pos/internal/money"
@@ -152,6 +153,10 @@ type StockMovementsData struct {
 	Movements []stock.Movement
 	MoveType  string
 	ProductID string
+	// UserID is the selected "By" filter (staff id as a string, "" = anyone);
+	// Staff is the dropdown's options.
+	UserID string
+	Staff  []auth.User
 	// FilterName is the selected product's name, resolved by ID rather than by
 	// scanning a page of products (which silently blanked out beyond page 1).
 	FilterName     string
@@ -198,6 +203,15 @@ templ StockMovementsPage(d StockMovementsData) {
 					</select>
 				</div>
 				<div>
+					<label class="block text-xs text-slate-500 mb-1">By</label>
+					<select name="user_id" class="border rounded-lg px-2 py-1.5 text-sm">
+						@movProductOption("", "Anyone", d.UserID)
+						for _, u := range d.Staff {
+							@movProductOption(strconv.FormatInt(u.ID, 10), u.Name, d.UserID)
+						}
+					</select>
+				</div>
+				<div>
 					<label class="block text-xs text-slate-500 mb-1">From</label>
 					<input type="date" name="from" value={ d.From } class="border rounded-lg px-2 py-1.5 text-sm"/>
 				</div>
@@ -227,8 +241,8 @@ templ StockMovementsPage(d StockMovementsData) {
 							<tr class="border-b last:border-0">
 								<td class="py-2 px-3 text-slate-500 whitespace-nowrap">{ m.CreatedAt.Format("2006-01-02 15:04") }</td>
 								<td class="py-2 px-3">{ m.ProductName }</td>
-								<td class="py-2 px-3 capitalize">{ m.Type }</td>
-								<td class="py-2 px-3 text-right">{ money.Display(m.Quantity) }</td>
+								<td class="py-2 px-3 capitalize">{ moveTypeLabel(m.Type) }</td>
+								<td class={ "py-2 px-3 text-right whitespace-nowrap", templ.KV("text-emerald-600", m.Quantity.IsPositive()), templ.KV("text-rose-600", m.Quantity.IsNegative()) }>{ signedQty(m.Quantity) }</td>
 								<td class="py-2 px-3 text-slate-500">{ m.UserName }</td>
 								<td class="py-2 px-3 text-slate-500">{ strOrEmpty(m.Note) }</td>
 							</tr>

@@ -140,6 +140,7 @@ func (r *Repository) ListMovements(ctx context.Context, productID *int64, mtype 
 // rather than read as "the most recent N".
 type MovementFilter struct {
 	ProductID *int64
+	UserID    *int64 // who made the movement; nil = anyone
 	Type      string
 	From, To  *time.Time
 	Limit     int
@@ -153,6 +154,7 @@ const movementWhere = `
 	  AND ($2::text        IS NULL OR m.type = $2::stock_movement_type)
 	  AND ($3::timestamptz IS NULL OR m.created_at >= $3)
 	  AND ($4::timestamptz IS NULL OR m.created_at <  $4)
+	  AND ($5::bigint      IS NULL OR m.user_id = $5)
 	  -- Hide the hidden system/developer account's movements from the owner's log.
 	  AND m.user_id NOT IN (SELECT id FROM users WHERE is_system)`
 
@@ -167,8 +169,8 @@ func (r *Repository) FindMovements(ctx context.Context, f MovementFilter) ([]Mov
 		JOIN products p ON p.id = m.product_id
 		JOIN users u    ON u.id = m.user_id`+movementWhere+`
 		ORDER BY m.created_at DESC, m.id DESC
-		LIMIT NULLIF($5, 0) OFFSET $6`,
-		f.ProductID, nilIfEmpty(f.Type), f.From, f.To, f.Limit, f.Offset)
+		LIMIT NULLIF($6, 0) OFFSET $7`,
+		f.ProductID, nilIfEmpty(f.Type), f.From, f.To, f.UserID, f.Limit, f.Offset)
 	return rows, err
 }
 
@@ -177,6 +179,6 @@ func (r *Repository) CountMovements(ctx context.Context, f MovementFilter) (int,
 	var n int
 	err := r.q.GetContext(ctx, &n, `
 		SELECT count(*) FROM stock_movements m`+movementWhere,
-		f.ProductID, nilIfEmpty(f.Type), f.From, f.To)
+		f.ProductID, nilIfEmpty(f.Type), f.From, f.To, f.UserID)
 	return n, err
 }

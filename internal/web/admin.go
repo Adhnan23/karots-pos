@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"karots-pos/internal/apperr"
 	"karots-pos/internal/escpos"
 	"karots-pos/internal/features/audit"
+	"karots-pos/internal/features/auth"
 	"karots-pos/internal/features/customers"
 	"karots-pos/internal/features/products"
 	"karots-pos/internal/features/recipes"
@@ -580,7 +582,14 @@ func (a *adminUI) StockMovements(c echo.Context) error {
 		}
 	}
 	mtype := c.QueryParam("type")
-	f := stock.MovementFilter{ProductID: pid, Type: mtype}
+	var uid *int64
+	uidStr := c.QueryParam("user_id")
+	if uidStr != "" {
+		if id, uerr := strconv.ParseInt(uidStr, 10, 64); uerr == nil {
+			uid = &id
+		}
+	}
+	f := stock.MovementFilter{ProductID: pid, UserID: uid, Type: mtype}
 
 	// Optional date window. The trail is append-only and grows with every sale,
 	// so "everything since the beginning" stops being a useful default fast.
@@ -634,11 +643,21 @@ func (a *adminUI) StockMovements(c echo.Context) error {
 			filterName = p.Name
 		}
 	}
+
+	// Staff dropdown for the "By" filter. Non-system users only; a movement by a
+	// since-disabled cashier still lists them so their history stays filterable.
+	staff, err := a.s.auth.ListUsers(ctx)
+	if err != nil {
+		return err
+	}
+	staff = slices.DeleteFunc(staff, func(u auth.User) bool { return u.IsSystem })
 	return response.RenderPage(c, adminpages.StockMovementsPage(adminpages.StockMovementsData{
 		UserName:   middleware.CurrentUserName(c),
 		Movements:  moves,
 		MoveType:   mtype,
 		ProductID:  pidStr,
+		UserID:     uidStr,
+		Staff:      staff,
 		FilterName: filterName,
 		Preset:     preset,
 		From:       fromStr,
