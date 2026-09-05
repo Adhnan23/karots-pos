@@ -683,8 +683,10 @@ func (a *adminUI) BatchesPage(c echo.Context) error {
 	return response.RenderPage(c, adminpages.BatchesManagePage(d))
 }
 
-// batchesData loads every live lot (already earliest-expiry first) and buckets
-// them into expired / expiring-soon for the alert on top.
+// batchesData loads every live lot (already earliest-expiry first), buckets them
+// into expired / expiring-soon for the alert on top, and groups them by product
+// so the page can collapse each product's lots. Groups are ordered expired-first,
+// then expiring, then by name — the ones needing action float up.
 func (a *adminUI) batchesData(c echo.Context) (adminpages.BatchesManageData, error) {
 	ctx := c.Request().Context()
 	rows, err := a.s.stock.AllBatches(ctx)
@@ -696,21 +698,56 @@ func (a *adminUI) batchesData(c echo.Context) (adminpages.BatchesManageData, err
 	d := adminpages.BatchesManageData{
 		UserName: middleware.CurrentUserName(c),
 		Symbol:   a.symbol(ctx),
-		Rows:     rows,
 	}
+	idx := map[int64]int{} // product id -> index into d.Groups
 	for _, b := range rows {
-		d.TotalValue = d.TotalValue.Add(b.QtyRemaining.Mul(b.CostPrice))
+		val := b.QtyRemaining.Mul(b.CostPrice)
+		d.TotalValue = d.TotalValue.Add(val)
+		expired := b.ExpiryDate != nil && b.ExpiryDate.Before(now)
+		expiring := !expired && b.ExpiryDate != nil && b.ExpiryDate.Before(soon)
 		switch {
 		case b.ExpiryDate == nil:
 			d.NoExpiry++
-		case b.ExpiryDate.Before(now):
+		case expired:
 			d.Expired++
-			d.ExpiredValue = d.ExpiredValue.Add(b.QtyRemaining.Mul(b.CostPrice))
-		case b.ExpiryDate.Before(soon):
+			d.ExpiredValue = d.ExpiredValue.Add(val)
+		case expiring:
 			d.ExpiringSoon++
-			d.ExpiringValue = d.ExpiringValue.Add(b.QtyRemaining.Mul(b.CostPrice))
+			d.ExpiringValue = d.ExpiringValue.Add(val)
+		}
+		gi, ok := idx[b.ProductID]
+		if !ok {
+			d.Groups = append(d.Groups, adminpages.BatchGroup{ProductName: b.ProductName, UnitAbbr: b.UnitAbbr})
+			gi = len(d.Groups) - 1
+			idx[b.ProductID] = gi
+		}
+		g := &d.Groups[gi]
+		g.Lots = append(g.Lots, b)
+		g.OnHand = g.OnHand.Add(b.QtyRemaining)
+		g.Value = g.Value.Add(val)
+		if expired {
+			g.Expired++
+		}
+		if expiring {
+			g.ExpiringSoon++
 		}
 	}
+	rank := func(g adminpages.BatchGroup) int {
+		switch {
+		case g.Expired > 0:
+			return 0
+		case g.ExpiringSoon > 0:
+			return 1
+		default:
+			return 2
+		}
+	}
+	slices.SortStableFunc(d.Groups, func(x, y adminpages.BatchGroup) int {
+		if rx, ry := rank(x), rank(y); rx != ry {
+			return rx - ry
+		}
+		return strings.Compare(x.ProductName, y.ProductName)
+	})
 	return d, nil
 }
 

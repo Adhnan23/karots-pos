@@ -371,16 +371,25 @@ templ BatchesModal(p products.Product, batches []stock.Batch, symbol string) {
 	}
 }
 
-// BatchesManageData drives the detailed Batches page: every live lot plus the
-// expired / expiring-soon buckets shown in the alert on top.
+// BatchesManageData drives the detailed Batches page: live lots grouped by
+// product, plus the expired / expiring-soon buckets shown in the alert on top.
 type BatchesManageData struct {
 	UserName, Symbol      string
-	Rows                  []stock.Batch
+	Groups                []BatchGroup
 	Expired, ExpiringSoon int
 	NoExpiry              int
 	TotalValue            decimal.Decimal
 	ExpiredValue          decimal.Decimal
 	ExpiringValue         decimal.Decimal
+}
+
+// BatchGroup is one product's live lots, so the page can collapse them under a
+// single product header rather than showing a wall of anonymous rows.
+type BatchGroup struct {
+	ProductName, UnitAbbr string
+	Lots                  []stock.Batch
+	OnHand, Value         decimal.Decimal
+	Expired, ExpiringSoon int
 }
 
 templ BatchesManagePage(d BatchesManageData) {
@@ -424,67 +433,92 @@ templ BatchesBody(d BatchesManageData) {
 				</div>
 			}
 		</div>
-	} else if len(d.Rows) > 0 {
+	} else if len(d.Groups) > 0 {
 		<div class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm text-emerald-700 mb-5">
 			✓ Nothing expired or expiring within 30 days.
 		</div>
 	}
-	<div class="overflow-x-auto">
-		<table class="w-full text-sm">
-			<thead class="text-left text-slate-500 border-b">
-				<tr>
-					<th class="py-2 pr-3">Product</th>
-					<th class="py-2 pr-3">Expiry</th>
-					<th class="py-2 pr-3 text-right">Remaining</th>
-					<th class="py-2 pr-3 text-right">Cost</th>
-					<th class="py-2 pr-3 text-right">Value</th>
-					<th class="py-2 text-right"></th>
-				</tr>
-			</thead>
-			<tbody>
-				for _, b := range d.Rows {
-					{{ lbl, cls := expiryBadge(b.ExpiryDate) }}
-					<tr class={ "border-b last:border-0", templ.KV("bg-rose-50/60", lbl == "expired") }>
-						<td class="py-2 pr-3">
-							<div class="font-medium">{ b.ProductName }</div>
-							if b.BatchNo != nil {
-								<div class="text-xs text-slate-400">batch { *b.BatchNo }</div>
+	if len(d.Groups) == 0 {
+		<p class="py-10 text-center text-slate-500">No live batches.</p>
+	} else {
+		<div class="space-y-2">
+			for _, g := range d.Groups {
+				<div class="border rounded-xl overflow-hidden" x-data={ "{ open: " + strconv.FormatBool(g.Expired > 0 || g.ExpiringSoon > 0) + " }" }>
+					<button type="button" x-on:click="open = !open" class="w-full flex items-center justify-between gap-3 px-4 py-3 text-left hover:bg-slate-50">
+						<div class="flex items-center gap-2 min-w-0">
+							<span class="text-slate-400 text-xs w-3" x-text="open ? '▾' : '▸'"></span>
+							<span class="font-medium truncate">{ g.ProductName }</span>
+							if g.Expired > 0 {
+								<span class="shrink-0 px-1.5 py-0.5 rounded text-[11px] font-medium text-rose-600 bg-rose-50">{ strconv.Itoa(g.Expired) } expired</span>
 							}
-						</td>
-						<td class="py-2 pr-3 whitespace-nowrap">
-							if b.ExpiryDate != nil {
-								{ b.ExpiryDate.Format("2006-01-02") }
-								if lbl != "" {
-									<span class={ "ml-1 px-1.5 py-0.5 rounded text-[11px] font-medium", cls }>{ lbl }</span>
+							if g.ExpiringSoon > 0 {
+								<span class="shrink-0 px-1.5 py-0.5 rounded text-[11px] font-medium text-amber-600 bg-amber-50">{ strconv.Itoa(g.ExpiringSoon) } expiring</span>
+							}
+						</div>
+						<div class="shrink-0 text-sm text-slate-500 whitespace-nowrap">
+							{ countLabel(len(g.Lots), "lot") } · { money.Display(g.OnHand) } { g.UnitAbbr } · { money.Format(d.Symbol, g.Value) }
+						</div>
+					</button>
+					<div x-show="open" x-cloak class="border-t overflow-x-auto">
+						<table class="w-full text-sm">
+							<thead class="text-left text-slate-500 border-b bg-slate-50/60">
+								<tr>
+									<th class="py-2 px-4">Expiry</th>
+									<th class="py-2 px-4">Batch</th>
+									<th class="py-2 px-4 text-right">Remaining</th>
+									<th class="py-2 px-4 text-right">Cost</th>
+									<th class="py-2 px-4 text-right">Value</th>
+									<th class="py-2 px-4 text-right"></th>
+								</tr>
+							</thead>
+							<tbody>
+								for _, b := range g.Lots {
+									{{ lbl, cls := expiryBadge(b.ExpiryDate) }}
+									<tr class={ "border-b last:border-0", templ.KV("bg-rose-50/60", lbl == "expired") }>
+										<td class="py-2 px-4 whitespace-nowrap">
+											if b.ExpiryDate != nil {
+												{ b.ExpiryDate.Format("2006-01-02") }
+												if lbl != "" {
+													<span class={ "ml-1 px-1.5 py-0.5 rounded text-[11px] font-medium", cls }>{ lbl }</span>
+												}
+											} else {
+												<span class="text-slate-400">no expiry</span>
+											}
+										</td>
+										<td class="py-2 px-4 text-slate-500">{ strOrEmpty(b.BatchNo) }</td>
+										<td class="py-2 px-4 text-right whitespace-nowrap">{ money.Display(b.QtyRemaining) } { b.UnitAbbr }</td>
+										<td class="py-2 px-4 text-right whitespace-nowrap">{ money.Format(d.Symbol, b.CostPrice) }</td>
+										<td class="py-2 px-4 text-right whitespace-nowrap">{ money.Format(d.Symbol, b.QtyRemaining.Mul(b.CostPrice)) }</td>
+										<td class="py-2 px-4 text-right whitespace-nowrap">
+											if lbl == "expired" {
+												<form hx-post="/admin/stock/damage" hx-swap="none"
+													hx-confirm={ "Write off " + money.Display(b.QtyRemaining) + " " + b.UnitAbbr + " of " + b.ProductName + " as damaged?" }>
+													<input type="hidden" name="product_id" value={ strconv.FormatInt(b.ProductID, 10) }/>
+													<input type="hidden" name="batch_id" value={ strconv.FormatInt(b.ID, 10) }/>
+													<input type="hidden" name="quantity" value={ b.QtyRemaining.String() }/>
+													<input type="hidden" name="reason" value="damage"/>
+													<input type="hidden" name="note" value={ expiredNote(b.ExpiryDate) }/>
+													<button type="submit" class="px-3 py-1.5 rounded-lg bg-rose-600 text-white text-xs font-medium">Write off</button>
+												</form>
+											}
+										</td>
+									</tr>
 								}
-							} else {
-								<span class="text-slate-400">no expiry</span>
-							}
-						</td>
-						<td class="py-2 pr-3 text-right whitespace-nowrap">{ money.Display(b.QtyRemaining) } { b.UnitAbbr }</td>
-						<td class="py-2 pr-3 text-right whitespace-nowrap">{ money.Format(d.Symbol, b.CostPrice) }</td>
-						<td class="py-2 pr-3 text-right whitespace-nowrap">{ money.Format(d.Symbol, b.QtyRemaining.Mul(b.CostPrice)) }</td>
-						<td class="py-2 text-right whitespace-nowrap">
-							if lbl == "expired" {
-								<form hx-post="/admin/stock/damage" hx-swap="none"
-									hx-confirm={ "Write off " + money.Display(b.QtyRemaining) + " " + b.UnitAbbr + " of " + b.ProductName + " as damaged?" }>
-									<input type="hidden" name="product_id" value={ strconv.FormatInt(b.ProductID, 10) }/>
-									<input type="hidden" name="batch_id" value={ strconv.FormatInt(b.ID, 10) }/>
-									<input type="hidden" name="quantity" value={ b.QtyRemaining.String() }/>
-									<input type="hidden" name="reason" value="damage"/>
-									<input type="hidden" name="note" value={ expiredNote(b.ExpiryDate) }/>
-									<button type="submit" class="px-3 py-1.5 rounded-lg bg-rose-600 text-white text-xs font-medium">Write off</button>
-								</form>
-							}
-						</td>
-					</tr>
-				}
-				if len(d.Rows) == 0 {
-					<tr><td colspan="6" class="py-10 text-center text-slate-500">No live batches.</td></tr>
-				}
-			</tbody>
-		</table>
-	</div>
+							</tbody>
+						</table>
+					</div>
+				</div>
+			}
+		</div>
+	}
+}
+
+// countLabel is "1 lot" / "3 lots" — a count with a naively pluralised noun.
+func countLabel(n int, word string) string {
+	if n == 1 {
+		return "1 " + word
+	}
+	return strconv.Itoa(n) + " " + word + "s"
 }
 
 // expiredNote is the write-off note stamped on an expired lot's damage movement.
