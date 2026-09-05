@@ -13,7 +13,8 @@ type Row struct {
 	OnHand      string
 	Cost        string // pre-formatted money
 	Price       string // pre-formatted money
-	DaysLabel   string // "42 days" or "never sold"
+	DaysLabel   string // "42 days" / "never sold" / "expires in 10 days"
+	Expiring    bool   // reason is an upcoming expiry, not staleness
 	SuggestPct  string // "12.5"
 	NewPrice    string // pre-formatted money
 	Approved    bool
@@ -27,6 +28,7 @@ type PageData struct {
 	StaleDays        int
 	DefaultPercent   string
 	MinMarginPercent string
+	ExpiryDays       int
 }
 
 templ Page(d PageData) {
@@ -34,7 +36,7 @@ templ Page(d PageData) {
 		<div class="flex items-center justify-between mb-6">
 			<div>
 				<h1 class="text-2xl font-bold">Clearance / Stale stock</h1>
-				<p class="text-sm text-slate-500">Items with stock that haven't sold lately. Approve a markdown and it's offered at the till.</p>
+				<p class="text-sm text-slate-500">Items with stock that haven't sold lately, or with a lot expiring soon. Approve a markdown and it's offered at the till.</p>
 			</div>
 		</div>
 		<form method="post" action="/admin/clearance/settings" class="bg-white rounded-2xl shadow-sm p-4 mb-6 flex flex-wrap items-end gap-4">
@@ -50,6 +52,10 @@ templ Page(d PageData) {
 				<label class="block text-xs text-slate-500 mb-1">Min margin % over cost</label>
 				<input type="number" step="0.5" name="min_margin_percent" value={ d.MinMarginPercent } min="0" class="border rounded-lg px-3 py-1.5 w-28"/>
 			</div>
+			<div>
+				<label class="block text-xs text-slate-500 mb-1">Expiring within (days)</label>
+				<input type="number" name="expiry_days" value={ strconv.Itoa(d.ExpiryDays) } min="1" class="border rounded-lg px-3 py-1.5 w-28"/>
+			</div>
 			<button class="px-4 py-1.5 rounded-lg bg-indigo-600 text-white text-sm font-medium">Save</button>
 		</form>
 		<div class="bg-white rounded-2xl shadow-sm p-6">
@@ -61,7 +67,7 @@ templ Page(d PageData) {
 						<tr>
 							<th class="py-2 px-2">Product</th>
 							<th class="py-2 px-2 text-right">On hand</th>
-							<th class="py-2 px-2 text-right">Last sold</th>
+							<th class="py-2 px-2 text-right">Reason</th>
 							<th class="py-2 px-2 text-right">Cost</th>
 							<th class="py-2 px-2 text-right">Price</th>
 							<th class="py-2 px-2 text-right">New price</th>
@@ -79,7 +85,13 @@ templ Page(d PageData) {
 									}
 								</td>
 								<td class="py-2 px-2 text-right">{ r.OnHand } <span class="text-slate-400">{ r.Unit }</span></td>
-								<td class="py-2 px-2 text-right text-slate-500">{ r.DaysLabel }</td>
+								<td class="py-2 px-2 text-right">
+									if r.Expiring {
+										<span class="px-1.5 py-0.5 rounded text-xs font-medium text-amber-700 bg-amber-50">{ r.DaysLabel }</span>
+									} else {
+										<span class="text-slate-500">{ r.DaysLabel }</span>
+									}
+								</td>
 								<td class="py-2 px-2 text-right">{ r.Cost }</td>
 								<td class="py-2 px-2 text-right">{ r.Price }</td>
 								<td class="py-2 px-2 text-right font-semibold text-emerald-700">{ r.NewPrice }</td>

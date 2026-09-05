@@ -2,6 +2,7 @@ package clearance
 
 import (
 	"context"
+	"time"
 
 	"karots-pos/internal/plugin"
 
@@ -17,19 +18,20 @@ type Settings struct {
 	StaleDays        int             `db:"stale_days"`
 	DefaultPercent   decimal.Decimal `db:"default_percent"`
 	MinMarginPercent decimal.Decimal `db:"min_margin_percent"`
+	ExpiryDays       int             `db:"expiry_days"` // flag lots expiring within this window
 }
 
 func (s *Store) GetSettings(ctx context.Context) (Settings, error) {
 	var out Settings
 	err := s.db.GetContext(ctx, &out,
-		`SELECT stale_days, default_percent, min_margin_percent FROM clearance_settings WHERE id = 1`)
+		`SELECT stale_days, default_percent, min_margin_percent, expiry_days FROM clearance_settings WHERE id = 1`)
 	return out, err
 }
 
 func (s *Store) SaveSettings(ctx context.Context, in Settings) error {
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE clearance_settings SET stale_days=$1, default_percent=$2, min_margin_percent=$3 WHERE id = 1`,
-		in.StaleDays, in.DefaultPercent, in.MinMarginPercent)
+		`UPDATE clearance_settings SET stale_days=$1, default_percent=$2, min_margin_percent=$3, expiry_days=$4 WHERE id = 1`,
+		in.StaleDays, in.DefaultPercent, in.MinMarginPercent, in.ExpiryDays)
 	return err
 }
 
@@ -66,15 +68,19 @@ type StaleItem struct {
 	OnHand        decimal.Decimal  `db:"stock_qty"`
 	Cost          decimal.Decimal  `db:"cost_price"`
 	Price         decimal.Decimal  `db:"selling_price"`
-	DaysSinceSale *int             `db:"days_since_sale"` // nil = never sold
-	Status        *string          `db:"status"`          // approved | dismissed | nil (candidate)
+	DaysSinceSale *int             `db:"days_since_sale"`  // nil = never sold
+	SoonestExpiry *time.Time       `db:"soonest_expiry"`   // soonest FUTURE lot expiry, nil = none
+	Status        *string          `db:"status"`           // approved | dismissed | nil (candidate)
 	MarkdownType  *string          `db:"discount_type"`
 	MarkdownValue *decimal.Decimal `db:"discount_value"`
 }
 
-// StaleItems lists products with stock but no sale within stale_days (or never
-// sold), plus any already-approved markdowns, excluding dismissed ones. Services
-// and inactive products are excluded.
+// StaleItems lists clearance candidates: products with stock that either haven't
+// sold within stale_days (slow movers) OR have a live lot expiring within
+// expiry_days (sell it before it must be written off). Already-approved markdowns
+// are included; dismissed ones and services/inactive products are excluded.
+// Already-expired lots are NOT clearance candidates — those belong on the Batches
+// page's write-off, so the expiry join only considers future-dated lots.
 func (s *Store) StaleItems(ctx context.Context) ([]StaleItem, error) {
 	cfg, err := s.GetSettings(ctx)
 	if err != nil {
@@ -86,6 +92,7 @@ func (s *Store) StaleItems(ctx context.Context) ([]StaleItem, error) {
 		       COALESCE(st.quantity, 0) AS stock_qty, p.cost_price, p.selling_price,
 		       CASE WHEN ls.last_sold IS NULL THEN NULL
 		            ELSE EXTRACT(DAY FROM now() - ls.last_sold)::int END AS days_since_sale,
+		       be.soonest_expiry,
 		       m.status, m.discount_type, m.discount_value
 		FROM products p
 		JOIN units u ON u.id = p.unit_id
@@ -95,13 +102,22 @@ func (s *Store) StaleItems(ctx context.Context) ([]StaleItem, error) {
 		    FROM sale_items si JOIN sales sa ON sa.id = si.sale_id
 		    GROUP BY si.product_id
 		) ls ON ls.product_id = p.id
+		LEFT JOIN (
+		    SELECT product_id, MIN(expiry_date) AS soonest_expiry
+		    FROM stock_batches
+		    WHERE qty_remaining > 0 AND expiry_date IS NOT NULL AND expiry_date > now()
+		    GROUP BY product_id
+		) be ON be.product_id = p.id
 		LEFT JOIN clearance_markdowns m ON m.product_id = p.id
 		WHERE p.is_active = true AND p.is_service = false
 		  AND COALESCE(st.quantity, 0) > 0
-		  AND (ls.last_sold IS NULL OR ls.last_sold < now() - ($1 || ' days')::interval)
+		  AND (
+		        (ls.last_sold IS NULL OR ls.last_sold < now() - ($1 || ' days')::interval)
+		     OR (be.soonest_expiry IS NOT NULL AND be.soonest_expiry <= now() + ($2 || ' days')::interval)
+		  )
 		  AND (m.status IS DISTINCT FROM 'dismissed')
-		ORDER BY ls.last_sold ASC NULLS FIRST, p.name`,
-		cfg.StaleDays)
+		ORDER BY be.soonest_expiry ASC NULLS LAST, ls.last_sold ASC NULLS FIRST, p.name`,
+		cfg.StaleDays, cfg.ExpiryDays)
 	return rows, err
 }
 

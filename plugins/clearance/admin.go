@@ -1,8 +1,10 @@
 package clearance
 
 import (
+	"math"
 	"net/http"
 	"strconv"
+	"time"
 
 	"karots-pos/internal/middleware"
 	"karots-pos/internal/money"
@@ -31,9 +33,25 @@ func (a *adminUI) Page(c echo.Context) error {
 	rows := make([]Row, 0, len(items))
 	for _, it := range items {
 		pct := suggestPercent(it.Price, it.Cost, cfg.DefaultPercent, cfg.MinMarginPercent)
+		// Reason label: expiry wins over staleness when a lot is inside the window.
 		days := "never sold"
 		if it.DaysSinceSale != nil {
 			days = strconv.Itoa(*it.DaysSinceSale) + " days"
+		}
+		expiring := false
+		if it.SoonestExpiry != nil {
+			// Round up so a lot dated N calendar days out reads "N days", not N-1.
+			if d := int(math.Ceil(time.Until(*it.SoonestExpiry).Hours() / 24)); d <= cfg.ExpiryDays {
+				expiring = true
+				switch {
+				case d <= 0:
+					days = "expires today"
+				case d == 1:
+					days = "expires in 1 day"
+				default:
+					days = "expires in " + strconv.Itoa(d) + " days"
+				}
+			}
 		}
 		approved := it.Status != nil && *it.Status == "approved"
 		apct := ""
@@ -49,6 +67,7 @@ func (a *adminUI) Page(c echo.Context) error {
 			Cost:        money.Format(symbol, it.Cost),
 			Price:       money.Format(symbol, it.Price),
 			DaysLabel:   days,
+			Expiring:    expiring,
 			SuggestPct:  pct.String(),
 			NewPrice:    money.Format(symbol, newPrice(it.Price, pct)),
 			Approved:    approved,
@@ -62,6 +81,7 @@ func (a *adminUI) Page(c echo.Context) error {
 		StaleDays:        cfg.StaleDays,
 		DefaultPercent:   cfg.DefaultPercent.String(),
 		MinMarginPercent: cfg.MinMarginPercent.String(),
+		ExpiryDays:       cfg.ExpiryDays,
 	}))
 }
 
@@ -104,7 +124,11 @@ func (a *adminUI) SaveSettings(c echo.Context) error {
 	if err != nil {
 		mm = decimal.NewFromInt(5)
 	}
-	if err := a.p.store.SaveSettings(c.Request().Context(), Settings{StaleDays: days, DefaultPercent: dp, MinMarginPercent: mm}); err != nil {
+	xd, _ := strconv.Atoi(c.FormValue("expiry_days"))
+	if xd < 1 {
+		xd = 14
+	}
+	if err := a.p.store.SaveSettings(c.Request().Context(), Settings{StaleDays: days, DefaultPercent: dp, MinMarginPercent: mm, ExpiryDays: xd}); err != nil {
 		return err
 	}
 	return c.Redirect(http.StatusSeeOther, "/admin/clearance")
