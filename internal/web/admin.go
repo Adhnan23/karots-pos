@@ -531,20 +531,25 @@ func (a *adminUI) Stock(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	moves, err := a.s.stock.Movements(ctx, nil, c.QueryParam("type"), 50)
+	// The landing page shows only a short preview; the full audit trail (who,
+	// when, filters, pagination) lives at /admin/stock/movements.
+	moves, err := a.s.stock.Movements(ctx, nil, "", stockPreviewSize)
 	if err != nil {
 		return err
 	}
 	return response.RenderPage(c, adminpages.StockPage(adminpages.StockData{
-		UserName:   middleware.CurrentUserName(c),
-		Products:   prods,
-		Movements:  moves,
-		MoveType:   c.QueryParam("type"),
+		UserName:  middleware.CurrentUserName(c),
+		Products:  prods,
+		Movements: moves,
 	}))
 }
 
+// stockPreviewSize is how many recent movements the Inventory landing previews
+// before pointing at the full history page.
+const stockPreviewSize = 8
+
 func (a *adminUI) StockTable(c echo.Context) error {
-	moves, err := a.s.stock.Movements(c.Request().Context(), nil, c.QueryParam("type"), 50)
+	moves, err := a.s.stock.Movements(c.Request().Context(), nil, "", stockPreviewSize)
 	if err != nil {
 		return err
 	}

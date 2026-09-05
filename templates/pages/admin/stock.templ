@@ -2,19 +2,21 @@ package adminpages
 
 import (
 	"strconv"
+	"strings"
 
 	"karots-pos/internal/features/products"
 	"karots-pos/internal/features/stock"
 	"karots-pos/internal/money"
 	adminfragments "karots-pos/templates/fragments/admin"
 	"karots-pos/templates/layouts"
+
+	"github.com/shopspring/decimal"
 )
 
 type StockData struct {
 	UserName  string
 	Products  []products.Product
 	Movements []stock.Movement
-	MoveType  string
 }
 
 templ StockPage(d StockData) {
@@ -62,27 +64,11 @@ templ StockPage(d StockData) {
 			<div class="bg-white rounded-2xl shadow-sm p-6">
 				<div class="flex items-center justify-between mb-4">
 					<h2 class="text-lg font-semibold">Recent Movements</h2>
-					<select
-						class="border rounded-lg px-2 py-1 text-sm"
-						name="type"
-						hx-get="/admin/stock/table"
-						hx-target="#movement-tbody"
-						hx-swap="innerHTML"
-						hx-trigger="change"
-					>
-						@moveTypeOption("", "All types", d.MoveType)
-						@moveTypeOption("purchase", "Purchase", d.MoveType)
-						@moveTypeOption("sale", "Sale", d.MoveType)
-						@moveTypeOption("adjust", "Adjustment", d.MoveType)
-						@moveTypeOption("return", "Return", d.MoveType)
-						@moveTypeOption("damage", "Damage", d.MoveType)
-						@moveTypeOption("own_use", "Shop own use", d.MoveType)
-						@moveTypeOption("staff", "Staff welfare", d.MoveType)
-					</select>
+					<a href="/admin/stock/movements" class="text-sm text-indigo-600 hover:underline">View all →</a>
 				</div>
 				<table class="w-full text-sm">
 					<thead class="text-left text-slate-500 border-b">
-						<tr><th class="py-2">When</th><th class="py-2">Product</th><th class="py-2">Type</th><th class="py-2 text-right">Qty</th></tr>
+						<tr><th class="py-2">When</th><th class="py-2">Product</th><th class="py-2">Type</th><th class="py-2 text-right pr-4">Qty</th><th class="py-2">By</th></tr>
 					</thead>
 					<tbody id="movement-tbody"
 						hx-get="/admin/stock/table"
@@ -131,17 +117,34 @@ templ StockLevelRows(prods []products.Product) {
 
 templ MovementRows(rows []stock.Movement) {
 	if len(rows) == 0 {
-		<tr><td colspan="4" class="py-6 text-center text-slate-500">No movements yet.</td></tr>
+		<tr><td colspan="5" class="py-6 text-center text-slate-500">No movements yet.</td></tr>
 	} else {
 		for _, m := range rows {
 			<tr class="border-b last:border-0">
-				<td class="py-2 text-slate-500">{ m.CreatedAt.Format("01-02 15:04") }</td>
+				<td class="py-2 text-slate-500 whitespace-nowrap">{ m.CreatedAt.Format("01-02 15:04") }</td>
 				<td class="py-2">{ m.ProductName }</td>
-				<td class="py-2 capitalize">{ m.Type }</td>
-				<td class="py-2 text-right">{ money.Display(m.Quantity) }</td>
+				<td class="py-2 capitalize">{ moveTypeLabel(m.Type) }</td>
+				<td class={ "py-2 text-right pr-4 whitespace-nowrap font-medium", templ.KV("text-emerald-600", m.Quantity.IsPositive()), templ.KV("text-rose-600", m.Quantity.IsNegative()) }>{ signedQty(m.Quantity) }</td>
+				<td class="py-2 text-slate-500">{ m.UserName }</td>
 			</tr>
 		}
 	}
+}
+
+// signedQty prints a movement quantity with an explicit + for stock coming in,
+// so a glance separates a receipt from a sale even before the colour registers.
+func signedQty(q decimal.Decimal) string {
+	s := money.Display(q)
+	if q.IsPositive() {
+		return "+" + s
+	}
+	return s
+}
+
+// moveTypeLabel turns a raw movement type ("own_use") into something readable
+// ("own use"); the template capitalises it.
+func moveTypeLabel(t string) string {
+	return strings.ReplaceAll(t, "_", " ")
 }
 
 type StockMovementsData struct {
@@ -262,11 +265,22 @@ func batchPriceValue(b stock.Batch) string {
 // stickered at the old price keeps selling at that price after a new delivery
 // moves the shelf price on.
 templ BatchesModal(p products.Product, batches []stock.Batch, symbol string) {
-	@modalShell("Batches — " + p.Name) {
+	@modalShellWide("Batches — " + p.Name) {
 		<div class="p-6">
+			<div class="flex items-center justify-between mb-4">
+				<p class="text-sm text-slate-500">
+					if len(batches) == 1 {
+						1 live lot · <span class="font-medium text-slate-700">{ money.Display(p.StockQty) } { p.UnitAbbr }</span> on hand
+					} else {
+						{ strconv.Itoa(len(batches)) } live lots · <span class="font-medium text-slate-700">{ money.Display(p.StockQty) } { p.UnitAbbr }</span> on hand
+					}
+				</p>
+				<span class="text-xs text-slate-400">Earliest expiry sells first</span>
+			</div>
 			if len(batches) == 0 {
-				<p class="text-slate-500 text-sm">No live batches. On hand: { money.Display(p.StockQty) } { p.UnitAbbr }.</p>
+				<p class="text-slate-500 text-sm py-4 text-center">No live batches for this product.</p>
 			} else {
+				<div class="overflow-x-auto">
 				<table class="w-full text-sm">
 					<thead class="text-left text-slate-500 border-b">
 						<tr>
@@ -279,18 +293,27 @@ templ BatchesModal(p products.Product, batches []stock.Batch, symbol string) {
 						</tr>
 					</thead>
 					<tbody>
-						for _, b := range batches {
-							<tr class="border-b last:border-0">
-								<td class="py-2 pr-3">
+						for i, b := range batches {
+							{{ badge, badgeCls := expiryBadge(b.ExpiryDate) }}
+							<tr class={ "border-b last:border-0", templ.KV("bg-rose-50/60", badge == "expired") }>
+								<td class="py-2 pr-3 whitespace-nowrap">
 									if b.ExpiryDate != nil {
 										{ b.ExpiryDate.Format("2006-01-02") }
+										if badge != "" {
+											<span class={ "ml-1 px-1.5 py-0.5 rounded text-[11px] font-medium", badgeCls }>{ badge }</span>
+										}
 									} else {
-										<span class="text-slate-400">—</span>
+										<span class="text-slate-400">no expiry</span>
 									}
 								</td>
-								<td class="py-2 pr-3 capitalize text-slate-500">{ b.Source }</td>
-								<td class="py-2 pr-3 text-right">{ money.Display(b.QtyRemaining) } { b.UnitAbbr }</td>
-								<td class="py-2 pr-3 text-right">{ money.Format(symbol, b.CostPrice) }</td>
+								<td class="py-2 pr-3 capitalize text-slate-500">
+									{ b.Source }
+									if i == 0 {
+										<span class="ml-1 px-1.5 py-0.5 rounded text-[11px] bg-indigo-100 text-indigo-700">next to sell</span>
+									}
+								</td>
+								<td class="py-2 pr-3 text-right whitespace-nowrap">{ money.Display(b.QtyRemaining) } { b.UnitAbbr }</td>
+								<td class="py-2 pr-3 text-right whitespace-nowrap">{ money.Format(symbol, b.CostPrice) }</td>
 								<td class="py-2 pr-3 text-right">
 									<form
 										class="flex items-center justify-end gap-1"
@@ -314,11 +337,13 @@ templ BatchesModal(p products.Product, batches []stock.Batch, symbol string) {
 										<div class="text-[11px] text-slate-400 pr-1">product price</div>
 									}
 								</td>
-								<td class="py-2 text-right text-slate-500">{ b.CreatedAt.Format("2006-01-02") }</td>
+								<td class="py-2 text-right text-slate-500 whitespace-nowrap">{ b.CreatedAt.Format("2006-01-02") }</td>
 							</tr>
 						}
 					</tbody>
 				</table>
+				</div>
+				<p class="text-xs text-slate-400 mt-3">Set a lot's price to keep older stock selling at its sticker after a price change; blank follows the product's current price.</p>
 			}
 			<div class="flex justify-end pt-4">
 				<button type="button" class="px-4 py-2 rounded-lg border" x-on:click="$dispatch('close-modal')">Close</button>

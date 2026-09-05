@@ -23,6 +23,20 @@ templ modalShell(title string) {
 	</div>
 }
 
+// modalShellWide is modalShell for content that needs room — a multi-column
+// table rather than a stacked form (e.g. the batches list).
+templ modalShellWide(title string) {
+	<div class="fixed inset-0 bg-black/40 flex items-center justify-center z-40 p-4" x-data>
+		<div class="bg-white rounded-2xl shadow-xl w-full max-w-3xl max-h-full overflow-auto">
+			<div class="flex items-center justify-between px-6 py-4 border-b">
+				<h3 class="text-lg font-semibold">{ title }</h3>
+				<button class="text-slate-400 hover:text-slate-600" x-on:click="$dispatch('close-modal')">✕</button>
+			</div>
+			{ children... }
+		</div>
+	</div>
+}
+
 templ modalButtons() {
 	<div class="flex justify-end gap-3 pt-2">
 		<button type="button" class="px-4 py-2 rounded-lg border" x-on:click="$dispatch('close-modal')">Cancel</button>
