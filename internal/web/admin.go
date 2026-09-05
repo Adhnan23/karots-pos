@@ -110,9 +110,17 @@ func (a *adminUI) Dashboard(c echo.Context) error {
 	var due decimal.Decimal
 	_ = a.db.GetContext(ctx, &due, `SELECT COALESCE(SUM(outstanding_balance),0) FROM customers`)
 
-	expiring, err := a.s.stock.Expiring(ctx, 30)
+	expiring, err := a.s.stock.Expiring(ctx, 30) // <= now+30, includes already-expired
 	if err != nil {
 		return err
+	}
+	var expiredCount, expiringCount int
+	for _, b := range expiring {
+		if b.ExpiryDate != nil && b.ExpiryDate.Before(now) {
+			expiredCount++
+		} else {
+			expiringCount++
+		}
 	}
 
 	reviewCount, err := a.s.products.CountNeedsReview(ctx)
@@ -126,7 +134,8 @@ func (a *adminUI) Dashboard(c echo.Context) error {
 		TodayCount:     pl.SalesCount,
 		TodayTotal:     pl.Revenue,
 		LowStockCount:  lowStock,
-		ExpiringCount:  len(expiring),
+		ExpiringCount:  expiringCount,
+		ExpiredCount:   expiredCount,
 		OutstandingDue: due,
 		ReviewCount:    reviewCount,
 		Recent:         recent,
@@ -698,6 +707,8 @@ func (a *adminUI) batchesData(c echo.Context) (adminpages.BatchesManageData, err
 	d := adminpages.BatchesManageData{
 		UserName: middleware.CurrentUserName(c),
 		Symbol:   a.symbol(ctx),
+		Q:        strings.TrimSpace(c.QueryParam("q")),
+		Show:     c.QueryParam("show"),
 	}
 	idx := map[int64]int{} // product id -> index into d.Groups
 	for _, b := range rows {
@@ -748,7 +759,61 @@ func (a *adminUI) batchesData(c echo.Context) (adminpages.BatchesManageData, err
 		}
 		return strings.Compare(x.ProductName, y.ProductName)
 	})
+
+	// Filter the displayed groups (the banner totals above stay over everything).
+	q := strings.ToLower(d.Q)
+	if q != "" || d.Show != "" {
+		kept := d.Groups[:0]
+		for _, g := range d.Groups {
+			if q != "" && !strings.Contains(strings.ToLower(g.ProductName), q) {
+				continue
+			}
+			switch d.Show {
+			case "expired":
+				if g.Expired == 0 {
+					continue
+				}
+			case "attention":
+				if g.Expired == 0 && g.ExpiringSoon == 0 {
+					continue
+				}
+			}
+			kept = append(kept, g)
+		}
+		d.Groups = kept
+	}
 	return d, nil
+}
+
+// WriteOffExpired writes off every currently-expired lot as damage in one action
+// — the bulk companion to the per-lot button on the Batches page.
+func (a *adminUI) WriteOffExpired(c echo.Context) error {
+	ctx := c.Request().Context()
+	rows, err := a.s.stock.Expiring(ctx, 0)
+	if err != nil {
+		return err
+	}
+	now := time.Now()
+	n := 0
+	for _, b := range rows {
+		if b.ExpiryDate == nil || !b.ExpiryDate.Before(now) {
+			continue
+		}
+		if err := a.s.stock.Consume(ctx, stock.ConsumeInput{
+			ProductID: b.ProductID, Quantity: b.QtyRemaining.String(),
+			Reason: "damage", BatchID: b.ID, Note: "expired " + b.ExpiryDate.Format("2006-01-02"),
+		}, middleware.CurrentUserID(c)); err != nil {
+			return err
+		}
+		n++
+	}
+	msg := "No expired stock to write off"
+	if n == 1 {
+		msg = "1 expired lot written off"
+	} else if n > 1 {
+		msg = strconv.Itoa(n) + " expired lots written off"
+	}
+	return htmxReload(c, msg, "reload-stock")
 }
 
 func (a *adminUI) StockForm(c echo.Context) error {

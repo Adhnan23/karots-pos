@@ -338,6 +338,7 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	ag.GET("/stock/damage", admin.DamageForm)
 	ag.POST("/stock/damage", admin.DamageRecord)
 	ag.GET("/stock/batches", admin.BatchesPage)
+	ag.POST("/stock/expired/write-off-all", admin.WriteOffExpired)
 	ag.GET("/stock/batches/:id", admin.BatchesView)
 	ag.POST("/stock/batches/:id/price", admin.BatchPriceSet)
 	ag.GET("/stock/lots/:id", admin.ProductLots)

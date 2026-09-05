@@ -21,6 +21,7 @@ type DashboardData struct {
 	TodayTotal     decimal.Decimal
 	LowStockCount  int
 	ExpiringCount  int
+	ExpiredCount   int
 	OutstandingDue decimal.Decimal
 	ReviewCount    int
 	Recent         []sales.Sale
@@ -75,11 +76,14 @@ templ Dashboard(d DashboardData) {
 				<span class="text-sm font-medium">Review now →</span>
 			</a>
 		}
-		<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
+		<div class={ "grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8", templ.KV("lg:grid-cols-6", d.ExpiredCount > 0), templ.KV("lg:grid-cols-5", d.ExpiredCount == 0) }>
 			@statCardDelta("Today's Sales", strconv.Itoa(d.TodayCount), "indigo", "/admin/sales?preset=today", d.SalesDelta)
 			@statCardDelta("Today's Revenue", money.Format(d.Symbol, d.TodayTotal), "emerald", "/admin/finance", d.RevenueDelta)
 			@statCardLink("Low Stock Items", strconv.Itoa(d.LowStockCount), "amber", "/admin/reports/low-stock")
-			@statCardLink("Expiring Soon", strconv.Itoa(d.ExpiringCount), "rose", "/admin/reports/batches?days=30")
+			if d.ExpiredCount > 0 {
+				@statCardLink("Expired", strconv.Itoa(d.ExpiredCount), "rose", "/admin/stock/batches?show=expired")
+			}
+			@statCardLink("Expiring Soon", strconv.Itoa(d.ExpiringCount), "amber", "/admin/stock/batches?show=attention")
 			@statCardLink("Customer Dues", money.Format(d.Symbol, d.OutstandingDue), "rose", "/admin/customers")
 		</div>
 

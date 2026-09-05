@@ -1,6 +1,7 @@
 package adminpages
 
 import (
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -375,12 +376,27 @@ templ BatchesModal(p products.Product, batches []stock.Batch, symbol string) {
 // product, plus the expired / expiring-soon buckets shown in the alert on top.
 type BatchesManageData struct {
 	UserName, Symbol      string
+	Q, Show               string // product search + view filter ("", "attention", "expired")
 	Groups                []BatchGroup
 	Expired, ExpiringSoon int
 	NoExpiry              int
 	TotalValue            decimal.Decimal
 	ExpiredValue          decimal.Decimal
 	ExpiringValue         decimal.Decimal
+}
+
+// batchBodyURL is the refreshable body's fetch URL, carrying the current filters
+// so a reload-stock refresh (after a write-off) keeps the same view.
+func batchBodyURL(d BatchesManageData) string {
+	q := url.Values{}
+	q.Set("body", "1")
+	if d.Q != "" {
+		q.Set("q", d.Q)
+	}
+	if d.Show != "" {
+		q.Set("show", d.Show)
+	}
+	return "/admin/stock/batches?" + q.Encode()
 }
 
 // BatchGroup is one product's live lots, so the page can collapse them under a
@@ -405,8 +421,26 @@ templ BatchesManagePage(d BatchesManageData) {
 			</div>
 		</div>
 		<div class="bg-white rounded-2xl shadow-sm p-6">
+			<form method="get" action="/admin/stock/batches" class="flex flex-wrap items-end gap-3 mb-5">
+				<div>
+					<label class="block text-xs text-slate-500 mb-1">Product</label>
+					<input type="text" name="q" value={ d.Q } placeholder="Search product…" class="border rounded-lg px-3 py-1.5 text-sm w-56"/>
+				</div>
+				<div>
+					<label class="block text-xs text-slate-500 mb-1">Show</label>
+					<select name="show" class="border rounded-lg px-2 py-1.5 text-sm">
+						@movProductOption("", "All batches", d.Show)
+						@movProductOption("attention", "Expiring & expired", d.Show)
+						@movProductOption("expired", "Expired only", d.Show)
+					</select>
+				</div>
+				<button type="submit" class="px-4 py-1.5 rounded-lg bg-indigo-600 text-white text-sm font-medium">Filter</button>
+				if d.Q != "" || d.Show != "" {
+					<a href="/admin/stock/batches" class="px-4 py-1.5 rounded-lg border text-sm text-slate-600">Clear</a>
+				}
+			</form>
 			<div id="batches-body"
-				hx-get="/admin/stock/batches?body=1"
+				hx-get={ batchBodyURL(d) }
 				hx-trigger="reload-stock from:body"
 				hx-target="#batches-body"
 				hx-swap="innerHTML"
@@ -421,9 +455,12 @@ templ BatchesBody(d BatchesManageData) {
 	if d.Expired > 0 || d.ExpiringSoon > 0 {
 		<div class="flex flex-wrap gap-3 mb-5">
 			if d.Expired > 0 {
-				<div class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm text-rose-700">
-					⚠ <span class="font-semibold">{ strconv.Itoa(d.Expired) } expired</span>
-					<span class="text-rose-500">· { money.Format(d.Symbol, d.ExpiredValue) } — write off below</span>
+				<div class="flex items-center gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm text-rose-700">
+					<span>⚠ <span class="font-semibold">{ strconv.Itoa(d.Expired) } expired</span> · { money.Format(d.Symbol, d.ExpiredValue) }</span>
+					<button type="button"
+						hx-post="/admin/stock/expired/write-off-all" hx-swap="none"
+						hx-confirm={ "Write off all " + strconv.Itoa(d.Expired) + " expired lots as damaged?" }
+						class="px-3 py-1 rounded-lg bg-rose-600 text-white text-xs font-medium">Write off all</button>
 				</div>
 			}
 			if d.ExpiringSoon > 0 {
