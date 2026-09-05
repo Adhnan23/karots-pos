@@ -14,7 +14,8 @@ func AdminSections() []AdminSection {
 		{"Inventory", "/admin/inventory", "inventory", "📦", []AdminLink{
 			{"/admin/products", "Products", "products", "Product catalogue & pricing"},
 			{"/admin/products/review", "Items to Review", "review", "Quick-added items needing details"},
-			{"/admin/stock", "Stock & Movements", "stock", "Adjust stock and view movement history"},
+			{"/admin/stock", "Stock Movement", "stock", "On-hand levels and movement history"},
+			{"/admin/stock/batches", "Batches", "batches", "Live lots, expiry alerts and write-offs"},
 			{"/admin/stock/take", "Stock-take", "stocktake", "Count and reconcile on-hand quantities"},
 			{"/admin/inventory/intake", "Stock Intake", "intake", "Add or restock items, set quantity, and print labels in one place"},
 			{"/admin/conversions", "Conversions", "conversions", "Repack / break bulk into sellable units"},

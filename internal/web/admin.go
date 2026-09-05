@@ -668,6 +668,52 @@ func (a *adminUI) StockMovements(c echo.Context) error {
 	}))
 }
 
+// BatchesPage is the detailed live-lot view: an expiry alert with one-tap
+// write-offs for expired lots on top (the admin mirror of the till's expired-lot
+// prompt), then every live lot with its expiry at a glance. Pass ?body=1 for the
+// refreshable inner fragment (reload-stock re-fetches it after a write-off).
+func (a *adminUI) BatchesPage(c echo.Context) error {
+	d, err := a.batchesData(c)
+	if err != nil {
+		return err
+	}
+	if c.QueryParam("body") == "1" {
+		return response.RenderFragment(c, adminpages.BatchesBody(d))
+	}
+	return response.RenderPage(c, adminpages.BatchesManagePage(d))
+}
+
+// batchesData loads every live lot (already earliest-expiry first) and buckets
+// them into expired / expiring-soon for the alert on top.
+func (a *adminUI) batchesData(c echo.Context) (adminpages.BatchesManageData, error) {
+	ctx := c.Request().Context()
+	rows, err := a.s.stock.AllBatches(ctx)
+	if err != nil {
+		return adminpages.BatchesManageData{}, err
+	}
+	now := time.Now()
+	soon := now.AddDate(0, 0, 30)
+	d := adminpages.BatchesManageData{
+		UserName: middleware.CurrentUserName(c),
+		Symbol:   a.symbol(ctx),
+		Rows:     rows,
+	}
+	for _, b := range rows {
+		d.TotalValue = d.TotalValue.Add(b.QtyRemaining.Mul(b.CostPrice))
+		switch {
+		case b.ExpiryDate == nil:
+			d.NoExpiry++
+		case b.ExpiryDate.Before(now):
+			d.Expired++
+			d.ExpiredValue = d.ExpiredValue.Add(b.QtyRemaining.Mul(b.CostPrice))
+		case b.ExpiryDate.Before(soon):
+			d.ExpiringSoon++
+			d.ExpiringValue = d.ExpiringValue.Add(b.QtyRemaining.Mul(b.CostPrice))
+		}
+	}
+	return d, nil
+}
+
 func (a *adminUI) StockForm(c echo.Context) error {
 	prods, _, err := a.s.products.List(c.Request().Context(), products.ListQuery{Limit: 100})
 	if err != nil {

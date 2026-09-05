@@ -3,6 +3,7 @@ package adminpages
 import (
 	"strconv"
 	"strings"
+	"time"
 
 	"karots-pos/internal/features/auth"
 	"karots-pos/internal/features/products"
@@ -21,10 +22,14 @@ type StockData struct {
 }
 
 templ StockPage(d StockData) {
-	@layouts.Admin("Inventory", d.UserName, "stock") {
+	@layouts.Admin("Stock Movement", d.UserName, "stock") {
 		<div class="flex items-center justify-between mb-6">
-			<h1 class="text-2xl font-bold">Inventory</h1>
+			<h1 class="text-2xl font-bold">Stock Movement</h1>
 			<div class="flex gap-2">
+				<a
+					class="px-4 py-2 rounded-lg border font-medium"
+					href="/admin/stock/batches"
+				>Batches</a>
 				<a
 					class="px-4 py-2 rounded-lg border font-medium"
 					href="/admin/stock/movements"
@@ -364,6 +369,130 @@ templ BatchesModal(p products.Product, batches []stock.Batch, symbol string) {
 			</div>
 		</div>
 	}
+}
+
+// BatchesManageData drives the detailed Batches page: every live lot plus the
+// expired / expiring-soon buckets shown in the alert on top.
+type BatchesManageData struct {
+	UserName, Symbol      string
+	Rows                  []stock.Batch
+	Expired, ExpiringSoon int
+	NoExpiry              int
+	TotalValue            decimal.Decimal
+	ExpiredValue          decimal.Decimal
+	ExpiringValue         decimal.Decimal
+}
+
+templ BatchesManagePage(d BatchesManageData) {
+	@layouts.Admin("Batches", d.UserName, "batches") {
+		<div class="flex items-center justify-between mb-6">
+			<div>
+				<h1 class="text-2xl font-bold">Batches</h1>
+				<p class="text-sm text-slate-500">Every live lot, earliest expiry first. Write off expired stock so it stops being sold.</p>
+			</div>
+			<div class="flex gap-2">
+				<a class="px-4 py-2 rounded-lg border font-medium" href="/admin/stock">← Stock Movement</a>
+				<a class="px-4 py-2 rounded-lg border font-medium" href="/admin/reports/batches">Report / CSV</a>
+			</div>
+		</div>
+		<div class="bg-white rounded-2xl shadow-sm p-6">
+			<div id="batches-body"
+				hx-get="/admin/stock/batches?body=1"
+				hx-trigger="reload-stock from:body"
+				hx-target="#batches-body"
+				hx-swap="innerHTML"
+			>
+				@BatchesBody(d)
+			</div>
+		</div>
+	}
+}
+
+templ BatchesBody(d BatchesManageData) {
+	if d.Expired > 0 || d.ExpiringSoon > 0 {
+		<div class="flex flex-wrap gap-3 mb-5">
+			if d.Expired > 0 {
+				<div class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm text-rose-700">
+					⚠ <span class="font-semibold">{ strconv.Itoa(d.Expired) } expired</span>
+					<span class="text-rose-500">· { money.Format(d.Symbol, d.ExpiredValue) } — write off below</span>
+				</div>
+			}
+			if d.ExpiringSoon > 0 {
+				<div class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-700">
+					<span class="font-semibold">{ strconv.Itoa(d.ExpiringSoon) } expiring in 30 days</span>
+					<span class="text-amber-600">· { money.Format(d.Symbol, d.ExpiringValue) }</span>
+				</div>
+			}
+		</div>
+	} else if len(d.Rows) > 0 {
+		<div class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm text-emerald-700 mb-5">
+			✓ Nothing expired or expiring within 30 days.
+		</div>
+	}
+	<div class="overflow-x-auto">
+		<table class="w-full text-sm">
+			<thead class="text-left text-slate-500 border-b">
+				<tr>
+					<th class="py-2 pr-3">Product</th>
+					<th class="py-2 pr-3">Expiry</th>
+					<th class="py-2 pr-3 text-right">Remaining</th>
+					<th class="py-2 pr-3 text-right">Cost</th>
+					<th class="py-2 pr-3 text-right">Value</th>
+					<th class="py-2 text-right"></th>
+				</tr>
+			</thead>
+			<tbody>
+				for _, b := range d.Rows {
+					{{ lbl, cls := expiryBadge(b.ExpiryDate) }}
+					<tr class={ "border-b last:border-0", templ.KV("bg-rose-50/60", lbl == "expired") }>
+						<td class="py-2 pr-3">
+							<div class="font-medium">{ b.ProductName }</div>
+							if b.BatchNo != nil {
+								<div class="text-xs text-slate-400">batch { *b.BatchNo }</div>
+							}
+						</td>
+						<td class="py-2 pr-3 whitespace-nowrap">
+							if b.ExpiryDate != nil {
+								{ b.ExpiryDate.Format("2006-01-02") }
+								if lbl != "" {
+									<span class={ "ml-1 px-1.5 py-0.5 rounded text-[11px] font-medium", cls }>{ lbl }</span>
+								}
+							} else {
+								<span class="text-slate-400">no expiry</span>
+							}
+						</td>
+						<td class="py-2 pr-3 text-right whitespace-nowrap">{ money.Display(b.QtyRemaining) } { b.UnitAbbr }</td>
+						<td class="py-2 pr-3 text-right whitespace-nowrap">{ money.Format(d.Symbol, b.CostPrice) }</td>
+						<td class="py-2 pr-3 text-right whitespace-nowrap">{ money.Format(d.Symbol, b.QtyRemaining.Mul(b.CostPrice)) }</td>
+						<td class="py-2 text-right whitespace-nowrap">
+							if lbl == "expired" {
+								<form hx-post="/admin/stock/damage" hx-swap="none"
+									hx-confirm={ "Write off " + money.Display(b.QtyRemaining) + " " + b.UnitAbbr + " of " + b.ProductName + " as damaged?" }>
+									<input type="hidden" name="product_id" value={ strconv.FormatInt(b.ProductID, 10) }/>
+									<input type="hidden" name="batch_id" value={ strconv.FormatInt(b.ID, 10) }/>
+									<input type="hidden" name="quantity" value={ b.QtyRemaining.String() }/>
+									<input type="hidden" name="reason" value="damage"/>
+									<input type="hidden" name="note" value={ expiredNote(b.ExpiryDate) }/>
+									<button type="submit" class="px-3 py-1.5 rounded-lg bg-rose-600 text-white text-xs font-medium">Write off</button>
+								</form>
+							}
+						</td>
+					</tr>
+				}
+				if len(d.Rows) == 0 {
+					<tr><td colspan="6" class="py-10 text-center text-slate-500">No live batches.</td></tr>
+				}
+			</tbody>
+		</table>
+	</div>
+}
+
+// expiredNote is the write-off note stamped on an expired lot's damage movement.
+func expiredNote(exp *time.Time) string {
+	if exp == nil {
+		return "expired"
+	}
+	return "expired " + exp.Format("2006-01-02")
 }
 
 templ moveTypeOption(value, label, selected string) {
