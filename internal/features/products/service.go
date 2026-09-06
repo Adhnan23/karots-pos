@@ -96,6 +96,20 @@ func (s *Service) Get(ctx context.Context, id int64) (*Product, error) {
 	return p, nil
 }
 
+// FindByName returns the active product with this exact (case-insensitive) name,
+// or nil when none exists. Used by Stock Intake to warn before creating a
+// duplicate. A DB error other than "no rows" is surfaced.
+func (s *Service) FindByName(ctx context.Context, name string) (*Product, error) {
+	p, err := s.repo.FindByName(ctx, name)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, apperr.Internal("failed to look up product", err)
+	}
+	return p, nil
+}
+
 // PriceOptions backs the till's lot prompt. It returns, for every product whose
 // live lots disagree on price OR include an expired lot, that product's options —
 // nothing else. The till loads this once at startup and refreshes it after each

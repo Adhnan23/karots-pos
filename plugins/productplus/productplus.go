@@ -50,6 +50,9 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 	reg.AddProductFormValidate(p.validateProductForm)
 	reg.AddProductSaved(p.saveProductForm)
 
+	// Stock Intake fast path: only the fields flagged "show in stock intake".
+	reg.AddIntakeFormSection(plugin.IntakeFormSection{Render: p.renderIntakeForm, Save: p.saveIntakeForm})
+
 	// Search: register the contributor hook. The web layer fans every plugin's
 	// contributor into the products search seam, so this composes with other plugins.
 	reg.AddProductSearchContributor(plugin.ProductSearchContributor{Match: p.matchProducts})

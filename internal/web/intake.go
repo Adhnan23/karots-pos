@@ -11,10 +11,12 @@ import (
 	"karots-pos/internal/features/stock"
 	"karots-pos/internal/middleware"
 	"karots-pos/internal/money"
+	"karots-pos/internal/plugin"
 	"karots-pos/internal/response"
 	adminfragments "karots-pos/templates/fragments/admin"
 	adminpages "karots-pos/templates/pages/admin"
 
+	"github.com/a-h/templ"
 	"github.com/labstack/echo/v4"
 )
 
@@ -47,12 +49,27 @@ func (a *adminUI) IntakePage(c echo.Context) error {
 	if unitSel == 0 && len(us) > 0 {
 		unitSel = us[0].ID
 	}
+	// Plugin-contributed intake fields (Product Plus fields flagged "show in stock
+	// intake"). A render error is logged, never fatal to the page.
+	var extra []templ.Component
+	for _, sec := range plugin.IntakeFormSections() {
+		if sec.Render == nil {
+			continue
+		}
+		comp, err := sec.Render(ctx)
+		if err != nil {
+			c.Logger().Warnf("intake form section: %v", err)
+			continue
+		}
+		extra = append(extra, comp)
+	}
 	return response.RenderPage(c, adminpages.IntakePage(adminpages.IntakeData{
 		UserName:     middleware.CurrentUserName(c),
 		Symbol:       a.symbol(ctx),
 		Categories:   cats,
 		UnitOptions:  unitOpts,
 		UnitSelected: unitSel,
+		Extra:        extra,
 	}))
 }
 
@@ -71,11 +88,29 @@ func (a *adminUI) IntakeCreate(c echo.Context) error {
 		return err
 	}
 	ctx := c.Request().Context()
+	// Duplicate-name guard: at intake speed it's easy to re-create an item that
+	// already exists — send the owner to the search box to restock it instead.
+	if existing, derr := a.s.products.FindByName(ctx, strings.TrimSpace(in.Name)); derr == nil && existing != nil {
+		return apperr.Conflict("“" + existing.Name + "” already exists — search for it above to add stock instead of creating a duplicate")
+	}
 	p, err := a.s.products.Create(ctx, in)
 	if err != nil {
 		return err
 	}
 	a.s.logAudit(c, audit.ActionCreate, "product", strconv.FormatInt(p.ID, 10), "intake created "+in.Name)
+
+	// Persist any plugin intake fields (Product Plus). Best-effort: the product is
+	// already saved, so a plugin error is logged, not surfaced as a failure.
+	if form, ferr := c.FormParams(); ferr == nil {
+		for _, sec := range plugin.IntakeFormSections() {
+			if sec.Save == nil {
+				continue
+			}
+			if serr := sec.Save(ctx, p.ID, form); serr != nil {
+				c.Logger().Warnf("intake form save: %v", serr)
+			}
+		}
+	}
 
 	qty := strings.TrimSpace(c.FormValue("quantity"))
 	if qty != "" {

@@ -268,6 +268,16 @@ type ProductFormSection struct {
 	Render func(ctx context.Context, productID int64) (templ.Component, error)
 }
 
+// IntakeFormSection injects a plugin's fields into the core Stock Intake
+// "New item" form. Render draws the controls (defaults only — intake always
+// creates); Save persists the posted values after the product is created. A
+// plugin decides which of its fields belong on this fast path (e.g. Product Plus
+// shows only fields flagged "show in stock intake"). Both fail soft.
+type IntakeFormSection struct {
+	Render func(ctx context.Context) (templ.Component, error)
+	Save   func(ctx context.Context, productID int64, form url.Values) error
+}
+
 // ProductFormValidate runs BEFORE a product is created/updated on the admin form.
 // A plugin returns an apperr.Validation when a required custom field is missing;
 // core aborts the save and shows the error. The client-side `required` attribute
@@ -375,6 +385,7 @@ type ProductReorderAnnotator struct {
 
 var (
 	productFormSections      []ProductFormSection
+	intakeFormSections       []IntakeFormSection
 	productValidators        []ProductFormValidate
 	productSavedHooks        []ProductSaved
 	productSearchers         []ProductSearchContributor
@@ -389,6 +400,9 @@ var (
 
 func (r *Registry) AddProductFormSection(s ProductFormSection) {
 	productFormSections = append(productFormSections, s)
+}
+func (r *Registry) AddIntakeFormSection(s IntakeFormSection) {
+	intakeFormSections = append(intakeFormSections, s)
 }
 func (r *Registry) AddProductFormValidate(v ProductFormValidate) {
 	productValidators = append(productValidators, v)
@@ -420,6 +434,7 @@ func (r *Registry) AddProductReorderAnnotator(a ProductReorderAnnotator) {
 }
 
 func ProductFormSections() []ProductFormSection             { return productFormSections }
+func IntakeFormSections() []IntakeFormSection               { return intakeFormSections }
 func ProductFormValidators() []ProductFormValidate          { return productValidators }
 func ProductSavedHooks() []ProductSaved                     { return productSavedHooks }
 func ProductSearchContributors() []ProductSearchContributor { return productSearchers }

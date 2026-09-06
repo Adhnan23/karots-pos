@@ -3700,10 +3700,14 @@ function intake(sym) {
     pCost: "",
     pSelling: "",
     pWholesale: "",
+    pMarkup: "",
     pGenBusy: false,
     // create
     newName: "",
     cBarcode: "",
+    cCost: "",
+    cSelling: "",
+    cMarkup: "",
     // shared form state
     qty: "",
     labelQty: "1",
@@ -3771,6 +3775,75 @@ function intake(sym) {
       this.labelQty = String(Math.min(200, n));
     },
 
+    // --- two-way cost ⇄ selling via markup ---
+    // Typing cost sets selling (cost × markup); typing selling sets cost
+    // (selling ÷ markup); changing markup recomputes from whichever is present.
+    // @input only fires on your own typing, so setting the sibling never loops.
+    _round(n) {
+      return Number.isFinite(n) && n > 0 ? String(Math.round(n)) : "";
+    },
+    newFromCost() {
+      const c = parseFloat(this.cCost), m = parseFloat(this.cMarkup);
+      if (c > 0 && m > 1) this.cSelling = this._round(c * m);
+    },
+    newFromSell() {
+      const s = parseFloat(this.cSelling), m = parseFloat(this.cMarkup);
+      if (s > 0 && m > 1) this.cCost = this._round(s / m);
+    },
+    newFromMarkup() {
+      const c = parseFloat(this.cCost), s = parseFloat(this.cSelling), m = parseFloat(this.cMarkup);
+      if (m > 1) { if (c > 0) this.cSelling = this._round(c * m); else if (s > 0) this.cCost = this._round(s / m); }
+    },
+    reFromCost() {
+      const c = parseFloat(this.pCost), m = parseFloat(this.pMarkup);
+      if (c > 0 && m > 1) this.pSelling = this._round(c * m);
+    },
+    reFromSell() {
+      const s = parseFloat(this.pSelling), m = parseFloat(this.pMarkup);
+      if (s > 0 && m > 1) this.pCost = this._round(s / m);
+    },
+    reFromMarkup() {
+      const c = parseFloat(this.pCost), s = parseFloat(this.pSelling), m = parseFloat(this.pMarkup);
+      if (m > 1) { if (c > 0) this.pSelling = this._round(c * m); else if (s > 0) this.pCost = this._round(s / m); }
+    },
+
+    // onSearchEnter routes a barcode scanner's Enter: an exact barcode (or a lone
+    // result) restocks it; anything else opens New, pre-filling a scanned barcode.
+    async onSearchEnter() {
+      const s = (this.q || "").trim();
+      if (!s) return;
+      let rows = [];
+      try {
+        const json = await apiFetch("GET", "/api/products?search=" + encodeURIComponent(s) + "&limit=20");
+        rows = json.data || [];
+      } catch (_) { /* fall through to create */ }
+      const exact = rows.find((r) => (r.barcode || "") === s);
+      if (exact) { this.pickExisting(exact); return; }
+      if (rows.length === 1) { this.pickExisting(rows[0]); return; }
+      // No match → create. If the query looks like a scanned barcode, seed it there.
+      this.createNew();
+      if (/^\d{6,}$/.test(s)) { this.newName = ""; this.cBarcode = s; this.q = ""; this.drawNew(); }
+    },
+
+    // softResetNew powers the rapid loop: after creating an item, clear only the
+    // per-item fields and stay in New mode, keeping category, unit, supplier and
+    // markup (all held in the untouched DOM / state) for the next similar item.
+    softResetNew() {
+      this.newName = "";
+      this.cBarcode = "";
+      this.cCost = "";
+      this.cSelling = "";
+      this.qty = "";
+      this.labelQty = "1";
+      this.labelFields = [];
+      this.mode = "new";
+      this.drawNew();
+      this.$nextTick(() => {
+        const el = document.querySelector('#intake-new-name');
+        if (el) el.focus();
+      });
+    },
+
     async search() {
       const s = (this.q || "").trim();
       if (!s) {
@@ -3798,6 +3871,11 @@ function intake(sym) {
       this.pCost = r.cost_price != null ? String(r.cost_price) : "";
       this.pSelling = r.selling_price != null ? String(r.selling_price) : "";
       this.pWholesale = r.wholesale_price != null ? String(r.wholesale_price) : "";
+      // Pre-fill markup from the product's own cost/selling so the ratio shows.
+      {
+        const c = parseFloat(this.pCost), s = parseFloat(this.pSelling);
+        this.pMarkup = c > 0 && s > 0 ? String(Math.round((s / c) * 100) / 100) : "";
+      }
       this.q = r.name;
       this.qty = "";
       this.labelQty = "1";
@@ -3809,6 +3887,9 @@ function intake(sym) {
       this.mode = "new";
       this.newName = (this.q || "").trim();
       this.cBarcode = "";
+      this.cCost = "";
+      this.cSelling = "";
+      // cMarkup is intentionally kept so it carries between items (rapid loop).
       this.qty = "";
       this.labelQty = "1";
       this.labelFields = []; // a brand-new item has no custom values yet
@@ -3828,8 +3909,12 @@ function intake(sym) {
       this.pCost = "";
       this.pSelling = "";
       this.pWholesale = "";
+      this.pMarkup = "";
       this.newName = "";
       this.cBarcode = "";
+      this.cCost = "";
+      this.cSelling = "";
+      this.cMarkup = "";
       this.qty = "";
       this.labelQty = "1";
       this.$nextTick(() => this.$refs.searchInput && this.$refs.searchInput.focus());
@@ -3946,6 +4031,7 @@ function intake(sym) {
       }
     },
     async afterSave(item, form) {
+      const wasNew = this.mode === "new";
       if (this.printLabels && item.barcode) {
         try {
           await this.sendLabels(item, new FormData(form));
@@ -3959,7 +4045,10 @@ function intake(sym) {
       }
       item.key = ++this.seq;
       this.items.unshift(item);
-      this.reset();
+      // Rapid loop: after a create, stay in New with category/unit/supplier/markup
+      // retained; a restock returns to the search box.
+      if (wasNew) this.softResetNew();
+      else this.reset();
     },
     async sendLabels(item, fd) {
       const p = new URLSearchParams();

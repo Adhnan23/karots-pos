@@ -177,6 +177,9 @@ templ FieldForm(f *Field) {
 					<label class="inline-flex items-center gap-2 text-sm text-slate-700">
 						<input type="checkbox" name="print_on_label" value="1" checked?={ formBool(f, "print_on_label") } class="rounded border-slate-300"/> On the barcode / shelf label <span class="text-slate-400">(selectable for the top/bottom line)</span>
 					</label>
+					<label class="inline-flex items-center gap-2 text-sm text-slate-700">
+						<input type="checkbox" name="show_in_intake" value="1" checked?={ formBool(f, "show_in_intake") } class="rounded border-slate-300"/> On the Stock Intake form <span class="text-slate-400">(when quick-adding a product)</span>
+					</label>
 				</div>
 			</div>
 			<div class="flex justify-end gap-3 pt-2">
@@ -305,6 +308,8 @@ func formBool(f *Field, which string) bool {
 		return f.ShowAtTill
 	case "print_on_label":
 		return f.PrintOnLabel
+	case "show_in_intake":
+		return f.ShowInIntake
 	}
 	return false
 }

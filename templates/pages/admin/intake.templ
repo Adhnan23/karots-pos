@@ -12,6 +12,9 @@ type IntakeData struct {
 	Categories   []categories.TreeNode
 	UnitOptions  []adminfragments.PickerOption
 	UnitSelected int64
+	// Extra holds plugin-contributed intake fields (e.g. Product Plus fields
+	// flagged "show in stock intake"), rendered inside the New-item form.
+	Extra []templ.Component
 }
 
 // IntakePage fuses add/restock + set-quantity + print-labels into one repeatable
@@ -35,6 +38,7 @@ templ IntakePage(d IntakeData) {
 							x-ref="searchInput"
 							x-model="q"
 							x-on:input.debounce.200ms="search()"
+							x-on:keydown.enter.prevent="onSearchEnter()"
 							x-on:focus="open = true"
 							x-on:click.away="open = false"
 							placeholder="Search an existing product, or type a new name…"
@@ -64,7 +68,7 @@ templ IntakePage(d IntakeData) {
 					<h2 class="text-lg font-semibold">New item</h2>
 					<div>
 						<label class="block text-sm font-medium mb-1">Name</label>
-						<input name="name" required x-model="newName" class="w-full border rounded-lg px-3 py-2"/>
+						<input id="intake-new-name" name="name" required x-model="newName" class="w-full border rounded-lg px-3 py-2"/>
 					</div>
 					<div class="grid grid-cols-2 gap-4">
 						<div>
@@ -76,26 +80,44 @@ templ IntakePage(d IntakeData) {
 							@adminfragments.OptionPicker("unit_id", d.UnitOptions, d.UnitSelected, "Select unit…")
 						</div>
 					</div>
-					<div class="grid grid-cols-2 gap-4">
+					<div>
+						<label class="block text-sm font-medium mb-1">Supplier <span class="text-slate-400 font-normal">(optional)</span></label>
+						@adminfragments.SupplierPicker("preferred_supplier_id", 0, "", "Search supplier…", true)
+					</div>
+					<div class="grid grid-cols-3 gap-4">
 						<div>
 							<label class="block text-sm font-medium mb-1">Cost <span class="text-slate-400 font-normal">(optional)</span></label>
-							<input name="cost_price" type="number" step="0.01" min="0" class="w-full border rounded-lg px-3 py-2"/>
+							<input name="cost_price" type="number" step="0.01" min="0" x-model="cCost" x-on:input="newFromCost()" class="w-full border rounded-lg px-3 py-2"/>
+						</div>
+						<div>
+							<label class="block text-sm font-medium mb-1">× Markup</label>
+							<input type="number" step="0.01" min="1" x-model="cMarkup" x-on:input="newFromMarkup()" placeholder="e.g. 1.4" title="Cost × markup = selling; selling ÷ markup = cost" class="w-full border rounded-lg px-3 py-2"/>
 						</div>
 						<div>
 							<label class="block text-sm font-medium mb-1">Selling price</label>
-							<input name="selling_price" type="number" step="0.01" min="0" class="w-full border rounded-lg px-3 py-2"/>
+							<input name="selling_price" type="number" step="0.01" min="0" x-model="cSelling" x-on:input="newFromSell()" class="w-full border rounded-lg px-3 py-2"/>
 						</div>
 					</div>
+					if len(d.Extra) > 0 {
+						<div class="border-t pt-4 space-y-4">
+							for _, comp := range d.Extra {
+								@comp
+							}
+						</div>
+					}
 					<div>
 						<label class="block text-sm font-medium mb-1">Barcode</label>
 						<div class="bc-field flex gap-2">
-							<input name="barcode" x-model="cBarcode" x-on:input="drawNew()" class="flex-1 border rounded-lg px-3 py-2"/>
+							<!-- Scanners end with Enter. Swallow it here (barcode isn't the
+							     last field) so a scan fills the code and moves to quantity
+							     instead of submitting a half-finished item. -->
+							<input name="barcode" x-model="cBarcode" x-on:input="drawNew()" x-on:keydown.enter.prevent="$refs.qtyInput && $refs.qtyInput.focus()" class="flex-1 border rounded-lg px-3 py-2"/>
 							<button type="button" onclick="generateBarcode(this)" class="px-3 py-2 rounded-lg border text-slate-700 whitespace-nowrap">Generate</button>
 						</div>
 					</div>
 					<div>
 						<label class="block text-sm font-medium mb-1">Opening quantity</label>
-						<input name="quantity" type="number" step="0.001" min="0" x-model="qty" x-on:input="syncLabelQty()" class="w-full border rounded-lg px-3 py-2"/>
+						<input name="quantity" x-ref="qtyInput" type="number" step="0.001" min="0" x-model="qty" x-on:input="syncLabelQty()" class="w-full border rounded-lg px-3 py-2"/>
 					</div>
 					@intakeBarcodePreview("intake-preview-new", "newName", "cBarcode")
 					@intakeLabelControls()
@@ -119,14 +141,18 @@ templ IntakePage(d IntakeData) {
 						<p class="text-slate-500 mb-2">This item has no barcode — generate one so the printed label scans at the till.</p>
 						<button type="button" x-on:click="genBarcode()" x-bind:disabled="pGenBusy" class="px-4 py-2 rounded-lg bg-indigo-600 text-white font-semibold disabled:opacity-40">Generate &amp; save barcode</button>
 					</div>
-					<div class="grid grid-cols-3 gap-4">
+					<div class="grid grid-cols-4 gap-4">
 						<div>
 							<label class="block text-sm font-medium mb-1">Cost</label>
-							<input name="cost_price" type="number" step="0.01" min="0" x-model="pCost" class="w-full border rounded-lg px-3 py-2"/>
+							<input name="cost_price" type="number" step="0.01" min="0" x-model="pCost" x-on:input="reFromCost()" class="w-full border rounded-lg px-3 py-2"/>
+						</div>
+						<div>
+							<label class="block text-sm font-medium mb-1">× Markup</label>
+							<input type="number" step="0.01" min="1" x-model="pMarkup" x-on:input="reFromMarkup()" placeholder="e.g. 1.4" title="Cost × markup = selling; selling ÷ markup = cost" class="w-full border rounded-lg px-3 py-2"/>
 						</div>
 						<div>
 							<label class="block text-sm font-medium mb-1">Selling</label>
-							<input name="selling_price" type="number" step="0.01" min="0" x-model="pSelling" title="Becomes the shelf price AND sticks to the stock you are adding now" class="w-full border rounded-lg px-3 py-2"/>
+							<input name="selling_price" type="number" step="0.01" min="0" x-model="pSelling" x-on:input="reFromSell()" title="Becomes the shelf price AND sticks to the stock you are adding now" class="w-full border rounded-lg px-3 py-2"/>
 						</div>
 						<div>
 							<label class="block text-sm font-medium mb-1">Wholesale</label>

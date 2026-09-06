@@ -25,11 +25,31 @@ type FieldValue struct {
 // (returns NopComponent) so a plugin error never blocks the core product form.
 func (p *Plugin) renderProductForm(ctx context.Context, productID int64) (templ.Component, error) {
 	fields, err := p.store.ActiveFields(ctx)
-	if err != nil || len(fields) == 0 {
+	if err != nil {
 		return templ.NopComponent, err
+	}
+	return p.renderFields(ctx, productID, fields)
+}
+
+// renderIntakeForm draws only the fields flagged "show in stock intake" on the
+// Stock Intake New-item form (always create → defaults).
+func (p *Plugin) renderIntakeForm(ctx context.Context) (templ.Component, error) {
+	fields, err := p.store.ActiveFields(ctx)
+	if err != nil {
+		return templ.NopComponent, err
+	}
+	return p.renderFields(ctx, 0, intakeFields(fields))
+}
+
+// renderFields is the shared control renderer: fills each field's value from the
+// product's stored values (or the field default when absent).
+func (p *Plugin) renderFields(ctx context.Context, productID int64, fields []Field) (templ.Component, error) {
+	if len(fields) == 0 {
+		return templ.NopComponent, nil
 	}
 	values := map[int64]string{}
 	if productID > 0 {
+		var err error
 		if values, err = p.store.Values(ctx, productID); err != nil {
 			return templ.NopComponent, err
 		}
@@ -43,6 +63,17 @@ func (p *Plugin) renderProductForm(ctx context.Context, productID int64) (templ.
 		rows = append(rows, FieldValue{Field: f, Value: v})
 	}
 	return ProductFieldsFragment(rows), nil
+}
+
+// intakeFields keeps only the fields marked to show on Stock Intake.
+func intakeFields(all []Field) []Field {
+	out := make([]Field, 0, len(all))
+	for _, f := range all {
+		if f.ShowInIntake {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 // validateProductForm blocks a save when a required custom field is blank. Fails
@@ -91,6 +122,20 @@ func (p *Plugin) saveProductForm(ctx context.Context, productID int64, form url.
 	if err != nil {
 		return err
 	}
+	return p.saveFields(ctx, productID, form, fields)
+}
+
+// saveIntakeForm persists only the intake-shown fields posted from Stock Intake,
+// so a hidden field's default (e.g. a bool defaulting Yes) is never clobbered.
+func (p *Plugin) saveIntakeForm(ctx context.Context, productID int64, form url.Values) error {
+	fields, err := p.store.ActiveFields(ctx)
+	if err != nil {
+		return err
+	}
+	return p.saveFields(ctx, productID, form, intakeFields(fields))
+}
+
+func (p *Plugin) saveFields(ctx context.Context, productID int64, form url.Values, fields []Field) error {
 	for _, f := range fields {
 		raw, present := form["pp_"+f.Key]
 		val := ""
