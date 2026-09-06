@@ -2,6 +2,7 @@ package aicatalog
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -64,14 +65,75 @@ func (a *adminUI) Page(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	return response.RenderPage(c, Page(PageData{
+	d := PageData{
 		UserName:      middleware.CurrentUserName(c),
 		Provider:      cfg.Provider,
 		BaseURL:       cfg.BaseURL,
 		Model:         cfg.Model,
 		HasKey:        cfg.APIKey != "",
 		DefaultMarkup: cfg.DefaultMarkup.String(),
-	}))
+	}
+	if run, _ := a.p.store.LatestRun(ctx); run != nil {
+		d.HasLastRun = true
+		d.LastRunSummary = run.Summary
+	}
+	return response.RenderPage(c, Page(d))
+}
+
+// OptimizePreview asks the AI for a tidy-up plan and renders it for approval.
+func (a *adminUI) OptimizePreview(c echo.Context) error {
+	ctx := c.Request().Context()
+	cfg, err := a.p.store.GetSettings(ctx)
+	if err != nil {
+		return err
+	}
+	cats, err := a.p.store.OptimizeCategories(ctx)
+	if err != nil {
+		return err
+	}
+	prods, err := a.p.store.OptimizeProducts(ctx, 300)
+	if err != nil {
+		return err
+	}
+	plan, aerr := NewClient(cfg).Optimize(ctx, cats, prods)
+	if aerr != nil {
+		return response.RenderFragment(c, OptimizeError(aerr.Error()))
+	}
+	d := OptimizeData{Plan: plan, HasChanges: !plan.empty(), CatName: map[int64]string{}, ProdName: map[int64]string{}}
+	for _, x := range cats {
+		d.CatName[x.ID] = x.Name
+	}
+	for _, x := range prods {
+		d.ProdName[x.ID] = x.Name
+	}
+	pj, _ := json.Marshal(plan)
+	d.PlanJSON = string(pj)
+	return response.RenderFragment(c, OptimizePreview(d))
+}
+
+// OptimizeApply applies the plan the preview posted back, recording undo.
+func (a *adminUI) OptimizeApply(c echo.Context) error {
+	plan, err := parseOptimizePlan([]byte(c.FormValue("plan")))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid plan")
+	}
+	summary, err := a.p.store.ApplyPlan(c.Request().Context(), plan, middleware.CurrentUserID(c))
+	if err != nil {
+		return err
+	}
+	return response.RenderFragment(c, OptimizeResult(summary, true),
+		response.Toast("Optimised: "+summary, "success"))
+}
+
+// OptimizeRevert undoes the most recent Optimize run.
+func (a *adminUI) OptimizeRevert(c echo.Context) error {
+	summary, err := a.p.store.Revert(c.Request().Context())
+	if err != nil {
+		c.Response().Header().Set("HX-Trigger", response.Toast("Revert failed: "+err.Error(), "error"))
+		return response.NoContent(c)
+	}
+	return response.RenderFragment(c, OptimizeResult("Reverted ("+summary+")", false),
+		response.Toast("Reverted: "+summary, "success"))
 }
 
 func (a *adminUI) SaveSettings(c echo.Context) error {

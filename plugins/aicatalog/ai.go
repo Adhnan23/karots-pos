@@ -27,11 +27,13 @@ Reply with STRICT JSON ONLY, no prose, matching:
 {"confident":bool,"best":{"name":"","category":"","specs":"","explanation":""},
 "options":[{"name":"","category":"","specs":"","explanation":""}]}
 Set confident=true and fill "best" only when you are sure. Otherwise set
-confident=false and give up to 4 "options". "category" is a hierarchical path
-from broad to specific using " > " between levels, e.g. "Bearings > Deep Groove"
-or "Beverages > Soft Drinks". Prefer 2 levels (broad parent > specific child) so
-similar items group together. "explanation" is one short sentence a non-expert
-understands. "specs" holds key dimensions/ratings if known.`
+confident=false and give up to 4 "options". "category" uses " > " between levels,
+but keep it GENERAL and SHALLOW: usually ONE broad category, at most two levels.
+Only add a deeper sub-category when a shop would stock MANY items of that exact
+type. Never build long chains like A > B > C > D. Prefer "Bearings" (or at most
+"Bearings > Ball Bearings"), NOT "Automotive > Parts > Bearings > Deep Groove".
+"explanation" is one short sentence a non-expert understands. "specs" holds key
+dimensions/ratings if known.`
 
 type chatReq struct {
 	Model    string    `json:"model"`
@@ -214,6 +216,43 @@ func (c *Client) Identify(ctx context.Context, query, userHint string) (Identify
 func (c *Client) Ping(ctx context.Context) error {
 	_, err := c.complete(ctx, "", "reply with the single word: ok", false)
 	return err
+}
+
+const optimizeSystemPrompt = `You reorganise a shop's product category tree. You are given CATEGORIES
+(id|name|parentId|productCount; parentId "-" means top level) and PRODUCTS (id|name|categoryId).
+Propose ONLY clearly beneficial, conservative changes. Reply STRICT JSON ONLY:
+{"renames":[{"id":0,"to":"","reason":""}],
+ "reparents":[{"id":0,"parent_id":0,"reason":""}],
+ "merges":[{"from":0,"into":0,"reason":""}],
+ "moves":[{"product_id":0,"category_id":0,"reason":""}]}
+Rules:
+- Keep the tree GENERAL and SHALLOW. FLATTEN over-specific categories that hold few products (say under ~5) into their broader parent or a sibling — via merge, or reparent to a broader category. Only keep a deep/very specific category when it holds MANY products. Avoid long chains like A > B > C > D.
+- merges: fold duplicate / near-duplicate (or tiny over-specific) categories together; "into" is the id you keep (broader/better/plural name), "from" is removed.
+- reparents: group related loose top-level categories under a broad parent (parent_id = an existing category id; use 0 to make top level).
+- renames: fix casing/spelling/singular-plural for consistency.
+- moves: move an obviously mis-filed product to a better EXISTING category id.
+Only reference ids that appear in the lists; parent_id and category_id must be existing category ids. Use empty arrays when nothing needs changing. No prose.`
+
+// Optimize asks the model for a category-tidy plan over the given tree/products.
+func (c *Client) Optimize(ctx context.Context, cats []CatRow, prods []ProdRow) (OptimizePlan, error) {
+	var b strings.Builder
+	b.WriteString("CATEGORIES (id|name|parentId|productCount):\n")
+	for _, c := range cats {
+		parent := "-"
+		if c.ParentID != nil {
+			parent = fmt.Sprintf("%d", *c.ParentID)
+		}
+		fmt.Fprintf(&b, "%d|%s|%s|%d\n", c.ID, c.Name, parent, c.Count)
+	}
+	b.WriteString("\nPRODUCTS (id|name|categoryId):\n")
+	for _, p := range prods {
+		fmt.Fprintf(&b, "%d|%s|%d\n", p.ID, p.Name, p.CategoryID)
+	}
+	content, err := c.complete(ctx, optimizeSystemPrompt, b.String(), false)
+	if err != nil {
+		return OptimizePlan{}, err
+	}
+	return parseOptimizePlan([]byte(content))
 }
 
 func (c *Client) isGemini() bool { return strings.EqualFold(c.cfg.Provider, "gemini") }

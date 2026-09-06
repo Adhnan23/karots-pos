@@ -3,12 +3,22 @@ package aicatalog
 import "karots-pos/templates/layouts"
 
 type PageData struct {
-	UserName      string
-	Provider      string
-	BaseURL       string
-	Model         string
-	HasKey        bool
-	DefaultMarkup string
+	UserName       string
+	Provider       string
+	BaseURL        string
+	Model          string
+	HasKey         bool
+	DefaultMarkup  string
+	HasLastRun     bool
+	LastRunSummary string
+}
+
+type OptimizeData struct {
+	Plan       OptimizePlan
+	CatName    map[int64]string
+	ProdName   map[int64]string
+	PlanJSON   string
+	HasChanges bool
 }
 
 templ Page(d PageData) {
@@ -56,6 +66,26 @@ templ Page(d PageData) {
 			<div id="ai-step" class="bg-white rounded-2xl shadow-sm p-6">
 				@StepIdentify()
 			</div>
+			<div class="mt-6 bg-white rounded-2xl shadow-sm p-6">
+				<div class="flex items-center justify-between gap-3 flex-wrap">
+					<div>
+						<h2 class="text-lg font-semibold">🧹 Optimize categories</h2>
+						<p class="text-sm text-slate-500">Let the AI tidy the category tree — merge duplicates, group loose categories, and re-file mis-placed products. You review before it applies, and you can revert.</p>
+					</div>
+					<div class="flex gap-2">
+						<button hx-get="/admin/ai-catalog/optimize" hx-target="#ai-optimize" hx-swap="innerHTML"
+							hx-indicator="#ai-opt-spin"
+							class="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium">Scan &amp; suggest</button>
+						if d.HasLastRun {
+							<button hx-post="/admin/ai-catalog/optimize/revert" hx-target="#ai-optimize" hx-swap="innerHTML"
+								hx-confirm="Revert the last optimize? This restores the previous category tree."
+								class="px-4 py-2 rounded-lg border text-sm">↩ Revert last ({ d.LastRunSummary })</button>
+						}
+					</div>
+				</div>
+				<div id="ai-opt-spin" class="htmx-indicator text-sm text-slate-400 mt-3">Thinking…</div>
+				<div id="ai-optimize" class="mt-4"></div>
+			</div>
 		</div>
 		<script>
 			function aiApplyPreset(sel) {
@@ -95,6 +125,73 @@ templ stepHeader(step, total int, title string) {
 		<span class="text-xs font-semibold text-indigo-600">Step { itoa(step) }/{ itoa(total) }</span>
 		<h2 class="text-lg font-semibold">{ title }</h2>
 	</div>
+}
+
+templ OptimizeError(msg string) {
+	<p class="text-sm text-rose-600">Couldn't get suggestions: { msg }</p>
+}
+
+templ OptimizeResult(msg string, applied bool) {
+	<div class="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+		{ msg }
+		if applied {
+			<span class="text-slate-500"> — reload the page to see the updated tree; use “Revert last” if you don't like it.</span>
+		}
+	</div>
+}
+
+templ OptimizePreview(d OptimizeData) {
+	if !d.HasChanges {
+		<p class="text-slate-500">Catalog looks tidy — nothing to optimize. 🎉</p>
+	} else {
+		<div class="space-y-4 text-sm">
+			if len(d.Plan.Merges) > 0 {
+				<div>
+					<h3 class="font-semibold text-slate-700 mb-1">Merge duplicates</h3>
+					<ul class="space-y-1">
+						for _, op := range d.Plan.Merges {
+							<li>Merge <span class="font-medium">{ catLabel(d.CatName, op.From) }</span> → <span class="font-medium">{ catLabel(d.CatName, op.Into) }</span> <span class="text-slate-400">{ op.Reason }</span></li>
+						}
+					</ul>
+				</div>
+			}
+			if len(d.Plan.Reparents) > 0 {
+				<div>
+					<h3 class="font-semibold text-slate-700 mb-1">Group under a parent</h3>
+					<ul class="space-y-1">
+						for _, op := range d.Plan.Reparents {
+							<li>Move <span class="font-medium">{ catLabel(d.CatName, op.ID) }</span> under <span class="font-medium">{ catLabel(d.CatName, op.ParentID) }</span> <span class="text-slate-400">{ op.Reason }</span></li>
+						}
+					</ul>
+				</div>
+			}
+			if len(d.Plan.Renames) > 0 {
+				<div>
+					<h3 class="font-semibold text-slate-700 mb-1">Rename</h3>
+					<ul class="space-y-1">
+						for _, op := range d.Plan.Renames {
+							<li><span class="font-medium">{ catLabel(d.CatName, op.ID) }</span> → <span class="font-medium">{ op.To }</span> <span class="text-slate-400">{ op.Reason }</span></li>
+						}
+					</ul>
+				</div>
+			}
+			if len(d.Plan.Moves) > 0 {
+				<div>
+					<h3 class="font-semibold text-slate-700 mb-1">Re-file products</h3>
+					<ul class="space-y-1">
+						for _, op := range d.Plan.Moves {
+							<li>Move <span class="font-medium">{ nameOr(d.ProdName, op.ProductID) }</span> → <span class="font-medium">{ catLabel(d.CatName, op.CategoryID) }</span> <span class="text-slate-400">{ op.Reason }</span></li>
+						}
+					</ul>
+				</div>
+			}
+			<form hx-post="/admin/ai-catalog/optimize/apply" hx-target="#ai-optimize" hx-swap="innerHTML">
+				<input type="hidden" name="plan" value={ d.PlanJSON }/>
+				<button class="mt-2 px-5 py-2 rounded-lg bg-emerald-600 text-white font-semibold">✓ Apply all changes</button>
+				<span class="ml-2 text-xs text-slate-400">You can revert this afterward.</span>
+			</form>
+		</div>
+	}
 }
 
 templ StepIdentify() {

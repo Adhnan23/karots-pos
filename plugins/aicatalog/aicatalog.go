@@ -39,6 +39,9 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 	reg.Admin().POST("/ai-catalog/price", a.Price)
 	reg.Admin().POST("/ai-catalog/qty", a.Qty)
 	reg.Admin().POST("/ai-catalog/save", a.Save)
+	reg.Admin().GET("/ai-catalog/optimize", a.OptimizePreview)
+	reg.Admin().POST("/ai-catalog/optimize/apply", a.OptimizeApply)
+	reg.Admin().POST("/ai-catalog/optimize/revert", a.OptimizeRevert)
 
 	reg.AddAdminNav(plugin.AdminNavEntry{
 		SectionLabel: "AI Catalog", Icon: "🤖",
