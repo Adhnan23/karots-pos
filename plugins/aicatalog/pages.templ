@@ -15,18 +15,27 @@ templ Page(d PageData) {
 	@layouts.Admin("AI Catalog", d.UserName, "aicatalog") {
 		<div class="max-w-2xl mx-auto">
 			<h1 class="text-2xl font-bold mb-1">AI Catalog — add products fast</h1>
-			<p class="text-sm text-slate-500 mb-4">Type a part code; the AI names it, suggests a category, and walks you through one step at a time.</p>
+			<p class="text-sm text-slate-500 mb-4">Type a name or code; the AI names it, suggests a category, and walks you through one step at a time.</p>
 			<details class="bg-white rounded-2xl shadow-sm p-4 mb-6">
 				<summary class="cursor-pointer text-sm font-medium">AI settings</summary>
 				<form method="post" action="/admin/ai-catalog/settings" class="mt-4 grid gap-3">
+					<label class="text-xs text-slate-500">Preset (fills the fields below — then just paste your key)
+						<select onchange="aiApplyPreset(this)" class="mt-1 w-full border rounded-lg px-3 py-1.5">
+							<option value="">— choose a provider —</option>
+							<option value="gemini" data-provider="gemini" data-base="https://generativelanguage.googleapis.com/v1beta/openai" data-model="gemini-2.5-flash">Google Gemini (free tier, can web-search)</option>
+							<option value="openrouter" data-provider="openrouter" data-base="https://openrouter.ai/api/v1" data-model="google/gemini-2.0-flash-exp:free">OpenRouter (free models)</option>
+							<option value="groq" data-provider="groq" data-base="https://api.groq.com/openai/v1" data-model="llama-3.3-70b-versatile">Groq (fast free tier)</option>
+							<option value="openai" data-provider="openai" data-base="https://api.openai.com/v1" data-model="gpt-4o-mini">OpenAI (paid)</option>
+						</select>
+					</label>
 					<label class="text-xs text-slate-500">Provider
-						<input name="provider" value={ d.Provider } class="mt-1 w-full border rounded-lg px-3 py-1.5"/>
+						<input id="ai-provider" name="provider" value={ d.Provider } class="mt-1 w-full border rounded-lg px-3 py-1.5"/>
 					</label>
 					<label class="text-xs text-slate-500">Base URL
-						<input name="base_url" value={ d.BaseURL } class="mt-1 w-full border rounded-lg px-3 py-1.5"/>
+						<input id="ai-base" name="base_url" value={ d.BaseURL } class="mt-1 w-full border rounded-lg px-3 py-1.5"/>
 					</label>
 					<label class="text-xs text-slate-500">Model
-						<input name="model" value={ d.Model } class="mt-1 w-full border rounded-lg px-3 py-1.5"/>
+						<input id="ai-model" name="model" value={ d.Model } class="mt-1 w-full border rounded-lg px-3 py-1.5"/>
 					</label>
 					<label class="text-xs text-slate-500">API key
 						if d.HasKey {
@@ -49,6 +58,13 @@ templ Page(d PageData) {
 			</div>
 		</div>
 		<script>
+			function aiApplyPreset(sel) {
+				var o = sel.options[sel.selectedIndex];
+				if (!o || !o.dataset.base) return;
+				document.getElementById('ai-provider').value = o.dataset.provider || '';
+				document.getElementById('ai-base').value = o.dataset.base || '';
+				document.getElementById('ai-model').value = o.dataset.model || '';
+			}
 			document.body.addEventListener('ai-print-labels', function (e) {
 				var d = e.detail || {};
 				var body = new URLSearchParams({ product_id: d.product_id, qty: d.qty, slots: '0', show_price: '1' });
@@ -58,10 +74,177 @@ templ Page(d PageData) {
 	}
 }
 
+// hidden carries all accumulated wizard state forward. Each editing step uses a
+// DISTINCT visible input name (e.g. category_in) so it never collides with the
+// hidden field it will become on the next step.
+templ hidden(w wizard) {
+	<input type="hidden" name="query" value={ w.Query }/>
+	<input type="hidden" name="name" value={ w.Name }/>
+	<input type="hidden" name="category" value={ w.Category }/>
+	<input type="hidden" name="specs" value={ w.Specs }/>
+	<input type="hidden" name="explanation" value={ w.Explanation }/>
+	<input type="hidden" name="source" value={ w.Source }/>
+	<input type="hidden" name="barcode" value={ w.Barcode }/>
+	<input type="hidden" name="cost_price" value={ w.CostPrice }/>
+	<input type="hidden" name="selling_price" value={ w.Selling }/>
+	<input type="hidden" name="qty" value={ w.Qty }/>
+}
+
+templ stepHeader(step, total int, title string) {
+	<div class="mb-3 flex items-center gap-2">
+		<span class="text-xs font-semibold text-indigo-600">Step { itoa(step) }/{ itoa(total) }</span>
+		<h2 class="text-lg font-semibold">{ title }</h2>
+	</div>
+}
+
 templ StepIdentify() {
+	@stepHeader(1, 6, "Add a product")
 	<form hx-post="/admin/ai-catalog/identify" hx-target="#ai-step" hx-swap="innerHTML">
-		<label class="block text-sm font-medium mb-2">What is it? (name or part number)</label>
-		<input name="query" autofocus placeholder="e.g. 6200 2RS" class="w-full border rounded-lg px-3 py-2 text-lg"/>
+		<label class="block text-sm text-slate-500 mb-2">Product name, code, or part number</label>
+		<input name="query" autofocus placeholder="e.g. 6200 2RS · Coca-Cola 500ml · A4 paper" class="w-full border rounded-lg px-3 py-2 text-lg"/>
 		<button class="mt-3 px-5 py-2 rounded-lg bg-indigo-600 text-white font-medium">Identify →</button>
+	</form>
+}
+
+templ StepIdentifyError(msg string) {
+	@stepHeader(1, 6, "Add a product")
+	<p class="text-sm text-rose-600 mb-2">{ msg }</p>
+	<form hx-post="/admin/ai-catalog/identify" hx-target="#ai-step" hx-swap="innerHTML">
+		<input name="query" autofocus placeholder="e.g. 6200 2RS · Coca-Cola 500ml · A4 paper" class="w-full border rounded-lg px-3 py-2 text-lg"/>
+		<button class="mt-3 px-5 py-2 rounded-lg bg-indigo-600 text-white font-medium">Identify →</button>
+	</form>
+}
+
+templ StepOptions(w wizard) {
+	@stepHeader(2, 6, "Which one is it?")
+	if w.AIError != "" {
+		<p class="text-sm text-amber-700 bg-amber-50 rounded-lg px-3 py-2 mb-3">AI couldn't help ({ w.AIError }). Pick a manual option below.</p>
+	}
+	<div class="grid gap-2">
+		for _, opt := range w.Options {
+			<form hx-post="/admin/ai-catalog/pick" hx-target="#ai-step" hx-swap="innerHTML">
+				<input type="hidden" name="query" value={ w.Query }/>
+				<input type="hidden" name="name" value={ opt.Name }/>
+				<input type="hidden" name="category" value={ opt.Category }/>
+				<input type="hidden" name="specs" value={ opt.Specs }/>
+				<input type="hidden" name="explanation" value={ opt.Explanation }/>
+				if w.Confident {
+					<input type="hidden" name="confident" value="1"/>
+				}
+				<button class="w-full text-left border rounded-xl px-4 py-3 hover:border-indigo-500 hover:bg-indigo-50 transition">
+					<div class="flex items-center justify-between">
+						<span class="font-medium">{ opt.Name }</span>
+						if w.Confident {
+							<span class="text-xs px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">Best match</span>
+						}
+					</div>
+					if opt.Explanation != "" {
+						<div class="text-sm text-slate-500 mt-0.5">{ opt.Explanation }</div>
+					}
+					if opt.Category != "" {
+						<div class="text-xs text-slate-400 mt-1">→ { opt.Category }</div>
+					}
+				</button>
+			</form>
+		}
+	</div>
+	<form hx-post="/admin/ai-catalog/pick" hx-target="#ai-step" hx-swap="innerHTML" class="mt-4 border-t pt-4">
+		<input type="hidden" name="query" value={ w.Query }/>
+		<label class="block text-sm text-slate-500 mb-1">None of these — tell it what this is</label>
+		<div class="flex gap-2">
+			<input name="explain" placeholder="e.g. small sealed bearing for a fan motor" class="flex-1 border rounded-lg px-3 py-2"/>
+			<button class="px-4 py-2 rounded-lg bg-slate-700 text-white text-sm">Use this →</button>
+		</div>
+	</form>
+}
+
+templ StepCategory(w wizard) {
+	@stepHeader(3, 6, "Name & category")
+	<form hx-post="/admin/ai-catalog/category" hx-target="#ai-step" hx-swap="innerHTML">
+		@hidden(w)
+		<label class="block text-sm text-slate-500 mb-1">Product name (AI suggestion — edit if needed)</label>
+		<input name="name_in" value={ w.Name } autofocus class="w-full border rounded-lg px-3 py-2 mb-3"/>
+		<label class="block text-sm text-slate-500 mb-1">Category path — use &gt; for sub-categories (edit if needed)</label>
+		<input name="category_in" value={ w.Category } placeholder="e.g. Bearings > Deep Groove" class="w-full border rounded-lg px-3 py-2"/>
+		<button class="mt-3 px-5 py-2 rounded-lg bg-indigo-600 text-white font-medium">Next: barcode →</button>
+	</form>
+}
+
+templ StepBarcode(w wizard) {
+	@stepHeader(4, 6, "Barcode")
+	if w.Warn != "" {
+		<p class="text-sm text-rose-600 mb-2">{ w.Warn }</p>
+	}
+	<form hx-post="/admin/ai-catalog/barcode" hx-target="#ai-step" hx-swap="innerHTML">
+		@hidden(w)
+		<label class="block text-sm text-slate-500 mb-1">Scan a barcode, or Generate one</label>
+		<input name="barcode_in" autofocus placeholder="scan here…" class="w-full border rounded-lg px-3 py-2"/>
+		<div class="mt-3 flex gap-2">
+			<button name="action" value="scan" class="px-5 py-2 rounded-lg bg-indigo-600 text-white font-medium">Use scanned →</button>
+			<button name="action" value="generate" class="px-4 py-2 rounded-lg border text-sm">Generate one →</button>
+		</div>
+	</form>
+}
+
+templ StepPrice(w wizard) {
+	@stepHeader(5, 6, "Price")
+	<form hx-post="/admin/ai-catalog/price" hx-target="#ai-step" hx-swap="innerHTML" x-data={ "{sell:'', markup:'" + w.Markup + "', get cost(){var s=parseFloat(this.sell),m=parseFloat(this.markup); return (s>0&&m>1)?Math.round(s/m):''}}" }>
+		@hidden(w)
+		<label class="block text-sm text-slate-500 mb-1">Selling price</label>
+		<input name="selling_in" x-model="sell" inputmode="decimal" autofocus placeholder="e.g. 500" class="w-full border rounded-lg px-3 py-2"/>
+		<div class="mt-2 flex items-center gap-2 text-sm">
+			<span class="text-slate-500">÷ markup</span>
+			<input name="markup" x-model="markup" inputmode="decimal" class="w-20 border rounded-lg px-2 py-1"/>
+			<span class="text-slate-500">= cost</span>
+			<span class="font-semibold text-emerald-700" x-text="cost || '—'"></span>
+		</div>
+		<p class="text-xs text-slate-400 mt-2">Or enter the cost directly:</p>
+		<input name="cost_in" inputmode="decimal" placeholder="cost (optional)" class="mt-1 w-40 border rounded-lg px-3 py-2"/>
+		<div>
+			<button class="mt-3 px-5 py-2 rounded-lg bg-indigo-600 text-white font-medium">Next: quantity →</button>
+		</div>
+	</form>
+}
+
+templ StepQty(w wizard) {
+	@stepHeader(6, 6, "Quantity on hand")
+	<form hx-post="/admin/ai-catalog/qty" hx-target="#ai-step" hx-swap="innerHTML">
+		@hidden(w)
+		<label class="block text-sm text-slate-500 mb-1">How many do you have?</label>
+		<input name="qty_in" inputmode="decimal" autofocus placeholder="e.g. 10" class="w-40 border rounded-lg px-3 py-2"/>
+		<div>
+			<button class="mt-3 px-5 py-2 rounded-lg bg-indigo-600 text-white font-medium">Next: labels →</button>
+		</div>
+	</form>
+}
+
+templ StepLabels(w wizard) {
+	<div class="mb-3">
+		<span class="text-xs font-semibold text-indigo-600">Last step</span>
+		<h2 class="text-lg font-semibold">Print labels &amp; save</h2>
+	</div>
+	<form hx-post="/admin/ai-catalog/save" hx-target="#ai-step" hx-swap="innerHTML"
+		x-data={ "{n:'" + w.Qty + "'}" }>
+		@hidden(w)
+		<p class="text-sm text-slate-500 mb-2">
+			Saving <span class="font-medium text-slate-700">{ w.Name }</span>
+			· qty { w.Qty }
+			if w.CostPrice != "" {
+				· cost { w.CostPrice }
+			}
+			if w.Selling != "" {
+				· sell { w.Selling }
+			}
+		</p>
+		<label class="block text-sm text-slate-500 mb-1">How many labels?</label>
+		<div class="flex items-center gap-2">
+			<input name="labels" x-model="n" inputmode="numeric" class="w-24 border rounded-lg px-3 py-2"/>
+			<button type="button" class="px-3 py-1.5 rounded-lg border text-sm" @click={ "n='" + w.Qty + "'" }>= qty ({ w.Qty })</button>
+			<button type="button" class="px-3 py-1.5 rounded-lg border text-sm" @click="n='1'">1</button>
+			<button type="button" class="px-3 py-1.5 rounded-lg border text-sm" @click="n='0'">None</button>
+		</div>
+		<div>
+			<button class="mt-4 px-6 py-2.5 rounded-lg bg-emerald-600 text-white font-semibold">✓ Save product</button>
+		</div>
 	</form>
 }
