@@ -40,6 +40,36 @@ func TestIdentifyParsesChatCompletion(t *testing.T) {
 	}
 }
 
+func TestIdentifyGeminiUsesGroundingEndpoint(t *testing.T) {
+	// Fake Gemini native endpoint: assert we hit generateContent with the
+	// google_search tool and the key as a query param, and parse candidates.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.URL.Path, "/models/gemini-2.5-flash:generateContent") {
+			t.Errorf("wrong path %s", r.URL.Path)
+		}
+		if r.URL.Query().Get("key") != "gkey" {
+			t.Errorf("missing key query param, got %q", r.URL.RawQuery)
+		}
+		body, _ := io.ReadAll(r.Body)
+		if !strings.Contains(string(body), "google_search") {
+			t.Errorf("grounding tool not requested: %s", body)
+		}
+		content := `{"confident":true,"best":{"name":"Bajaj RE Drawer Lock","category":"Automotive > Three-Wheeler > Locks","specs":"","explanation":"OEM lock"},"options":[]}`
+		resp := map[string]any{"candidates": []map[string]any{{"content": map[string]any{"parts": []map[string]any{{"text": content}}}}}}
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+
+	c := NewClient(Settings{Provider: "gemini", BaseURL: srv.URL, Model: "gemini-2.5-flash", APIKey: "gkey"})
+	got, err := c.Identify(context.Background(), "bajaj drawer lock", "")
+	if err != nil {
+		t.Fatalf("Identify err: %v", err)
+	}
+	if !got.Confident || got.Best.Category != "Automotive > Three-Wheeler > Locks" {
+		t.Fatalf("bad result: %+v", got)
+	}
+}
+
 func TestIdentifyErrorsWithoutKey(t *testing.T) {
 	c := NewClient(Settings{BaseURL: "http://example.invalid", Model: "x", APIKey: ""})
 	if _, err := c.Identify(context.Background(), "anything", ""); err == nil {
