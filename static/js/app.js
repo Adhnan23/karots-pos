@@ -4044,6 +4044,7 @@ function intake(sym) {
         toast("Saved", "success");
       }
       item.key = ++this.seq;
+      item.kind = wasNew ? "create" : "restock";
       this.items.unshift(item);
       // Rapid loop: after a create, stay in New with category/unit/supplier/markup
       // retained; a restock returns to the search box.
@@ -4069,6 +4070,35 @@ function intake(sym) {
         body: p,
       });
       if (!res.ok) throw new Error("print failed");
+    },
+    // sessionUnits totals the quantity added across this session's rows.
+    sessionUnits() {
+      return this.items.reduce((n, it) => n + (Number(it.qty) || 0), 0);
+    },
+    // undo reverses one session row: backs out its stock, and (for a create)
+    // disables the mistakenly-added product. Removes the row on success.
+    async undo(it) {
+      const what = it.kind === "create" ? "remove the new product “" + it.name + "”" : "back out +" + it.qty + " from “" + it.name + "”";
+      if (!window.confirm("Undo — " + what + "?")) return;
+      try {
+        const p = new URLSearchParams({
+          product_id: String(it.id),
+          qty: String(it.qty || "0"),
+          kind: it.kind || "restock",
+        });
+        const res = await fetch("/admin/inventory/intake/undo", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+          body: p,
+        });
+        const j = await res.json().catch(() => null);
+        if (!res.ok || !j || !j.success) throw new Error(j?.error?.message || "Could not undo");
+        this.items = this.items.filter((x) => x.key !== it.key);
+        toast("Undone: " + it.name, "success");
+      } catch (e) {
+        toast(e.message || "Could not undo", "error");
+      }
     },
     async reprint(it) {
       try {

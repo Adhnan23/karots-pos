@@ -330,6 +330,7 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	ag.GET("/inventory/intake", admin.IntakePage)
 	ag.POST("/inventory/intake/create", admin.IntakeCreate)
 	ag.POST("/inventory/intake/restock", admin.IntakeRestock)
+	ag.POST("/inventory/intake/undo", admin.IntakeUndo)
 	ag.GET("/stock/take", admin.StockTake)
 	ag.POST("/stock/take", admin.StockTakeApply)
 	ag.GET("/stock/take/sheet", admin.StockTakeSheet)

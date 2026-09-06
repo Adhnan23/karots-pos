@@ -18,6 +18,7 @@ import (
 
 	"github.com/a-h/templ"
 	"github.com/labstack/echo/v4"
+	"github.com/shopspring/decimal"
 )
 
 // IntakePage renders the Stock Intake workflow: add or restock an item, set its
@@ -189,6 +190,47 @@ func (a *adminUI) IntakeRestock(c echo.Context) error {
 	}
 	a.s.logAudit(c, audit.ActionUpdate, "product", strconv.FormatInt(id, 10), "intake restock +"+add.String())
 	return response.OK(c, a.intakeItem(ctx, id, add.String()))
+}
+
+// IntakeUndo reverses one intake row from the "added this session" list: it
+// removes the stock that row added (clamped at zero), and if the row created a
+// brand-new product, disables it — a mistaken quick-add vanishes from the catalog
+// but stays recoverable via "Show disabled". A restock only backs out the stock.
+func (a *adminUI) IntakeUndo(c echo.Context) error {
+	if err := a.requireStockTake(c); err != nil {
+		return err
+	}
+	id, err := strconv.ParseInt(c.FormValue("product_id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("missing product")
+	}
+	ctx := c.Request().Context()
+	p, err := a.s.products.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	// Back out the quantity this row added.
+	if delta, perr := money.Parse(strings.TrimSpace(c.FormValue("qty"))); perr == nil && delta.IsPositive() {
+		newQty := p.StockQty.Sub(delta)
+		if newQty.IsNegative() {
+			newQty = decimal.Zero
+		}
+		if aerr := a.s.stock.Adjust(ctx, stock.AdjustInput{
+			ProductID:   id,
+			NewQuantity: newQty.String(),
+			Note:        "stock intake undo",
+		}, middleware.CurrentUserID(c)); aerr != nil {
+			return aerr
+		}
+	}
+	kind := c.FormValue("kind")
+	if kind == "create" {
+		if derr := a.s.products.Delete(ctx, id); derr != nil {
+			return derr
+		}
+	}
+	a.s.logAudit(c, audit.ActionUpdate, "product", strconv.FormatInt(id, 10), "intake undo ("+kind+")")
+	return response.OK(c, map[string]any{"id": id})
 }
 
 // intakeItem builds the small JSON payload the intake page needs to render a
