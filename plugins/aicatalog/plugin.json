@@ -1,0 +1,7 @@
+{
+  "key": "aicatalog",
+  "name": "AI Catalog",
+  "import": "karots-pos/plugins/aicatalog",
+  "version": "1.0.0",
+  "description": "AI-assisted fast product entry: identify a part from its code, suggest a category, dup-check/generate a barcode, cost-from-markup, set qty, print labels."
+}
