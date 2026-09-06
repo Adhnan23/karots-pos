@@ -31,12 +31,35 @@ type wizard struct {
 	CostPrice   string
 	Selling     string
 	Qty         string
+	// bulk queue: items still to add after the current one, plus the total count
+	// for the "Product X of Y" badge. Carried through the hidden fields.
+	Queue     []string
+	BulkTotal int
 	// transient display
 	Markup    string
 	Warn      string
 	AIError   string
 	Confident bool
 	Options   []Candidate
+}
+
+// queueSep joins the remaining bulk queries in one hidden field. Unit separator
+// (ASCII 31) won't appear in a typed part name.
+const queueSep = "\x1f"
+
+func joinQueue(q []string) string { return strings.Join(q, queueSep) }
+
+// splitQueries turns a single- or multi-line entry into a clean list of items
+// (split on newlines or commas, trimmed, blanks dropped).
+func splitQueries(raw string) []string {
+	parts := strings.FieldsFunc(raw, func(r rune) bool { return r == '\n' || r == '\r' || r == ',' })
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if s := strings.TrimSpace(p); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // readWizard pulls the persistent fields every step re-posts.
@@ -52,6 +75,12 @@ func readWizard(c echo.Context) wizard {
 		CostPrice:   strings.TrimSpace(c.FormValue("cost_price")),
 		Selling:     strings.TrimSpace(c.FormValue("selling_price")),
 		Qty:         strings.TrimSpace(c.FormValue("qty")),
+	}
+	if q := c.FormValue("queue"); q != "" {
+		w.Queue = strings.Split(q, queueSep)
+	}
+	if n, err := strconv.Atoi(c.FormValue("bulk_total")); err == nil {
+		w.BulkTotal = n
 	}
 	if w.Source == "" {
 		w.Source = "user_picked"
@@ -72,6 +101,7 @@ func (a *adminUI) Page(c echo.Context) error {
 		Model:         cfg.Model,
 		HasKey:        cfg.APIKey != "",
 		DefaultMarkup: cfg.DefaultMarkup.String(),
+		ManualMode:    cfg.ManualMode,
 	}
 	if run, _ := a.p.store.LatestRun(ctx); run != nil {
 		d.HasLastRun = true
@@ -95,10 +125,41 @@ func (a *adminUI) OptimizePreview(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	// Manual mode: hand over the prompt to paste into a chatbot instead of calling one.
+	if cfg.ManualMode {
+		return response.RenderFragment(c, OptimizeManualPrompt(OptimizePrompt(cats, prods), ""))
+	}
 	plan, aerr := NewClient(cfg).Optimize(ctx, cats, prods)
 	if aerr != nil {
 		return response.RenderFragment(c, OptimizeError(aerr.Error()))
 	}
+	return response.RenderFragment(c, OptimizePreview(a.optimizeData(cats, prods, plan)))
+}
+
+// OptimizeManual parses the tidy-up plan the owner pasted from their chatbot.
+func (a *adminUI) OptimizeManual(c echo.Context) error {
+	ctx := c.Request().Context()
+	plan, err := parseOptimizePlan([]byte(c.FormValue("response")))
+	if err != nil {
+		cats, _ := a.p.store.OptimizeCategories(ctx)
+		prods, _ := a.p.store.OptimizeProducts(ctx, 300)
+		return response.RenderFragment(c, OptimizeManualPrompt(OptimizePrompt(cats, prods),
+			"Couldn't read that reply — paste the whole answer (it should be JSON starting with {)."))
+	}
+	cats, err := a.p.store.OptimizeCategories(ctx)
+	if err != nil {
+		return err
+	}
+	prods, err := a.p.store.OptimizeProducts(ctx, 300)
+	if err != nil {
+		return err
+	}
+	return response.RenderFragment(c, OptimizePreview(a.optimizeData(cats, prods, plan)))
+}
+
+// optimizeData builds the preview view-model (name maps + JSON) shared by the
+// live and manual optimize paths.
+func (a *adminUI) optimizeData(cats []CatRow, prods []ProdRow, plan OptimizePlan) OptimizeData {
 	d := OptimizeData{Plan: plan, HasChanges: !plan.empty(), CatName: map[int64]string{}, ProdName: map[int64]string{}}
 	for _, x := range cats {
 		d.CatName[x.ID] = x.Name
@@ -108,7 +169,7 @@ func (a *adminUI) OptimizePreview(c echo.Context) error {
 	}
 	pj, _ := json.Marshal(plan)
 	d.PlanJSON = string(pj)
-	return response.RenderFragment(c, OptimizePreview(d))
+	return d
 }
 
 // OptimizeApply applies the plan the preview posted back, recording undo.
@@ -153,10 +214,36 @@ func (a *adminUI) SaveSettings(c echo.Context) error {
 	if m, e := decimal.NewFromString(c.FormValue("default_markup")); e == nil && m.GreaterThan(decimal.NewFromInt(1)) {
 		cur.DefaultMarkup = m
 	}
+	cur.ManualMode = c.FormValue("manual_mode") == "on"
 	if err := a.p.store.SaveSettings(ctx, cur); err != nil {
 		return err
 	}
 	return c.Redirect(http.StatusSeeOther, "/admin/ai-catalog")
+}
+
+// ModelList fetches the provider's available models for the settings combo box,
+// using the base URL / key currently typed in the form (falling back to the
+// stored key when the field is left blank).
+func (a *adminUI) ModelList(c echo.Context) error {
+	ctx := c.Request().Context()
+	cfg, err := a.p.store.GetSettings(ctx)
+	if err != nil {
+		return err
+	}
+	if v := c.FormValue("provider"); v != "" {
+		cfg.Provider = v
+	}
+	if v := c.FormValue("base_url"); v != "" {
+		cfg.BaseURL = v
+	}
+	if k := c.FormValue("api_key"); k != "" {
+		cfg.APIKey = k
+	}
+	models, aerr := NewClient(cfg).ListModels(ctx)
+	if aerr != nil {
+		return response.RenderFragment(c, ModelOptions(nil, aerr.Error()))
+	}
+	return response.RenderFragment(c, ModelOptions(models, ""))
 }
 
 func (a *adminUI) TestKey(c echo.Context) error {
@@ -168,26 +255,68 @@ func (a *adminUI) TestKey(c echo.Context) error {
 		c.Response().Header().Set("HX-Trigger", response.Toast("AI test failed: "+err.Error(), "error"))
 		return response.NoContent(c)
 	}
-	c.Response().Header().Set("HX-Trigger", response.Toast("AI key works ✓", "success"))
+	c.Response().Header().Set("HX-Trigger", response.Toast("AI works ✓", "success"))
 	return response.NoContent(c)
 }
 
-// Identify: step 1 -> options.
+// Identify: step 1 -> options. Accepts a single item ("query") or several at
+// once ("queries", one per line/comma); the rest are queued for after each save.
 func (a *adminUI) Identify(c echo.Context) error {
-	ctx := c.Request().Context()
 	w := readWizard(c)
-	if w.Query == "" {
+	raw := c.FormValue("queries")
+	if strings.TrimSpace(raw) == "" {
+		raw = w.Query
+	}
+	items := splitQueries(raw)
+	if len(items) == 0 {
 		return response.RenderFragment(c, StepIdentifyError("Type a name or part number."))
 	}
+	w.Query = items[0]
+	w.Queue = items[1:]
+	w.BulkTotal = len(items)
+	return a.runIdentify(c, w, c.FormValue("hint"))
+}
+
+// runIdentify identifies w.Query and renders the options step (or the paste step
+// in manual mode). Extra triggers ride the response — used to fire the "Saved"
+// toast when auto-advancing to the next bulk item. hint is only sent live.
+func (a *adminUI) runIdentify(c echo.Context, w wizard, hint string, triggers ...string) error {
+	ctx := c.Request().Context()
 	cfg, err := a.p.store.GetSettings(ctx)
 	if err != nil {
 		return err
 	}
-	res, aerr := NewClient(cfg).Identify(ctx, w.Query, c.FormValue("hint"))
+	// Feed the shop's existing categories so the AI reuses a fitting one instead
+	// of inventing an inconsistent new label for a similar item.
+	existing, _ := a.p.store.CategoryPaths(ctx)
+	// Manual mode: no API call — hand the owner a prompt to paste into a chatbot.
+	if cfg.ManualMode {
+		return response.RenderFragment(c, StepManualIdentify(w, IdentifyPrompt(w.Query, hint, existing), ""), triggers...)
+	}
+	res, aerr := NewClient(cfg).Identify(ctx, w.Query, hint, existing)
 	if aerr != nil {
 		// AI down / no key: let the owner type it manually.
 		w.AIError = aerr.Error()
-		return response.RenderFragment(c, StepOptions(w))
+		return response.RenderFragment(c, StepOptions(w), triggers...)
+	}
+	if res.Confident {
+		w.Confident = true
+		w.Options = []Candidate{res.Best}
+	} else {
+		w.Options = res.Options
+	}
+	return response.RenderFragment(c, StepOptions(w), triggers...)
+}
+
+// IdentifyManual parses the reply the owner pasted from their chatbot.
+func (a *adminUI) IdentifyManual(c echo.Context) error {
+	w := readWizard(c)
+	res, err := parseIdentify([]byte(c.FormValue("response")))
+	if err != nil {
+		existing, _ := a.p.store.CategoryPaths(c.Request().Context())
+		return response.RenderFragment(c, StepManualIdentify(w,
+			IdentifyPrompt(w.Query, "", existing),
+			"Couldn't read that reply — paste the whole answer (it should be JSON starting with {)."))
 	}
 	if res.Confident {
 		w.Confident = true
@@ -340,12 +469,18 @@ func (a *adminUI) Save(c echo.Context) error {
 		ProductID: p.ID, ResolvedName: w.Name, SuggestedCategory: w.Category,
 		Specs: w.Specs, UserExplanation: w.Explanation, Source: w.Source, RawQuery: w.Query,
 	})
-	// Reset to step 1; fire a label print for N labels via the core endpoint.
+	// Fire a label print for N labels via the core endpoint.
 	trigger := response.Toast("Saved: "+p.Name, "success")
 	if labels := strings.TrimSpace(c.FormValue("labels")); labels != "" && labels != "0" {
 		trigger = response.ToastAnd("Saved: "+p.Name, "success",
 			`{"ai-print-labels":{"product_id":`+strconv.FormatInt(p.ID, 10)+`,"qty":"`+labels+`"}}`)
 	}
+	// Bulk: auto-advance to the next queued item, carrying the toast.
+	if len(w.Queue) > 0 {
+		next := wizard{Query: w.Queue[0], Queue: w.Queue[1:], BulkTotal: w.BulkTotal}
+		return a.runIdentify(c, next, "", trigger)
+	}
+	// Otherwise reset to step 1.
 	return response.RenderFragment(c, StepIdentify(), trigger)
 }
 
@@ -371,3 +506,10 @@ func strPtr(s string) *string {
 }
 
 func itoa(i int) string { return strconv.Itoa(i) }
+
+func jsBool(b bool) string {
+	if b {
+		return "true"
+	}
+	return "false"
+}

@@ -36,6 +36,39 @@ func (s *Store) OptimizeCategories(ctx context.Context) ([]CatRow, error) {
 	return rows, err
 }
 
+// CategoryPaths returns every category as a full "Parent > Child" path so the
+// identify step can show the AI which categories already exist and have it
+// reuse a fitting one instead of inventing an inconsistent new label. Capped so
+// a pathological catalog can't blow the prompt.
+func (s *Store) CategoryPaths(ctx context.Context) ([]string, error) {
+	rows, err := s.OptimizeCategories(ctx)
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[int64]CatRow, len(rows))
+	for _, r := range rows {
+		byID[r.ID] = r
+	}
+	paths := make([]string, 0, len(rows))
+	for _, r := range rows {
+		parts := []string{r.Name}
+		cur := r
+		for i := 0; i < 20 && cur.ParentID != nil; i++ {
+			p, ok := byID[*cur.ParentID]
+			if !ok {
+				break
+			}
+			parts = append([]string{p.Name}, parts...)
+			cur = p
+		}
+		paths = append(paths, strings.Join(parts, " > "))
+		if len(paths) >= 200 { // ponytail: dozens typical; cap guards a huge tree
+			break
+		}
+	}
+	return paths, nil
+}
+
 // OptimizeProducts lists active products with their current category (capped, so
 // a huge catalog doesn't blow the AI context).
 func (s *Store) OptimizeProducts(ctx context.Context, limit int) ([]ProdRow, error) {

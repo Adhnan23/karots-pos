@@ -9,6 +9,7 @@ type PageData struct {
 	Model          string
 	HasKey         bool
 	DefaultMarkup  string
+	ManualMode     bool
 	HasLastRun     bool
 	LastRunSummary string
 }
@@ -28,7 +29,15 @@ templ Page(d PageData) {
 			<p class="text-sm text-slate-500 mb-4">Type a name or code; the AI names it, suggests a category, and walks you through one step at a time.</p>
 			<details class="bg-white rounded-2xl shadow-sm p-4 mb-6">
 				<summary class="cursor-pointer text-sm font-medium">AI settings</summary>
-				<form method="post" action="/admin/ai-catalog/settings" class="mt-4 grid gap-3">
+				<form method="post" action="/admin/ai-catalog/settings" class="mt-4 grid gap-3" x-data={ "{manual:" + jsBool(d.ManualMode) + "}" }>
+					<label class="flex items-start gap-2 rounded-lg bg-slate-50 px-3 py-2">
+						<input type="checkbox" name="manual_mode" checked?={ d.ManualMode } x-model="manual" class="mt-0.5"/>
+						<span class="text-sm">
+							<span class="font-medium">Manual mode — no API key</span>
+							<span class="block text-xs text-slate-500">Don't have a paid AI key? Turn this on and the plugin gives you a prompt to paste into any chatbot (ChatGPT, Gemini, Claude — where web search is free), then you paste the answer back.</span>
+						</span>
+					</label>
+					<div x-show="!manual" class="grid gap-3">
 					<label class="text-xs text-slate-500">Preset (fills the fields below — then just paste your key)
 						<select onchange="aiApplyPreset(this)" class="mt-1 w-full border rounded-lg px-3 py-1.5">
 							<option value="">— choose a provider —</option>
@@ -36,8 +45,12 @@ templ Page(d PageData) {
 							<option value="openrouter" data-provider="openrouter" data-base="https://openrouter.ai/api/v1" data-model="google/gemini-2.0-flash-exp:free">OpenRouter (free models)</option>
 							<option value="groq" data-provider="groq" data-base="https://api.groq.com/openai/v1" data-model="openai/gpt-oss-120b">Groq (fast free tier)</option>
 							<option value="openai" data-provider="openai" data-base="https://api.openai.com/v1" data-model="gpt-4o-mini">OpenAI (paid)</option>
+							<option value="ollama" data-provider="ollama" data-base="http://localhost:11434/v1" data-model="">Ollama (local — no key)</option>
+							<option value="lmstudio" data-provider="lmstudio" data-base="http://localhost:1234/v1" data-model="">LM Studio (local — no key)</option>
+							<option value="llamacpp" data-provider="llamacpp" data-base="http://localhost:8080/v1" data-model="">llama.cpp server (local — no key)</option>
 						</select>
 					</label>
+					<p class="text-xs text-slate-400 -mt-1">Local providers (Ollama / LM Studio / llama.cpp) need no key — leave it blank. Any OpenAI-compatible base URL works.</p>
 					<label class="text-xs text-slate-500">Provider
 						<input id="ai-provider" name="provider" value={ d.Provider } class="mt-1 w-full border rounded-lg px-3 py-1.5"/>
 					</label>
@@ -45,7 +58,14 @@ templ Page(d PageData) {
 						<input id="ai-base" name="base_url" value={ d.BaseURL } class="mt-1 w-full border rounded-lg px-3 py-1.5"/>
 					</label>
 					<label class="text-xs text-slate-500">Model
-						<input id="ai-model" name="model" value={ d.Model } class="mt-1 w-full border rounded-lg px-3 py-1.5"/>
+						<div class="mt-1 flex gap-2">
+							<input id="ai-model" name="model" value={ d.Model } list="ai-model-list" placeholder="pick or type a model" class="w-full border rounded-lg px-3 py-1.5"/>
+							<button type="button" hx-post="/admin/ai-catalog/models"
+								hx-include="[name='provider'],[name='base_url'],[name='api_key']"
+								hx-target="#ai-models" hx-swap="innerHTML"
+								class="shrink-0 px-3 py-1.5 rounded-lg border text-sm">Load models</button>
+						</div>
+						<div id="ai-models" class="mt-1"></div>
 					</label>
 					<label class="text-xs text-slate-500">API key
 						if d.HasKey {
@@ -54,12 +74,13 @@ templ Page(d PageData) {
 							<input name="api_key" type="password" placeholder="paste your key" class="mt-1 w-full border rounded-lg px-3 py-1.5"/>
 						}
 					</label>
+					</div>
 					<label class="text-xs text-slate-500">Default markup (selling ÷ this = cost)
 						<input name="default_markup" value={ d.DefaultMarkup } class="mt-1 w-32 border rounded-lg px-3 py-1.5"/>
 					</label>
 					<div class="flex gap-2">
 						<button class="px-4 py-1.5 rounded-lg bg-indigo-600 text-white text-sm font-medium">Save</button>
-						<button type="button" hx-post="/admin/ai-catalog/test-key" class="px-4 py-1.5 rounded-lg border text-sm">Test key</button>
+						<button type="button" x-show="!manual" hx-post="/admin/ai-catalog/test-key" class="px-4 py-1.5 rounded-lg border text-sm">Test AI</button>
 					</div>
 				</form>
 			</details>
@@ -88,6 +109,13 @@ templ Page(d PageData) {
 			</div>
 		</div>
 		<script>
+			function aiCopyPrompt(btn) {
+				var ta = btn.closest('.ai-copybox').querySelector('textarea');
+				ta.select();
+				navigator.clipboard && navigator.clipboard.writeText(ta.value);
+				var old = btn.textContent; btn.textContent = 'Copied ✓';
+				setTimeout(function () { btn.textContent = old; }, 1500);
+			}
 			function aiApplyPreset(sel) {
 				var o = sel.options[sel.selectedIndex];
 				if (!o || !o.dataset.base) return;
@@ -118,6 +146,21 @@ templ hidden(w wizard) {
 	<input type="hidden" name="cost_price" value={ w.CostPrice }/>
 	<input type="hidden" name="selling_price" value={ w.Selling }/>
 	<input type="hidden" name="qty" value={ w.Qty }/>
+	if len(w.Queue) > 0 {
+		<input type="hidden" name="queue" value={ joinQueue(w.Queue) }/>
+	}
+	if w.BulkTotal > 0 {
+		<input type="hidden" name="bulk_total" value={ itoa(w.BulkTotal) }/>
+	}
+}
+
+// bulkProgress shows "Product X of Y" while stepping through a multi-item batch.
+templ bulkProgress(w wizard) {
+	if w.BulkTotal > 1 {
+		<div class="mb-2 inline-block rounded bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700">
+			Product { itoa(w.BulkTotal - len(w.Queue)) } of { itoa(w.BulkTotal) }
+		</div>
+	}
 }
 
 templ stepHeader(step, total int, title string) {
@@ -125,6 +168,22 @@ templ stepHeader(step, total int, title string) {
 		<span class="text-xs font-semibold text-indigo-600">Step { itoa(step) }/{ itoa(total) }</span>
 		<h2 class="text-lg font-semibold">{ title }</h2>
 	</div>
+}
+
+// ModelOptions fills the model combo box's datalist from a live provider fetch.
+templ ModelOptions(models []string, errMsg string) {
+	<datalist id="ai-model-list">
+		for _, m := range models {
+			<option value={ m }></option>
+		}
+	</datalist>
+	if errMsg != "" {
+		<span class="text-xs text-rose-600">Couldn't load models: { errMsg }</span>
+	} else if len(models) > 0 {
+		<span class="text-xs text-emerald-600">{ itoa(len(models)) } models loaded — click the box to pick.</span>
+	} else {
+		<span class="text-xs text-slate-400">No models returned.</span>
+	}
 }
 
 templ OptimizeError(msg string) {
@@ -194,12 +253,58 @@ templ OptimizePreview(d OptimizeData) {
 	}
 }
 
+// manualCopyBox shows a read-only prompt with a Copy button (bring-your-own-chatbot mode).
+templ manualCopyBox(prompt string) {
+	<div class="ai-copybox">
+		<div class="flex items-center justify-between mb-1">
+			<span class="text-xs font-medium text-slate-500">Prompt — paste this into your chatbot</span>
+			<button type="button" onclick="aiCopyPrompt(this)" class="px-3 py-1 rounded-lg border text-xs">Copy prompt</button>
+		</div>
+		<textarea readonly rows="6" class="w-full border rounded-lg px-3 py-2 text-xs font-mono bg-slate-50">{ prompt }</textarea>
+	</div>
+}
+
+templ StepManualIdentify(w wizard, prompt, errMsg string) {
+	@stepHeader(2, 6, "Ask your chatbot")
+	@bulkProgress(w)
+	<p class="text-sm text-slate-500 mb-3">Copy this, paste it into ChatGPT / Gemini / Claude (turn on web search if it has it), then paste the reply back below.</p>
+	@manualCopyBox(prompt)
+	if errMsg != "" {
+		<p class="text-sm text-rose-600 mt-3">{ errMsg }</p>
+	}
+	<form hx-post="/admin/ai-catalog/identify/manual" hx-target="#ai-step" hx-swap="innerHTML" class="mt-4">
+		@hidden(w)
+		<label class="block text-sm text-slate-500 mb-1">Paste the chatbot's answer</label>
+		<textarea name="response" rows="6" autofocus placeholder="paste the reply here…" class="w-full border rounded-lg px-3 py-2 text-sm font-mono"></textarea>
+		<button class="mt-3 px-5 py-2 rounded-lg bg-indigo-600 text-white font-medium">Continue →</button>
+	</form>
+}
+
+templ OptimizeManualPrompt(prompt, errMsg string) {
+	<p class="text-sm text-slate-500 mb-3">Manual mode: copy this into your chatbot, then paste its reply back to preview the changes.</p>
+	@manualCopyBox(prompt)
+	if errMsg != "" {
+		<p class="text-sm text-rose-600 mt-3">{ errMsg }</p>
+	}
+	<form hx-post="/admin/ai-catalog/optimize/manual" hx-target="#ai-optimize" hx-swap="innerHTML" class="mt-4">
+		<label class="block text-sm text-slate-500 mb-1">Paste the chatbot's answer</label>
+		<textarea name="response" rows="6" placeholder="paste the reply here…" class="w-full border rounded-lg px-3 py-2 text-sm font-mono"></textarea>
+		<button class="mt-3 px-5 py-2 rounded-lg bg-indigo-600 text-white font-medium">Preview changes →</button>
+	</form>
+}
+
 templ StepIdentify() {
 	@stepHeader(1, 6, "Add a product")
 	<form hx-post="/admin/ai-catalog/identify" hx-target="#ai-step" hx-swap="innerHTML">
 		<label class="block text-sm text-slate-500 mb-2">Product name, code, or part number</label>
 		<input name="query" autofocus placeholder="e.g. 6200 2RS · Coca-Cola 500ml · A4 paper" class="w-full border rounded-lg px-3 py-2 text-lg"/>
 		<button class="mt-3 px-5 py-2 rounded-lg bg-indigo-600 text-white font-medium">Identify →</button>
+		<details class="mt-4">
+			<summary class="cursor-pointer text-sm text-slate-500">➕ Add several at once</summary>
+			<label class="mt-2 mb-1 block text-xs text-slate-500">One item per line (or comma-separated) — the assistant walks you through each in turn.</label>
+			<textarea name="queries" rows="4" placeholder="one item per line…" class="w-full border rounded-lg px-3 py-2"></textarea>
+			<button class="mt-2 px-5 py-2 rounded-lg bg-indigo-600 text-white font-medium">Start with these →</button>
+		</details>
 	</form>
 }
 
@@ -214,6 +319,7 @@ templ StepIdentifyError(msg string) {
 
 templ StepOptions(w wizard) {
 	@stepHeader(2, 6, "Which one is it?")
+	@bulkProgress(w)
 	if w.AIError != "" {
 		<p class="text-sm text-amber-700 bg-amber-50 rounded-lg px-3 py-2 mb-3">AI couldn't help ({ w.AIError }). Pick a manual option below.</p>
 	}
@@ -257,6 +363,7 @@ templ StepOptions(w wizard) {
 
 templ StepCategory(w wizard) {
 	@stepHeader(3, 6, "Name & category")
+	@bulkProgress(w)
 	<form hx-post="/admin/ai-catalog/category" hx-target="#ai-step" hx-swap="innerHTML">
 		@hidden(w)
 		<label class="block text-sm text-slate-500 mb-1">Product name (AI suggestion — edit if needed)</label>
@@ -269,6 +376,7 @@ templ StepCategory(w wizard) {
 
 templ StepBarcode(w wizard) {
 	@stepHeader(4, 6, "Barcode")
+	@bulkProgress(w)
 	if w.Warn != "" {
 		<p class="text-sm text-rose-600 mb-2">{ w.Warn }</p>
 	}
@@ -285,6 +393,7 @@ templ StepBarcode(w wizard) {
 
 templ StepPrice(w wizard) {
 	@stepHeader(5, 6, "Price")
+	@bulkProgress(w)
 	<form hx-post="/admin/ai-catalog/price" hx-target="#ai-step" hx-swap="innerHTML" x-data={ "{sell:'', markup:'" + w.Markup + "', get cost(){var s=parseFloat(this.sell),m=parseFloat(this.markup); return (s>0&&m>1)?Math.round(s/m):''}}" }>
 		@hidden(w)
 		<label class="block text-sm text-slate-500 mb-1">Selling price</label>
@@ -305,6 +414,7 @@ templ StepPrice(w wizard) {
 
 templ StepQty(w wizard) {
 	@stepHeader(6, 6, "Quantity on hand")
+	@bulkProgress(w)
 	<form hx-post="/admin/ai-catalog/qty" hx-target="#ai-step" hx-swap="innerHTML">
 		@hidden(w)
 		<label class="block text-sm text-slate-500 mb-1">How many do you have?</label>
@@ -320,6 +430,7 @@ templ StepLabels(w wizard) {
 		<span class="text-xs font-semibold text-indigo-600">Last step</span>
 		<h2 class="text-lg font-semibold">Print labels &amp; save</h2>
 	</div>
+	@bulkProgress(w)
 	<form hx-post="/admin/ai-catalog/save" hx-target="#ai-step" hx-swap="innerHTML"
 		x-data={ "{n:'" + w.Qty + "'}" }>
 		@hidden(w)

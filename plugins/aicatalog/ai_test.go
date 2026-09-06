@@ -31,7 +31,7 @@ func TestIdentifyParsesChatCompletion(t *testing.T) {
 	defer srv.Close()
 
 	c := NewClient(Settings{BaseURL: srv.URL, Model: "x", APIKey: "test-key"})
-	got, err := c.Identify(context.Background(), "6200 2rs", "")
+	got, err := c.Identify(context.Background(), "6200 2rs", "", nil)
 	if err != nil {
 		t.Fatalf("Identify err: %v", err)
 	}
@@ -61,7 +61,7 @@ func TestIdentifyGeminiUsesGroundingEndpoint(t *testing.T) {
 	defer srv.Close()
 
 	c := NewClient(Settings{Provider: "gemini", BaseURL: srv.URL, Model: "gemini-2.5-flash", APIKey: "gkey"})
-	got, err := c.Identify(context.Background(), "bajaj drawer lock", "")
+	got, err := c.Identify(context.Background(), "bajaj drawer lock", "", nil)
 	if err != nil {
 		t.Fatalf("Identify err: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestIdentifyGeminiUsesGroundingEndpoint(t *testing.T) {
 
 func TestIdentifyErrorsWithoutKey(t *testing.T) {
 	c := NewClient(Settings{BaseURL: "http://example.invalid", Model: "x", APIKey: ""})
-	if _, err := c.Identify(context.Background(), "anything", ""); err == nil {
+	if _, err := c.Identify(context.Background(), "anything", "", nil); err == nil {
 		t.Fatal("expected an error when no API key is set")
 	}
 }

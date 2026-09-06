@@ -22,6 +22,7 @@ type Settings struct {
 	Model         string          `db:"model"`
 	APIKey        string          `db:"api_key"`
 	DefaultMarkup decimal.Decimal `db:"default_markup"`
+	ManualMode    bool            `db:"manual_mode"`
 }
 
 type Candidate struct {
@@ -50,14 +51,14 @@ type LearnedItem struct {
 func (s *Store) GetSettings(ctx context.Context) (Settings, error) {
 	var out Settings
 	err := s.db.GetContext(ctx, &out,
-		`SELECT provider, base_url, model, api_key, default_markup FROM aicatalog_settings WHERE id = 1`)
+		`SELECT provider, base_url, model, api_key, default_markup, manual_mode FROM aicatalog_settings WHERE id = 1`)
 	return out, err
 }
 
 func (s *Store) SaveSettings(ctx context.Context, in Settings) error {
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE aicatalog_settings SET provider=$1, base_url=$2, model=$3, api_key=$4, default_markup=$5 WHERE id = 1`,
-		in.Provider, in.BaseURL, in.Model, in.APIKey, in.DefaultMarkup)
+		`UPDATE aicatalog_settings SET provider=$1, base_url=$2, model=$3, api_key=$4, default_markup=$5, manual_mode=$6 WHERE id = 1`,
+		in.Provider, in.BaseURL, in.Model, in.APIKey, in.DefaultMarkup, in.ManualMode)
 	return err
 }
 

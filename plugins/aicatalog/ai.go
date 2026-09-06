@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 )
@@ -33,7 +34,14 @@ Only add a deeper sub-category when a shop would stock MANY items of that exact
 type. Never build long chains like A > B > C > D. Prefer "Bearings" (or at most
 "Bearings > Ball Bearings"), NOT "Automotive > Parts > Bearings > Deep Groove".
 "explanation" is one short sentence a non-expert understands. "specs" holds key
-dimensions/ratings if known.`
+dimensions/ratings if known.
+When web search is available, ALWAYS look the item up to confirm it rather than
+relying on memory — codes and part numbers are easily confused, so verify before
+answering. If you cannot confirm what it is, set confident=false and offer your
+best options instead of guessing a single answer.
+If a list of the shop's EXISTING categories is given, and one of them fits the
+item, REUSE its exact path verbatim instead of inventing a new name — so similar
+items land together. Only propose a new category when none of the existing ones fit.`
 
 type chatReq struct {
 	Model    string    `json:"model"`
@@ -53,9 +61,6 @@ type chatResp struct {
 }
 
 func (c *Client) call(ctx context.Context, messages []chatMsg) (string, error) {
-	if strings.TrimSpace(c.cfg.APIKey) == "" {
-		return "", errors.New("AI API key is not set — add it in AI Catalog settings")
-	}
 	payload, _ := json.Marshal(chatReq{Model: c.cfg.Model, Messages: messages})
 	url := strings.TrimRight(c.cfg.BaseURL, "/") + "/chat/completions"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
@@ -63,7 +68,9 @@ func (c *Client) call(ctx context.Context, messages []chatMsg) (string, error) {
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
+	if c.cfg.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
+	}
 	resp, err := c.hc.Do(req)
 	if err != nil {
 		return "", err
@@ -199,14 +206,29 @@ func (c *Client) callGemini(ctx context.Context, system, user string, search boo
 	return sb.String(), nil
 }
 
-func (c *Client) Identify(ctx context.Context, query, userHint string) (IdentifyResult, error) {
+// identifyUserMsg builds the user turn describing the item to identify.
+func identifyUserMsg(query, userHint string, existingCats []string) string {
 	user := "Identify this item: " + query
 	if strings.TrimSpace(userHint) != "" {
 		user += "\nAdditional context from the shop owner: " + userHint
 	}
+	if len(existingCats) > 0 {
+		user += "\n\nEXISTING shop categories (reuse a fitting one verbatim, else propose new):\n- " + strings.Join(existingCats, "\n- ")
+	}
+	return user
+}
+
+// IdentifyPrompt is the full copy-paste prompt for manual (bring-your-own-chatbot)
+// mode: system instructions + the request in one blob the owner pastes into any
+// chatbot. The reply is fed back through parseIdentify.
+func IdentifyPrompt(query, userHint string, existingCats []string) string {
+	return systemPrompt + "\n\n" + identifyUserMsg(query, userHint, existingCats)
+}
+
+func (c *Client) Identify(ctx context.Context, query, userHint string, existingCats []string) (IdentifyResult, error) {
 	// Gemini gets live Google Search grounding; other providers answer from
 	// built-in knowledge over the OpenAI-compatible endpoint.
-	content, err := c.complete(ctx, systemPrompt, user, c.isGemini())
+	content, err := c.complete(ctx, systemPrompt, identifyUserMsg(query, userHint, existingCats), c.isGemini())
 	if err != nil {
 		return IdentifyResult{}, err
 	}
@@ -233,8 +255,8 @@ Rules:
 - moves: move an obviously mis-filed product to a better EXISTING category id.
 Only reference ids that appear in the lists; parent_id and category_id must be existing category ids. Use empty arrays when nothing needs changing. No prose.`
 
-// Optimize asks the model for a category-tidy plan over the given tree/products.
-func (c *Client) Optimize(ctx context.Context, cats []CatRow, prods []ProdRow) (OptimizePlan, error) {
+// optimizeUserMsg serialises the category tree + product sample the model reasons over.
+func optimizeUserMsg(cats []CatRow, prods []ProdRow) string {
 	var b strings.Builder
 	b.WriteString("CATEGORIES (id|name|parentId|productCount):\n")
 	for _, c := range cats {
@@ -248,7 +270,18 @@ func (c *Client) Optimize(ctx context.Context, cats []CatRow, prods []ProdRow) (
 	for _, p := range prods {
 		fmt.Fprintf(&b, "%d|%s|%d\n", p.ID, p.Name, p.CategoryID)
 	}
-	content, err := c.complete(ctx, optimizeSystemPrompt, b.String(), false)
+	return b.String()
+}
+
+// OptimizePrompt is the full copy-paste prompt for manual mode; the pasted reply
+// is fed back through parseOptimizePlan.
+func OptimizePrompt(cats []CatRow, prods []ProdRow) string {
+	return optimizeSystemPrompt + "\n\n" + optimizeUserMsg(cats, prods)
+}
+
+// Optimize asks the model for a category-tidy plan over the given tree/products.
+func (c *Client) Optimize(ctx context.Context, cats []CatRow, prods []ProdRow) (OptimizePlan, error) {
+	content, err := c.complete(ctx, optimizeSystemPrompt, optimizeUserMsg(cats, prods), false)
 	if err != nil {
 		return OptimizePlan{}, err
 	}
@@ -257,12 +290,61 @@ func (c *Client) Optimize(ctx context.Context, cats []CatRow, prods []ProdRow) (
 
 func (c *Client) isGemini() bool { return strings.EqualFold(c.cfg.Provider, "gemini") }
 
+// isLocal reports a local OpenAI-compatible server (Ollama, LM Studio, llama.cpp),
+// which needs no API key.
+func (c *Client) isLocal() bool {
+	b := strings.ToLower(c.cfg.BaseURL)
+	return strings.Contains(b, "localhost") || strings.Contains(b, "127.0.0.1") || strings.Contains(b, "0.0.0.0")
+}
+
+// ListModels fetches the provider's available models via the OpenAI-compatible
+// GET {base}/models endpoint (works for Groq, OpenAI, OpenRouter, Gemini's compat
+// path, and local servers), returning their ids sorted.
+func (c *Client) ListModels(ctx context.Context) ([]string, error) {
+	if strings.TrimSpace(c.cfg.APIKey) == "" && !c.isLocal() {
+		return nil, errors.New("add the API key first, then load models")
+	}
+	url := strings.TrimRight(c.cfg.BaseURL, "/") + "/models"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	if c.cfg.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
+	}
+	resp, err := c.hc.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, apiErrMessage(body))
+	}
+	var mr struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &mr); err != nil {
+		return nil, fmt.Errorf("unreadable model list: %s", snippet(body))
+	}
+	out := make([]string, 0, len(mr.Data))
+	for _, m := range mr.Data {
+		if strings.TrimSpace(m.ID) != "" {
+			out = append(out, m.ID)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
 // complete dispatches one prompt to the right backend and returns the model's
 // text. search=true asks Gemini to use Google Search grounding (ignored by the
 // OpenAI-compatible path, which has no built-in web search).
 func (c *Client) complete(ctx context.Context, system, user string, search bool) (string, error) {
-	if strings.TrimSpace(c.cfg.APIKey) == "" {
-		return "", errors.New("AI API key is not set — add it in AI Catalog settings")
+	if strings.TrimSpace(c.cfg.APIKey) == "" && !c.isLocal() {
+		return "", errors.New("AI API key is not set — add it in AI Catalog settings (or use a local provider)")
 	}
 	if c.isGemini() {
 		return c.callGemini(ctx, system, user, search)
