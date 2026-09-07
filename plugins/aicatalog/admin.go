@@ -107,60 +107,117 @@ func (a *adminUI) Page(c echo.Context) error {
 		d.HasLastRun = true
 		d.LastRunSummary = run.Summary
 	}
+	if md, mErr := a.mockData(ctx); mErr == nil {
+		d.Mock = md
+	}
 	return response.RenderPage(c, Page(d))
 }
 
-// OptimizePreview asks the AI for a tidy-up plan and renders it for approval.
+// optimizeChunk is how many products go into one Optimize pass, so a large
+// catalog is tidied in chunks small enough to paste into a chatbot.
+const optimizeChunk = 150
+
+// chunkParams reads the paging cursor (offset) and the chunked-session run id
+// that ride the optimize forms/links. Works for GET (query) and POST (form).
+func chunkParams(c echo.Context) (offset int, runID int64) {
+	offset, _ = strconv.Atoi(c.FormValue("offset"))
+	if offset < 0 {
+		offset = 0
+	}
+	runID, _ = strconv.ParseInt(c.FormValue("run_id"), 10, 64)
+	return
+}
+
+func chunkIndex(offset int) int { return offset/optimizeChunk + 1 }
+func chunkCount(total int) int {
+	if total <= 0 {
+		return 1
+	}
+	return (total + optimizeChunk - 1) / optimizeChunk
+}
+func moreChunks(offset, total int) bool { return offset+optimizeChunk < total }
+func nextOffset(offset int) int         { return offset + optimizeChunk }
+
+// chunkEnd is the 1-based index of the last product in this chunk (clamped).
+func chunkEnd(offset, total int) int {
+	if end := offset + optimizeChunk; end < total {
+		return end
+	}
+	return total
+}
+
+func itoa64(i int64) string { return strconv.FormatInt(i, 10) }
+
+// optimizeNextURL builds the GET url for the next chunk, carrying the session run id.
+func optimizeNextURL(offset int, runID int64) string {
+	return "/admin/ai-catalog/optimize?offset=" + itoa(nextOffset(offset)) +
+		"&run_id=" + strconv.FormatInt(runID, 10)
+}
+
+// OptimizePreview asks the AI for a tidy-up plan for one chunk and renders it for
+// approval (or hands over the paste-prompt in manual mode).
 func (a *adminUI) OptimizePreview(c echo.Context) error {
 	ctx := c.Request().Context()
 	cfg, err := a.p.store.GetSettings(ctx)
 	if err != nil {
 		return err
 	}
+	offset, runID := chunkParams(c)
 	cats, err := a.p.store.OptimizeCategories(ctx)
 	if err != nil {
 		return err
 	}
-	prods, err := a.p.store.OptimizeProducts(ctx, 300)
+	total, err := a.p.store.CountOptimizeProducts(ctx)
+	if err != nil {
+		return err
+	}
+	prods, err := a.p.store.OptimizeProducts(ctx, optimizeChunk, offset)
 	if err != nil {
 		return err
 	}
 	// Manual mode: hand over the prompt to paste into a chatbot instead of calling one.
 	if cfg.ManualMode {
-		return response.RenderFragment(c, OptimizeManualPrompt(OptimizePrompt(cats, prods), ""))
+		return response.RenderFragment(c, OptimizeManualPrompt(OptimizePrompt(cats, prods), "", offset, total, runID))
 	}
 	plan, aerr := NewClient(cfg).Optimize(ctx, cats, prods)
 	if aerr != nil {
 		return response.RenderFragment(c, OptimizeError(aerr.Error()))
 	}
-	return response.RenderFragment(c, OptimizePreview(a.optimizeData(cats, prods, plan)))
+	return response.RenderFragment(c, OptimizePreview(a.optimizeData(cats, prods, plan, offset, total, runID)))
 }
 
 // OptimizeManual parses the tidy-up plan the owner pasted from their chatbot.
 func (a *adminUI) OptimizeManual(c echo.Context) error {
 	ctx := c.Request().Context()
-	plan, err := parseOptimizePlan([]byte(c.FormValue("response")))
-	if err != nil {
-		cats, _ := a.p.store.OptimizeCategories(ctx)
-		prods, _ := a.p.store.OptimizeProducts(ctx, 300)
-		return response.RenderFragment(c, OptimizeManualPrompt(OptimizePrompt(cats, prods),
-			"Couldn't read that reply — paste the whole answer (it should be JSON starting with {)."))
-	}
+	offset, runID := chunkParams(c)
 	cats, err := a.p.store.OptimizeCategories(ctx)
 	if err != nil {
 		return err
 	}
-	prods, err := a.p.store.OptimizeProducts(ctx, 300)
+	total, err := a.p.store.CountOptimizeProducts(ctx)
 	if err != nil {
 		return err
 	}
-	return response.RenderFragment(c, OptimizePreview(a.optimizeData(cats, prods, plan)))
+	prods, err := a.p.store.OptimizeProducts(ctx, optimizeChunk, offset)
+	if err != nil {
+		return err
+	}
+	plan, perr := parseOptimizePlan([]byte(c.FormValue("response")))
+	if perr != nil {
+		return response.RenderFragment(c, OptimizeManualPrompt(OptimizePrompt(cats, prods),
+			"Couldn't read that reply — paste the whole answer (it should be JSON starting with {).", offset, total, runID))
+	}
+	return response.RenderFragment(c, OptimizePreview(a.optimizeData(cats, prods, plan, offset, total, runID)))
 }
 
-// optimizeData builds the preview view-model (name maps + JSON) shared by the
-// live and manual optimize paths.
-func (a *adminUI) optimizeData(cats []CatRow, prods []ProdRow, plan OptimizePlan) OptimizeData {
-	d := OptimizeData{Plan: plan, HasChanges: !plan.empty(), CatName: map[int64]string{}, ProdName: map[int64]string{}}
+// optimizeData builds the preview view-model (name maps + JSON + chunk cursor)
+// shared by the live and manual optimize paths.
+func (a *adminUI) optimizeData(cats []CatRow, prods []ProdRow, plan OptimizePlan, offset, total int, runID int64) OptimizeData {
+	d := OptimizeData{
+		Plan: plan, HasChanges: !plan.empty(),
+		CatName: map[int64]string{}, ProdName: map[int64]string{},
+		Offset: offset, Total: total, RunID: runID,
+	}
 	for _, x := range cats {
 		d.CatName[x.ID] = x.Name
 	}
@@ -172,17 +229,24 @@ func (a *adminUI) optimizeData(cats []CatRow, prods []ProdRow, plan OptimizePlan
 	return d
 }
 
-// OptimizeApply applies the plan the preview posted back, recording undo.
+// OptimizeApply applies one chunk's plan, threading the session run id so the
+// whole chunked run reverts as one, then offers the next chunk if any.
 func (a *adminUI) OptimizeApply(c echo.Context) error {
+	ctx := c.Request().Context()
 	plan, err := parseOptimizePlan([]byte(c.FormValue("plan")))
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid plan")
 	}
-	summary, err := a.p.store.ApplyPlan(c.Request().Context(), plan, middleware.CurrentUserID(c))
+	offset, runID := chunkParams(c)
+	summary, outRun, err := a.p.store.ApplyPlan(ctx, plan, middleware.CurrentUserID(c), runID)
 	if err != nil {
 		return err
 	}
-	return response.RenderFragment(c, OptimizeResult(summary, true),
+	total, err := a.p.store.CountOptimizeProducts(ctx)
+	if err != nil {
+		return err
+	}
+	return response.RenderFragment(c, OptimizeApplyResult(summary, offset, total, outRun),
 		response.Toast("Optimised: "+summary, "success"))
 }
 

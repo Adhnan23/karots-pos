@@ -288,6 +288,84 @@ func (c *Client) Optimize(ctx context.Context, cats []CatRow, prods []ProdRow) (
 	return parseOptimizePlan([]byte(content))
 }
 
+// --- batch enrich for the mock/staging table ---
+
+// EnrichRow is one staging row handed to the AI to identify/categorise.
+type EnrichRow struct {
+	ID     int64
+	Name   string
+	Detail string
+}
+
+// EnrichResult is one enriched row keyed back to its mock id.
+type EnrichResult struct {
+	ID          int64  `json:"id"`
+	Name        string `json:"name"`
+	Category    string `json:"category"`
+	Specs       string `json:"specs"`
+	Explanation string `json:"explanation"`
+	Confident   bool   `json:"confident"`
+}
+
+const enrichSystemPrompt = `You identify and categorise a batch of retail/spare-part products.
+Each line is: mock_id | name | detail   (detail may be blank).
+If you have web access, verify each item online rather than guessing — codes and
+part numbers are easily confused. If you cannot identify a line, ASK me for
+clarification, quoting its mock_id and name and saying what you need; I will
+answer and you continue. When everything is clear, reply with a JSON ARRAY ONLY
+(a one-line summary before it is fine), one object per input line:
+[{"id":<mock_id>,"name":"","category":"","specs":"","explanation":"","confident":true}]
+Keep EVERY mock_id I gave you, even ones you were unsure about (use your best
+guess with confident:false). "name" is a clean product name. "explanation" is one
+short sentence a non-expert understands. "specs" holds key dimensions/ratings.
+"category" uses " > " between levels but stays GENERAL and SHALLOW — usually one
+broad category, at most two levels; never long chains like A > B > C > D.
+If a list of the shop's EXISTING categories is given and one fits, REUSE its exact
+path verbatim so similar items land together; propose a new path only when none fits.`
+
+func enrichUserMsg(rows []EnrichRow, existingCats []string) string {
+	var b strings.Builder
+	b.WriteString("Items (mock_id | name | detail):\n")
+	for _, r := range rows {
+		fmt.Fprintf(&b, "%d | %s | %s\n", r.ID, r.Name, r.Detail)
+	}
+	if len(existingCats) > 0 {
+		b.WriteString("\nEXISTING shop categories (reuse a fitting one verbatim, else propose new):\n- ")
+		b.WriteString(strings.Join(existingCats, "\n- "))
+	}
+	return b.String()
+}
+
+// EnrichPrompt is the full copy-paste prompt for manual mode.
+func EnrichPrompt(rows []EnrichRow, existingCats []string) string {
+	return enrichSystemPrompt + "\n\n" + enrichUserMsg(rows, existingCats)
+}
+
+// parseEnrich pulls the JSON array out of the model's reply (tolerating a summary
+// line or code fences around it) into per-row results keyed by mock id.
+func parseEnrich(raw []byte) ([]EnrichResult, error) {
+	s := strings.TrimSpace(string(raw))
+	i := strings.IndexByte(s, '[')
+	j := strings.LastIndexByte(s, ']')
+	if i < 0 || j < i {
+		return nil, errors.New("no JSON array found in the reply")
+	}
+	var out []EnrichResult
+	if err := json.Unmarshal([]byte(s[i:j+1]), &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// EnrichBatch sends the rows for identification and returns per-row results.
+func (c *Client) EnrichBatch(ctx context.Context, rows []EnrichRow, existingCats []string) ([]EnrichResult, error) {
+	content, err := c.complete(ctx, enrichSystemPrompt, enrichUserMsg(rows, existingCats), c.isGemini())
+	if err != nil {
+		return nil, err
+	}
+	return parseEnrich([]byte(content))
+}
+
 func (c *Client) isGemini() bool { return strings.EqualFold(c.cfg.Provider, "gemini") }
 
 // isLocal reports a local OpenAI-compatible server (Ollama, LM Studio, llama.cpp),

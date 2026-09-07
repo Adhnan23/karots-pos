@@ -69,15 +69,26 @@ func (s *Store) CategoryPaths(ctx context.Context) ([]string, error) {
 	return paths, nil
 }
 
-// OptimizeProducts lists active products with their current category (capped, so
-// a huge catalog doesn't blow the AI context).
-func (s *Store) OptimizeProducts(ctx context.Context, limit int) ([]ProdRow, error) {
+// OptimizeProducts lists a page of active products with their current category.
+// Paging (limit+offset over a stable id order) lets a large catalog be optimised
+// in chunks — each chunk small enough to paste into a chatbot. Products are never
+// deleted by a plan, so the id order stays stable across chunks.
+func (s *Store) OptimizeProducts(ctx context.Context, limit, offset int) ([]ProdRow, error) {
 	var rows []ProdRow
 	err := s.db.SelectContext(ctx, &rows, `
 		SELECT id, name, category_id FROM products
 		WHERE is_active AND is_service = false
-		ORDER BY id LIMIT $1`, limit)
+		ORDER BY id LIMIT $1 OFFSET $2`, limit, offset)
 	return rows, err
+}
+
+// CountOptimizeProducts is the total the chunked Optimize pages through, so the
+// UI can show "chunk k of K" and know when the last chunk is done.
+func (s *Store) CountOptimizeProducts(ctx context.Context) (int, error) {
+	var n int
+	err := s.db.GetContext(ctx, &n,
+		`SELECT count(*) FROM products WHERE is_active AND is_service = false`)
+	return n, err
 }
 
 // --- the plan the AI returns ---
@@ -133,12 +144,17 @@ type OptimizeRun struct {
 
 // ApplyPlan validates the plan against real ids and applies it in a single
 // transaction, recording the exact undo ops so it can be reverted. Invalid or
-// unsafe ops (unknown ids, cycles, self-merge) are skipped, not fatal. Returns a
-// human summary of what was applied.
-func (s *Store) ApplyPlan(ctx context.Context, plan OptimizePlan, userID int64) (string, error) {
+// unsafe ops (unknown ids, cycles, self-merge) are skipped, not fatal.
+//
+// runID threads a chunked Optimize session into ONE run: pass 0 for the first
+// chunk (a new run is created) and the returned id for later chunks (their undo
+// ops are appended to the same run). A single Revert then rolls back the whole
+// session. Returns the human summary and the run id (0 when nothing was applied
+// and no run existed yet).
+func (s *Store) ApplyPlan(ctx context.Context, plan OptimizePlan, userID, runID int64) (string, int64, error) {
 	tx, err := s.db.BeginTxx(ctx, nil)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	defer tx.Rollback()
 
@@ -146,7 +162,7 @@ func (s *Store) ApplyPlan(ctx context.Context, plan OptimizePlan, userID int64) 
 	{
 		var ids []int64
 		if err := tx.SelectContext(ctx, &ids, `SELECT id FROM categories`); err != nil {
-			return "", err
+			return "", 0, err
 		}
 		for _, id := range ids {
 			catExists[id] = true
@@ -156,7 +172,7 @@ func (s *Store) ApplyPlan(ctx context.Context, plan OptimizePlan, userID int64) 
 	{
 		var ids []int64
 		if err := tx.SelectContext(ctx, &ids, `SELECT id FROM products`); err != nil {
-			return "", err
+			return "", 0, err
 		}
 		for _, id := range ids {
 			prodExists[id] = true
@@ -185,7 +201,7 @@ func (s *Store) ApplyPlan(ctx context.Context, plan OptimizePlan, userID int64) 
 			continue
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE categories SET name=$2 WHERE id=$1`, op.ID, op.To); err != nil {
-			return "", err
+			return "", 0, err
 		}
 		undo = append(undo, map[string]any{"kind": "rename", "id": op.ID, "name": old})
 		nRen++
@@ -202,7 +218,7 @@ func (s *Store) ApplyPlan(ctx context.Context, plan OptimizePlan, userID int64) 
 				continue
 			}
 			if desc, err := isDescendant(ctx, tx, op.ID, op.ParentID); err != nil {
-				return "", err
+				return "", 0, err
 			} else if desc {
 				continue
 			}
@@ -214,7 +230,7 @@ func (s *Store) ApplyPlan(ctx context.Context, plan OptimizePlan, userID int64) 
 			continue
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE categories SET parent_id=$2 WHERE id=$1`, op.ID, newParent); err != nil {
-			return "", err
+			return "", 0, err
 		}
 		undo = append(undo, map[string]any{"kind": "reparent", "id": op.ID, "parent_id": oldParent})
 		nRep++
@@ -231,19 +247,19 @@ func (s *Store) ApplyPlan(ctx context.Context, plan OptimizePlan, userID int64) 
 		}
 		var prodIDs, childIDs []int64
 		if err := tx.SelectContext(ctx, &prodIDs, `SELECT id FROM products WHERE category_id=$1`, op.From); err != nil {
-			return "", err
+			return "", 0, err
 		}
 		if err := tx.SelectContext(ctx, &childIDs, `SELECT id FROM categories WHERE parent_id=$1`, op.From); err != nil {
-			return "", err
+			return "", 0, err
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE products SET category_id=$2 WHERE category_id=$1`, op.From, op.Into); err != nil {
-			return "", err
+			return "", 0, err
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE categories SET parent_id=$2 WHERE parent_id=$1`, op.From, op.Into); err != nil {
-			return "", err
+			return "", 0, err
 		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM categories WHERE id=$1`, op.From); err != nil {
-			return "", err
+			return "", 0, err
 		}
 		catExists[op.From] = false
 		undo = append(undo, map[string]any{
@@ -266,23 +282,50 @@ func (s *Store) ApplyPlan(ctx context.Context, plan OptimizePlan, userID int64) 
 			continue
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE products SET category_id=$2 WHERE id=$1`, op.ProductID, op.CategoryID); err != nil {
-			return "", err
+			return "", 0, err
 		}
 		undo = append(undo, map[string]any{"kind": "move_product", "id": op.ProductID, "category_id": oldCat})
 		nMove++
 	}
 
 	if len(undo) == 0 {
-		return "No changes applied.", tx.Commit()
+		// Nothing changed this chunk — keep the session's run id (0 if none yet).
+		return "No changes applied.", runID, tx.Commit()
 	}
 	summary := fmt.Sprintf("%d rename, %d re-parent, %d merge, %d product move", nRen, nRep, nMerge, nMove)
-	undoJSON, _ := json.Marshal(undo)
-	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO aicatalog_optimize_runs (applied_by, summary, undo) VALUES ($1,$2,$3)`,
-		userID, summary, undoJSON); err != nil {
-		return "", err
+
+	if runID != 0 {
+		// Append this chunk's undo ops to the existing session run so one Revert
+		// rolls the whole session back. Reverse-order replay stays correct: ops
+		// appended last (applied last) are undone first.
+		var run struct {
+			Undo    []byte `db:"undo"`
+			Summary string `db:"summary"`
+		}
+		if err := tx.GetContext(ctx, &run,
+			`SELECT undo, summary FROM aicatalog_optimize_runs WHERE id=$1 FOR UPDATE`, runID); err != nil {
+			return "", 0, err
+		}
+		var prev []map[string]any
+		_ = json.Unmarshal(run.Undo, &prev)
+		merged, _ := json.Marshal(append(prev, undo...))
+		combined := run.Summary + "; " + summary
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE aicatalog_optimize_runs SET summary=$2, undo=$3 WHERE id=$1`,
+			runID, combined, merged); err != nil {
+			return "", 0, err
+		}
+		return combined, runID, tx.Commit()
 	}
-	return summary, tx.Commit()
+
+	undoJSON, _ := json.Marshal(undo)
+	var newID int64
+	if err := tx.GetContext(ctx, &newID,
+		`INSERT INTO aicatalog_optimize_runs (applied_by, summary, undo) VALUES ($1,$2,$3) RETURNING id`,
+		userID, summary, undoJSON); err != nil {
+		return "", 0, err
+	}
+	return summary, newID, tx.Commit()
 }
 
 // isDescendant reports whether `node` is `ancestor` or sits below it, walking up

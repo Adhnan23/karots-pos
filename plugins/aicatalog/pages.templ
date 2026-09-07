@@ -12,6 +12,7 @@ type PageData struct {
 	ManualMode     bool
 	HasLastRun     bool
 	LastRunSummary string
+	Mock           MockData
 }
 
 type OptimizeData struct {
@@ -20,11 +21,15 @@ type OptimizeData struct {
 	ProdName   map[int64]string
 	PlanJSON   string
 	HasChanges bool
+	// chunked-session cursor
+	Offset int
+	Total  int
+	RunID  int64
 }
 
 templ Page(d PageData) {
 	@layouts.Admin("AI Catalog", d.UserName, "aicatalog") {
-		<div class="max-w-2xl mx-auto">
+		<div class="max-w-6xl mx-auto">
 			<h1 class="text-2xl font-bold mb-1">AI Catalog — add products fast</h1>
 			<p class="text-sm text-slate-500 mb-4">Type a name or code; the AI names it, suggests a category, and walks you through one step at a time.</p>
 			<details class="bg-white rounded-2xl shadow-sm p-4 mb-6">
@@ -84,29 +89,32 @@ templ Page(d PageData) {
 					</div>
 				</form>
 			</details>
-			<div id="ai-step" class="bg-white rounded-2xl shadow-sm p-6">
-				@StepIdentify()
-			</div>
-			<div class="mt-6 bg-white rounded-2xl shadow-sm p-6">
-				<div class="flex items-center justify-between gap-3 flex-wrap">
-					<div>
-						<h2 class="text-lg font-semibold">🧹 Optimize categories</h2>
-						<p class="text-sm text-slate-500">Let the AI tidy the category tree — merge duplicates, group loose categories, and re-file mis-placed products. You review before it applies, and you can revert.</p>
-					</div>
-					<div class="flex gap-2">
-						<button hx-get="/admin/ai-catalog/optimize" hx-target="#ai-optimize" hx-swap="innerHTML"
-							hx-indicator="#ai-opt-spin"
-							class="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium">Scan &amp; suggest</button>
-						if d.HasLastRun {
-							<button hx-post="/admin/ai-catalog/optimize/revert" hx-target="#ai-optimize" hx-swap="innerHTML"
-								hx-confirm="Revert the last optimize? This restores the previous category tree."
-								class="px-4 py-2 rounded-lg border text-sm">↩ Revert last ({ d.LastRunSummary })</button>
-						}
-					</div>
+			<div class="grid gap-6 lg:grid-cols-2 items-start">
+				<div id="ai-step" class="bg-white rounded-2xl shadow-sm p-6">
+					@StepIdentify()
 				</div>
-				<div id="ai-opt-spin" class="htmx-indicator text-sm text-slate-400 mt-3">Thinking…</div>
-				<div id="ai-optimize" class="mt-4"></div>
+				<div class="bg-white rounded-2xl shadow-sm p-6">
+					<div class="flex items-center justify-between gap-3 flex-wrap">
+						<div>
+							<h2 class="text-lg font-semibold">🧹 Optimize categories</h2>
+							<p class="text-sm text-slate-500">Let the AI tidy the category tree — merge duplicates, group loose categories, and re-file mis-placed products. You review before it applies, and you can revert.</p>
+						</div>
+						<div class="flex gap-2">
+							<button hx-get="/admin/ai-catalog/optimize" hx-target="#ai-optimize" hx-swap="innerHTML"
+								hx-indicator="#ai-opt-spin"
+								class="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium">Scan &amp; suggest</button>
+							if d.HasLastRun {
+								<button hx-post="/admin/ai-catalog/optimize/revert" hx-target="#ai-optimize" hx-swap="innerHTML"
+									hx-confirm="Revert the last optimize? This restores the previous category tree."
+									class="px-4 py-2 rounded-lg border text-sm">↩ Revert last ({ d.LastRunSummary })</button>
+							}
+						</div>
+					</div>
+					<div id="ai-opt-spin" class="htmx-indicator text-sm text-slate-400 mt-3">Thinking…</div>
+					<div id="ai-optimize" class="mt-4"></div>
+				</div>
 			</div>
+			@MockSection(d.Mock)
 		</div>
 		<script>
 			function aiCopyPrompt(btn) {
@@ -200,8 +208,10 @@ templ OptimizeResult(msg string, applied bool) {
 }
 
 templ OptimizePreview(d OptimizeData) {
+	@chunkBadge(d.Offset, d.Total)
 	if !d.HasChanges {
-		<p class="text-slate-500">Catalog looks tidy — nothing to optimize. 🎉</p>
+		<p class="text-slate-500">Nothing to change in this chunk. 🎉</p>
+		@nextChunkButton(d.Offset, d.Total, d.RunID)
 	} else {
 		<div class="space-y-4 text-sm">
 			if len(d.Plan.Merges) > 0 {
@@ -246,8 +256,10 @@ templ OptimizePreview(d OptimizeData) {
 			}
 			<form hx-post="/admin/ai-catalog/optimize/apply" hx-target="#ai-optimize" hx-swap="innerHTML">
 				<input type="hidden" name="plan" value={ d.PlanJSON }/>
-				<button class="mt-2 px-5 py-2 rounded-lg bg-emerald-600 text-white font-semibold">✓ Apply all changes</button>
-				<span class="ml-2 text-xs text-slate-400">You can revert this afterward.</span>
+				<input type="hidden" name="offset" value={ itoa(d.Offset) }/>
+				<input type="hidden" name="run_id" value={ itoa64(d.RunID) }/>
+				<button class="mt-2 px-5 py-2 rounded-lg bg-emerald-600 text-white font-semibold">✓ Apply these changes</button>
+				<span class="ml-2 text-xs text-slate-400">You can revert afterward.</span>
 			</form>
 		</div>
 	}
@@ -280,17 +292,43 @@ templ StepManualIdentify(w wizard, prompt, errMsg string) {
 	</form>
 }
 
-templ OptimizeManualPrompt(prompt, errMsg string) {
+templ OptimizeManualPrompt(prompt, errMsg string, offset, total int, runID int64) {
+	@chunkBadge(offset, total)
 	<p class="text-sm text-slate-500 mb-3">Manual mode: copy this into your chatbot, then paste its reply back to preview the changes.</p>
 	@manualCopyBox(prompt)
 	if errMsg != "" {
 		<p class="text-sm text-rose-600 mt-3">{ errMsg }</p>
 	}
 	<form hx-post="/admin/ai-catalog/optimize/manual" hx-target="#ai-optimize" hx-swap="innerHTML" class="mt-4">
+		<input type="hidden" name="offset" value={ itoa(offset) }/>
+		<input type="hidden" name="run_id" value={ itoa64(runID) }/>
 		<label class="block text-sm text-slate-500 mb-1">Paste the chatbot's answer</label>
 		<textarea name="response" rows="6" placeholder="paste the reply here…" class="w-full border rounded-lg px-3 py-2 text-sm font-mono"></textarea>
 		<button class="mt-3 px-5 py-2 rounded-lg bg-indigo-600 text-white font-medium">Preview changes →</button>
 	</form>
+}
+
+// chunkBadge shows "Chunk k of K" when the catalog spans more than one chunk.
+templ chunkBadge(offset, total int) {
+	if total > optimizeChunk {
+		<div class="mb-2 inline-block rounded bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700">
+			Chunk { itoa(chunkIndex(offset)) } of { itoa(chunkCount(total)) } · products { itoa(offset + 1) }–{ itoa(chunkEnd(offset, total)) } of { itoa(total) }
+		</div>
+	}
+}
+
+// nextChunkButton advances to the next chunk (carrying the session run id).
+templ nextChunkButton(offset int, total int, runID int64) {
+	if moreChunks(offset, total) {
+		<button hx-get={ optimizeNextURL(offset, runID) } hx-target="#ai-optimize" hx-swap="innerHTML"
+			class="mt-3 px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium">Next chunk →</button>
+	}
+}
+
+// OptimizeApplyResult confirms one applied chunk and offers the next.
+templ OptimizeApplyResult(summary string, offset, total int, runID int64) {
+	@OptimizeResult(summary, true)
+	@nextChunkButton(offset, total, runID)
 }
 
 templ StepIdentify() {
@@ -455,4 +493,128 @@ templ StepLabels(w wizard) {
 			<button class="mt-4 px-6 py-2.5 rounded-lg bg-emerald-600 text-white font-semibold">✓ Save product</button>
 		</div>
 	</form>
+}
+
+// --- mock (staging) bulk-add ---
+
+templ MockSection(d MockData) {
+	<div id="mock-section" class="mt-6 bg-white rounded-2xl shadow-sm p-6">
+		<div class="mb-3">
+			<h2 class="text-lg font-semibold">🧱 Bulk add (staging)</h2>
+			<p class="text-sm text-slate-500">Quick-add many draft products, optionally let AI fill category/name, then commit them all at once. Nothing hits the catalog until you commit — and you can revert.</p>
+		</div>
+		<form hx-post="/admin/ai-catalog/mock/row" hx-target="#mock-rows" hx-swap="beforeend"
+			x-data={ "{mode:'sell',v:'',markup:'" + d.Markup + "',num(x){var n=parseFloat(x);return isNaN(n)?0:n},get sell(){return this.mode==='sell'?this.v:(this.num(this.v)>0&&this.num(this.markup)>1?Math.round(this.num(this.v)*this.num(this.markup)):'')},get cost(){return this.mode==='cost'?this.v:(this.num(this.v)>0&&this.num(this.markup)>1?Math.round(this.num(this.v)/this.num(this.markup)):'')}}" }
+			x-on:htmx:after-request="if($event.detail.successful){$refs.nm.value='';$refs.dt.value='';$refs.qt.value='';$refs.bc.value='';v='';$refs.nm.focus()}"
+			class="grid gap-2 md:grid-cols-6 items-end border rounded-xl p-3 bg-slate-50 mb-4">
+			<label class="text-xs text-slate-500 md:col-span-2">Name
+				<input name="name" x-ref="nm" required placeholder="name or code" class="mt-1 w-full border rounded-lg px-2 py-1.5"/>
+			</label>
+			<label class="text-xs text-slate-500 md:col-span-2">Detail (optional)
+				<input name="detail" x-ref="dt" placeholder="what it is…" class="mt-1 w-full border rounded-lg px-2 py-1.5"/>
+			</label>
+			<label class="text-xs text-slate-500">Qty
+				<input name="qty" x-ref="qt" inputmode="decimal" class="mt-1 w-full border rounded-lg px-2 py-1.5"/>
+			</label>
+			<label class="text-xs text-slate-500">Barcode
+				<input name="barcode" x-ref="bc" placeholder="scan / blank" class="mt-1 w-full border rounded-lg px-2 py-1.5"/>
+			</label>
+			<div class="md:col-span-4 flex items-end gap-2 flex-wrap">
+				<label class="text-xs text-slate-500">Type
+					<select x-model="mode" class="mt-1 block border rounded-lg px-2 py-1.5">
+						<option value="sell">Selling</option>
+						<option value="cost">Cost</option>
+					</select>
+				</label>
+				<label class="text-xs text-slate-500">Price
+					<input x-model="v" inputmode="decimal" class="mt-1 w-24 border rounded-lg px-2 py-1.5"/>
+				</label>
+				<label class="text-xs text-slate-500">× markup
+					<input x-model="markup" inputmode="decimal" class="mt-1 w-16 border rounded-lg px-2 py-1.5"/>
+				</label>
+				<div class="text-xs text-slate-500 pb-1">
+					cost <span class="font-semibold text-emerald-700" x-text="cost||'—'"></span>
+					· sell <span class="font-semibold text-emerald-700" x-text="sell||'—'"></span>
+				</div>
+			</div>
+			<input type="hidden" name="cost_price" x-bind:value="cost"/>
+			<input type="hidden" name="selling_price" x-bind:value="sell"/>
+			<div class="md:col-span-2">
+				<button class="px-4 py-1.5 rounded-lg bg-indigo-600 text-white text-sm font-medium">+ Add row</button>
+			</div>
+		</form>
+		<div class="overflow-x-auto">
+			<table class="w-full text-sm">
+				<thead>
+					<tr class="text-left text-xs text-slate-400">
+						<th class="py-1 pr-2">Name</th>
+						<th class="py-1 pr-2">Detail</th>
+						<th class="py-1 pr-2">Qty</th>
+						<th class="py-1 pr-2">Barcode</th>
+						<th class="py-1 pr-2">Cost</th>
+						<th class="py-1 pr-2">Sell</th>
+						<th class="py-1 pr-2">Category</th>
+						<th></th>
+					</tr>
+				</thead>
+				<tbody id="mock-rows">
+					for _, r := range d.Drafts {
+						@MockRowTR(r)
+					}
+				</tbody>
+			</table>
+		</div>
+		if len(d.Drafts) == 0 {
+			<p class="text-sm text-slate-400 mt-2">No draft rows yet — add some above.</p>
+		}
+		<div class="mt-4 flex flex-wrap gap-2">
+			<button hx-post="/admin/ai-catalog/mock/enrich" hx-target="#mock-section" hx-swap="outerHTML"
+				class="px-4 py-2 rounded-lg border text-sm">🤖 Enrich with AI</button>
+			<button hx-post="/admin/ai-catalog/mock/commit" hx-target="#mock-section" hx-swap="outerHTML"
+				hx-confirm="Create real products from all draft rows?"
+				class="px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-semibold">✓ Commit all drafts</button>
+		</div>
+		if d.EnrichPrompt != "" {
+			<div class="mt-4 border-t pt-4">
+				<p class="text-sm text-slate-500 mb-2">Paste this into your chatbot, do any back-and-forth there, then paste ONLY the JSON array back.</p>
+				@manualCopyBox(d.EnrichPrompt)
+				if d.EnrichError != "" {
+					<p class="text-sm text-rose-600 mt-2">{ d.EnrichError }</p>
+				}
+				<form hx-post="/admin/ai-catalog/mock/apply" hx-target="#mock-section" hx-swap="outerHTML" class="mt-3">
+					<textarea name="response" rows="5" placeholder="paste the JSON array…" class="w-full border rounded-lg px-3 py-2 text-sm font-mono"></textarea>
+					<button class="mt-2 px-5 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium">Apply answer →</button>
+				</form>
+			</div>
+		}
+		if len(d.Committed) > 0 {
+			<div class="mt-4 border-t pt-4">
+				<p class="text-sm text-slate-600 mb-2"><span class="font-medium">{ itoa(len(d.Committed)) }</span> committed this session.</p>
+				<div class="flex gap-2">
+					<button hx-post="/admin/ai-catalog/mock/revert" hx-target="#mock-section" hx-swap="outerHTML"
+						hx-confirm="Revert committed products back to drafts? This disables the created products and restores stock."
+						class="px-4 py-2 rounded-lg border text-sm text-rose-600">↩ Revert commit</button>
+					<button hx-post="/admin/ai-catalog/mock/clear" hx-target="#mock-section" hx-swap="outerHTML"
+						hx-confirm="Clear the committed rows? The real products stay; only these staging rows are removed."
+						class="px-4 py-2 rounded-lg border text-sm">Clear committed</button>
+				</div>
+			</div>
+		}
+	</div>
+}
+
+templ MockRowTR(r MockRow) {
+	<tr id={ "mock-row-" + itoa64(r.ID) } class="border-t">
+		<td class="py-1 pr-2"><input name="name" value={ r.Name } hx-post={ mockRowURL(r.ID) } hx-trigger="change" hx-swap="none" class="w-32 border rounded px-2 py-1"/></td>
+		<td class="py-1 pr-2"><input name="detail" value={ r.Detail } hx-post={ mockRowURL(r.ID) } hx-trigger="change" hx-swap="none" class="w-40 border rounded px-2 py-1"/></td>
+		<td class="py-1 pr-2"><input name="qty" value={ r.Qty } hx-post={ mockRowURL(r.ID) } hx-trigger="change" hx-swap="none" class="w-14 border rounded px-2 py-1"/></td>
+		<td class="py-1 pr-2"><input name="barcode" value={ r.Barcode } hx-post={ mockRowURL(r.ID) } hx-trigger="change" hx-swap="none" class="w-28 border rounded px-2 py-1"/></td>
+		<td class="py-1 pr-2"><input name="cost_price" value={ r.CostPrice } hx-post={ mockRowURL(r.ID) } hx-trigger="change" hx-swap="none" class="w-16 border rounded px-2 py-1"/></td>
+		<td class="py-1 pr-2"><input name="selling_price" value={ r.SellingPrice } hx-post={ mockRowURL(r.ID) } hx-trigger="change" hx-swap="none" class="w-16 border rounded px-2 py-1"/></td>
+		<td class="py-1 pr-2"><input name="category" value={ r.Category } hx-post={ mockRowURL(r.ID) } hx-trigger="change" hx-swap="none" placeholder="—" class="w-36 border rounded px-2 py-1"/></td>
+		<td class="py-1 text-right">
+			<button hx-delete={ mockRowURL(r.ID) } hx-target={ "#mock-row-" + itoa64(r.ID) } hx-swap="delete"
+				hx-confirm="Delete this draft row?" class="text-rose-500 text-xs px-2">✕</button>
+		</td>
+	</tr>
 }

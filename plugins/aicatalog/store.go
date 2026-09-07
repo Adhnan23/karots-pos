@@ -99,6 +99,15 @@ func costFromMarkup(selling, markup decimal.Decimal) (decimal.Decimal, error) {
 	return selling.Div(markup).Round(0), nil
 }
 
+// sellFromMarkup derives selling from a cost and a markup multiple:
+// selling = round(cost * markup) to a whole number. markup must be > 1.
+func sellFromMarkup(cost, markup decimal.Decimal) (decimal.Decimal, error) {
+	if markup.LessThanOrEqual(decimal.NewFromInt(1)) {
+		return decimal.Zero, errors.New("markup must be greater than 1")
+	}
+	return cost.Mul(markup).Round(0), nil
+}
+
 // parseIdentify tolerantly parses the model's reply into an IdentifyResult:
 // it strips a leading ```json fence / trailing ``` and any prose around the
 // outermost JSON object before unmarshalling.

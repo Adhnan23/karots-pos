@@ -46,6 +46,16 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 	reg.Admin().POST("/ai-catalog/optimize/apply", a.OptimizeApply)
 	reg.Admin().POST("/ai-catalog/optimize/revert", a.OptimizeRevert)
 
+	// Mock (staging) bulk-add
+	reg.Admin().POST("/ai-catalog/mock/row", a.MockAddRow)
+	reg.Admin().POST("/ai-catalog/mock/row/:id", a.MockUpdateRow)
+	reg.Admin().DELETE("/ai-catalog/mock/row/:id", a.MockDeleteRow)
+	reg.Admin().POST("/ai-catalog/mock/enrich", a.MockEnrich)
+	reg.Admin().POST("/ai-catalog/mock/apply", a.MockEnrichApply)
+	reg.Admin().POST("/ai-catalog/mock/commit", a.MockCommit)
+	reg.Admin().POST("/ai-catalog/mock/revert", a.MockRevert)
+	reg.Admin().POST("/ai-catalog/mock/clear", a.MockClear)
+
 	reg.AddAdminNav(plugin.AdminNavEntry{
 		SectionLabel: "AI Catalog", Icon: "🤖",
 		Href: "/admin/ai-catalog", Label: "Add products", Key: "aicatalog",
