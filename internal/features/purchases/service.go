@@ -64,6 +64,10 @@ type ItemInput struct {
 	FreeQty      string `json:"free_qty"`
 	CostPrice    string `json:"cost_price"    validate:"required"`
 	SellingPrice string `json:"selling_price"`
+	// Per-line discount the supplier knocked off this item. Value is the entered
+	// number; Type is "fixed" (Rs per unit) or "percent" (off the line).
+	Discount     string `json:"discount"`
+	DiscountType string `json:"discount_type" validate:"omitempty,oneof=fixed percent"`
 	ExpiryDate   string `json:"expiry_date"`
 	// OrderedQty carries the originally-ordered amount through a receive so the
 	// draft's planned qty is preserved alongside the actually-received quantity.
@@ -74,6 +78,7 @@ type CreateInput struct {
 	SupplierID   int64       `json:"supplier_id" validate:"required,gt=0"`
 	InvoiceNo    *string     `json:"invoice_no"`
 	Discount     string      `json:"discount"`
+	DiscountType string      `json:"discount_type" validate:"omitempty,oneof=fixed percent"`
 	DueDate      string      `json:"due_date"`
 	ExpectedDate string      `json:"expected_date"`
 	Notes        *string     `json:"notes"`
@@ -101,10 +106,11 @@ func parseDate(s string) (*time.Time, error) {
 // transaction — this package cannot import either (supplierpay imports it), and
 // the field that used to live here marked invoices paid without moving a cent.
 func CreateTx(ctx context.Context, tx *sqlx.Tx, in CreateInput, userID int64) (*Detail, error) {
-	discount, err := money.Parse(in.Discount)
-	if err != nil || discount.IsNegative() {
+	billValue, err := money.Parse(in.Discount)
+	if err != nil || billValue.IsNegative() {
 		return nil, apperr.Validation("discount must be a non-negative amount")
 	}
+	billType := normDiscountType(in.DiscountType)
 	var dueDate *time.Time
 	if in.DueDate != "" {
 		d, err := time.Parse("2006-01-02", in.DueDate)
@@ -123,14 +129,13 @@ func CreateTx(ctx context.Context, tx *sqlx.Tx, in CreateInput, userID int64) (*
 		return nil, err
 	}
 
+	discount := resolveBillDiscount(billType, billValue, subtotal)
 	total := subtotal.Sub(discount)
-	if total.IsNegative() {
-		return nil, apperr.Validation("discount exceeds purchase subtotal")
-	}
 
 	purchaseID, err := repo.InsertPurchase(ctx, purchaseRow{
 		SupplierID: in.SupplierID, InvoiceNo: in.InvoiceNo, Status: receivedStatus(decimal.Zero, total),
-		Subtotal: subtotal, Discount: discount, Total: total, Paid: decimal.Zero,
+		Subtotal: subtotal, Discount: discount, DiscountType: billType, DiscountValue: billValue,
+		Total: total, Paid: decimal.Zero,
 		DueDate: dueDate, ReceivedBy: userID, Notes: in.Notes,
 	})
 	if err != nil {
@@ -176,21 +181,73 @@ func receivedStatus(paid, total decimal.Decimal) string {
 	}
 }
 
-// lotCost is the per-unit inventory cost of a received lot. With no free units
-// it is exactly the list cost (no divide, no rounding drift, and a zero list
-// cost still lets the batch inherit the product's own cost). With bonus units
-// it is what was actually paid (paidSubtotal) spread across every unit that
-// arrived (gotQty = paid + free), so the freebie surfaces as margin on sale.
+// normDiscountType defaults a blank/unknown discount type to "fixed".
+func normDiscountType(t string) string {
+	if t == "percent" {
+		return "percent"
+	}
+	return "fixed"
+}
+
+// clampDiscount keeps a discount within [0, base] so it can never go negative or
+// exceed what it is discounting.
+func clampDiscount(amt, base decimal.Decimal) decimal.Decimal {
+	if amt.IsNegative() {
+		return decimal.Zero
+	}
+	if amt.GreaterThan(base) {
+		return base
+	}
+	return amt
+}
+
+// resolveItemDiscount turns a per-line discount into an amount off the line.
+// Fixed is per unit (× qty); percent is off the line gross. Mirrors the sell side.
+func resolveItemDiscount(dtype string, value, lineGross, qty decimal.Decimal) decimal.Decimal {
+	var amt decimal.Decimal
+	if dtype == "percent" {
+		amt = lineGross.Mul(value).Div(decimal.NewFromInt(100))
+	} else {
+		amt = value.Mul(qty)
+	}
+	return clampDiscount(amt.Round(2), lineGross)
+}
+
+// resolveBillDiscount turns the whole-bill discount into an amount off the given
+// base (the net subtotal after item discounts). Fixed is a flat amount; percent
+// is off the base. Mirrors the sell side.
+func resolveBillDiscount(dtype string, value, base decimal.Decimal) decimal.Decimal {
+	var amt decimal.Decimal
+	if dtype == "percent" {
+		amt = base.Mul(value).Div(decimal.NewFromInt(100))
+	} else {
+		amt = value
+	}
+	return clampDiscount(amt.Round(2), base)
+}
+
+// lotCost is the per-unit inventory cost of a received lot. When nothing reduced
+// the price (no free units and the paid basis equals list × qty) it is exactly
+// the list cost — no divide, no rounding drift — and a zero/empty basis still
+// lets the batch inherit the product's own cost (a free or fully-discounted
+// line). Otherwise it is what was actually paid for the lot (costBasis: the line
+// net after its own discount AND its share of the bill discount) spread across
+// every unit that arrived (gotQty = paid + free), so a discount or freebie
+// surfaces as real margin when the units sell.
 // ponytail: rounds to 4dp, so blended×gotQty can drift a fraction from paid;
 // per-unit costing lives with that — bump precision only if valuation demands.
-func lotCost(paidSubtotal, gotQty, freeQty, listCost decimal.Decimal) decimal.Decimal {
-	if !freeQty.IsPositive() {
-		return listCost
-	}
+func lotCost(costBasis, gotQty, freeQty, listCost decimal.Decimal) decimal.Decimal {
 	if !gotQty.IsPositive() {
 		return decimal.Zero
 	}
-	return paidSubtotal.DivRound(gotQty, 4)
+	if !costBasis.IsPositive() {
+		return listCost
+	}
+	// Nothing reduced the price: keep the exact list cost (no divide, no drift).
+	if freeQty.IsZero() && costBasis.Equal(gotQty.Mul(listCost).Round(2)) {
+		return listCost
+	}
+	return costBasis.DivRound(gotQty, 4)
 }
 
 // parseLines validates item inputs into purchase lines and returns their subtotal.
@@ -225,14 +282,27 @@ func parseLines(items []ItemInput) ([]PurchaseItem, decimal.Decimal, error) {
 			}
 			expiry = &e
 		}
-		// Free units are deliberately absent from the payable: the subtotal is
-		// paid qty × cost only, so nothing about a freebie reaches the supplier
-		// balance, invoice total, or payment section.
-		lineSub := qty.Mul(cost).Round(2)
-		subtotal = subtotal.Add(lineSub)
+		discVal := decimal.Zero
+		if strings.TrimSpace(it.Discount) != "" {
+			discVal, err = money.Parse(it.Discount)
+			if err != nil || discVal.IsNegative() {
+				return nil, decimal.Zero, apperr.Validation("item discount is invalid")
+			}
+		}
+		discType := normDiscountType(it.DiscountType)
+		// Free units are deliberately absent from the payable: the gross is paid
+		// qty × cost only, so nothing about a freebie reaches the supplier balance.
+		// A per-item discount then comes off that gross, and the line net is what
+		// is owed for the line.
+		lineGross := qty.Mul(cost).Round(2)
+		disc := resolveItemDiscount(discType, discVal, lineGross, qty)
+		lineNet := lineGross.Sub(disc)
+		subtotal = subtotal.Add(lineNet)
 		lines = append(lines, PurchaseItem{
 			ProductID: it.ProductID, Quantity: qty, FreeQty: free, CostPrice: cost,
-			SellingPrice: selling, ExpiryDate: expiry, Subtotal: lineSub,
+			SellingPrice: selling, ExpiryDate: expiry,
+			Discount: disc, DiscountType: discType, DiscountValue: discVal,
+			Subtotal: lineNet,
 		})
 	}
 	return lines, subtotal, nil
@@ -243,6 +313,16 @@ func parseLines(items []ItemInput) ([]PurchaseItem, decimal.Decimal, error) {
 // supplier payable. Shared by instant GRNs (Create) and draft receipts (Receive).
 // Each line's OrderedQty is preserved as supplied by the caller.
 func applyReceivedLines(ctx context.Context, repo *Repository, stk *stock.Repository, sup *suppliers.Repository, purchaseID, supplierID int64, lines []PurchaseItem, owed decimal.Decimal, userID int64) error {
+	// The whole-bill discount is spread across the lines pro-rata to each line's
+	// net, so it lowers the received COST (not just what is owed): each line's
+	// cost basis is scaled by owed/netSum. With no bill discount owed == netSum,
+	// so the basis is the line net untouched (and lotCost keeps the exact list
+	// cost when no discount or freebie touched the line at all).
+	netSum := decimal.Zero
+	for _, ln := range lines {
+		netSum = netSum.Add(ln.Subtotal)
+	}
+	billScaled := owed.LessThan(netSum) && netSum.IsPositive()
 	for _, ln := range lines {
 		ln.PurchaseID = purchaseID
 		itemID, err := repo.InsertItemReturningID(ctx, purchaseID, ln)
@@ -267,9 +347,13 @@ func applyReceivedLines(ctx context.Context, repo *Repository, stk *stock.Reposi
 		// vanishes into COGS. lotCost stays the list cost when there are no free
 		// units, and zero (a free/unpriced line) still lets the batch inherit the
 		// product's own cost.
+		costBasis := ln.Subtotal
+		if billScaled {
+			costBasis = ln.Subtotal.Mul(owed).DivRound(netSum, 4)
+		}
 		if _, err := stk.InsertBatch(ctx, stock.NewBatch{
 			ProductID: ln.ProductID, PurchaseItemID: &itemID, ExpiryDate: ln.ExpiryDate,
-			Quantity: gotQty, CostPrice: lotCost(ln.Subtotal, gotQty, ln.FreeQty, ln.CostPrice),
+			Quantity: gotQty, CostPrice: lotCost(costBasis, gotQty, ln.FreeQty, ln.CostPrice),
 			SellingPrice: ln.SellingPrice, Source: "purchase",
 		}); err != nil {
 			return apperr.Internal("failed to create stock batch", err)
@@ -337,10 +421,11 @@ func insertDraftLines(ctx context.Context, repo *Repository, purchaseID int64, l
 // effects) within the given transaction and returns its id.
 func createDraftTx(ctx context.Context, tx *sqlx.Tx, in CreateInput, userID int64) (int64, error) {
 	repo := NewRepository(tx)
-	discount, err := money.Parse(in.Discount)
-	if err != nil || discount.IsNegative() {
-		discount = decimal.Zero
+	billValue, err := money.Parse(in.Discount)
+	if err != nil || billValue.IsNegative() {
+		billValue = decimal.Zero
 	}
+	billType := normDiscountType(in.DiscountType)
 	dueDate, err := parseDate(in.DueDate)
 	if err != nil {
 		return 0, err
@@ -353,13 +438,12 @@ func createDraftTx(ctx context.Context, tx *sqlx.Tx, in CreateInput, userID int6
 	if err != nil {
 		return 0, err
 	}
+	discount := resolveBillDiscount(billType, billValue, subtotal)
 	total := subtotal.Sub(discount)
-	if total.IsNegative() {
-		return 0, apperr.Validation("discount exceeds purchase subtotal")
-	}
 	id, err := repo.InsertPurchase(ctx, purchaseRow{
 		SupplierID: in.SupplierID, InvoiceNo: in.InvoiceNo, Status: "draft",
-		Subtotal: subtotal, Discount: discount, Total: total, Paid: decimal.Zero,
+		Subtotal: subtotal, Discount: discount, DiscountType: billType, DiscountValue: billValue,
+		Total: total, Paid: decimal.Zero,
 		DueDate: dueDate, ExpectedDate: expected, ReceivedBy: userID, Notes: in.Notes,
 	})
 	if err != nil {
@@ -460,10 +544,11 @@ func (s *Service) CreateDraftsFromReorder(ctx context.Context, in ReorderPOInput
 
 // UpdateDraft replaces a draft's lines and header. Only drafts are editable.
 func (s *Service) UpdateDraft(ctx context.Context, id int64, in CreateInput, userID int64) (*Detail, error) {
-	discount, err := money.Parse(in.Discount)
-	if err != nil || discount.IsNegative() {
-		discount = decimal.Zero
+	billValue, err := money.Parse(in.Discount)
+	if err != nil || billValue.IsNegative() {
+		billValue = decimal.Zero
 	}
+	billType := normDiscountType(in.DiscountType)
 	dueDate, err := parseDate(in.DueDate)
 	if err != nil {
 		return nil, err
@@ -486,10 +571,8 @@ func (s *Service) UpdateDraft(ctx context.Context, id int64, in CreateInput, use
 		if err != nil {
 			return err
 		}
+		discount := resolveBillDiscount(billType, billValue, subtotal)
 		total := subtotal.Sub(discount)
-		if total.IsNegative() {
-			return apperr.Validation("discount exceeds purchase subtotal")
-		}
 		if err := repo.DeleteItems(ctx, id); err != nil {
 			return apperr.Internal("failed to clear draft lines", err)
 		}
@@ -498,7 +581,8 @@ func (s *Service) UpdateDraft(ctx context.Context, id int64, in CreateInput, use
 		}
 		if err := repo.UpdateHeader(ctx, id, purchaseRow{
 			InvoiceNo: in.InvoiceNo, Status: "draft", Subtotal: subtotal,
-			Discount: discount, Total: total, Paid: decimal.Zero,
+			Discount: discount, DiscountType: billType, DiscountValue: billValue,
+			Total: total, Paid: decimal.Zero,
 			DueDate: dueDate, ExpectedDate: expected, ReceivedBy: userID, Notes: in.Notes,
 		}); err != nil {
 			return apperr.Internal("failed to update draft", err)
@@ -518,11 +602,12 @@ func (s *Service) UpdateDraft(ctx context.Context, id int64, in CreateInput, use
 
 // ReceiveInput is the payload the receive screen posts for a draft.
 type ReceiveInput struct {
-	InvoiceNo  *string     `json:"invoice_no"`
-	Discount   string      `json:"discount"`
-	DueDate    string      `json:"due_date"`
-	Notes      *string     `json:"notes"`
-	Items      []ItemInput `json:"items" validate:"required,min=1,dive"`
+	InvoiceNo    *string     `json:"invoice_no"`
+	Discount     string      `json:"discount"`
+	DiscountType string      `json:"discount_type" validate:"omitempty,oneof=fixed percent"`
+	DueDate      string      `json:"due_date"`
+	Notes        *string     `json:"notes"`
+	Items        []ItemInput `json:"items" validate:"required,min=1,dive"`
 	// KeepRemainder, when true, spins the still-unreceived quantities (ordered −
 	// received, where positive) into a new draft PO so the rest stays on order.
 	KeepRemainder bool `json:"keep_remainder"`
@@ -553,10 +638,11 @@ func parseReceiveLines(items []ItemInput) ([]PurchaseItem, decimal.Decimal, erro
 // transaction. Like CreateTx it records no payment: the web layer composes
 // paying on top so a real payment row, drawer movement and receipt all exist.
 func ReceiveTx(ctx context.Context, tx *sqlx.Tx, id int64, in ReceiveInput, userID int64) (*Detail, error) {
-	discount, err := money.Parse(in.Discount)
-	if err != nil || discount.IsNegative() {
+	billValue, err := money.Parse(in.Discount)
+	if err != nil || billValue.IsNegative() {
 		return nil, apperr.Validation("discount must be a non-negative amount")
 	}
+	billType := normDiscountType(in.DiscountType)
 	dueDate, err := parseDate(in.DueDate)
 	if err != nil {
 		return nil, err
@@ -577,10 +663,8 @@ func ReceiveTx(ctx context.Context, tx *sqlx.Tx, id int64, in ReceiveInput, user
 		if err != nil {
 			return err
 		}
+		discount := resolveBillDiscount(billType, billValue, subtotal)
 		total := subtotal.Sub(discount)
-		if total.IsNegative() {
-			return apperr.Validation("discount exceeds purchase subtotal")
-		}
 		notes := in.Notes
 		if notes == nil {
 			notes = cur.Notes
@@ -598,7 +682,8 @@ func ReceiveTx(ctx context.Context, tx *sqlx.Tx, id int64, in ReceiveInput, user
 		}
 		if err := repo.UpdateHeader(ctx, id, purchaseRow{
 			InvoiceNo: in.InvoiceNo, Status: receivedStatus(decimal.Zero, total), Subtotal: subtotal,
-			Discount: discount, Total: total, Paid: decimal.Zero, DueDate: dueDate,
+			Discount: discount, DiscountType: billType, DiscountValue: billValue,
+			Total: total, Paid: decimal.Zero, DueDate: dueDate,
 			ExpectedDate: cur.ExpectedDate, ReceivedBy: userID, Notes: notes,
 		}); err != nil {
 			return apperr.Internal("failed to update purchase", err)
@@ -790,7 +875,6 @@ func RegisterAPI(e *echo.Echo, db *sqlx.DB, cfg *config.Config) {
 	g.GET("/:id", api.Get)
 	g.POST("", api.Create)
 }
-
 
 // remainderLines works out what is still owed after a delivery: for each item on
 // the original order, how much of it did not turn up.

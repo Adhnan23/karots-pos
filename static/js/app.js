@@ -2626,6 +2626,10 @@ function grn(symbol, config) {
     invoiceNo: config.invoiceNo || "", // supplier's invoice/bill no. (Receive now)
     notes: config.notes || "",
     lines: [],
+    // Whole-bill discount the supplier gave: a value + fixed(Rs)/percent(%). It
+    // comes off the net subtotal and, on Receive, lowers the received cost too.
+    discount: Number(config.discount_value) || 0,
+    discountType: config.discount_type || "fixed",
     busy: false,
     // Counter mode: a fixed supplier, a different endpoint, and an optional
     // "paying now" block. Absent config leaves the admin draft flow untouched.
@@ -2708,6 +2712,8 @@ function grn(symbol, config) {
           free_qty: Number(l.free_qty) || 0,
           cost_price: Number(l.cost_price) || 0,
           selling_price: Number(l.selling_price) || 0,
+          discount: Number(l.discount_value) || 0,
+          discount_type: l.discount_type || "fixed",
           expiry_date: l.expiry_date || "",
           _open: false,
           _results: [],
@@ -2721,7 +2727,7 @@ function grn(symbol, config) {
       return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     },
     addLine() {
-      this.lines.push({ product_id: 0, product_name: "", barcode: "", ordered: "", quantity: 0, free_qty: 0, cost_price: 0, selling_price: 0, expiry_date: "", _open: false, _results: [] });
+      this.lines.push({ product_id: 0, product_name: "", barcode: "", ordered: "", quantity: 0, free_qty: 0, cost_price: 0, selling_price: 0, discount: 0, discount_type: "fixed", expiry_date: "", _open: false, _results: [] });
     },
     removeLine(i) {
       this.lines.splice(i, 1);
@@ -2744,11 +2750,33 @@ function grn(symbol, config) {
     decLine(l) {
       l.quantity = Math.max(0, (Number(l.quantity) || 0) - 1);
     },
-    lineSub(l) {
+    // lineGross is qty × cost, before any discount.
+    lineGross(l) {
       return (Number(l.quantity) || 0) * (Number(l.cost_price) || 0);
+    },
+    // lineDiscount: fixed is per-unit (× qty), percent is off the line. Clamped.
+    lineDiscount(l) {
+      const g = this.lineGross(l);
+      const v = Number(l.discount) || 0;
+      const d = l.discount_type === "percent" ? (g * v) / 100 : v * (Number(l.quantity) || 0);
+      return Math.min(Math.max(0, d), g);
+    },
+    // lineSub is the net line payable (gross − its discount) — the per-row total.
+    lineSub(l) {
+      return this.lineGross(l) - this.lineDiscount(l);
     },
     subtotal() {
       return this.lines.reduce((s, l) => s + this.lineSub(l), 0);
+    },
+    // billDiscount resolves the whole-bill discount against the net subtotal.
+    billDiscount() {
+      const base = this.subtotal();
+      const v = Number(this.discount) || 0;
+      const d = this.discountType === "percent" ? (base * v) / 100 : v;
+      return Math.min(Math.max(0, d), base);
+    },
+    total() {
+      return Math.max(0, this.subtotal() - this.billDiscount());
     },
     // newItemHint nudges for the two numbers a new item genuinely needs: the
     // cost is on the invoice in the cashier's hand, and a zero cost would book
@@ -2793,7 +2821,7 @@ function grn(symbol, config) {
     // Fill the payment box with the whole invoice — the common case when a
     // supplier delivers and is paid on the spot.
     payAll() {
-      this.payAmount = Number(this.subtotal().toFixed(2));
+      this.payAmount = Number(this.total().toFixed(2));
     },
     async submit(receiveNow = false) {
       if (this.busy) return;
@@ -2821,6 +2849,8 @@ function grn(symbol, config) {
           ordered_qty: l.ordered ? String(l.ordered) : "",
           cost_price: String(l.cost_price || 0),
           selling_price: String(l.selling_price || 0),
+          discount: String(l.discount || 0),
+          discount_type: l.discount_type || "fixed",
           expiry_date: l.expiry_date || "",
         }));
       if (items.length === 0) {
@@ -2834,7 +2864,8 @@ function grn(symbol, config) {
           : this.editId > 0 ? "/admin/purchases/" + this.editId + "/edit" : "/admin/purchases";
       const body = {
         supplier_id: Number(this.supplierId),
-        discount: "0",
+        discount: String(this.discount || 0),
+        discount_type: this.discountType,
         expected_date: this.expectedDate || "",
         invoice_no: this.invoiceNo || null,
         notes: this.notes || null,
@@ -2879,7 +2910,8 @@ function grnReceive(symbol, config) {
     id: Number(config.id) || 0,
     invoiceNo: "",
     dueDate: "",
-    discount: 0,
+    discount: Number(config.discount_value) || 0,
+    discountType: config.discount_type || "fixed",
     payAmount: 0,
     payMethod: "cash",
     paySource: (config.sources && config.sources[0] && config.sources[0].value) || "",
@@ -2896,6 +2928,8 @@ function grnReceive(symbol, config) {
       free_qty: Number(l.free_qty) || 0,
       cost_price: Number(l.cost_price) || 0,
       selling_price: Number(l.selling_price) || 0,
+      discount: Number(l.discount_value) || 0,
+      discount_type: l.discount_type || "fixed",
       expiry_date: l.expiry_date || "",
       cur_cost: Number(l.cur_cost) || 0,
       cur_sell: Number(l.cur_sell) || 0,
@@ -2914,7 +2948,7 @@ function grnReceive(symbol, config) {
     addNewLine() {
       this.lines.push({
         product_id: 0, product_name: "", ordered: "", quantity: 1, free_qty: 0,
-        cost_price: 0, selling_price: 0, expiry_date: "",
+        cost_price: 0, selling_price: 0, discount: 0, discount_type: "fixed", expiry_date: "",
         cur_cost: 0, cur_sell: 0, _new: true, _open: false, _results: [],
       });
     },
@@ -2926,14 +2960,29 @@ function grnReceive(symbol, config) {
       const n = Number(v) || 0;
       return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     },
-    lineSub(l) {
+    lineGross(l) {
       return (Number(l.quantity) || 0) * (Number(l.cost_price) || 0);
+    },
+    lineDiscount(l) {
+      const g = this.lineGross(l);
+      const v = Number(l.discount) || 0;
+      const d = l.discount_type === "percent" ? (g * v) / 100 : v * (Number(l.quantity) || 0);
+      return Math.min(Math.max(0, d), g);
+    },
+    lineSub(l) {
+      return this.lineGross(l) - this.lineDiscount(l);
     },
     subtotal() {
       return this.lines.reduce((s, l) => s + this.lineSub(l), 0);
     },
+    billDiscount() {
+      const base = this.subtotal();
+      const v = Number(this.discount) || 0;
+      const d = this.discountType === "percent" ? (base * v) / 100 : v;
+      return Math.min(Math.max(0, d), base);
+    },
     total() {
-      return Math.max(0, this.subtotal() - (Number(this.discount) || 0));
+      return Math.max(0, this.subtotal() - this.billDiscount());
     },
     hasVariance() {
       return this.lines.some((l) => Number(l.quantity) !== Number(l.ordered));
@@ -2972,6 +3021,8 @@ function grnReceive(symbol, config) {
           ordered_qty: l._new ? "" : String(l.ordered || 0),
           cost_price: String(l.cost_price || 0),
           selling_price: String(l.selling_price || 0),
+          discount: String(l.discount || 0),
+          discount_type: l.discount_type || "fixed",
           expiry_date: l.expiry_date || "",
         }));
       if (items.length === 0) {
@@ -2983,6 +3034,7 @@ function grnReceive(symbol, config) {
         await apiFetch("POST", "/admin/purchases/" + this.id + "/receive", {
           invoice_no: this.invoiceNo || null,
           discount: String(this.discount || 0),
+          discount_type: this.discountType,
           pay_amount: String(this.payAmount || 0),
           pay_method: this.payMethod,
           pay_source: this.paySource,

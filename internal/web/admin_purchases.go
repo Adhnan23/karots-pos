@@ -363,12 +363,14 @@ func parseIDList(s string) []int64 {
 // entryConfigJSON serialises a draft for the edit form's Alpine state.
 func entryConfigJSON(d purchases.Detail) string {
 	type line struct {
-		ProductID    int64  `json:"product_id"`
-		Name         string `json:"name"`
-		Quantity     string `json:"quantity"`
-		CostPrice    string `json:"cost_price"`
-		SellingPrice string `json:"selling_price"`
-		ExpiryDate   string `json:"expiry_date"`
+		ProductID     int64  `json:"product_id"`
+		Name          string `json:"name"`
+		Quantity      string `json:"quantity"`
+		CostPrice     string `json:"cost_price"`
+		SellingPrice  string `json:"selling_price"`
+		DiscountValue string `json:"discount_value"`
+		DiscountType  string `json:"discount_type"`
+		ExpiryDate    string `json:"expiry_date"`
 	}
 	lines := make([]line, 0, len(d.Items))
 	for _, it := range d.Items {
@@ -377,12 +379,14 @@ func entryConfigJSON(d purchases.Detail) string {
 			exp = it.ExpiryDate.Format("2006-01-02")
 		}
 		lines = append(lines, line{
-			ProductID:    it.ProductID,
-			Name:         it.ProductName,
-			Quantity:     it.Quantity.String(),
-			CostPrice:    it.CostPrice.String(),
-			SellingPrice: it.SellingPrice.String(),
-			ExpiryDate:   exp,
+			ProductID:     it.ProductID,
+			Name:          it.ProductName,
+			Quantity:      it.Quantity.String(),
+			CostPrice:     it.CostPrice.String(),
+			SellingPrice:  it.SellingPrice.String(),
+			DiscountValue: it.DiscountValue.String(),
+			DiscountType:  it.DiscountType,
+			ExpiryDate:    exp,
 		})
 	}
 	notes := ""
@@ -394,12 +398,14 @@ func entryConfigJSON(d purchases.Detail) string {
 		expected = d.Purchase.ExpectedDate.Format("2006-01-02")
 	}
 	b, _ := json.Marshal(map[string]any{
-		"editId":       d.Purchase.ID,
-		"supplierId":   strconv.FormatInt(d.Purchase.SupplierID, 10),
-		"supplierName": d.Purchase.SupplierName,
-		"expectedDate": expected,
-		"notes":        notes,
-		"lines":        lines,
+		"editId":         d.Purchase.ID,
+		"supplierId":     strconv.FormatInt(d.Purchase.SupplierID, 10),
+		"supplierName":   d.Purchase.SupplierName,
+		"expectedDate":   expected,
+		"notes":          notes,
+		"discount_value": d.Purchase.DiscountValue.String(),
+		"discount_type":  d.Purchase.DiscountType,
+		"lines":          lines,
 	})
 	return string(b)
 }
@@ -409,15 +415,17 @@ func entryConfigJSON(d purchases.Detail) string {
 // {cost, sell} so the screen can flag a squeezed margin and suggest a new price.
 func receiveConfigJSON(d purchases.Detail, cur map[int64][2]string, sources []adminfragments.LocationChoice) string {
 	type line struct {
-		ProductID    int64  `json:"product_id"`
-		ProductName  string `json:"product_name"`
-		Ordered      string `json:"ordered"`
-		Quantity     string `json:"quantity"`
-		CostPrice    string `json:"cost_price"`
-		SellingPrice string `json:"selling_price"`
-		ExpiryDate   string `json:"expiry_date"`
-		CurCost      string `json:"cur_cost"`
-		CurSell      string `json:"cur_sell"`
+		ProductID     int64  `json:"product_id"`
+		ProductName   string `json:"product_name"`
+		Ordered       string `json:"ordered"`
+		Quantity      string `json:"quantity"`
+		CostPrice     string `json:"cost_price"`
+		SellingPrice  string `json:"selling_price"`
+		DiscountValue string `json:"discount_value"`
+		DiscountType  string `json:"discount_type"`
+		ExpiryDate    string `json:"expiry_date"`
+		CurCost       string `json:"cur_cost"`
+		CurSell       string `json:"cur_sell"`
 	}
 	lines := make([]line, 0, len(d.Items))
 	for _, it := range d.Items {
@@ -434,15 +442,17 @@ func receiveConfigJSON(d purchases.Detail, cur map[int64][2]string, sources []ad
 			curCost, curSell = v[0], v[1]
 		}
 		lines = append(lines, line{
-			ProductID:    it.ProductID,
-			ProductName:  it.ProductName,
-			Ordered:      ord,
-			Quantity:     ord,
-			CostPrice:    it.CostPrice.String(),
-			SellingPrice: it.SellingPrice.String(),
-			ExpiryDate:   exp,
-			CurCost:      curCost,
-			CurSell:      curSell,
+			ProductID:     it.ProductID,
+			ProductName:   it.ProductName,
+			Ordered:       ord,
+			Quantity:      ord,
+			CostPrice:     it.CostPrice.String(),
+			SellingPrice:  it.SellingPrice.String(),
+			DiscountValue: it.DiscountValue.String(),
+			DiscountType:  it.DiscountType,
+			ExpiryDate:    exp,
+			CurCost:       curCost,
+			CurSell:       curSell,
 		})
 	}
 	type src struct {
@@ -454,9 +464,11 @@ func receiveConfigJSON(d purchases.Detail, cur map[int64][2]string, sources []ad
 		srcs = append(srcs, src{Value: s.Value, Label: s.Label})
 	}
 	b, _ := json.Marshal(map[string]any{
-		"id":      d.Purchase.ID,
-		"lines":   lines,
-		"sources": srcs,
+		"id":             d.Purchase.ID,
+		"lines":          lines,
+		"sources":        srcs,
+		"discount_value": d.Purchase.DiscountValue.String(),
+		"discount_type":  d.Purchase.DiscountType,
 	})
 	return string(b)
 }

@@ -13,22 +13,24 @@ import (
 )
 
 type Purchase struct {
-	ID         int64           `db:"id"          json:"id"`
-	SupplierID int64           `db:"supplier_id" json:"supplier_id"`
-	InvoiceNo  *string         `db:"invoice_no"  json:"invoice_no,omitempty"`
-	Status     string          `db:"status"      json:"status"`
-	Subtotal   decimal.Decimal `db:"subtotal"    json:"subtotal"`
-	Discount   decimal.Decimal `db:"discount"    json:"discount"`
-	Total      decimal.Decimal `db:"total"       json:"total"`
-	PaidAmount decimal.Decimal `db:"paid_amount" json:"paid_amount"`
+	ID            int64           `db:"id"          json:"id"`
+	SupplierID    int64           `db:"supplier_id" json:"supplier_id"`
+	InvoiceNo     *string         `db:"invoice_no"  json:"invoice_no,omitempty"`
+	Status        string          `db:"status"      json:"status"`
+	Subtotal      decimal.Decimal `db:"subtotal"    json:"subtotal"`
+	Discount      decimal.Decimal `db:"discount"    json:"discount"`          // resolved bill-discount amount
+	DiscountType  string          `db:"discount_type"  json:"discount_type"`  // fixed|percent
+	DiscountValue decimal.Decimal `db:"discount_value" json:"discount_value"` // as entered
+	Total         decimal.Decimal `db:"total"       json:"total"`
+	PaidAmount    decimal.Decimal `db:"paid_amount" json:"paid_amount"`
 	// CreditedAmount is value returned to the supplier against this invoice. It
 	// reduces what is owed without claiming any money changed hands.
 	CreditedAmount decimal.Decimal `db:"credited_amount" json:"credited_amount"`
-	DueDate    *time.Time      `db:"due_date"    json:"due_date,omitempty"`
-	ExpectedDate *time.Time    `db:"expected_date" json:"expected_date,omitempty"`
-	ReceivedBy *int64          `db:"received_by" json:"received_by,omitempty"`
-	Notes      *string         `db:"notes"       json:"notes,omitempty"`
-	CreatedAt  time.Time       `db:"created_at"  json:"created_at"`
+	DueDate        *time.Time      `db:"due_date"    json:"due_date,omitempty"`
+	ExpectedDate   *time.Time      `db:"expected_date" json:"expected_date,omitempty"`
+	ReceivedBy     *int64          `db:"received_by" json:"received_by,omitempty"`
+	Notes          *string         `db:"notes"       json:"notes,omitempty"`
+	CreatedAt      time.Time       `db:"created_at"  json:"created_at"`
 	// joined
 	SupplierName   string  `db:"supplier_name"   json:"supplier_name"`
 	ReceivedByName *string `db:"received_by_name" json:"received_by_name,omitempty"`
@@ -52,8 +54,13 @@ type PurchaseItem struct {
 	CostPrice    decimal.Decimal  `db:"cost_price"    json:"cost_price"`
 	SellingPrice decimal.Decimal  `db:"selling_price" json:"selling_price"`
 	ExpiryDate   *time.Time       `db:"expiry_date"   json:"expiry_date,omitempty"`
-	Subtotal     decimal.Decimal  `db:"subtotal"      json:"subtotal"`
-	ProductName  string           `db:"product_name"  json:"product_name"`
+	// Per-line discount: Discount is the resolved amount off this line; Type/Value
+	// are what was entered (fixed Rs per unit, or a percent off the line).
+	Discount      decimal.Decimal `db:"discount"       json:"discount"`
+	DiscountType  string          `db:"discount_type"  json:"discount_type"`
+	DiscountValue decimal.Decimal `db:"discount_value" json:"discount_value"`
+	Subtotal      decimal.Decimal `db:"subtotal"      json:"subtotal"` // net line payable (after its discount)
+	ProductName   string          `db:"product_name"  json:"product_name"`
 }
 
 type Detail struct {
@@ -66,26 +73,28 @@ type Repository struct{ q db.Queryer }
 func NewRepository(q db.Queryer) *Repository { return &Repository{q: q} }
 
 type purchaseRow struct {
-	SupplierID   int64
-	InvoiceNo    *string
-	Status       string
-	Subtotal     decimal.Decimal
-	Discount     decimal.Decimal
-	Total        decimal.Decimal
-	Paid         decimal.Decimal
-	DueDate      *time.Time
-	ExpectedDate *time.Time
-	ReceivedBy   int64
-	Notes        *string
+	SupplierID    int64
+	InvoiceNo     *string
+	Status        string
+	Subtotal      decimal.Decimal
+	Discount      decimal.Decimal
+	DiscountType  string
+	DiscountValue decimal.Decimal
+	Total         decimal.Decimal
+	Paid          decimal.Decimal
+	DueDate       *time.Time
+	ExpectedDate  *time.Time
+	ReceivedBy    int64
+	Notes         *string
 }
 
 func (r *Repository) InsertPurchase(ctx context.Context, p purchaseRow) (int64, error) {
 	var id int64
 	err := r.q.GetContext(ctx, &id, `
 		INSERT INTO purchases
-			(supplier_id, invoice_no, status, subtotal, discount, total, paid_amount, due_date, expected_date, received_by, notes)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
-		p.SupplierID, p.InvoiceNo, p.Status, p.Subtotal, p.Discount, p.Total, p.Paid, p.DueDate, p.ExpectedDate, p.ReceivedBy, p.Notes)
+			(supplier_id, invoice_no, status, subtotal, discount, discount_type, discount_value, total, paid_amount, due_date, expected_date, received_by, notes)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
+		p.SupplierID, p.InvoiceNo, p.Status, p.Subtotal, p.Discount, p.DiscountType, p.DiscountValue, p.Total, p.Paid, p.DueDate, p.ExpectedDate, p.ReceivedBy, p.Notes)
 	return id, err
 }
 
@@ -99,9 +108,9 @@ func (r *Repository) InsertItem(ctx context.Context, purchaseID int64, it Purcha
 func (r *Repository) InsertItemReturningID(ctx context.Context, purchaseID int64, it PurchaseItem) (int64, error) {
 	var id int64
 	err := r.q.GetContext(ctx, &id, `
-		INSERT INTO purchase_items (purchase_id, product_id, quantity, free_qty, ordered_qty, cost_price, selling_price, expiry_date, subtotal)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
-		purchaseID, it.ProductID, it.Quantity, it.FreeQty, it.OrderedQty, it.CostPrice, it.SellingPrice, it.ExpiryDate, it.Subtotal)
+		INSERT INTO purchase_items (purchase_id, product_id, quantity, free_qty, ordered_qty, cost_price, selling_price, expiry_date, discount, discount_type, discount_value, subtotal)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+		purchaseID, it.ProductID, it.Quantity, it.FreeQty, it.OrderedQty, it.CostPrice, it.SellingPrice, it.ExpiryDate, it.Discount, it.DiscountType, it.DiscountValue, it.Subtotal)
 	return id, err
 }
 
@@ -279,10 +288,10 @@ func (r *Repository) ListByStatus(ctx context.Context, draft bool, limit int) ([
 func (r *Repository) UpdateHeader(ctx context.Context, id int64, h purchaseRow) error {
 	_, err := r.q.ExecContext(ctx, `
 		UPDATE purchases
-		SET invoice_no = $2, status = $3, subtotal = $4, discount = $5,
-		    total = $6, paid_amount = $7, due_date = $8, expected_date = $9, received_by = $10, notes = $11
+		SET invoice_no = $2, status = $3, subtotal = $4, discount = $5, discount_type = $6, discount_value = $7,
+		    total = $8, paid_amount = $9, due_date = $10, expected_date = $11, received_by = $12, notes = $13
 		WHERE id = $1`,
-		id, h.InvoiceNo, h.Status, h.Subtotal, h.Discount, h.Total, h.Paid, h.DueDate, h.ExpectedDate, h.ReceivedBy, h.Notes)
+		id, h.InvoiceNo, h.Status, h.Subtotal, h.Discount, h.DiscountType, h.DiscountValue, h.Total, h.Paid, h.DueDate, h.ExpectedDate, h.ReceivedBy, h.Notes)
 	return err
 }
 
