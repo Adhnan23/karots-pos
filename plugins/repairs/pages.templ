@@ -1,0 +1,279 @@
+package repairs
+
+import (
+	"strconv"
+
+	"karots-pos/internal/money"
+	"karots-pos/templates/layouts"
+)
+
+// ---- view models ----
+
+type ListRow struct {
+	ID         int64
+	TicketNo   string
+	Customer   string
+	Phone      string
+	Device     string
+	RepairType string
+	Status     string
+	DueLabel   string
+	Urgent     bool
+}
+
+type ListData struct {
+	UserName string
+	Rows     []ListRow
+}
+
+type FormData struct {
+	UserName     string
+	Types        []string
+	Models       []string
+	WarrantyDays int
+}
+
+type DetailData struct {
+	UserName      string
+	Symbol        string
+	D             *Detail
+	Total         string
+	Deposit       string
+	Balance       string
+	DueLabel      string
+	Urgent        bool
+	WarrantyLabel string
+}
+
+// statusBadge maps a status to a Tailwind colour chip.
+func statusBadge(s string) string {
+	switch s {
+	case "ready":
+		return "bg-emerald-100 text-emerald-700"
+	case "collected":
+		return "bg-slate-100 text-slate-600"
+	case "cancelled":
+		return "bg-rose-100 text-rose-700"
+	default:
+		return "bg-amber-100 text-amber-700"
+	}
+}
+
+// ---- pages ----
+
+templ RepairsListPage(d ListData) {
+	@layouts.Admin("Repairs", d.UserName, "repairs") {
+		<div class="flex items-center justify-between mb-6">
+			<h1 class="text-2xl font-bold">Repairs</h1>
+			<a href="/admin/repairs/new" class="px-4 py-2 rounded-lg bg-indigo-600 text-white font-semibold">+ New repair</a>
+		</div>
+		<div class="bg-white rounded-2xl shadow-sm overflow-hidden">
+			<table class="w-full text-sm">
+				<thead class="text-left text-slate-500 border-b">
+					<tr>
+						<th class="py-2 px-3">Ticket</th>
+						<th class="py-2 px-3">Customer</th>
+						<th class="py-2 px-3">Device</th>
+						<th class="py-2 px-3">Type</th>
+						<th class="py-2 px-3">Status</th>
+						<th class="py-2 px-3">Due</th>
+						<th class="py-2 px-3"></th>
+					</tr>
+				</thead>
+				<tbody>
+					if len(d.Rows) == 0 {
+						<tr><td class="py-6 px-3 text-slate-400" colspan="7">No open repairs. Click “New repair” to start one.</td></tr>
+					}
+					for _, r := range d.Rows {
+						<tr class="border-b last:border-0 hover:bg-slate-50">
+							<td class="py-2 px-3 font-medium">{ r.TicketNo }</td>
+							<td class="py-2 px-3">
+								{ r.Customer }
+								if r.Phone != "" {
+									<span class="block text-xs text-slate-400">{ r.Phone }</span>
+								}
+							</td>
+							<td class="py-2 px-3">{ r.Device }</td>
+							<td class="py-2 px-3">{ r.RepairType }</td>
+							<td class="py-2 px-3"><span class={ "px-2 py-0.5 rounded-full text-xs " + statusBadge(r.Status) }>{ r.Status }</span></td>
+							<td class="py-2 px-3">
+								if r.Urgent {
+									<span class="text-rose-600 font-semibold">{ r.DueLabel }</span>
+								} else {
+									<span class="text-slate-500">{ r.DueLabel }</span>
+								}
+							</td>
+							<td class="py-2 px-3 text-right"><a class="text-indigo-600" href={ templ.SafeURL("/admin/repairs/" + strconv.FormatInt(r.ID, 10)) }>Open →</a></td>
+						</tr>
+					}
+				</tbody>
+			</table>
+		</div>
+	}
+}
+
+templ RepairFormPage(d FormData) {
+	@layouts.Admin("New Repair", d.UserName, "repairs") {
+		<div class="flex items-center justify-between mb-6">
+			<h1 class="text-2xl font-bold">New repair</h1>
+			<a href="/admin/repairs" class="text-slate-500 hover:underline">← Back</a>
+		</div>
+		<form method="post" action="/admin/repairs" class="bg-white rounded-2xl shadow-sm p-6 max-w-2xl space-y-4">
+			<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+				<div>
+					<label class="block text-sm font-medium mb-1">Customer name</label>
+					<input name="customer_name" class="w-full border rounded-lg px-3 py-2" placeholder="Walk-in name…"/>
+				</div>
+				<div>
+					<label class="block text-sm font-medium mb-1">Phone</label>
+					<input name="customer_phone" class="w-full border rounded-lg px-3 py-2" placeholder="07…"/>
+				</div>
+				<div>
+					<label class="block text-sm font-medium mb-1">Repair type</label>
+					<input name="repair_type" list="repair-types" class="w-full border rounded-lg px-3 py-2" placeholder="e.g. Screen replace"/>
+					<datalist id="repair-types">
+						for _, t := range d.Types {
+							<option value={ t }></option>
+						}
+					</datalist>
+				</div>
+				<div>
+					<label class="block text-sm font-medium mb-1">Device model</label>
+					<input name="device_model" list="repair-models" class="w-full border rounded-lg px-3 py-2" placeholder="e.g. iPhone 11"/>
+					<datalist id="repair-models">
+						for _, m := range d.Models {
+							<option value={ m }></option>
+						}
+					</datalist>
+				</div>
+			</div>
+			<div>
+				<label class="block text-sm font-medium mb-1">Reported fault</label>
+				<textarea name="fault" rows="2" class="w-full border rounded-lg px-3 py-2" placeholder="What's wrong…"></textarea>
+			</div>
+			<div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+				<div>
+					<label class="block text-sm font-medium mb-1">Promised date</label>
+					<input type="date" name="promised_date" class="w-full border rounded-lg px-3 py-2"/>
+				</div>
+				<div>
+					<label class="block text-sm font-medium mb-1">Warranty (days)</label>
+					<input type="number" min="0" name="warranty_days" value={ strconv.Itoa(d.WarrantyDays) } class="w-full border rounded-lg px-3 py-2"/>
+				</div>
+				<div class="flex items-end">
+					<label class="flex items-center gap-2 text-sm"><input type="checkbox" name="urgent" value="1"/> Mark urgent</label>
+				</div>
+			</div>
+			<div>
+				<label class="block text-sm font-medium mb-1">Notes</label>
+				<input name="notes" class="w-full border rounded-lg px-3 py-2" placeholder="Optional…"/>
+			</div>
+			<div class="flex justify-end">
+				<button type="submit" class="px-5 py-2.5 rounded-lg bg-indigo-600 text-white font-semibold">Open repair</button>
+			</div>
+		</form>
+	}
+}
+
+templ RepairDetailPage(d DetailData) {
+	@layouts.Admin("Repair "+d.D.Job.TicketNo, d.UserName, "repairs") {
+		<div class="flex items-center justify-between mb-6">
+			<div>
+				<h1 class="text-2xl font-bold">{ d.D.Job.TicketNo }
+					<span class={ "ml-2 px-2 py-0.5 rounded-full text-sm align-middle " + statusBadge(d.D.Job.Status) }>{ d.D.Job.Status }</span>
+				</h1>
+				<p class="text-sm text-slate-500">{ d.D.Job.RepairType } · { d.D.Job.DeviceModel }</p>
+			</div>
+			<a href="/admin/repairs" class="text-slate-500 hover:underline">← Back</a>
+		</div>
+		<div class="grid gap-6 lg:grid-cols-3 items-start">
+			<div class="lg:col-span-2 space-y-6">
+				@RepairLines(d)
+			</div>
+			<div class="space-y-6">
+				<div class="bg-white rounded-2xl shadow-sm p-5 text-sm space-y-1">
+					<div class="font-semibold mb-1">Customer</div>
+					<div>{ d.D.Job.CustomerName }</div>
+					if d.D.Job.CustomerPhone != "" {
+						<div class="text-slate-500">{ d.D.Job.CustomerPhone }</div>
+					}
+					<div class="pt-2 font-semibold">Fault</div>
+					<div class="text-slate-600">{ d.D.Job.Fault }</div>
+					<div class="pt-2 flex justify-between"><span class="text-slate-500">Due</span>
+						if d.Urgent {
+							<span class="text-rose-600 font-semibold">{ d.DueLabel }</span>
+						} else {
+							<span>{ d.DueLabel }</span>
+						}
+					</div>
+					if d.WarrantyLabel != "" {
+						<div class="flex justify-between"><span class="text-slate-500">Warranty</span><span>{ d.WarrantyLabel }</span></div>
+					}
+				</div>
+				if d.D.Job.Status != "collected" && d.D.Job.Status != "cancelled" {
+					<div class="bg-white rounded-2xl shadow-sm p-5">
+						<div class="font-semibold text-sm mb-2">Status</div>
+						<div class="flex flex-wrap gap-2">
+							@statusButton(d.D.Job.ID, "received", "Received")
+							@statusButton(d.D.Job.ID, "in_progress", "In progress")
+							@statusButton(d.D.Job.ID, "ready", "Ready")
+						</div>
+					</div>
+				}
+			</div>
+		</div>
+	}
+}
+
+templ statusButton(id int64, status, label string) {
+	<form method="post" action={ templ.SafeURL("/admin/repairs/" + strconv.FormatInt(id, 10) + "/status") }>
+		<input type="hidden" name="status" value={ status }/>
+		<button type="submit" class="px-3 py-1.5 rounded-lg border text-sm hover:bg-slate-50">{ label }</button>
+	</form>
+}
+
+// RepairLines renders the parts + charges + totals block. The add/remove forms
+// and the deposit/collect actions are added in later tasks.
+templ RepairLines(d DetailData) {
+	<div id="repair-lines" class="bg-white rounded-2xl shadow-sm p-5">
+		<div class="font-semibold text-sm mb-2">Parts</div>
+		<table class="w-full text-sm mb-4">
+			<thead class="text-left text-slate-500 border-b">
+				<tr><th class="py-1">Item</th><th class="py-1 text-right w-20">Qty</th><th class="py-1 text-right w-28">Unit</th><th class="py-1 text-right w-24">Disc.</th><th class="py-1 text-right w-28">Total</th></tr>
+			</thead>
+			<tbody>
+				if len(d.D.Parts) == 0 {
+					<tr><td class="py-2 text-slate-400" colspan="5">No parts added.</td></tr>
+				}
+				for _, p := range d.D.Parts {
+					<tr class="border-b last:border-0">
+						<td class="py-1">{ p.ProductName }</td>
+						<td class="py-1 text-right">{ p.Qty.String() }</td>
+						<td class="py-1 text-right">{ money.Format(d.Symbol, p.UnitCharge) }</td>
+						<td class="py-1 text-right text-rose-600">{ money.Format(d.Symbol, p.Discount) }</td>
+						<td class="py-1 text-right">{ money.Format(d.Symbol, p.Qty.Mul(p.UnitCharge).Sub(p.Discount)) }</td>
+					</tr>
+				}
+			</tbody>
+		</table>
+		<div class="font-semibold text-sm mb-2">Charges</div>
+		<table class="w-full text-sm mb-4">
+			<tbody>
+				if len(d.D.Charges) == 0 {
+					<tr><td class="py-2 text-slate-400" colspan="2">No charges added.</td></tr>
+				}
+				for _, ch := range d.D.Charges {
+					<tr class="border-b last:border-0">
+						<td class="py-1">{ ch.Label }</td>
+						<td class="py-1 text-right">{ money.Format(d.Symbol, ch.Amount) }</td>
+					</tr>
+				}
+			</tbody>
+		</table>
+		<div class="border-t pt-3 text-sm space-y-1">
+			<div class="flex justify-between"><span class="text-slate-500">Total</span><span class="font-semibold">{ d.Total }</span></div>
+			<div class="flex justify-between"><span class="text-slate-500">Deposit paid</span><span>{ d.Deposit }</span></div>
+			<div class="flex justify-between text-base"><span class="font-semibold">Balance due</span><span class="font-bold">{ d.Balance }</span></div>
+		</div>
+	</div>
+}
