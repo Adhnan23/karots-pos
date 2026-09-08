@@ -14,6 +14,7 @@ import (
 	"karots-pos/internal/response"
 
 	"github.com/labstack/echo/v4"
+	"github.com/shopspring/decimal"
 )
 
 type adminUI struct{ p *Plugin }
@@ -163,6 +164,7 @@ func (a *adminUI) detailData(c echo.Context, d *Detail) DetailData {
 		DueLabel:      label,
 		Urgent:        urgent || d.Job.Urgent,
 		WarrantyLabel: warranty,
+		Editable:      d.Job.Status != "collected" && d.Job.Status != "cancelled",
 	}
 }
 
@@ -203,12 +205,102 @@ func (a *adminUI) Suggest(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{"types": types, "models": models})
 }
 
+func (a *adminUI) AddPart(c echo.Context) error {
+	ctx := c.Request().Context()
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	pid, err := strconv.ParseInt(c.FormValue("product_id"), 10, 64)
+	if err != nil || pid <= 0 {
+		return apperr.Validation("pick a product")
+	}
+	qty, err := money.Parse(c.FormValue("qty"))
+	if err != nil || !qty.IsPositive() {
+		return apperr.Validation("quantity must be greater than zero")
+	}
+	// A real product is always priced by the catalogue on the collection sale, so
+	// seed unit_charge from it — the discount is the only per-repair lever.
+	prod, err := a.p.core.Products.Get(ctx, pid)
+	if err != nil {
+		return apperr.NotFound("product")
+	}
+	dval := decimal.Zero
+	if s := strings.TrimSpace(c.FormValue("discount")); s != "" {
+		if dval, err = money.Parse(s); err != nil || dval.IsNegative() {
+			return apperr.Validation("discount is invalid")
+		}
+	}
+	if err := a.p.store.AddPart(ctx, id, PartInput{
+		ProductID: pid, Qty: qty, UnitCharge: prod.SellingPrice,
+		DiscountType: c.FormValue("discount_type"), DiscountValue: dval,
+	}); err != nil {
+		return err
+	}
+	return a.redirectDetail(c, id)
+}
+
+func (a *adminUI) RemovePart(c echo.Context) error {
+	ctx := c.Request().Context()
+	pid, err := strconv.ParseInt(c.Param("pid"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	if err := a.p.store.RemovePart(ctx, pid); err != nil {
+		return err
+	}
+	return a.redirectDetailForm(c)
+}
+
+func (a *adminUI) AddCharge(c echo.Context) error {
+	ctx := c.Request().Context()
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	label := strings.TrimSpace(c.FormValue("label"))
+	if label == "" {
+		label = "Labour"
+	}
+	amount, err := money.Parse(c.FormValue("amount"))
+	if err != nil || amount.IsNegative() {
+		return apperr.Validation("amount is invalid")
+	}
+	if err := a.p.store.AddCharge(ctx, id, label, amount); err != nil {
+		return err
+	}
+	return a.redirectDetail(c, id)
+}
+
+func (a *adminUI) RemoveCharge(c echo.Context) error {
+	ctx := c.Request().Context()
+	cid, err := strconv.ParseInt(c.Param("cid"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	if err := a.p.store.RemoveCharge(ctx, cid); err != nil {
+		return err
+	}
+	return a.redirectDetailForm(c)
+}
+
+// redirectDetail sends the browser back to a job's detail page.
+func (a *adminUI) redirectDetail(c echo.Context, id int64) error {
+	return c.Redirect(http.StatusSeeOther, "/admin/repairs/"+strconv.FormatInt(id, 10))
+}
+
+// redirectDetailForm redirects using the job_id carried on a remove form (whose
+// route has only the child id, not the job id).
+func (a *adminUI) redirectDetailForm(c echo.Context) error {
+	jid, _ := strconv.ParseInt(c.FormValue("job_id"), 10, 64)
+	if jid <= 0 {
+		return c.Redirect(http.StatusSeeOther, "/admin/repairs")
+	}
+	return a.redirectDetail(c, jid)
+}
+
 // ---- filled in later tasks (stubs keep routes live) ----
 
-func (a *adminUI) AddPart(c echo.Context) error       { return c.NoContent(http.StatusOK) }
-func (a *adminUI) RemovePart(c echo.Context) error    { return c.NoContent(http.StatusOK) }
-func (a *adminUI) AddCharge(c echo.Context) error     { return c.NoContent(http.StatusOK) }
-func (a *adminUI) RemoveCharge(c echo.Context) error  { return c.NoContent(http.StatusOK) }
 func (a *adminUI) TakeDeposit(c echo.Context) error   { return c.NoContent(http.StatusOK) }
 func (a *adminUI) Collect(c echo.Context) error       { return c.NoContent(http.StatusOK) }
 func (a *adminUI) Cancel(c echo.Context) error        { return c.NoContent(http.StatusOK) }

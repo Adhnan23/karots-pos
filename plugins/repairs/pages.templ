@@ -43,6 +43,7 @@ type DetailData struct {
 	DueLabel      string
 	Urgent        bool
 	WarrantyLabel string
+	Editable      bool
 }
 
 // statusBadge maps a status to a Tailwind colour chip.
@@ -232,18 +233,18 @@ templ statusButton(id int64, status, label string) {
 	</form>
 }
 
-// RepairLines renders the parts + charges + totals block. The add/remove forms
-// and the deposit/collect actions are added in later tasks.
+// RepairLines renders the parts + charges + totals block, with add/remove forms
+// when the job is still editable. Deposit/collect actions arrive in Task 7.
 templ RepairLines(d DetailData) {
 	<div id="repair-lines" class="bg-white rounded-2xl shadow-sm p-5">
 		<div class="font-semibold text-sm mb-2">Parts</div>
-		<table class="w-full text-sm mb-4">
+		<table class="w-full text-sm mb-2">
 			<thead class="text-left text-slate-500 border-b">
-				<tr><th class="py-1">Item</th><th class="py-1 text-right w-20">Qty</th><th class="py-1 text-right w-28">Unit</th><th class="py-1 text-right w-24">Disc.</th><th class="py-1 text-right w-28">Total</th></tr>
+				<tr><th class="py-1">Item</th><th class="py-1 text-right w-20">Qty</th><th class="py-1 text-right w-28">Unit</th><th class="py-1 text-right w-24">Disc.</th><th class="py-1 text-right w-28">Total</th><th class="w-8"></th></tr>
 			</thead>
 			<tbody>
 				if len(d.D.Parts) == 0 {
-					<tr><td class="py-2 text-slate-400" colspan="5">No parts added.</td></tr>
+					<tr><td class="py-2 text-slate-400" colspan="6">No parts added.</td></tr>
 				}
 				for _, p := range d.D.Parts {
 					<tr class="border-b last:border-0">
@@ -252,28 +253,101 @@ templ RepairLines(d DetailData) {
 						<td class="py-1 text-right">{ money.Format(d.Symbol, p.UnitCharge) }</td>
 						<td class="py-1 text-right text-rose-600">{ money.Format(d.Symbol, p.Discount) }</td>
 						<td class="py-1 text-right">{ money.Format(d.Symbol, p.Qty.Mul(p.UnitCharge).Sub(p.Discount)) }</td>
+						<td class="py-1 text-right">
+							if d.Editable {
+								@removeForm("/admin/repairs/part/"+strconv.FormatInt(p.ID, 10)+"/delete", d.D.Job.ID)
+							}
+						</td>
 					</tr>
 				}
 			</tbody>
 		</table>
-		<div class="font-semibold text-sm mb-2">Charges</div>
-		<table class="w-full text-sm mb-4">
+		if d.Editable {
+			@addPartForm(d)
+		}
+		<div class="font-semibold text-sm mb-2 mt-4">Charges</div>
+		<table class="w-full text-sm mb-2">
 			<tbody>
 				if len(d.D.Charges) == 0 {
-					<tr><td class="py-2 text-slate-400" colspan="2">No charges added.</td></tr>
+					<tr><td class="py-2 text-slate-400" colspan="3">No charges added.</td></tr>
 				}
 				for _, ch := range d.D.Charges {
 					<tr class="border-b last:border-0">
 						<td class="py-1">{ ch.Label }</td>
 						<td class="py-1 text-right">{ money.Format(d.Symbol, ch.Amount) }</td>
+						<td class="py-1 text-right w-8">
+							if d.Editable {
+								@removeForm("/admin/repairs/charge/"+strconv.FormatInt(ch.ID, 10)+"/delete", d.D.Job.ID)
+							}
+						</td>
 					</tr>
 				}
 			</tbody>
 		</table>
+		if d.Editable {
+			<form method="post" action={ templ.SafeURL("/admin/repairs/" + strconv.FormatInt(d.D.Job.ID, 10) + "/charge") } class="flex gap-2 mb-4">
+				<input name="label" placeholder="Charge (e.g. Labour)" class="flex-1 border rounded px-2 py-1 text-sm"/>
+				<input name="amount" type="number" step="0.01" min="0" placeholder="0.00" class="w-28 border rounded px-2 py-1 text-sm text-right"/>
+				<button class="px-3 py-1 rounded bg-slate-700 text-white text-sm">Add</button>
+			</form>
+		}
 		<div class="border-t pt-3 text-sm space-y-1">
 			<div class="flex justify-between"><span class="text-slate-500">Total</span><span class="font-semibold">{ d.Total }</span></div>
 			<div class="flex justify-between"><span class="text-slate-500">Deposit paid</span><span>{ d.Deposit }</span></div>
 			<div class="flex justify-between text-base"><span class="font-semibold">Balance due</span><span class="font-bold">{ d.Balance }</span></div>
 		</div>
 	</div>
+}
+
+templ removeForm(action string, jobID int64) {
+	<form method="post" action={ templ.SafeURL(action) }>
+		<input type="hidden" name="job_id" value={ strconv.FormatInt(jobID, 10) }/>
+		<button class="text-rose-500 hover:text-rose-700" title="Remove">✕</button>
+	</form>
+}
+
+// addPartForm is a small live product search that fills a hidden product_id and
+// posts a normal form (full reload). unit price comes from the catalogue server-side.
+templ addPartForm(d DetailData) {
+	<form method="post" action={ templ.SafeURL("/admin/repairs/" + strconv.FormatInt(d.D.Job.ID, 10) + "/part") } x-data="repairPartPicker()" class="mb-2">
+		<div class="flex flex-wrap gap-2 items-start">
+			<div class="relative flex-1 min-w-48" x-on:click.away="open=false">
+				<input type="text" x-model="q" x-on:input="search()" x-on:focus="open=true" placeholder="Search part…" class="w-full border rounded px-2 py-1 text-sm"/>
+				<input type="hidden" name="product_id" x-bind:value="productId"/>
+				<div x-show="open && results.length" x-cloak class="absolute z-20 left-0 right-0 mt-1 bg-white border rounded-lg shadow max-h-56 overflow-auto">
+					<template x-for="r in results" x-bind:key="r.id">
+						<button type="button" x-on:click="pick(r)" class="block w-full text-left px-3 py-1.5 hover:bg-slate-100 text-sm" x-text="r.name + (r.barcode ? '  ·  ' + r.barcode : '')"></button>
+					</template>
+				</div>
+			</div>
+			<input name="qty" type="number" step="0.001" min="0" value="1" class="w-20 border rounded px-2 py-1 text-sm text-center" title="Qty"/>
+			<div class="flex items-center rounded border">
+				<input name="discount" type="number" step="0.01" min="0" placeholder="0" class="w-20 px-1 py-1 text-sm text-right" title="Discount"/>
+				<select name="discount_type" class="border-l px-1 py-1 text-xs bg-slate-50"><option value="fixed">Rs</option><option value="percent">%</option></select>
+			</div>
+			<button type="submit" x-bind:disabled="!productId" class="px-3 py-1 rounded bg-indigo-600 text-white text-sm disabled:opacity-40">Add part</button>
+		</div>
+	</form>
+	<script>
+		function repairPartPicker(){
+			return {
+				q:"", productId:"", results:[], open:false, _t:null, _seq:0,
+				async search(){
+					const q=this.q.trim();
+					if(!q){ this.results=[]; this.open=false; return; }
+					const seq=++this._seq;
+					if(this._t) clearTimeout(this._t);
+					await new Promise(r=>{ this._t=setTimeout(r,200); });
+					if(seq!==this._seq) return;
+					try{
+						const res=await fetch("/api/products?limit=20&search="+encodeURIComponent(q),{credentials:"same-origin"});
+						const j=await res.json();
+						if(seq!==this._seq) return;
+						this.results=(j.data||[]); this.open=true;
+					}catch(e){ this.results=[]; }
+				},
+				pick(r){ this.productId=String(r.id); this.q=r.name; this.results=[]; this.open=false; },
+			};
+		}
+	</script>
 }
