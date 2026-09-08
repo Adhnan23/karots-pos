@@ -2,10 +2,13 @@ package repairs
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
 	"karots-pos/internal/db"
+	"karots-pos/internal/features/activity"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/shopspring/decimal"
@@ -315,4 +318,23 @@ func (s *Store) DistinctModels(ctx context.Context) ([]string, error) {
 	err := s.q.SelectContext(ctx, &v,
 		`SELECT DISTINCT device_model FROM repair_jobs WHERE device_model <> '' ORDER BY 1`)
 	return v, err
+}
+
+// serviceDefaults resolves the category + unit for the hidden labour/service
+// product, creating a "Repairs" category on first use. Mirrors documents.
+func (s *Store) serviceDefaults(ctx context.Context) (catID, unitID int64, err error) {
+	if err = s.q.GetContext(ctx, &unitID, `SELECT id FROM units ORDER BY id LIMIT 1`); err != nil {
+		return 0, 0, err
+	}
+	err = s.q.GetContext(ctx, &catID, `SELECT id FROM categories WHERE name = 'Repairs' LIMIT 1`)
+	if errors.Is(err, sql.ErrNoRows) {
+		err = s.q.GetContext(ctx, &catID, `INSERT INTO categories (name) VALUES ('Repairs') RETURNING id`)
+	}
+	return catID, unitID, err
+}
+
+// ActivityRows feeds repair job events into the central Activity view. Filled in
+// Task 9; a stub keeps the hook harmless until then.
+func (s *Store) ActivityRows(ctx context.Context, f activity.Filter) ([]activity.Row, error) {
+	return nil, nil
 }
