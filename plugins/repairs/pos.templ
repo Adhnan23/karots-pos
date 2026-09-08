@@ -14,14 +14,32 @@ templ RepairApplyFragment(d FormData) {
 		<form hx-post="/cashier/repairs" hx-target="#rcj" hx-swap="outerHTML" class="space-y-2">
 			@customerPickerFields()
 			<div class="grid grid-cols-2 gap-2">
-				<input name="repair_type" list="rc-types" placeholder="Repair type" class="border rounded px-2 py-1 text-sm"/>
-				<input name="device_model" list="rc-models" placeholder="Device model" class="border rounded px-2 py-1 text-sm"/>
-				<input name="repaired_by" list="rc-people" placeholder="Repaired by (blank = us)" class="border rounded px-2 py-1 text-sm"/>
-				<input type="date" name="promised_date" class="border rounded px-2 py-1 text-sm"/>
+				<div>
+					<label class="block text-xs text-slate-500 mb-0.5">Repair type</label>
+					<input name="repair_type" list="rc-types" placeholder="e.g. Screen replace" class="w-full border rounded px-2 py-1 text-sm"/>
+				</div>
+				<div>
+					<label class="block text-xs text-slate-500 mb-0.5">Device model</label>
+					<input name="device_model" list="rc-models" placeholder="e.g. iPhone 11" class="w-full border rounded px-2 py-1 text-sm"/>
+				</div>
+				<div>
+					<label class="block text-xs text-slate-500 mb-0.5">Repaired by</label>
+					<input name="repaired_by" list="rc-people" placeholder="Blank = in-house (us)" class="w-full border rounded px-2 py-1 text-sm"/>
+				</div>
+				<div>
+					<label class="block text-xs text-slate-500 mb-0.5">Promised date (give back by)</label>
+					<input type="date" name="promised_date" class="w-full border rounded px-2 py-1 text-sm"/>
+				</div>
 			</div>
-			<input name="fault" placeholder="Reported fault" class="w-full border rounded px-2 py-1 text-sm"/>
-			<div class="flex gap-2">
-				<input type="number" min="0" name="warranty_days" value={ strconv.Itoa(d.WarrantyDays) } class="w-28 border rounded px-2 py-1 text-sm" title="Warranty days"/>
+			<div>
+				<label class="block text-xs text-slate-500 mb-0.5">Reported fault</label>
+				<textarea name="fault" rows="2" placeholder="What's wrong with it…" class="w-full border rounded px-2 py-1 text-sm"></textarea>
+			</div>
+			<div class="flex gap-2 items-end">
+				<div>
+					<label class="block text-xs text-slate-500 mb-0.5">Warranty (days)</label>
+					<input type="number" min="0" name="warranty_days" value={ strconv.Itoa(d.WarrantyDays) } class="w-28 border rounded px-2 py-1 text-sm"/>
+				</div>
 				<button class="flex-1 px-3 py-1.5 rounded bg-indigo-600 text-white text-sm font-semibold">Create job</button>
 			</div>
 			<datalist id="rc-types">
@@ -51,18 +69,31 @@ templ RepairCashierJob(d DetailData) {
 			<div class="font-semibold">{ d.D.Job.TicketNo } — { d.D.Job.DeviceModel }</div>
 			<span class="text-xs text-slate-500">{ d.D.Job.Status }</span>
 		</div>
+		if d.Warning != "" {
+			<div class="rounded bg-amber-50 border border-amber-300 text-amber-800 text-xs px-2 py-1.5">{ d.Warning }</div>
+		}
 		<table class="w-full text-sm">
 			<tbody>
 				for _, p := range d.D.Parts {
 					<tr class="border-b last:border-0">
 						<td class="py-1">{ p.ProductName } <span class="text-slate-400">×{ p.Qty.String() }</span></td>
 						<td class="py-1 text-right">{ money.Format(d.Symbol, p.Qty.Mul(p.UnitCharge).Sub(p.Discount)) }</td>
+						<td class="py-1 text-right w-6">
+							if d.Editable {
+								<button type="button" class="text-rose-500" title="Remove" hx-post={ "/cashier/repairs/" + strconv.FormatInt(d.D.Job.ID, 10) + "/part/" + strconv.FormatInt(p.ID, 10) + "/delete" } hx-target="#rcj" hx-swap="outerHTML">✕</button>
+							}
+						</td>
 					</tr>
 				}
 				for _, ch := range d.D.Charges {
 					<tr class="border-b last:border-0">
 						<td class="py-1">{ ch.Label }</td>
 						<td class="py-1 text-right">{ money.Format(d.Symbol, ch.Amount) }</td>
+						<td class="py-1 text-right w-6">
+							if d.Editable {
+								<button type="button" class="text-rose-500" title="Remove" hx-post={ "/cashier/repairs/" + strconv.FormatInt(d.D.Job.ID, 10) + "/charge/" + strconv.FormatInt(ch.ID, 10) + "/delete" } hx-target="#rcj" hx-swap="outerHTML">✕</button>
+							}
+						</td>
 					</tr>
 				}
 			</tbody>
@@ -73,7 +104,10 @@ templ RepairCashierJob(d DetailData) {
 			<div class="flex justify-between font-bold"><span>Balance</span><span>{ d.Balance }</span></div>
 		</div>
 		if d.Editable {
-			<form hx-post={ "/cashier/repairs/" + strconv.FormatInt(d.D.Job.ID, 10) + "/part" } hx-target="#rcj" hx-swap="outerHTML" x-data="repairPartPicker()" class="flex gap-1 items-start border-t pt-2">
+			<form hx-post={ "/cashier/repairs/" + strconv.FormatInt(d.D.Job.ID, 10) + "/part" } hx-target="#rcj" hx-swap="outerHTML" x-data="{ q:'', productId:'', results:[], open:false, _t:null, _seq:0,
+					async search(){ const q=this.q.trim(); if(!q){ this.results=[]; this.open=false; return; } const seq=++this._seq; if(this._t) clearTimeout(this._t); await new Promise(r=>{ this._t=setTimeout(r,200); }); if(seq!==this._seq) return;
+						try{ const res=await fetch('/api/products?limit=20&search='+encodeURIComponent(q),{credentials:'same-origin'}); const j=await res.json(); if(seq!==this._seq) return; this.results=(j.data||[]); this.open=true; }catch(e){ this.results=[]; } },
+					pick(r){ this.productId=String(r.id); this.q=r.name; this.results=[]; this.open=false; } }" class="flex gap-1 items-start border-t pt-2">
 				<div class="relative flex-1" x-on:click.away="open=false">
 					<input type="text" x-model="q" x-on:input="search()" x-on:focus="open=true" placeholder="Add part…" class="w-full border rounded px-2 py-1 text-sm"/>
 					<input type="hidden" name="product_id" x-bind:value="productId"/>
@@ -113,21 +147,6 @@ templ RepairCashierJob(d DetailData) {
 			</form>
 		}
 	</div>
-	<script>
-		function repairPartPicker(){
-			return {
-				q:"", productId:"", results:[], open:false, _t:null, _seq:0,
-				async search(){
-					const q=this.q.trim(); if(!q){ this.results=[]; this.open=false; return; }
-					const seq=++this._seq; if(this._t) clearTimeout(this._t);
-					await new Promise(r=>{ this._t=setTimeout(r,200); });
-					if(seq!==this._seq) return;
-					try{ const res=await fetch("/api/products?limit=20&search="+encodeURIComponent(q),{credentials:"same-origin"}); const j=await res.json(); if(seq!==this._seq) return; this.results=(j.data||[]); this.open=true; }catch(e){ this.results=[]; }
-				},
-				pick(r){ this.productId=String(r.id); this.q=r.name; this.results=[]; this.open=false; },
-			};
-		}
-	</script>
 }
 
 // RepairCollected confirms the sale rang and offers the repair receipt.

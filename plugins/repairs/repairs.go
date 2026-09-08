@@ -73,7 +73,9 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 	reg.Cashier().GET("/repairs/receipts", ch.Receipts)
 	reg.Cashier().GET("/repairs/:id", ch.Detail)
 	reg.Cashier().POST("/repairs/:id/part", ch.AddPart)
+	reg.Cashier().POST("/repairs/:id/part/:pid/delete", ch.RemovePart)
 	reg.Cashier().POST("/repairs/:id/charge", ch.AddCharge)
+	reg.Cashier().POST("/repairs/:id/charge/:cid/delete", ch.RemoveCharge)
 	reg.Cashier().POST("/repairs/:id/deposit", ch.TakeDeposit)
 	reg.Cashier().POST("/repairs/:id/collect", ch.Collect)
 	reg.Cashier().GET("/repairs/:id/receipt", ch.RepairReceipt)
@@ -132,11 +134,13 @@ func (p *Plugin) renderReceipt(c echo.Context) error {
 		return apperr.NotFound("repair")
 	}
 	sym, shop := "Rs.", ""
+	var addr, phone, footer *string
 	if sc, serr := p.core.Settings.Get(ctx); serr == nil && sc != nil {
 		if sc.CurrencySymbol != "" {
 			sym = sc.CurrencySymbol
 		}
 		shop = sc.ShopName
+		addr, phone, footer = sc.Address, sc.Phone, sc.ReceiptFooter
 	}
 	total, dep, bal := JobTotals(d)
 	warranty := ""
@@ -144,7 +148,7 @@ func (p *Plugin) renderReceipt(c echo.Context) error {
 		warranty = d.Job.WarrantyUntil.Format("2006-01-02")
 	}
 	return response.RenderPage(c, RepairReceipt(ReceiptData{
-		Symbol: sym, ShopName: shop, D: d,
+		Symbol: sym, ShopName: shop, Address: addr, Phone: phone, Footer: footer, D: d,
 		Total: money.Format(sym, total), Deposit: money.Format(sym, dep),
 		Balance: money.Format(sym, bal), WarrantyLabel: warranty,
 	}))

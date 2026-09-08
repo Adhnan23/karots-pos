@@ -16,6 +16,14 @@ import (
 
 type cashierUI struct{ p *Plugin }
 
+// errMsg is a short, human message from an error for an inline warning banner.
+func errMsg(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
 func (h *cashierUI) symbol(c echo.Context) string {
 	if sc, err := h.p.core.Settings.Get(c.Request().Context()); err == nil && sc != nil && sc.CurrencySymbol != "" {
 		return sc.CurrencySymbol
@@ -86,6 +94,13 @@ func (h *cashierUI) Detail(c echo.Context) error {
 
 // renderJob loads a job and returns the cashier job fragment.
 func (h *cashierUI) renderJob(c echo.Context, id int64) error {
+	return h.renderJobWarn(c, id, "")
+}
+
+// renderJobWarn is renderJob with an inline warning banner (e.g. "open your till
+// first"), so a failed deposit/collect keeps the panel instead of swapping in a
+// raw error page.
+func (h *cashierUI) renderJobWarn(c echo.Context, id int64, warn string) error {
 	ctx := c.Request().Context()
 	d, err := h.p.store.GetJob(ctx, id)
 	if err != nil {
@@ -100,7 +115,39 @@ func (h *cashierUI) renderJob(c echo.Context, id int64) error {
 		Deposit:  money.Format(sym, dep),
 		Balance:  money.Format(sym, bal),
 		Editable: d.Job.Status != "collected" && d.Job.Status != "cancelled",
+		Warning:  warn,
 	}))
+}
+
+// RemovePart / RemoveCharge let the cashier take a mistaken line off a job.
+func (h *cashierUI) RemovePart(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	pid, err := strconv.ParseInt(c.Param("pid"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	if err := h.p.store.RemovePart(c.Request().Context(), pid); err != nil {
+		return err
+	}
+	return h.renderJob(c, id)
+}
+
+func (h *cashierUI) RemoveCharge(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	cid, err := strconv.ParseInt(c.Param("cid"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	if err := h.p.store.RemoveCharge(c.Request().Context(), cid); err != nil {
+		return err
+	}
+	return h.renderJob(c, id)
 }
 
 func (h *cashierUI) AddPart(c echo.Context) error {
@@ -170,7 +217,7 @@ func (h *cashierUI) TakeDeposit(c echo.Context) error {
 	if _, err := h.p.core.CashRegister.PayIn(ctx, uid, cashregister.MovementInput{
 		Amount: amount.StringFixed(2), Reason: "Repair " + job.Job.TicketNo + " deposit",
 	}); err != nil {
-		return err
+		return h.renderJobWarn(c, id, "Couldn't take the deposit: "+errMsg(err)+" Open your till first, then try again.")
 	}
 	if err := h.p.store.AddPayment(ctx, id, amount, "deposit", uid); err != nil {
 		return err
@@ -187,7 +234,7 @@ func (h *cashierUI) Collect(c echo.Context) error {
 		return apperr.BadRequest("invalid id")
 	}
 	if err := h.p.collect(ctx, id, c.FormValue("pay_method"), c.FormValue("pay_now"), middleware.CurrentUserID(c)); err != nil {
-		return err
+		return h.renderJobWarn(c, id, "Couldn't collect: "+errMsg(err))
 	}
 	d, err := h.p.store.GetJob(ctx, id)
 	if err != nil {
