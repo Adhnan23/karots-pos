@@ -196,7 +196,14 @@ func (h *cashierUI) Collect(c echo.Context) error {
 	return response.RenderFragment(c, RepairCollected(d.Job))
 }
 
-// ---- filled in Task 9 (stubs keep routes live) ----
+func (h *cashierUI) Receipts(c echo.Context) error {
+	jobs, err := h.p.store.ListCollected(c.Request().Context(), 100)
+	if err != nil {
+		return err
+	}
+	return response.RenderFragment(c, RepairsReceiptsTab(ReceiptsTabData{
+		Symbol: h.symbol(c), BaseURL: "/cashier/repairs", Jobs: jobs,
+	}))
+}
 
-func (h *cashierUI) Receipts(c echo.Context) error      { return c.NoContent(http.StatusOK) }
-func (h *cashierUI) RepairReceipt(c echo.Context) error { return c.NoContent(http.StatusOK) }
+func (h *cashierUI) RepairReceipt(c echo.Context) error { return h.p.renderReceipt(c) }

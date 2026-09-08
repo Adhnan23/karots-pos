@@ -400,3 +400,164 @@ templ addPartForm(d DetailData) {
 		}
 	</script>
 }
+
+// ---- receipt ----
+
+type ReceiptData struct {
+	Symbol        string
+	ShopName      string
+	D             *Detail
+	Total         string
+	Deposit       string
+	Balance       string
+	WarrantyLabel string
+}
+
+templ RepairReceipt(d ReceiptData) {
+	@layouts.Report("Repair "+d.D.Job.TicketNo, d.ShopName) {
+		<div class="max-w-md mx-auto text-sm">
+			<div class="text-center mb-2">
+				<div class="font-bold text-base">{ d.ShopName }</div>
+				<div class="text-slate-500">Repair receipt</div>
+			</div>
+			<div class="flex justify-between border-t border-b py-1">
+				<span class="font-semibold">{ d.D.Job.TicketNo }</span>
+				<span>{ d.D.Job.CreatedAt.Format("2006-01-02") }</span>
+			</div>
+			<div class="py-1">
+				<div>{ d.D.Job.RepairType } · { d.D.Job.DeviceModel }</div>
+				if d.D.Job.Fault != "" {
+					<div class="text-slate-500">Fault: { d.D.Job.Fault }</div>
+				}
+				if d.D.Job.CustomerName != "" {
+					<div class="text-slate-500">{ d.D.Job.CustomerName } { d.D.Job.CustomerPhone }</div>
+				}
+			</div>
+			<table class="w-full border-t">
+				<tbody>
+					for _, p := range d.D.Parts {
+						<tr>
+							<td class="py-0.5">{ p.ProductName } ×{ p.Qty.String() }</td>
+							<td class="py-0.5 text-right">{ money.Format(d.Symbol, p.Qty.Mul(p.UnitCharge).Sub(p.Discount)) }</td>
+						</tr>
+					}
+					for _, ch := range d.D.Charges {
+						<tr>
+							<td class="py-0.5">{ ch.Label }</td>
+							<td class="py-0.5 text-right">{ money.Format(d.Symbol, ch.Amount) }</td>
+						</tr>
+					}
+				</tbody>
+				<tfoot class="border-t">
+					<tr><td class="py-0.5">Total</td><td class="py-0.5 text-right font-semibold">{ d.Total }</td></tr>
+					<tr><td class="py-0.5">Deposit</td><td class="py-0.5 text-right">{ d.Deposit }</td></tr>
+					<tr class="font-bold"><td class="py-0.5">Balance</td><td class="py-0.5 text-right">{ d.Balance }</td></tr>
+				</tfoot>
+			</table>
+			if d.WarrantyLabel != "" {
+				<div class="text-center border-t mt-2 pt-2">Warranty until { d.WarrantyLabel }</div>
+			}
+		</div>
+	}
+}
+
+// ---- receipts tab (inside the core Receipts page) ----
+
+type ReceiptsTabData struct {
+	Symbol  string
+	BaseURL string // "/admin/repairs" or "/cashier/repairs"
+	Jobs    []Job
+}
+
+templ RepairsReceiptsTab(d ReceiptsTabData) {
+	<div class="bg-white rounded-2xl shadow-sm overflow-hidden">
+		<table class="w-full text-sm">
+			<thead class="text-left text-slate-500 border-b">
+				<tr><th class="py-2 px-3">Ticket</th><th class="py-2 px-3">Device</th><th class="py-2 px-3">Collected</th><th class="py-2 px-3"></th></tr>
+			</thead>
+			<tbody>
+				if len(d.Jobs) == 0 {
+					<tr><td class="py-4 px-3 text-slate-400" colspan="4">No collected repairs yet.</td></tr>
+				}
+				for _, j := range d.Jobs {
+					<tr class="border-b last:border-0">
+						<td class="py-2 px-3 font-medium">{ j.TicketNo }</td>
+						<td class="py-2 px-3">{ j.DeviceModel }</td>
+						<td class="py-2 px-3">
+							if j.CollectedAt != nil {
+								{ j.CollectedAt.Format("2006-01-02 15:04") }
+							}
+						</td>
+						<td class="py-2 px-3 text-right"><a class="text-indigo-600" target="_blank" href={ templ.SafeURL(d.BaseURL + "/" + strconv.FormatInt(j.ID, 10) + "/receipt") }>Print →</a></td>
+					</tr>
+				}
+			</tbody>
+		</table>
+	</div>
+}
+
+// ---- report ----
+
+type ReportRow struct {
+	TicketNo  string
+	Device    string
+	Collected string
+	Total     string
+	Warranty  string
+}
+
+type ReportData struct {
+	UserName string
+	FromLbl  string
+	ToLbl    string
+	Rows     []ReportRow
+	GrandTot string
+	Count    int
+}
+
+templ RepairsReportPage(d ReportData) {
+	@layouts.Admin("Repairs report", d.UserName, "repairs") {
+		<div class="flex items-center justify-between mb-6">
+			<h1 class="text-2xl font-bold">Repairs report</h1>
+			<a href="/admin/repairs" class="text-slate-500 hover:underline">← Repairs</a>
+		</div>
+		<form method="get" class="flex gap-2 items-end mb-4">
+			<div><label class="block text-xs text-slate-500">From</label><input type="date" name="from" value={ d.FromLbl } class="border rounded px-2 py-1 text-sm"/></div>
+			<div><label class="block text-xs text-slate-500">To</label><input type="date" name="to" value={ d.ToLbl } class="border rounded px-2 py-1 text-sm"/></div>
+			<button class="px-3 py-1.5 rounded bg-indigo-600 text-white text-sm">Apply</button>
+		</form>
+		<div class="bg-white rounded-2xl shadow-sm overflow-hidden">
+			<table class="w-full text-sm">
+				<thead class="text-left text-slate-500 border-b">
+					<tr><th class="py-2 px-3">Ticket</th><th class="py-2 px-3">Device</th><th class="py-2 px-3">Collected</th><th class="py-2 px-3 text-right">Revenue</th><th class="py-2 px-3">Warranty</th></tr>
+				</thead>
+				<tbody>
+					if len(d.Rows) == 0 {
+						<tr><td class="py-4 px-3 text-slate-400" colspan="5">No repairs collected in this range.</td></tr>
+					}
+					for _, r := range d.Rows {
+						<tr class="border-b last:border-0">
+							<td class="py-2 px-3 font-medium">{ r.TicketNo }</td>
+							<td class="py-2 px-3">{ r.Device }</td>
+							<td class="py-2 px-3">{ r.Collected }</td>
+							<td class="py-2 px-3 text-right">{ r.Total }</td>
+							<td class="py-2 px-3">{ r.Warranty }</td>
+						</tr>
+					}
+				</tbody>
+				<tfoot class="border-t font-bold">
+					<tr><td class="py-2 px-3" colspan="3">{ strconv.Itoa(d.Count) } repairs</td><td class="py-2 px-3 text-right">{ d.GrandTot }</td><td></td></tr>
+				</tfoot>
+			</table>
+		</div>
+	}
+}
+
+// ---- dashboard card ----
+
+templ ReadyCard() {
+	<a href="/admin/repairs" class="block bg-white rounded-2xl shadow-sm p-5 hover:shadow">
+		<div class="text-slate-500 text-sm">🔧 Repairs ready for pickup</div>
+		<div class="text-3xl font-bold" hx-get="/admin/repairs/ready-count" hx-trigger="load" hx-swap="innerHTML">–</div>
+	</a>
+}

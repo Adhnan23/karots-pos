@@ -15,8 +15,10 @@ import (
 	"karots-pos/internal/features/products"
 	"karots-pos/internal/money"
 	"karots-pos/internal/plugin"
+	"karots-pos/internal/response"
 	"karots-pos/plugins/repairs/migrations"
 
+	"github.com/labstack/echo/v4"
 	"github.com/shopspring/decimal"
 )
 
@@ -50,6 +52,7 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 	reg.Admin().GET("/repairs/new", a.NewForm)
 	reg.Admin().POST("/repairs", a.Create)
 	reg.Admin().GET("/repairs/report", a.Report)
+	reg.Admin().GET("/repairs/ready-count", a.ReadyCount)
 	reg.Admin().GET("/repairs/receipts", a.Receipts)
 	reg.Admin().GET("/repairs/suggest", a.Suggest)
 	reg.Admin().GET("/repairs/:id", a.Detail)
@@ -92,7 +95,7 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 	})
 	reg.AddActivityContributor(plugin.ActivityContributor{Source: "repairs", List: p.store.ActivityRows})
 	reg.AddPaletteEntry(plugin.PaletteEntry{Href: "/admin/repairs", Label: "Repairs", Group: "Repairs"})
-	// DashboardCard wired in Task 9 (needs the ReadyCard component).
+	reg.AddDashboardCard(plugin.DashboardCard{Component: ReadyCard()})
 }
 
 // ensureLabourProduct returns the hidden is_service product used for labour and
@@ -115,6 +118,36 @@ func (p *Plugin) ensureLabourProduct(ctx context.Context) (int64, error) {
 		return 0, err
 	}
 	return prod.ID, nil
+}
+
+// renderReceipt renders the detailed repair receipt for the :id in the route.
+func (p *Plugin) renderReceipt(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	ctx := c.Request().Context()
+	d, err := p.store.GetJob(ctx, id)
+	if err != nil {
+		return apperr.NotFound("repair")
+	}
+	sym, shop := "Rs.", ""
+	if sc, serr := p.core.Settings.Get(ctx); serr == nil && sc != nil {
+		if sc.CurrencySymbol != "" {
+			sym = sc.CurrencySymbol
+		}
+		shop = sc.ShopName
+	}
+	total, dep, bal := JobTotals(d)
+	warranty := ""
+	if d.Job.WarrantyUntil != nil {
+		warranty = d.Job.WarrantyUntil.Format("2006-01-02")
+	}
+	return response.RenderPage(c, RepairReceipt(ReceiptData{
+		Symbol: sym, ShopName: shop, D: d,
+		Total: money.Format(sym, total), Deposit: money.Format(sym, dep),
+		Balance: money.Format(sym, bal), WarrantyLabel: warranty,
+	}))
 }
 
 // collect settles a job as a core sale: parts + charge lines, with the held

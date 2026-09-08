@@ -352,8 +352,76 @@ func (s *Store) serviceDefaults(ctx context.Context) (catID, unitID int64, err e
 	return catID, unitID, err
 }
 
-// ActivityRows feeds repair job events into the central Activity view. Filled in
-// Task 9; a stub keeps the hook harmless until then.
+// ListCollected returns recently-collected jobs (for the Receipts tab).
+func (s *Store) ListCollected(ctx context.Context, limit int) ([]Job, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 100
+	}
+	var rows []Job
+	err := s.q.SelectContext(ctx, &rows,
+		`SELECT * FROM repair_jobs WHERE status = 'collected' ORDER BY collected_at DESC LIMIT $1`, limit)
+	return rows, err
+}
+
+// CountReady counts jobs waiting to be picked up (status 'ready').
+func (s *Store) CountReady(ctx context.Context) (int, error) {
+	var n int
+	err := s.q.GetContext(ctx, &n, `SELECT COUNT(*) FROM repair_jobs WHERE status = 'ready'`)
+	return n, err
+}
+
+// ActivityRows feeds repair job events (opened / collected / cancelled) into the
+// central Activity view. The developer/system account is excluded upstream.
 func (s *Store) ActivityRows(ctx context.Context, f activity.Filter) ([]activity.Row, error) {
-	return nil, nil
+	type jrow struct {
+		TicketNo    string     `db:"ticket_no"`
+		DeviceModel string     `db:"device_model"`
+		CreatedBy   *int64     `db:"created_by"`
+		UserName    string     `db:"user_name"`
+		CreatedAt   time.Time  `db:"created_at"`
+		CollectedAt *time.Time `db:"collected_at"`
+		CancelledAt *time.Time `db:"cancelled_at"`
+	}
+	limit := f.Limit
+	if limit <= 0 || limit > 500 {
+		limit = 200
+	}
+	var js []jrow
+	if err := s.q.SelectContext(ctx, &js, `
+		SELECT j.ticket_no, j.device_model, j.created_by, COALESCE(u.name,'') AS user_name,
+		       j.created_at, j.collected_at, j.cancelled_at
+		FROM repair_jobs j LEFT JOIN users u ON u.id = j.created_by
+		ORDER BY j.created_at DESC LIMIT $1`, limit); err != nil {
+		return nil, err
+	}
+	inRange := func(t time.Time) bool {
+		if f.From != nil && t.Before(*f.From) {
+			return false
+		}
+		if f.To != nil && !t.Before(*f.To) {
+			return false
+		}
+		return true
+	}
+	out := make([]activity.Row, 0, len(js))
+	add := func(when time.Time, uid *int64, uname, action, detail string) {
+		if !inRange(when) {
+			return
+		}
+		out = append(out, activity.Row{
+			When: when, UserID: uid, UserName: uname, Source: "repairs",
+			Action: action, Detail: detail, Amount: decimal.Zero,
+		})
+	}
+	for _, j := range js {
+		who := j.DeviceModel
+		add(j.CreatedAt, j.CreatedBy, j.UserName, "repair opened", "Repair "+j.TicketNo+" — "+who)
+		if j.CollectedAt != nil {
+			add(*j.CollectedAt, j.CreatedBy, j.UserName, "repair collected", "Repair "+j.TicketNo+" — "+who)
+		}
+		if j.CancelledAt != nil {
+			add(*j.CancelledAt, j.CreatedBy, j.UserName, "repair cancelled", "Repair "+j.TicketNo+" — "+who)
+		}
+	}
+	return out, nil
 }

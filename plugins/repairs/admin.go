@@ -381,6 +381,62 @@ func (a *adminUI) Cancel(c echo.Context) error {
 	a.p.core.Audit.Record(ctx, middleware.CurrentUserID(c), audit.ActionUpdate, "repair", strconv.FormatInt(id, 10), "cancelled repair")
 	return a.redirectDetail(c, id)
 }
-func (a *adminUI) Report(c echo.Context) error        { return c.NoContent(http.StatusOK) }
-func (a *adminUI) Receipts(c echo.Context) error      { return c.NoContent(http.StatusOK) }
-func (a *adminUI) RepairReceipt(c echo.Context) error { return c.NoContent(http.StatusOK) }
+func (a *adminUI) Report(c echo.Context) error {
+	ctx := c.Request().Context()
+	sym := a.symbol(c)
+	to := time.Now().Truncate(24*time.Hour).AddDate(0, 0, 1)
+	from := to.AddDate(0, 0, -31)
+	if v := parseOptDate(c.QueryParam("from")); v != nil {
+		from = *v
+	}
+	if v := parseOptDate(c.QueryParam("to")); v != nil {
+		to = v.AddDate(0, 0, 1) // inclusive of the chosen end day
+	}
+	details, err := a.p.store.ListForReport(ctx, from, to)
+	if err != nil {
+		return err
+	}
+	rows := make([]ReportRow, 0, len(details))
+	grand := decimal.Zero
+	for i := range details {
+		d := &details[i]
+		total, _, _ := JobTotals(d)
+		grand = grand.Add(total)
+		collected, warranty := "", ""
+		if d.Job.CollectedAt != nil {
+			collected = d.Job.CollectedAt.Format("2006-01-02")
+		}
+		if d.Job.WarrantyUntil != nil {
+			warranty = d.Job.WarrantyUntil.Format("2006-01-02")
+		}
+		rows = append(rows, ReportRow{
+			TicketNo: d.Job.TicketNo, Device: d.Job.DeviceModel, Collected: collected,
+			Total: money.Format(sym, total), Warranty: warranty,
+		})
+	}
+	return response.RenderPage(c, RepairsReportPage(ReportData{
+		UserName: middleware.CurrentUserName(c),
+		FromLbl:  from.Format("2006-01-02"), ToLbl: to.AddDate(0, 0, -1).Format("2006-01-02"),
+		Rows: rows, GrandTot: money.Format(sym, grand), Count: len(rows),
+	}))
+}
+
+func (a *adminUI) Receipts(c echo.Context) error {
+	jobs, err := a.p.store.ListCollected(c.Request().Context(), 100)
+	if err != nil {
+		return err
+	}
+	return response.RenderFragment(c, RepairsReceiptsTab(ReceiptsTabData{
+		Symbol: a.symbol(c), BaseURL: "/admin/repairs", Jobs: jobs,
+	}))
+}
+
+func (a *adminUI) RepairReceipt(c echo.Context) error { return a.p.renderReceipt(c) }
+
+func (a *adminUI) ReadyCount(c echo.Context) error {
+	n, err := a.p.store.CountReady(c.Request().Context())
+	if err != nil {
+		return err
+	}
+	return c.String(http.StatusOK, strconv.Itoa(n))
+}
