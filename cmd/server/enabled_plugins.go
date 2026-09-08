@@ -22,4 +22,5 @@ import (
 	_ "karots-pos/plugins/documents"
 	_ "karots-pos/plugins/productplus"
 	_ "karots-pos/plugins/recharge"
+	_ "karots-pos/plugins/repairs"
 )
