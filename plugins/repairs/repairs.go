@@ -6,10 +6,18 @@ package repairs
 import (
 	"context"
 	"io/fs"
+	"strconv"
+	"strings"
+	"time"
 
+	"karots-pos/internal/apperr"
+	"karots-pos/internal/features/audit"
 	"karots-pos/internal/features/products"
+	"karots-pos/internal/money"
 	"karots-pos/internal/plugin"
 	"karots-pos/plugins/repairs/migrations"
+
+	"github.com/shopspring/decimal"
 )
 
 func init() { plugin.Register(&Plugin{}) }
@@ -50,9 +58,8 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 	reg.Admin().POST("/repairs/part/:pid/delete", a.RemovePart)
 	reg.Admin().POST("/repairs/:id/charge", a.AddCharge)
 	reg.Admin().POST("/repairs/charge/:cid/delete", a.RemoveCharge)
-	reg.Admin().POST("/repairs/:id/deposit", a.TakeDeposit)
+	reg.Admin().POST("/repairs/:id/pay-repairer", a.PayRepairer)
 	reg.Admin().POST("/repairs/:id/status", a.SetStatus)
-	reg.Admin().POST("/repairs/:id/collect", a.Collect)
 	reg.Admin().POST("/repairs/:id/cancel", a.Cancel)
 	reg.Admin().GET("/repairs/:id/receipt", a.RepairReceipt)
 
@@ -108,4 +115,56 @@ func (p *Plugin) ensureLabourProduct(ctx context.Context) (int64, error) {
 		return 0, err
 	}
 	return prod.ID, nil
+}
+
+// collect settles a job as a core sale: parts + charge lines, with the held
+// deposit applied as a non-cash wallet tender and the balance as `method`. It
+// links the sale, flips the status to collected, and stamps the warranty.
+func (p *Plugin) collect(ctx context.Context, jobID int64, method, payNowStr string, userID int64) error {
+	d, err := p.store.GetJob(ctx, jobID)
+	if err != nil {
+		return apperr.NotFound("repair")
+	}
+	if d.Job.Status == "collected" {
+		return apperr.Validation("this repair is already collected")
+	}
+	if len(d.Parts) == 0 && len(d.Charges) == 0 {
+		return apperr.Validation("add a part or a charge before collecting")
+	}
+	_, depositPaid, balance := JobTotals(d)
+
+	// How much is paid now vs left on account. method "credit" leaves the whole
+	// balance on account; a blank pay-now pays it all now; otherwise pay-now is
+	// what's handed over and the rest goes on account.
+	payNow := balance
+	if method == "credit" {
+		payNow = decimal.Zero
+	} else if raw := strings.TrimSpace(payNowStr); raw != "" {
+		v, perr := money.Parse(raw)
+		if perr != nil || v.IsNegative() {
+			return apperr.Validation("amount is invalid")
+		}
+		if v.GreaterThan(balance) {
+			v = balance
+		}
+		payNow = v
+	}
+	onAccount := balance.Sub(payNow)
+	if onAccount.IsPositive() && d.Job.CustomerID == nil {
+		return apperr.Validation("choose a registered customer to leave a balance on account")
+	}
+
+	in := BuildCollectionSale(d, p.labourProdID, d.Job.CustomerID,
+		collectionTenders(depositPaid, payNow, onAccount, method))
+	in.AllowOverLimit = true // an owner collecting a finished repair isn't blocked by a credit limit
+	sale, err := p.core.Sales.Create(ctx, in, userID)
+	if err != nil {
+		return err
+	}
+	if err := p.store.MarkCollected(ctx, jobID, sale.Sale.ID, warrantyUntil(d.Job.WarrantyDays, time.Now())); err != nil {
+		return err
+	}
+	p.core.Audit.Record(ctx, userID, audit.ActionUpdate, "repair",
+		strconv.FormatInt(jobID, 10), "collected repair (sale "+strconv.FormatInt(sale.Sale.ID, 10)+")")
+	return nil
 }

@@ -9,6 +9,8 @@ import (
 
 	"karots-pos/internal/apperr"
 	"karots-pos/internal/features/audit"
+	"karots-pos/internal/features/cashregister"
+	"karots-pos/internal/features/expenses"
 	"karots-pos/internal/middleware"
 	"karots-pos/internal/money"
 	"karots-pos/internal/response"
@@ -66,6 +68,7 @@ func jobInputFromForm(c echo.Context, defWarranty int) JobInput {
 		CustomerPhone: strings.TrimSpace(c.FormValue("customer_phone")),
 		RepairType:    strings.TrimSpace(c.FormValue("repair_type")),
 		DeviceModel:   strings.TrimSpace(c.FormValue("device_model")),
+		RepairedBy:    strings.TrimSpace(c.FormValue("repaired_by")),
 		Fault:         strings.TrimSpace(c.FormValue("fault")),
 		Notes:         strings.TrimSpace(c.FormValue("notes")),
 		PromisedDate:  parseOptDate(c.FormValue("promised_date")),
@@ -107,10 +110,12 @@ func (a *adminUI) NewForm(c echo.Context) error {
 	ctx := c.Request().Context()
 	types, _ := a.p.store.DistinctTypes(ctx)
 	models, _ := a.p.store.DistinctModels(ctx)
+	repairers, _ := a.p.store.DistinctRepairers(ctx)
 	return response.RenderPage(c, RepairFormPage(FormData{
 		UserName:     middleware.CurrentUserName(c),
 		Types:        types,
 		Models:       models,
+		Repairers:    repairers,
 		WarrantyDays: a.p.defWarranty,
 	}))
 }
@@ -145,6 +150,7 @@ func (a *adminUI) Detail(c echo.Context) error {
 
 // detailData assembles the view model for the detail page + the lines fragment.
 func (a *adminUI) detailData(c echo.Context, d *Detail) DetailData {
+	ctx := c.Request().Context()
 	sym := a.symbol(c)
 	total, dep, bal := JobTotals(d)
 	label, urgent := dueLabel(d.Job.PromisedDate)
@@ -154,6 +160,7 @@ func (a *adminUI) detailData(c echo.Context, d *Detail) DetailData {
 	} else if d.Job.WarrantyDays > 0 {
 		warranty = fmt.Sprintf("%d days from pickup", d.Job.WarrantyDays)
 	}
+	tills, _ := a.p.core.CashRegister.OpenSessions(ctx)
 	return DetailData{
 		UserName:      middleware.CurrentUserName(c),
 		Symbol:        sym,
@@ -161,10 +168,12 @@ func (a *adminUI) detailData(c echo.Context, d *Detail) DetailData {
 		Total:         money.Format(sym, total),
 		Deposit:       money.Format(sym, dep),
 		Balance:       money.Format(sym, bal),
+		RepairerPaid:  money.Format(sym, d.Job.RepairerPaid),
 		DueLabel:      label,
 		Urgent:        urgent || d.Job.Urgent,
 		WarrantyLabel: warranty,
 		Editable:      d.Job.Status != "collected" && d.Job.Status != "cancelled",
+		Tills:         tills,
 	}
 }
 
@@ -299,11 +308,79 @@ func (a *adminUI) redirectDetailForm(c echo.Context) error {
 	return a.redirectDetail(c, jid)
 }
 
-// ---- filled in later tasks (stubs keep routes live) ----
+// PayRepairer pays an outside repairer for a job. It books a core Expense (with
+// a generated note) and, when a source till is chosen, withdraws the cash from
+// it — mirroring how the documents plugin pays its labour. Customer money is
+// never touched here; that happens at the cashier.
+func (a *adminUI) PayRepairer(c echo.Context) error {
+	ctx := c.Request().Context()
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	amount, err := money.Parse(c.FormValue("amount"))
+	if err != nil || !amount.IsPositive() {
+		return apperr.Validation("amount must be greater than zero")
+	}
+	uid := middleware.CurrentUserID(c)
+	d, err := a.p.store.GetJob(ctx, id)
+	if err != nil {
+		return apperr.NotFound("repair")
+	}
+	who := d.Job.RepairedBy
+	if who == "" {
+		who = "repairer"
+	}
+	note := "Repair " + d.Job.TicketNo + " — paid " + who
+	if n := strings.TrimSpace(c.FormValue("note")); n != "" {
+		note += " (" + n + ")"
+	}
+	// Optional: take the cash from a chosen open till.
+	if src := strings.TrimSpace(c.FormValue("source")); src != "" {
+		tillUID, perr := strconv.ParseInt(src, 10, 64)
+		if perr != nil || tillUID <= 0 {
+			return apperr.Validation("choose a valid till")
+		}
+		if _, err := a.p.core.CashRegister.Withdraw(ctx, tillUID, cashregister.MovementInput{
+			Amount: amount.StringFixed(2), Reason: note,
+		}); err != nil {
+			return err
+		}
+	}
+	if _, err := a.p.core.Expenses.Create(ctx, expenses.CreateInput{
+		Category: "Repairs", Amount: amount.StringFixed(2), Description: &note,
+		ExpenseDate: time.Now().Format("2006-01-02"),
+	}, uid); err != nil {
+		return err
+	}
+	if err := a.p.store.AddRepairerPayment(ctx, id, amount); err != nil {
+		return err
+	}
+	a.p.core.Audit.Record(ctx, uid, audit.ActionCreate, "repair", strconv.FormatInt(id, 10), note)
+	return a.redirectDetail(c, id)
+}
 
-func (a *adminUI) TakeDeposit(c echo.Context) error   { return c.NoContent(http.StatusOK) }
-func (a *adminUI) Collect(c echo.Context) error       { return c.NoContent(http.StatusOK) }
-func (a *adminUI) Cancel(c echo.Context) error        { return c.NoContent(http.StatusOK) }
+func (a *adminUI) Cancel(c echo.Context) error {
+	ctx := c.Request().Context()
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	d, err := a.p.store.GetJob(ctx, id)
+	if err != nil {
+		return apperr.NotFound("repair")
+	}
+	if d.Job.Status == "collected" {
+		return apperr.Validation("a collected repair cannot be cancelled")
+	}
+	// Customer money lives at the cashier, so any deposit refund is handled there;
+	// cancelling here just closes the job.
+	if err := a.p.store.SetStatus(ctx, id, "cancelled", nil); err != nil {
+		return err
+	}
+	a.p.core.Audit.Record(ctx, middleware.CurrentUserID(c), audit.ActionUpdate, "repair", strconv.FormatInt(id, 10), "cancelled repair")
+	return a.redirectDetail(c, id)
+}
 func (a *adminUI) Report(c echo.Context) error        { return c.NoContent(http.StatusOK) }
 func (a *adminUI) Receipts(c echo.Context) error      { return c.NoContent(http.StatusOK) }
 func (a *adminUI) RepairReceipt(c echo.Context) error { return c.NoContent(http.StatusOK) }

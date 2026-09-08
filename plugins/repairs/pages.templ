@@ -3,6 +3,7 @@ package repairs
 import (
 	"strconv"
 
+	"karots-pos/internal/features/cashregister"
 	"karots-pos/internal/money"
 	"karots-pos/templates/layouts"
 )
@@ -30,6 +31,7 @@ type FormData struct {
 	UserName     string
 	Types        []string
 	Models       []string
+	Repairers    []string
 	WarrantyDays int
 }
 
@@ -40,10 +42,12 @@ type DetailData struct {
 	Total         string
 	Deposit       string
 	Balance       string
+	RepairerPaid  string
 	DueLabel      string
 	Urgent        bool
 	WarrantyLabel string
 	Editable      bool
+	Tills         []cashregister.SessionRow
 }
 
 // statusBadge maps a status to a Tailwind colour chip.
@@ -147,6 +151,15 @@ templ RepairFormPage(d FormData) {
 						}
 					</datalist>
 				</div>
+				<div>
+					<label class="block text-sm font-medium mb-1">Repaired by</label>
+					<input name="repaired_by" list="repair-people" class="w-full border rounded-lg px-3 py-2" placeholder="Leave blank for in-house (us)"/>
+					<datalist id="repair-people">
+						for _, r := range d.Repairers {
+							<option value={ r }></option>
+						}
+					</datalist>
+				</div>
 			</div>
 			<div>
 				<label class="block text-sm font-medium mb-1">Reported fault</label>
@@ -200,7 +213,14 @@ templ RepairDetailPage(d DetailData) {
 					}
 					<div class="pt-2 font-semibold">Fault</div>
 					<div class="text-slate-600">{ d.D.Job.Fault }</div>
-					<div class="pt-2 flex justify-between"><span class="text-slate-500">Due</span>
+					<div class="pt-2 flex justify-between"><span class="text-slate-500">Repaired by</span>
+						if d.D.Job.RepairedBy != "" {
+							<span>{ d.D.Job.RepairedBy }</span>
+						} else {
+							<span class="text-slate-400">us</span>
+						}
+					</div>
+					<div class="flex justify-between"><span class="text-slate-500">Due</span>
 						if d.Urgent {
 							<span class="text-rose-600 font-semibold">{ d.DueLabel }</span>
 						} else {
@@ -210,8 +230,9 @@ templ RepairDetailPage(d DetailData) {
 					if d.WarrantyLabel != "" {
 						<div class="flex justify-between"><span class="text-slate-500">Warranty</span><span>{ d.WarrantyLabel }</span></div>
 					}
+					<div class="pt-2 mt-1 border-t text-xs text-slate-400">Customer pays at the cashier till. This page is for managing the job and paying the repairer.</div>
 				</div>
-				if d.D.Job.Status != "collected" && d.D.Job.Status != "cancelled" {
+				if d.Editable {
 					<div class="bg-white rounded-2xl shadow-sm p-5">
 						<div class="font-semibold text-sm mb-2">Status</div>
 						<div class="flex flex-wrap gap-2">
@@ -219,6 +240,34 @@ templ RepairDetailPage(d DetailData) {
 							@statusButton(d.D.Job.ID, "in_progress", "In progress")
 							@statusButton(d.D.Job.ID, "ready", "Ready")
 						</div>
+					</div>
+					<div class="bg-white rounded-2xl shadow-sm p-5 space-y-2">
+						<div class="font-semibold text-sm">Pay the repairer</div>
+						<p class="text-xs text-slate-500">If an outside person did the repair, pay them here — it books as an expense. In-house work needs no payout.</p>
+						<form method="post" action={ templ.SafeURL("/admin/repairs/" + strconv.FormatInt(d.D.Job.ID, 10) + "/pay-repairer") } class="space-y-2">
+							<input name="amount" type="number" step="0.01" min="0" placeholder="Amount to pay" class="w-full border rounded px-2 py-1 text-sm text-right"/>
+							<input name="note" placeholder="Note (optional)" class="w-full border rounded px-2 py-1 text-sm"/>
+							<label class="block text-xs text-slate-500">Take the cash from</label>
+							<select name="source" class="w-full border rounded px-2 py-1 text-sm">
+								<option value="">— just record the expense (untracked) —</option>
+								for _, t := range d.Tills {
+									<option value={ strconv.FormatInt(t.UserID, 10) }>{ "Till: " + t.UserName }</option>
+								}
+							</select>
+							<button class="w-full px-3 py-1.5 rounded bg-slate-700 text-white text-sm font-semibold">Pay repairer</button>
+						</form>
+						if d.RepairerPaid != "" {
+							<div class="text-xs text-slate-500">Paid to repairer so far: <span class="font-medium">{ d.RepairerPaid }</span></div>
+						}
+						<form method="post" action={ templ.SafeURL("/admin/repairs/" + strconv.FormatInt(d.D.Job.ID, 10) + "/cancel") } x-on:submit="return confirm('Cancel this repair?')" class="pt-2 border-t">
+							<button class="w-full px-3 py-1 rounded border text-rose-600 text-sm">Cancel repair</button>
+						</form>
+					</div>
+				}
+				if d.D.Job.Status == "collected" && d.D.Job.SaleID != nil {
+					<div class="bg-white rounded-2xl shadow-sm p-5 text-sm">
+						<div class="font-semibold mb-1">Collected</div>
+						<a class="text-indigo-600" href={ templ.SafeURL("/admin/repairs/" + strconv.FormatInt(d.D.Job.ID, 10) + "/receipt") }>Print repair receipt →</a>
 					</div>
 				}
 			</div>

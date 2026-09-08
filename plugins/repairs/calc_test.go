@@ -41,47 +41,44 @@ func TestJobTotalsRefundAndOverpay(t *testing.T) {
 	}
 }
 
-func TestBuildCollectionSaleTenders(t *testing.T) {
+func TestSaleItemsLines(t *testing.T) {
 	det := &Detail{
-		Parts:    []Part{{ProductID: 5, Qty: d("1"), UnitCharge: d("1000")}},
-		Charges:  []Charge{{Amount: d("500"), Label: "Labour"}},
-		Payments: []Payment{{Amount: d("400"), Kind: "deposit"}},
+		Parts:   []Part{{ProductID: 5, Qty: d("1"), UnitCharge: d("1000"), DiscountType: "percent", DiscountValue: d("10")}},
+		Charges: []Charge{{Amount: d("500"), Label: "Labour"}},
 	}
-	in := BuildCollectionSale(det, 99, nil, "cash")
-	if len(in.Payments) != 2 {
-		t.Fatalf("want 2 tenders, got %d", len(in.Payments))
+	items := saleItems(det, 99)
+	if len(items) != 2 {
+		t.Fatalf("want 2 items, got %d", len(items))
 	}
-	var wallet, cash string
-	for _, p := range in.Payments {
-		if p.Method == "wallet" {
-			wallet = p.Amount
-		}
-		if p.Method == "cash" {
-			cash = p.Amount
-		}
+	if items[0].ProductID != 5 || items[0].DiscountType != "percent" || items[0].Discount != "10" {
+		t.Fatalf("bad part line: %+v", items[0])
 	}
-	if wallet != "400" || cash != "1100" {
-		t.Fatalf("tenders wallet/cash = %s/%s, want 400/1100", wallet, cash)
-	}
-	if len(in.Items) != 2 {
-		t.Fatalf("want 2 items, got %d", len(in.Items))
-	}
-	// The charge line rings on the labour product with a price override.
-	var chargeLine *struct{ ok bool }
-	for _, it := range in.Items {
-		if it.ProductID == 99 && it.PriceOverride == "500" {
-			chargeLine = &struct{ ok bool }{true}
-		}
-	}
-	if chargeLine == nil {
-		t.Fatal("charge line missing (labour product + PriceOverride)")
+	if items[1].ProductID != 99 || items[1].PriceOverride != "500" {
+		t.Fatalf("charge line must ring on labour product with PriceOverride: %+v", items[1])
 	}
 }
 
-func TestBuildCollectionSaleNoDeposit(t *testing.T) {
-	det := &Detail{Charges: []Charge{{Amount: d("500"), Label: "Labour"}}}
-	in := BuildCollectionSale(det, 99, nil, "card")
-	if len(in.Payments) != 1 || in.Payments[0].Method != "card" || in.Payments[0].Amount != "500" {
-		t.Fatalf("want single card 500 tender, got %+v", in.Payments)
+// TestCollectionTenders: deposit -> wallet, pay-now -> method, remainder -> credit.
+func TestCollectionTenders(t *testing.T) {
+	// deposit 400, pay 700 cash now, 400 left on account (total 1500).
+	ps := collectionTenders(d("400"), d("700"), d("400"), "cash")
+	got := map[string]string{}
+	for _, p := range ps {
+		got[p.Method] = p.Amount
+	}
+	if got["wallet"] != "400.00" || got["cash"] != "700.00" || got["credit"] != "400.00" {
+		t.Fatalf("tenders = %+v, want wallet 400 / cash 700 / credit 400", got)
+	}
+
+	// pay everything now: single cash tender, no wallet/credit.
+	ps = collectionTenders(d("0"), d("500"), d("0"), "card")
+	if len(ps) != 1 || ps[0].Method != "card" || ps[0].Amount != "500.00" {
+		t.Fatalf("want single card 500, got %+v", ps)
+	}
+
+	// whole thing on account: single credit tender.
+	ps = collectionTenders(d("0"), d("0"), d("500"), "credit")
+	if len(ps) != 1 || ps[0].Method != "credit" || ps[0].Amount != "500.00" {
+		t.Fatalf("want single credit 500, got %+v", ps)
 	}
 }

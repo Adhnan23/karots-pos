@@ -25,28 +25,30 @@ func newStoreQ(q db.Queryer) *Store { return &Store{q: q} }
 // ---- types (columns mirror migration 0001) ----
 
 type Job struct {
-	ID            int64      `db:"id"`
-	TicketNo      string     `db:"ticket_no"`
-	TicketCode    string     `db:"ticket_code"`
-	CustomerID    *int64     `db:"customer_id"`
-	CustomerName  string     `db:"customer_name"`
-	CustomerPhone string     `db:"customer_phone"`
-	RepairType    string     `db:"repair_type"`
-	DeviceModel   string     `db:"device_model"`
-	Fault         string     `db:"fault"`
-	Status        string     `db:"status"`
-	PromisedDate  *time.Time `db:"promised_date"`
-	Urgent        bool       `db:"urgent"`
-	WarrantyDays  int        `db:"warranty_days"`
-	WarrantyUntil *time.Time `db:"warranty_until"`
-	SaleID        *int64     `db:"sale_id"`
-	ReworkOf      *int64     `db:"rework_of"`
-	Notes         string     `db:"notes"`
-	CreatedBy     *int64     `db:"created_by"`
-	CreatedAt     time.Time  `db:"created_at"`
-	ReadyAt       *time.Time `db:"ready_at"`
-	CollectedAt   *time.Time `db:"collected_at"`
-	CancelledAt   *time.Time `db:"cancelled_at"`
+	ID            int64           `db:"id"`
+	TicketNo      string          `db:"ticket_no"`
+	TicketCode    string          `db:"ticket_code"`
+	CustomerID    *int64          `db:"customer_id"`
+	CustomerName  string          `db:"customer_name"`
+	CustomerPhone string          `db:"customer_phone"`
+	RepairType    string          `db:"repair_type"`
+	DeviceModel   string          `db:"device_model"`
+	RepairedBy    string          `db:"repaired_by"`
+	RepairerPaid  decimal.Decimal `db:"repairer_paid"`
+	Fault         string          `db:"fault"`
+	Status        string          `db:"status"`
+	PromisedDate  *time.Time      `db:"promised_date"`
+	Urgent        bool            `db:"urgent"`
+	WarrantyDays  int             `db:"warranty_days"`
+	WarrantyUntil *time.Time      `db:"warranty_until"`
+	SaleID        *int64          `db:"sale_id"`
+	ReworkOf      *int64          `db:"rework_of"`
+	Notes         string          `db:"notes"`
+	CreatedBy     *int64          `db:"created_by"`
+	CreatedAt     time.Time       `db:"created_at"`
+	ReadyAt       *time.Time      `db:"ready_at"`
+	CollectedAt   *time.Time      `db:"collected_at"`
+	CancelledAt   *time.Time      `db:"cancelled_at"`
 }
 
 type Part struct {
@@ -92,6 +94,7 @@ type JobInput struct {
 	CustomerPhone string
 	RepairType    string
 	DeviceModel   string
+	RepairedBy    string
 	Fault         string
 	Notes         string
 	PromisedDate  *time.Time
@@ -161,11 +164,11 @@ func (s *Store) CreateJob(ctx context.Context, in JobInput) (int64, error) {
 	err = s.q.GetContext(ctx, &id, `
 		INSERT INTO repair_jobs
 			(ticket_no, ticket_code, customer_id, customer_name, customer_phone,
-			 repair_type, device_model, fault, promised_date, urgent, warranty_days,
+			 repair_type, device_model, repaired_by, fault, promised_date, urgent, warranty_days,
 			 rework_of, notes, created_by)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id`,
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING id`,
 		no, code, in.CustomerID, in.CustomerName, in.CustomerPhone,
-		in.RepairType, in.DeviceModel, in.Fault, in.PromisedDate, in.Urgent, in.WarrantyDays,
+		in.RepairType, in.DeviceModel, in.RepairedBy, in.Fault, in.PromisedDate, in.Urgent, in.WarrantyDays,
 		in.ReworkOf, in.Notes, in.CreatedBy)
 	return id, err
 }
@@ -207,11 +210,11 @@ func (s *Store) UpdateJobFields(ctx context.Context, id int64, in JobInput) erro
 	_, err := s.q.ExecContext(ctx, `
 		UPDATE repair_jobs SET
 			customer_id = $2, customer_name = $3, customer_phone = $4,
-			repair_type = $5, device_model = $6, fault = $7,
-			promised_date = $8, urgent = $9, warranty_days = $10, notes = $11
+			repair_type = $5, device_model = $6, repaired_by = $7, fault = $8,
+			promised_date = $9, urgent = $10, warranty_days = $11, notes = $12
 		WHERE id = $1`,
 		id, in.CustomerID, in.CustomerName, in.CustomerPhone,
-		in.RepairType, in.DeviceModel, in.Fault,
+		in.RepairType, in.DeviceModel, in.RepairedBy, in.Fault,
 		in.PromisedDate, in.Urgent, in.WarrantyDays, in.Notes)
 	return err
 }
@@ -318,6 +321,22 @@ func (s *Store) DistinctModels(ctx context.Context) ([]string, error) {
 	err := s.q.SelectContext(ctx, &v,
 		`SELECT DISTINCT device_model FROM repair_jobs WHERE device_model <> '' ORDER BY 1`)
 	return v, err
+}
+
+func (s *Store) DistinctRepairers(ctx context.Context) ([]string, error) {
+	var v []string
+	err := s.q.SelectContext(ctx, &v,
+		`SELECT DISTINCT repaired_by FROM repair_jobs WHERE repaired_by <> '' ORDER BY 1`)
+	return v, err
+}
+
+// AddRepairerPayment records money paid out to the external repairer (for
+// display on the job); the actual cash movement + expense are booked by the
+// handler through core services.
+func (s *Store) AddRepairerPayment(ctx context.Context, jobID int64, amount decimal.Decimal) error {
+	_, err := s.q.ExecContext(ctx,
+		`UPDATE repair_jobs SET repairer_paid = repairer_paid + $2 WHERE id = $1`, jobID, amount)
+	return err
 }
 
 // serviceDefaults resolves the category + unit for the hidden labour/service

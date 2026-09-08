@@ -1,10 +1,22 @@
 package repairs
 
 import (
+	"time"
+
 	"karots-pos/internal/features/sales"
 
 	"github.com/shopspring/decimal"
 )
+
+// warrantyUntil is the date a repair's warranty runs to: nil when no warranty,
+// else the collection date (date-only) plus the warranty days.
+func warrantyUntil(days int, from time.Time) *time.Time {
+	if days <= 0 {
+		return nil
+	}
+	u := from.Truncate(24*time.Hour).AddDate(0, 0, days)
+	return &u
+}
 
 var hundred = decimal.NewFromInt(100)
 
@@ -70,14 +82,10 @@ func JobTotals(d *Detail) (total, depositPaid, balance decimal.Decimal) {
 	return total, depositPaid, balance
 }
 
-// BuildCollectionSale turns a job into the core sale that settles it: one line
-// per part (priced by the catalogue, with its per-item discount) and one line
-// per charge (the hidden labour/service product, amount via PriceOverride). The
-// already-paid deposit rides as a non-cash `wallet` tender; the balance is the
-// chosen method. A zero deposit or zero balance omits that tender.
-func BuildCollectionSale(d *Detail, labourProductID int64, customerID *int64, balanceMethod string) sales.CreateInput {
-	_, depositPaid, balance := JobTotals(d)
-
+// saleItems turns the job's parts + charges into sale lines: one line per part
+// (priced by the catalogue, carrying its per-item discount) and one line per
+// charge (the hidden labour/service product, amount via PriceOverride).
+func saleItems(d *Detail, labourProductID int64) []sales.ItemInput {
 	items := make([]sales.ItemInput, 0, len(d.Parts)+len(d.Charges))
 	for _, p := range d.Parts {
 		items = append(items, sales.ItemInput{
@@ -94,22 +102,40 @@ func BuildCollectionSale(d *Detail, labourProductID int64, customerID *int64, ba
 			PriceOverride: c.Amount.String(),
 		})
 	}
+	return items
+}
 
-	payments := make([]sales.PaymentInput, 0, 2)
+// collectionTenders splits a collection into sale tenders: the already-paid
+// deposit as a non-cash `wallet` tender, the pay-now amount via `method`, and
+// any remainder on account (credit). Zero legs are omitted; the three sum to the
+// job total. `method` is the pay-now method (cash/card/online); a blank or
+// "credit" method leaves nothing paid-now (the balance goes on account).
+func collectionTenders(depositPaid, payNow, onAccount decimal.Decimal, method string) []sales.PaymentInput {
+	switch method {
+	case "cash", "card", "online":
+	default:
+		method = "cash"
+	}
+	out := make([]sales.PaymentInput, 0, 3)
 	if depositPaid.IsPositive() {
-		payments = append(payments, sales.PaymentInput{Method: "wallet", Amount: depositPaid.String()})
+		out = append(out, sales.PaymentInput{Method: "wallet", Amount: depositPaid.StringFixed(2)})
 	}
-	if balance.IsPositive() {
-		if balanceMethod == "" {
-			balanceMethod = "cash"
-		}
-		payments = append(payments, sales.PaymentInput{Method: balanceMethod, Amount: balance.String()})
+	if payNow.IsPositive() {
+		out = append(out, sales.PaymentInput{Method: method, Amount: payNow.StringFixed(2)})
 	}
+	if onAccount.IsPositive() {
+		out = append(out, sales.PaymentInput{Method: "credit", Amount: onAccount.StringFixed(2)})
+	}
+	return out
+}
 
+// BuildCollectionSale assembles the settling sale from the job's lines and the
+// resolved tenders.
+func BuildCollectionSale(d *Detail, labourProductID int64, customerID *int64, tenders []sales.PaymentInput) sales.CreateInput {
 	return sales.CreateInput{
 		CustomerID: customerID,
 		SaleType:   "retail",
-		Items:      items,
-		Payments:   payments,
+		Items:      saleItems(d, labourProductID),
+		Payments:   tenders,
 	}
 }
