@@ -1,0 +1,144 @@
+package repairs
+
+import (
+	"strconv"
+
+	"karots-pos/internal/money"
+)
+
+// RepairApplyFragment is the "Apply a repair" inline form in the cashier menu.
+// It posts to /cashier/repairs and swaps in the job fragment.
+templ RepairApplyFragment(d FormData) {
+	<div class="p-3 space-y-2" id="rcj">
+		<div class="font-semibold">Apply a repair</div>
+		<form hx-post="/cashier/repairs" hx-target="#rcj" hx-swap="outerHTML" class="space-y-2">
+			<div class="grid grid-cols-2 gap-2">
+				<input name="customer_name" placeholder="Customer name" class="border rounded px-2 py-1 text-sm"/>
+				<input name="customer_phone" placeholder="Phone" class="border rounded px-2 py-1 text-sm"/>
+				<input name="repair_type" list="rc-types" placeholder="Repair type" class="border rounded px-2 py-1 text-sm"/>
+				<input name="device_model" list="rc-models" placeholder="Device model" class="border rounded px-2 py-1 text-sm"/>
+				<input name="repaired_by" list="rc-people" placeholder="Repaired by (blank = us)" class="border rounded px-2 py-1 text-sm"/>
+				<input type="date" name="promised_date" class="border rounded px-2 py-1 text-sm"/>
+			</div>
+			<input name="fault" placeholder="Reported fault" class="w-full border rounded px-2 py-1 text-sm"/>
+			<div class="flex gap-2">
+				<input type="number" min="0" name="warranty_days" value={ strconv.Itoa(d.WarrantyDays) } class="w-28 border rounded px-2 py-1 text-sm" title="Warranty days"/>
+				<button class="flex-1 px-3 py-1.5 rounded bg-indigo-600 text-white text-sm font-semibold">Create job</button>
+			</div>
+			<datalist id="rc-types">
+				for _, t := range d.Types {
+					<option value={ t }></option>
+				}
+			</datalist>
+			<datalist id="rc-models">
+				for _, m := range d.Models {
+					<option value={ m }></option>
+				}
+			</datalist>
+			<datalist id="rc-people">
+				for _, r := range d.Repairers {
+					<option value={ r }></option>
+				}
+			</datalist>
+		</form>
+	</div>
+}
+
+// RepairCashierJob is the cashier-side job panel: add parts/charges, take a
+// deposit, and collect. Every action swaps this fragment back in.
+templ RepairCashierJob(d DetailData) {
+	<div class="p-3 space-y-3" id="rcj">
+		<div class="flex items-center justify-between">
+			<div class="font-semibold">{ d.D.Job.TicketNo } — { d.D.Job.DeviceModel }</div>
+			<span class="text-xs text-slate-500">{ d.D.Job.Status }</span>
+		</div>
+		<table class="w-full text-sm">
+			<tbody>
+				for _, p := range d.D.Parts {
+					<tr class="border-b last:border-0">
+						<td class="py-1">{ p.ProductName } <span class="text-slate-400">×{ p.Qty.String() }</span></td>
+						<td class="py-1 text-right">{ money.Format(d.Symbol, p.Qty.Mul(p.UnitCharge).Sub(p.Discount)) }</td>
+					</tr>
+				}
+				for _, ch := range d.D.Charges {
+					<tr class="border-b last:border-0">
+						<td class="py-1">{ ch.Label }</td>
+						<td class="py-1 text-right">{ money.Format(d.Symbol, ch.Amount) }</td>
+					</tr>
+				}
+			</tbody>
+		</table>
+		<div class="text-sm space-y-0.5">
+			<div class="flex justify-between"><span class="text-slate-500">Total</span><span>{ d.Total }</span></div>
+			<div class="flex justify-between"><span class="text-slate-500">Deposit</span><span>{ d.Deposit }</span></div>
+			<div class="flex justify-between font-bold"><span>Balance</span><span>{ d.Balance }</span></div>
+		</div>
+		if d.Editable {
+			<form hx-post={ "/cashier/repairs/" + strconv.FormatInt(d.D.Job.ID, 10) + "/part" } hx-target="#rcj" hx-swap="outerHTML" x-data="repairPartPicker()" class="flex gap-1 items-start border-t pt-2">
+				<div class="relative flex-1" x-on:click.away="open=false">
+					<input type="text" x-model="q" x-on:input="search()" x-on:focus="open=true" placeholder="Add part…" class="w-full border rounded px-2 py-1 text-sm"/>
+					<input type="hidden" name="product_id" x-bind:value="productId"/>
+					<div x-show="open && results.length" x-cloak class="absolute z-30 left-0 right-0 mt-1 bg-white border rounded shadow max-h-48 overflow-auto">
+						<template x-for="r in results" x-bind:key="r.id">
+							<button type="button" x-on:click="pick(r)" class="block w-full text-left px-2 py-1 hover:bg-slate-100 text-sm" x-text="r.name"></button>
+						</template>
+					</div>
+				</div>
+				<input name="qty" type="number" step="0.001" min="0" value="1" class="w-14 border rounded px-1 py-1 text-sm text-center"/>
+				<input name="discount" type="number" step="0.01" min="0" placeholder="disc" class="w-16 border rounded px-1 py-1 text-sm text-right"/>
+				<select name="discount_type" class="border rounded px-1 py-1 text-xs"><option value="fixed">Rs</option><option value="percent">%</option></select>
+				<button type="submit" x-bind:disabled="!productId" class="px-2 py-1 rounded bg-indigo-600 text-white text-sm disabled:opacity-40">+</button>
+			</form>
+			<form hx-post={ "/cashier/repairs/" + strconv.FormatInt(d.D.Job.ID, 10) + "/charge" } hx-target="#rcj" hx-swap="outerHTML" class="flex gap-1">
+				<input name="label" placeholder="Charge (Labour)" class="flex-1 border rounded px-2 py-1 text-sm"/>
+				<input name="amount" type="number" step="0.01" min="0" placeholder="0.00" class="w-24 border rounded px-1 py-1 text-sm text-right"/>
+				<button class="px-2 py-1 rounded bg-slate-700 text-white text-sm">+</button>
+			</form>
+			<form hx-post={ "/cashier/repairs/" + strconv.FormatInt(d.D.Job.ID, 10) + "/deposit" } hx-target="#rcj" hx-swap="outerHTML" class="flex gap-1 border-t pt-2">
+				<input name="amount" type="number" step="0.01" min="0" placeholder="Take deposit" class="flex-1 border rounded px-2 py-1 text-sm text-right"/>
+				<button class="px-2 py-1 rounded bg-amber-600 text-white text-sm">Deposit</button>
+			</form>
+			<form hx-post={ "/cashier/repairs/" + strconv.FormatInt(d.D.Job.ID, 10) + "/collect" } hx-target="#rcj" hx-swap="outerHTML" class="space-y-1 border-t pt-2">
+				<div class="flex gap-1">
+					<select name="pay_method" class="border rounded px-1 py-1 text-sm">
+						<option value="cash">Cash</option>
+						<option value="card">Card</option>
+						<option value="online">Online</option>
+						if d.D.Job.CustomerID != nil {
+							<option value="credit">On account</option>
+						}
+					</select>
+					<input name="pay_now" type="number" step="0.01" min="0" placeholder="Pay now (blank=all)" class="flex-1 border rounded px-2 py-1 text-sm text-right"/>
+				</div>
+				<button class="w-full px-3 py-1.5 rounded bg-emerald-600 text-white text-sm font-semibold">Collect { d.Balance }</button>
+			</form>
+		}
+	</div>
+	<script>
+		function repairPartPicker(){
+			return {
+				q:"", productId:"", results:[], open:false, _t:null, _seq:0,
+				async search(){
+					const q=this.q.trim(); if(!q){ this.results=[]; this.open=false; return; }
+					const seq=++this._seq; if(this._t) clearTimeout(this._t);
+					await new Promise(r=>{ this._t=setTimeout(r,200); });
+					if(seq!==this._seq) return;
+					try{ const res=await fetch("/api/products?limit=20&search="+encodeURIComponent(q),{credentials:"same-origin"}); const j=await res.json(); if(seq!==this._seq) return; this.results=(j.data||[]); this.open=true; }catch(e){ this.results=[]; }
+				},
+				pick(r){ this.productId=String(r.id); this.q=r.name; this.results=[]; this.open=false; },
+			};
+		}
+	</script>
+}
+
+// RepairCollected confirms the sale rang and offers the repair receipt.
+templ RepairCollected(j Job) {
+	<div class="p-4 text-center space-y-2" id="rcj">
+		<div class="text-2xl">✅</div>
+		<div class="font-semibold">{ j.TicketNo } collected</div>
+		if j.WarrantyUntil != nil {
+			<div class="text-sm text-slate-500">Warranty until { j.WarrantyUntil.Format("2006-01-02") }</div>
+		}
+		<a class="inline-block px-3 py-1.5 rounded border text-sm text-indigo-600" href={ templ.SafeURL("/cashier/repairs/" + strconv.FormatInt(j.ID, 10) + "/receipt") } target="_blank">Print repair receipt</a>
+	</div>
+}

@@ -67,12 +67,12 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 	reg.Cashier().GET("/repairs/menu", ch.MenuRoot)
 	reg.Cashier().GET("/repairs/apply", ch.ApplyForm)
 	reg.Cashier().POST("/repairs", ch.Create)
-	reg.Cashier().POST("/repairs/record", ch.Record)
 	reg.Cashier().GET("/repairs/receipts", ch.Receipts)
 	reg.Cashier().GET("/repairs/:id", ch.Detail)
 	reg.Cashier().POST("/repairs/:id/part", ch.AddPart)
 	reg.Cashier().POST("/repairs/:id/charge", ch.AddCharge)
 	reg.Cashier().POST("/repairs/:id/deposit", ch.TakeDeposit)
+	reg.Cashier().POST("/repairs/:id/collect", ch.Collect)
 	reg.Cashier().GET("/repairs/:id/receipt", ch.RepairReceipt)
 
 	reg.AddAdminNav(plugin.AdminNavEntry{
