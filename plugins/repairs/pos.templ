@@ -12,9 +12,8 @@ templ RepairApplyFragment(d FormData) {
 	<div class="p-3 space-y-2" id="rcj">
 		<div class="font-semibold">Apply a repair</div>
 		<form hx-post="/cashier/repairs" hx-target="#rcj" hx-swap="outerHTML" class="space-y-2">
+			@customerPickerFields()
 			<div class="grid grid-cols-2 gap-2">
-				<input name="customer_name" placeholder="Customer name" class="border rounded px-2 py-1 text-sm"/>
-				<input name="customer_phone" placeholder="Phone" class="border rounded px-2 py-1 text-sm"/>
 				<input name="repair_type" list="rc-types" placeholder="Repair type" class="border rounded px-2 py-1 text-sm"/>
 				<input name="device_model" list="rc-models" placeholder="Device model" class="border rounded px-2 py-1 text-sm"/>
 				<input name="repaired_by" list="rc-people" placeholder="Repaired by (blank = us)" class="border rounded px-2 py-1 text-sm"/>

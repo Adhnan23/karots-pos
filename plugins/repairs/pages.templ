@@ -124,15 +124,10 @@ templ RepairFormPage(d FormData) {
 			<a href="/admin/repairs" class="text-slate-500 hover:underline">← Back</a>
 		</div>
 		<form method="post" action="/admin/repairs" class="bg-white rounded-2xl shadow-sm p-6 max-w-2xl space-y-4">
+			<div class="md:col-span-2">
+				@customerPickerFields()
+			</div>
 			<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-				<div>
-					<label class="block text-sm font-medium mb-1">Customer name</label>
-					<input name="customer_name" class="w-full border rounded-lg px-3 py-2" placeholder="Walk-in name…"/>
-				</div>
-				<div>
-					<label class="block text-sm font-medium mb-1">Phone</label>
-					<input name="customer_phone" class="w-full border rounded-lg px-3 py-2" placeholder="07…"/>
-				</div>
 				<div>
 					<label class="block text-sm font-medium mb-1">Repair type</label>
 					<input name="repair_type" list="repair-types" class="w-full border rounded-lg px-3 py-2" placeholder="e.g. Screen replace"/>
@@ -560,4 +555,62 @@ templ ReadyCard() {
 		<div class="text-slate-500 text-sm">🔧 Repairs ready for pickup</div>
 		<div class="text-3xl font-bold" hx-get="/admin/repairs/ready-count" hx-trigger="load" hx-swap="innerHTML">–</div>
 	</a>
+}
+
+// customerPickerFields renders the customer search/register block shared by the
+// admin new-job form and the cashier apply fragment. It reuses the existing
+// /api/customers endpoints (GET to search, POST to register) — no core change.
+// It submits customer_name, customer_phone, and (when picked/registered) a
+// hidden customer_id.
+templ customerPickerFields() {
+	<div x-data="repairCustomer()" class="relative">
+		<label class="block text-sm font-medium mb-1">Customer</label>
+		<div class="flex gap-2">
+			<input x-model="q" x-on:input="search()" x-on:focus="open=true" name="customer_name" placeholder="Search or type a name…" autocomplete="off" class="flex-1 border rounded-lg px-3 py-2"/>
+			<input x-model="phone" name="customer_phone" placeholder="Phone" class="w-40 border rounded-lg px-3 py-2"/>
+		</div>
+		<input type="hidden" name="customer_id" x-bind:value="id"/>
+		<div class="mt-1 text-xs">
+			<span x-show="id" class="text-emerald-600">✓ linked to a saved customer</span>
+			<button type="button" x-show="!id && q && phone" x-on:click="register()" class="text-indigo-600 hover:underline">+ Register this customer</button>
+		</div>
+		<div x-show="open && results.length" x-cloak x-on:click.away="open=false" class="absolute z-30 left-0 right-0 mt-1 bg-white border rounded-lg shadow max-h-56 overflow-auto">
+			<template x-for="r in results" x-bind:key="r.id">
+				<button type="button" x-on:click="pick(r)" class="block w-full text-left px-3 py-1.5 hover:bg-slate-100 text-sm" x-text="r.name + (r.phone ? '  ·  ' + r.phone : '')"></button>
+			</template>
+		</div>
+	</div>
+	<script>
+		function repairCustomer(){
+			return {
+				q:"", phone:"", id:"", results:[], open:false, _t:null, _seq:0,
+				async search(){
+					this.id=""; const q=this.q.trim();
+					if(!q){ this.results=[]; this.open=false; return; }
+					const seq=++this._seq; if(this._t) clearTimeout(this._t);
+					await new Promise(r=>{ this._t=setTimeout(r,200); });
+					if(seq!==this._seq) return;
+					try{
+						const res=await fetch("/api/customers?search="+encodeURIComponent(q),{credentials:"same-origin"});
+						const j=await res.json(); if(seq!==this._seq) return;
+						const rows=(j.data||[]);
+						this.results=rows.filter(c=>((c.name||"")+" "+(c.phone||"")).toLowerCase().includes(q.toLowerCase())).slice(0,15);
+						this.open=true;
+					}catch(e){ this.results=[]; }
+				},
+				pick(r){ this.id=String(r.id); this.q=r.name||""; this.phone=r.phone||""; this.results=[]; this.open=false; },
+				async register(){
+					const name=this.q.trim(), phone=this.phone.trim();
+					if(!name){ return; }
+					try{
+						const res=await fetch("/api/customers",{method:"POST",headers:{"Content-Type":"application/json"},credentials:"same-origin",body:JSON.stringify({name:name,phone:phone})});
+						const j=await res.json();
+						if(j && j.data && j.data.id){ this.id=String(j.data.id); this.open=false;
+							window.dispatchEvent(new CustomEvent('show-toast',{detail:{message:'Customer registered',level:'success'}}));
+						}
+					}catch(e){ window.dispatchEvent(new CustomEvent('show-toast',{detail:{message:'Could not register',level:'error'}})); }
+				},
+			};
+		}
+	</script>
 }
