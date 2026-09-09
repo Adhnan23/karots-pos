@@ -147,10 +147,18 @@ func (p *Plugin) renderReceipt(c echo.Context) error {
 	if d.Job.WarrantyUntil != nil {
 		warranty = d.Job.WarrantyUntil.Format("2006-01-02")
 	}
+	narrow := c.QueryParam("size") == "58"
+	switchSize, switchText := "58", "Switch to 58mm"
+	if narrow {
+		switchSize, switchText = "80", "Switch to 80mm"
+	}
 	return response.RenderPage(c, RepairReceipt(ReceiptData{
 		Symbol: sym, ShopName: shop, Address: addr, Phone: phone, Footer: footer, D: d,
 		Total: money.Format(sym, total), Deposit: money.Format(sym, dep),
 		Balance: money.Format(sym, bal), WarrantyLabel: warranty,
+		Narrow:     narrow,
+		SwitchURL:  c.Request().URL.Path + "?size=" + switchSize,
+		SwitchText: switchText,
 	}))
 }
 

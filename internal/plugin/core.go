@@ -3,8 +3,10 @@ package plugin
 import (
 	"karots-pos/internal/config"
 	"karots-pos/internal/features/audit"
+	"karots-pos/internal/features/cashflow"
 	"karots-pos/internal/features/cashregister"
 	"karots-pos/internal/features/expenses"
+	"karots-pos/internal/features/lockers"
 	"karots-pos/internal/features/products"
 	"karots-pos/internal/features/sales"
 	"karots-pos/internal/features/settings"
@@ -31,4 +33,9 @@ type Core struct {
 	Expenses     *expenses.Service
 	Products     *products.Service
 	Stock        *stock.Service
+	// Cashflow + Lockers let a plugin move money between real cash locations
+	// (lockers/tills) and list them for a source picker — e.g. paying an outside
+	// repairer from a chosen locker, exactly like the core expense/bill-pay flow.
+	Cashflow *cashflow.Service
+	Lockers  *lockers.Service
 }

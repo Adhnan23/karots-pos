@@ -157,6 +157,7 @@ templ RepairCollected(j Job) {
 		if j.WarrantyUntil != nil {
 			<div class="text-sm text-slate-500">Warranty until { j.WarrantyUntil.Format("2006-01-02") }</div>
 		}
-		<a class="inline-block px-3 py-1.5 rounded border text-sm text-indigo-600" href={ templ.SafeURL("/cashier/repairs/" + strconv.FormatInt(j.ID, 10) + "/receipt") } target="_blank">Print repair receipt</a>
+		<a class="inline-block px-5 py-2.5 rounded-lg bg-emerald-600 text-white font-semibold" href={ templ.SafeURL("/cashier/repairs/" + strconv.FormatInt(j.ID, 10) + "/receipt") } target="_blank">🖨 Print repair slip</a>
+		<div class="text-xs text-slate-400">The sale receipt is available in Receipts → Repairs.</div>
 	</div>
 }

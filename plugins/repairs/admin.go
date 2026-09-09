@@ -1,6 +1,7 @@
 package repairs
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -8,14 +9,16 @@ import (
 	"time"
 
 	"karots-pos/internal/apperr"
+	appdb "karots-pos/internal/db"
 	"karots-pos/internal/features/audit"
-	"karots-pos/internal/features/cashregister"
+	"karots-pos/internal/features/cashflow"
 	"karots-pos/internal/features/expenses"
 	"karots-pos/internal/features/reports"
 	"karots-pos/internal/middleware"
 	"karots-pos/internal/money"
 	"karots-pos/internal/response"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/labstack/echo/v4"
 	"github.com/shopspring/decimal"
 )
@@ -60,6 +63,47 @@ func dueLabel(promised *time.Time) (string, bool) {
 	default:
 		return fmt.Sprintf("in %dd", days), false
 	}
+}
+
+// cashLocations lists the real cash sources (lockers + open tills) for the
+// pay-repairer picker, mirroring the core expense/bill-pay location choices.
+func (a *adminUI) cashLocations(ctx context.Context) []LocChoice {
+	var out []LocChoice
+	if lks, err := a.p.core.Lockers.List(ctx, true); err == nil {
+		for _, l := range lks {
+			out = append(out, LocChoice{Value: "locker:" + strconv.FormatInt(l.ID, 10), Label: l.Name, Group: "Lockers"})
+		}
+	}
+	if tills, err := a.p.core.CashRegister.OpenSessions(ctx); err == nil {
+		for _, t := range tills {
+			out = append(out, LocChoice{Value: "till:" + strconv.FormatInt(t.UserID, 10), Label: "Till — " + t.UserName, Group: "Tills"})
+		}
+	}
+	return out
+}
+
+// parseCashLocation turns a picker value ("locker:ID" / "till:UID" / "external")
+// into a cashflow endpoint — same encoding as the core location picker.
+func parseCashLocation(v string) (cashflow.Location, bool, error) {
+	v = strings.TrimSpace(v)
+	if v == "" || v == "external" {
+		return cashflow.Location{}, false, nil // untracked: expense only, no cash move
+	}
+	kind, idStr, ok := strings.Cut(v, ":")
+	if !ok {
+		return cashflow.Location{}, false, apperr.Validation("invalid cash location")
+	}
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		return cashflow.Location{}, false, apperr.Validation("invalid cash location")
+	}
+	switch kind {
+	case "locker":
+		return cashflow.Locker(id), true, nil
+	case "till":
+		return cashflow.Till(id), true, nil
+	}
+	return cashflow.Location{}, false, apperr.Validation("invalid cash location")
 }
 
 // jobInputFromForm reads the shared job fields from a POST form.
@@ -177,7 +221,6 @@ func (a *adminUI) detailData(c echo.Context, d *Detail) DetailData {
 	} else if d.Job.WarrantyDays > 0 {
 		warranty = fmt.Sprintf("%d days from pickup", d.Job.WarrantyDays)
 	}
-	tills, _ := a.p.core.CashRegister.OpenSessions(ctx)
 	return DetailData{
 		UserName:      middleware.CurrentUserName(c),
 		Symbol:        sym,
@@ -190,7 +233,7 @@ func (a *adminUI) detailData(c echo.Context, d *Detail) DetailData {
 		Urgent:        urgent || d.Job.Urgent,
 		WarrantyLabel: warranty,
 		Editable:      d.Job.Status != "collected" && d.Job.Status != "cancelled",
-		Tills:         tills,
+		Locations:     a.cashLocations(ctx),
 	}
 }
 
@@ -352,25 +395,33 @@ func (a *adminUI) PayRepairer(c echo.Context) error {
 	if n := strings.TrimSpace(c.FormValue("note")); n != "" {
 		note += " (" + n + ")"
 	}
-	// Optional: take the cash from a chosen open till.
-	if src := strings.TrimSpace(c.FormValue("source")); src != "" {
-		tillUID, perr := strconv.ParseInt(src, 10, 64)
-		if perr != nil || tillUID <= 0 {
-			return apperr.Validation("choose a valid till")
-		}
-		if _, err := a.p.core.CashRegister.Withdraw(ctx, tillUID, cashregister.MovementInput{
-			Amount: amount.StringFixed(2), Reason: note,
-		}); err != nil {
-			return err
-		}
-	}
-	if _, err := a.p.core.Expenses.Create(ctx, expenses.CreateInput{
-		Category: "Repairs", Amount: amount.StringFixed(2), Description: &note,
-		ExpenseDate: time.Now().Format("2006-01-02"),
-	}, uid); err != nil {
+	loc, tracked, err := parseCashLocation(c.FormValue("source"))
+	if err != nil {
 		return err
 	}
-	if err := a.p.store.AddRepairerPayment(ctx, id, amount); err != nil {
+	in := expenses.CreateInput{
+		Category: "Repairs", Amount: amount.StringFixed(2), Description: &note,
+		ExpenseDate: time.Now().Format("2006-01-02"),
+	}
+	// Book the expense, debit the chosen cash location, and stamp the job — all in
+	// one tx (mirrors the core expense-with-location flow). An untracked source
+	// books the expense only, no cash move.
+	err = appdb.WithTx(ctx, a.p.core.DB, func(tx *sqlx.Tx) error {
+		e, err := a.p.core.Expenses.CreateInTx(ctx, tx, in, uid)
+		if err != nil {
+			return err
+		}
+		if tracked {
+			if _, err := a.p.core.Cashflow.MoveTx(ctx, tx, cashflow.MoveInput{
+				From: loc, To: cashflow.External(), Amount: e.Amount, Reason: note,
+				ReceiptKind: "expense", Ref: &cashflow.Ref{Kind: "expense", ID: e.ID}, ActorID: uid,
+			}); err != nil {
+				return err
+			}
+		}
+		return newStoreQ(tx).AddRepairerPayment(ctx, id, amount)
+	})
+	if err != nil {
 		return err
 	}
 	a.p.core.Audit.Record(ctx, uid, audit.ActionCreate, "repair", strconv.FormatInt(id, 10), note)

@@ -23,7 +23,6 @@ import (
 	"karots-pos/internal/features/lockers"
 	"karots-pos/internal/features/productgroups"
 	"karots-pos/internal/features/products"
-	adminfragments "karots-pos/templates/fragments/admin"
 	"karots-pos/internal/features/purchasereturns"
 	"karots-pos/internal/features/purchases"
 	"karots-pos/internal/features/recipes"
@@ -38,6 +37,7 @@ import (
 	"karots-pos/internal/features/warranty"
 	"karots-pos/internal/middleware"
 	"karots-pos/internal/plugin"
+	adminfragments "karots-pos/templates/fragments/admin"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/labstack/echo/v4"
@@ -585,7 +585,7 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 		DB: db, Cfg: cfg,
 		Audit: s.audit, Settings: s.settings, CashRegister: s.cashRegister,
 		Sales: s.sales, Expenses: s.expenses, Products: s.products,
-		Stock: s.stock,
+		Stock: s.stock, Cashflow: s.cashflow, Lockers: s.lockers,
 	}
 	reg := plugin.NewRegistry(core, plugin.NewMux(), e)
 	plugin.SetupAll(reg)

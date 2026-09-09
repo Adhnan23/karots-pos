@@ -3,7 +3,6 @@ package repairs
 import (
 	"strconv"
 
-	"karots-pos/internal/features/cashregister"
 	"karots-pos/internal/money"
 	"karots-pos/templates/layouts"
 	"karots-pos/templates/shared"
@@ -58,8 +57,15 @@ type DetailData struct {
 	Urgent        bool
 	WarrantyLabel string
 	Editable      bool
-	Tills         []cashregister.SessionRow
-	Warning       string // shown inline on the cashier job panel (e.g. till not open)
+	Locations     []LocChoice // cash sources for the pay-repairer picker (lockers + tills)
+	Warning       string      // shown inline on the cashier job panel (e.g. till not open)
+}
+
+// LocChoice is one cash-source option (locker or till) for the pay-repairer picker.
+type LocChoice struct {
+	Value string // "locker:ID" | "till:UID"
+	Label string
+	Group string
 }
 
 // statusBadge maps a status to a Tailwind colour chip.
@@ -262,10 +268,10 @@ templ RepairDetailPage(d DetailData) {
 							<input name="note" placeholder="Note (optional)" class="w-full border rounded px-2 py-1 text-sm"/>
 							<label class="block text-xs text-slate-500">Take the cash from</label>
 							<select name="source" class="w-full border rounded px-2 py-1 text-sm">
-								<option value="">— just record the expense (untracked) —</option>
-								for _, t := range d.Tills {
-									<option value={ strconv.FormatInt(t.UserID, 10) }>{ "Till: " + t.UserName }</option>
+								for _, loc := range d.Locations {
+									<option value={ loc.Value }>{ loc.Group + " — " + loc.Label }</option>
 								}
+								<option value="external">Untracked (record the expense only)</option>
 							</select>
 							<button class="w-full px-3 py-1.5 rounded bg-slate-700 text-white text-sm font-semibold">Pay repairer</button>
 						</form>
@@ -427,6 +433,17 @@ type ReceiptData struct {
 	Deposit       string
 	Balance       string
 	WarrantyLabel string
+	Narrow        bool   // 58mm when true, else 80mm
+	SwitchURL     string // toggles the paper size
+	SwitchText    string
+}
+
+func repairRollStyle(narrow bool) string {
+	w := "80mm"
+	if narrow {
+		w = "58mm"
+	}
+	return "@media print{@page{size:" + w + " auto;margin:0}html,body{width:" + w + ";height:auto;margin:0}}"
 }
 
 // RepairReceipt is a standalone, thermal-styled slip matching the sales receipt
@@ -441,10 +458,10 @@ templ RepairReceipt(d ReceiptData) {
 			<meta name="viewport" content="width=device-width, initial-scale=1"/>
 			<title>Repair { d.D.Job.TicketNo }</title>
 			<link rel="stylesheet" href="/static/css/app.css"/>
-			@templ.Raw("<style>@media print{@page{size:80mm auto;margin:0}html,body{width:80mm;height:auto;margin:0}}</style>")
+			@templ.Raw("<style>" + repairRollStyle(d.Narrow) + "</style>")
 		</head>
 		<body class="receipt-body">
-			<div class="receipt" id="receipt">
+			<div class={ "receipt", templ.KV("narrow", d.Narrow) } id="receipt">
 				<div class="r-center r-shop">{ d.ShopName }</div>
 				if d.Address != nil && *d.Address != "" {
 					<div class="r-center r-small">{ *d.Address }</div>
@@ -494,6 +511,9 @@ templ RepairReceipt(d ReceiptData) {
 				<div class="r-print-btn">
 					<button onclick="window.print()">🖨 Print</button>
 					<button type="button" class="r-secondary" onclick="window.history.length>1?window.history.back():window.close()">← Back</button>
+					if d.SwitchURL != "" {
+						<a href={ templ.SafeURL(d.SwitchURL) }>{ d.SwitchText }</a>
+					}
 				</div>
 			</div>
 		</body>
