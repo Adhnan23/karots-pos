@@ -216,6 +216,9 @@ func buildReceiptSlip(cfg *settings.Settings, r cashflow.Receipt, opts escpos.Op
 	// A money receipt is a cash hand-over, so keep a signature strip.
 	escpos.Center(&b)
 	escpos.Line(&b, "Signature: ____________________")
+	// Breathing room so the footer/credit doesn't crowd the signature line.
+	escpos.Line(&b, "")
+	escpos.Line(&b, "")
 
 	escpos.Footer(&b, *cfg)
 	return b.Bytes()

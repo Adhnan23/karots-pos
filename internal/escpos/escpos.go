@@ -158,6 +158,13 @@ func Title(b *bytes.Buffer, title string, w int) {
 // is what makes every receipt end the same way.
 func Footer(b *bytes.Buffer, cfg settings.Settings) {
 	w := columns(cfg.ReceiptWidth)
+	// Reset to left-align first: the footer centers by space-padding (see
+	// center()), which only lines up when the printer is NOT already in ESC
+	// center mode — otherwise the padded text is centered a second time and drifts
+	// right. Callers that ended in Center (e.g. a signature strip on money/debt
+	// slips) would otherwise render this off-centre; the sale/repair slips were
+	// already left when they got here. Resetting here fixes every caller at once.
+	b.Write([]byte{esc, 'a', 0})
 	// Centered by space-padding (see center()) so it lines up over the body and
 	// renders centered on any printer, the emulator, and plain text alike.
 	if s := deref(cfg.ReceiptFooter); s != "" {
