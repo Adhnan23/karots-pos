@@ -1,0 +1,63 @@
+// Package systempages holds vendor/system-user-only maintenance surfaces —
+// pages the shop admin never sees (gated by middleware.RequireSystemUser).
+package systempages
+
+import (
+	"karots-pos/internal/features/settings"
+	"karots-pos/templates/layouts"
+)
+
+// AppearancePanel is the locked appearance chooser. Only the system/support
+// account reaches it. Changing a select previews instantly on this page (it
+// stamps data-skin/data-density on <html>); Save persists it shop-wide.
+templ AppearancePanel(cur *settings.Settings, saved bool) {
+	@layouts.Base("Appearance") {
+		<div class="min-h-full flex items-center justify-center p-6"
+			x-data="{ skin: $root.closest('html') ? document.documentElement.getAttribute('data-skin') : 'default' }">
+			<div class="w-full max-w-lg bg-white rounded-2xl shadow-sm p-8">
+				<h1 class="text-2xl font-bold text-slate-800">Appearance</h1>
+				<p class="text-slate-500 mt-1 text-sm">
+					System-only. Sets the shop's locked look and receipt style. The shop admin cannot change this.
+				</p>
+				if saved {
+					<div class="mt-4 rounded-lg bg-emerald-50 text-emerald-700 px-4 py-3 text-sm">Saved. The new look is live shop-wide.</div>
+				}
+				<form method="post" action="/system/appearance" class="mt-6 space-y-5">
+					<div>
+						<label class="block text-sm font-medium text-slate-600 mb-1">Skin (brand colour + card shape)</label>
+						<select name="skin"
+							x-on:change="document.documentElement.setAttribute('data-skin', $event.target.value)"
+							class="w-full border rounded-lg px-3 py-2.5">
+							for _, s := range settings.Skins {
+								<option value={ s } selected?={ s == cur.Skin }>{ s }</option>
+							}
+						</select>
+					</div>
+					<div>
+						<label class="block text-sm font-medium text-slate-600 mb-1">Density</label>
+						<select name="density"
+							x-on:change="document.documentElement.setAttribute('data-density', $event.target.value)"
+							class="w-full border rounded-lg px-3 py-2.5">
+							for _, d := range settings.Densities {
+								<option value={ d } selected?={ d == cur.Density }>{ d }</option>
+							}
+						</select>
+					</div>
+					<div>
+						<label class="block text-sm font-medium text-slate-600 mb-1">Receipt style</label>
+						<select name="receipt_style" class="w-full border rounded-lg px-3 py-2.5">
+							for _, r := range settings.ReceiptStyles {
+								<option value={ r } selected?={ r == cur.ReceiptStyle }>{ r }</option>
+							}
+						</select>
+						<p class="text-xs text-slate-400 mt-1">Applies to every printed receipt — core and plugins.</p>
+					</div>
+					<div class="flex gap-2 pt-2">
+						<button type="submit" class="flex-1 py-3 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700">Save</button>
+						<a href="/admin" class="py-3 px-4 rounded-lg border text-slate-600">Back</a>
+					</div>
+				</form>
+			</div>
+		</div>
+	}
+}
