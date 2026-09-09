@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
+	"karots-pos/internal/apperr"
 	"karots-pos/internal/db"
 	"karots-pos/internal/features/activity"
 
@@ -61,6 +63,8 @@ type Part struct {
 	DiscountType  string          `db:"discount_type"`
 	DiscountValue decimal.Decimal `db:"discount_value"`
 	ProductName   string          `db:"product_name"` // joined
+	UnitCost      decimal.Decimal `db:"unit_cost"`     // joined product cost, for profit
+	WarrantyDays  int             `db:"warranty_days"` // this part's warranty (parts mode)
 }
 
 type Charge struct {
@@ -110,6 +114,7 @@ type PartInput struct {
 	UnitCharge    decimal.Decimal
 	DiscountType  string
 	DiscountValue decimal.Decimal
+	WarrantyDays  int // this part's own warranty (parts mode); 0 = none
 }
 
 // ---- config + ticket sequence ----
@@ -117,27 +122,38 @@ type PartInput struct {
 // EnsureConfig loads the singleton config, creating the labour/service product
 // on first run (via ensureLabour) and stamping its id. Returns the labour
 // product id and the default warranty days.
-func (s *Store) EnsureConfig(ctx context.Context, ensureLabour func() (int64, error)) (int64, int, error) {
+func (s *Store) EnsureConfig(ctx context.Context, ensureLabour func() (int64, error)) (int64, int, string, error) {
 	var cfg struct {
-		LabourProductID     int64 `db:"labour_product_id"`
-		DefaultWarrantyDays int   `db:"default_warranty_days"`
+		LabourProductID     int64  `db:"labour_product_id"`
+		DefaultWarrantyDays int    `db:"default_warranty_days"`
+		WarrantyMode        string `db:"warranty_mode"`
 	}
 	if err := s.q.GetContext(ctx, &cfg,
-		`SELECT labour_product_id, default_warranty_days FROM repair_config WHERE id = 1`); err != nil {
-		return 0, 0, err
+		`SELECT labour_product_id, default_warranty_days, warranty_mode FROM repair_config WHERE id = 1`); err != nil {
+		return 0, 0, "days", err
 	}
 	if cfg.LabourProductID == 0 {
 		pid, err := ensureLabour()
 		if err != nil {
-			return 0, 0, err
+			return 0, 0, "days", err
 		}
 		if _, err := s.q.ExecContext(ctx,
 			`UPDATE repair_config SET labour_product_id = $1 WHERE id = 1`, pid); err != nil {
-			return 0, 0, err
+			return 0, 0, "days", err
 		}
 		cfg.LabourProductID = pid
 	}
-	return cfg.LabourProductID, cfg.DefaultWarrantyDays, nil
+	return cfg.LabourProductID, cfg.DefaultWarrantyDays, cfg.WarrantyMode, nil
+}
+
+// SetWarrantyMode switches the shop between "days" (whole-repair warranty) and
+// "parts" (per-part warranty, PC-shop style).
+func (s *Store) SetWarrantyMode(ctx context.Context, mode string) error {
+	if mode != "days" && mode != "parts" {
+		return apperr.Validation("invalid warranty mode")
+	}
+	_, err := s.q.ExecContext(ctx, `UPDATE repair_config SET warranty_mode = $1 WHERE id = 1`, mode)
+	return err
 }
 
 // NextTicket atomically advances the per-shop counter and returns the human
@@ -180,7 +196,7 @@ func (s *Store) GetJob(ctx context.Context, id int64) (*Detail, error) {
 	}
 	d := &Detail{Job: j}
 	if err := s.q.SelectContext(ctx, &d.Parts, `
-		SELECT rp.*, COALESCE(p.name, '') AS product_name
+		SELECT rp.*, COALESCE(p.name, '') AS product_name, COALESCE(p.cost_price, 0) AS unit_cost
 		FROM repair_parts rp LEFT JOIN products p ON p.id = rp.product_id
 		WHERE rp.job_id = $1 ORDER BY rp.id`, id); err != nil {
 		return nil, err
@@ -219,6 +235,18 @@ func (s *Store) UpdateJobFields(ctx context.Context, id int64, in JobInput) erro
 	return err
 }
 
+// SetUrgent flips the urgent flag on an existing job (a customer who suddenly
+// asks to rush it), optionally updating the promised date in the same write.
+func (s *Store) SetUrgent(ctx context.Context, id int64, urgent bool, promised *time.Time) error {
+	if promised != nil {
+		_, err := s.q.ExecContext(ctx,
+			`UPDATE repair_jobs SET urgent = $2, promised_date = $3 WHERE id = $1`, id, urgent, promised)
+		return err
+	}
+	_, err := s.q.ExecContext(ctx, `UPDATE repair_jobs SET urgent = $2 WHERE id = $1`, id, urgent)
+	return err
+}
+
 // SetStatus moves a job's status and stamps the matching timestamp column.
 func (s *Store) SetStatus(ctx context.Context, id int64, status string, stamp *time.Time) error {
 	col := map[string]string{"ready": "ready_at", "collected": "collected_at", "cancelled": "cancelled_at"}[status]
@@ -247,9 +275,9 @@ func (s *Store) AddPart(ctx context.Context, jobID int64, p PartInput) error {
 	gross := p.Qty.Mul(p.UnitCharge)
 	disc := resolvePartDiscount(dtype, p.DiscountValue, gross, p.Qty)
 	_, err := s.q.ExecContext(ctx, `
-		INSERT INTO repair_parts (job_id, product_id, qty, unit_charge, discount, discount_type, discount_value)
-		VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-		jobID, p.ProductID, p.Qty, p.UnitCharge, disc, dtype, p.DiscountValue)
+		INSERT INTO repair_parts (job_id, product_id, qty, unit_charge, discount, discount_type, discount_value, warranty_days)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+		jobID, p.ProductID, p.Qty, p.UnitCharge, disc, dtype, p.DiscountValue, p.WarrantyDays)
 	return err
 }
 
@@ -282,6 +310,44 @@ func (s *Store) ListByStatuses(ctx context.Context, statuses []string) ([]Job, e
 	var rows []Job
 	q, args, err := sqlx.In(`SELECT * FROM repair_jobs WHERE status IN (?)
 		ORDER BY (promised_date IS NULL), promised_date, created_at`, statuses)
+	if err != nil {
+		return nil, err
+	}
+	q = s.q.Rebind(q)
+	err = s.q.SelectContext(ctx, &rows, q, args...)
+	return rows, err
+}
+
+// Search finds jobs by scanned/typed ticket code, ticket number, customer name
+// or phone, or device model. An exact ticket_code / ticket_no match (a scan)
+// sorts first; otherwise most-recent first.
+func (s *Store) Search(ctx context.Context, q string, limit int) ([]Job, error) {
+	q = strings.TrimSpace(q)
+	if q == "" {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 25
+	}
+	like := "%" + q + "%"
+	var rows []Job
+	err := s.q.SelectContext(ctx, &rows,
+		`SELECT * FROM repair_jobs
+		 WHERE ticket_no ILIKE $1 OR ticket_code ILIKE $1
+		    OR customer_name ILIKE $1 OR customer_phone ILIKE $1
+		    OR device_model ILIKE $1
+		 ORDER BY ((ticket_code = $2) OR (ticket_no = $2)) DESC, created_at DESC
+		 LIMIT $3`, like, q, limit)
+	return rows, err
+}
+
+// ListByStatusesRange is ListByStatuses limited to jobs dropped off (created) in
+// [from,to) — the admin list's date filter.
+func (s *Store) ListByStatusesRange(ctx context.Context, statuses []string, from, to time.Time) ([]Job, error) {
+	var rows []Job
+	q, args, err := sqlx.In(`SELECT * FROM repair_jobs WHERE status IN (?)
+		AND created_at >= ? AND created_at < ?
+		ORDER BY (promised_date IS NULL), promised_date, created_at`, statuses, from, to)
 	if err != nil {
 		return nil, err
 	}
@@ -360,6 +426,16 @@ func (s *Store) ListCollected(ctx context.Context, limit int) ([]Job, error) {
 	var rows []Job
 	err := s.q.SelectContext(ctx, &rows,
 		`SELECT * FROM repair_jobs WHERE status = 'collected' ORDER BY collected_at DESC LIMIT $1`, limit)
+	return rows, err
+}
+
+// ListCollectedRange returns collected jobs whose collection falls in [from,to),
+// for the date-filtered Receipts tab.
+func (s *Store) ListCollectedRange(ctx context.Context, from, to time.Time) ([]Job, error) {
+	var rows []Job
+	err := s.q.SelectContext(ctx, &rows,
+		`SELECT * FROM repair_jobs WHERE status = 'collected' AND collected_at >= $1 AND collected_at < $2
+		 ORDER BY collected_at DESC`, from, to)
 	return rows, err
 }
 

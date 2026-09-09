@@ -46,7 +46,7 @@ func TestSaleItemsLines(t *testing.T) {
 		Parts:   []Part{{ProductID: 5, Qty: d("1"), UnitCharge: d("1000"), DiscountType: "percent", DiscountValue: d("10")}},
 		Charges: []Charge{{Amount: d("500"), Label: "Labour"}},
 	}
-	items := saleItems(det, 99)
+	items := saleItems(det, 99, false)
 	if len(items) != 2 {
 		t.Fatalf("want 2 items, got %d", len(items))
 	}

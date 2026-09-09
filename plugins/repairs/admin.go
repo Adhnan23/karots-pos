@@ -47,6 +47,20 @@ func parseOptDate(s string) *time.Time {
 
 // jobDue is dueLabel for a whole job: a finished (collected/cancelled) job is
 // never "due" or urgent, so its promised-date warning is dropped.
+// canRework reports whether a job is eligible for a free warranty re-repair:
+// collected and still inside its warranty window.
+func canRework(j Job) bool {
+	return j.Status == "collected" && j.WarrantyUntil != nil && !time.Now().After(*j.WarrantyUntil)
+}
+
+// promisedInput formats a promised date for a date input (blank when none).
+func promisedInput(t *time.Time) string {
+	if t == nil {
+		return ""
+	}
+	return t.Format("2006-01-02")
+}
+
 func jobDue(status string, promised *time.Time, urgentFlag bool) (string, bool) {
 	if status == "collected" || status == "cancelled" {
 		return "—", false
@@ -167,7 +181,25 @@ func (a *adminUI) List(c echo.Context) error {
 		show = "open"
 		statuses = []string{"received", "in_progress", "ready"}
 	}
-	jobs, err := a.p.store.ListByStatuses(ctx, statuses)
+	// Scan/search wins over the status+date filter: a typed or scanned query
+	// looks across every status so a collected job is still findable by ticket.
+	q := strings.TrimSpace(c.QueryParam("q"))
+	preset, fromStr, toStr := c.QueryParam("preset"), "", ""
+	var jobs []Job
+	var err error
+	switch {
+	case q != "":
+		jobs, err = a.p.store.Search(ctx, q, 200)
+	case preset != "" || c.QueryParam("from") != "" || c.QueryParam("to") != "":
+		from, to, fs, ts, rerr := reports.ResolveRange(preset, c.QueryParam("from"), c.QueryParam("to"))
+		if rerr != nil {
+			return apperr.Validation(rerr.Error())
+		}
+		fromStr, toStr = fs, ts
+		jobs, err = a.p.store.ListByStatusesRange(ctx, statuses, from, to)
+	default:
+		jobs, err = a.p.store.ListByStatuses(ctx, statuses)
+	}
 	if err != nil {
 		return err
 	}
@@ -184,6 +216,11 @@ func (a *adminUI) List(c echo.Context) error {
 		UserName: middleware.CurrentUserName(c),
 		Show:     show,
 		Rows:     rows,
+		Query:        q,
+		Preset:       preset,
+		From:         fromStr,
+		To:           toStr,
+		WarrantyMode: a.p.warrantyMode,
 	}))
 }
 
@@ -198,6 +235,7 @@ func (a *adminUI) NewForm(c echo.Context) error {
 		Models:       models,
 		Repairers:    repairers,
 		WarrantyDays: a.p.defWarranty,
+		WarrantyMode: a.p.warrantyMode,
 	}))
 }
 
@@ -241,6 +279,12 @@ func (a *adminUI) detailData(c echo.Context, d *Detail) DetailData {
 	} else if d.Job.WarrantyDays > 0 {
 		warranty = fmt.Sprintf("%d days from pickup", d.Job.WarrantyDays)
 	}
+	// Empty (not "Rs. 0.00") when nothing has been paid, so the detail page can
+	// tell paid from unpaid — the audit trail for a "you never paid me" dispute.
+	repairerPaid := ""
+	if d.Job.RepairerPaid.IsPositive() {
+		repairerPaid = money.Format(sym, d.Job.RepairerPaid)
+	}
 	return DetailData{
 		UserName:      middleware.CurrentUserName(c),
 		Symbol:        sym,
@@ -248,10 +292,13 @@ func (a *adminUI) detailData(c echo.Context, d *Detail) DetailData {
 		Total:         money.Format(sym, total),
 		Deposit:       money.Format(sym, dep),
 		Balance:       money.Format(sym, bal),
-		RepairerPaid:  money.Format(sym, d.Job.RepairerPaid),
+		RepairerPaid:  repairerPaid,
 		DueLabel:      label,
 		Urgent:        urgent,
+		PromisedInput: promisedInput(d.Job.PromisedDate),
 		WarrantyLabel: warranty,
+		CanRework:     canRework(d.Job),
+		WarrantyMode:  a.p.warrantyMode,
 		Editable:      d.Job.Status != "collected" && d.Job.Status != "cancelled",
 		Locations:     a.cashLocations(ctx),
 	}
@@ -263,10 +310,60 @@ func (a *adminUI) Update(c echo.Context) error {
 	if err != nil {
 		return apperr.BadRequest("invalid id")
 	}
-	if err := a.p.store.UpdateJobFields(ctx, id, jobInputFromForm(c, a.p.defWarranty)); err != nil {
+	in := jobInputFromForm(c, a.p.defWarranty)
+	old, _ := a.p.store.GetJob(ctx, id)
+	if err := a.p.store.UpdateJobFields(ctx, id, in); err != nil {
 		return err
 	}
+	if old != nil {
+		a.p.auditDeadline(ctx, middleware.CurrentUserID(c), id, old.Job.PromisedDate, in.PromisedDate, old.Job.TicketNo)
+	}
 	return c.Redirect(http.StatusSeeOther, "/admin/repairs/"+strconv.FormatInt(id, 10))
+}
+
+// SetWarrantyMode switches the shop between day-based and part-based warranty.
+func (a *adminUI) SetWarrantyMode(c echo.Context) error {
+	mode := strings.TrimSpace(c.FormValue("mode"))
+	if err := a.p.store.SetWarrantyMode(c.Request().Context(), mode); err != nil {
+		return err
+	}
+	a.p.warrantyMode = mode
+	return c.Redirect(http.StatusSeeOther, "/admin/repairs")
+}
+
+// WarrantyRework opens a free re-repair linked to a collected, in-warranty job
+// and jumps to the new job to add the redo parts/labour.
+func (a *adminUI) WarrantyRework(c echo.Context) error {
+	ctx := c.Request().Context()
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	newID, err := a.p.startRework(ctx, id, middleware.CurrentUserID(c))
+	if err != nil {
+		return err
+	}
+	return a.redirectDetail(c, newID)
+}
+
+// SetUrgent adds or removes the urgent flag on an existing job (optionally
+// setting a rush date). Both admin and cashier can do it — a customer often asks
+// to rush at the counter, and it's a harmless, customer-facing change.
+func (a *adminUI) SetUrgent(c echo.Context) error {
+	ctx := c.Request().Context()
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	newP := parseOptDate(c.FormValue("promised_date"))
+	old, _ := a.p.store.GetJob(ctx, id)
+	if err := a.p.store.SetUrgent(ctx, id, c.FormValue("urgent") == "1", newP); err != nil {
+		return err
+	}
+	if old != nil {
+		a.p.auditDeadline(ctx, middleware.CurrentUserID(c), id, old.Job.PromisedDate, newP, old.Job.TicketNo)
+	}
+	return a.redirectDetail(c, id)
 }
 
 func (a *adminUI) SetStatus(c echo.Context) error {
@@ -320,9 +417,10 @@ func (a *adminUI) AddPart(c echo.Context) error {
 			return apperr.Validation("discount is invalid")
 		}
 	}
+	wd, _ := strconv.Atoi(strings.TrimSpace(c.FormValue("warranty_days")))
 	if err := a.p.store.AddPart(ctx, id, PartInput{
 		ProductID: pid, Qty: qty, UnitCharge: prod.SellingPrice,
-		DiscountType: c.FormValue("discount_type"), DiscountValue: dval,
+		DiscountType: c.FormValue("discount_type"), DiscountValue: dval, WarrantyDays: wd,
 	}); err != nil {
 		return err
 	}
@@ -375,7 +473,16 @@ func (a *adminUI) RemoveCharge(c echo.Context) error {
 
 // redirectDetail sends the browser back to a job's detail page.
 func (a *adminUI) redirectDetail(c echo.Context, id int64) error {
-	return c.Redirect(http.StatusSeeOther, "/admin/repairs/"+strconv.FormatInt(id, 10))
+	url := "/admin/repairs/" + strconv.FormatInt(id, 10)
+	// An HTMX form post can't follow a 303 into a full page cleanly — hand it a
+	// client-side redirect instead. On error the central handler already turns an
+	// HTMX request into an inline toast (no page swap), so a failed pay-repairer
+	// shows the reason inline rather than a jarring full 409 error page.
+	if c.Request().Header.Get("HX-Request") == "true" {
+		c.Response().Header().Set("HX-Redirect", url)
+		return c.NoContent(http.StatusOK)
+	}
+	return c.Redirect(http.StatusSeeOther, url)
 }
 
 // redirectDetailForm redirects using the job_id carried on a remove form (whose
@@ -485,11 +592,17 @@ func (a *adminUI) Report(c echo.Context) error {
 		return err
 	}
 	rows := make([]ReportRow, 0, len(details))
-	grand := decimal.Zero
+	grand, grandParts, grandRepairer, grandProfit := decimal.Zero, decimal.Zero, decimal.Zero, decimal.Zero
 	for i := range details {
 		d := &details[i]
 		total, _, _ := JobTotals(d)
+		parts := PartsCost(d)
+		repairer := d.Job.RepairerPaid
+		profit := total.Sub(parts).Sub(repairer)
 		grand = grand.Add(total)
+		grandParts = grandParts.Add(parts)
+		grandRepairer = grandRepairer.Add(repairer)
+		grandProfit = grandProfit.Add(profit)
 		collected, warranty := "", ""
 		if d.Job.CollectedAt != nil {
 			collected = datetime.Date(*d.Job.CollectedAt)
@@ -499,23 +612,36 @@ func (a *adminUI) Report(c echo.Context) error {
 		}
 		rows = append(rows, ReportRow{
 			TicketNo: d.Job.TicketNo, Device: d.Job.DeviceModel, Collected: collected,
-			Total: money.Format(sym, total), Warranty: warranty,
+			Total: money.Format(sym, total), Parts: money.Format(sym, parts),
+			Repairer: money.Format(sym, repairer), Profit: money.Format(sym, profit),
+			Warranty: warranty,
 		})
 	}
 	return response.RenderPage(c, RepairsReportPage(ReportData{
 		UserName: middleware.CurrentUserName(c),
 		Preset:   preset, FromLbl: fromStr, ToLbl: toStr,
-		Rows: rows, GrandTot: money.Format(sym, grand), Count: len(rows),
+		Rows: rows, GrandTot: money.Format(sym, grand),
+		GrandParts: money.Format(sym, grandParts), GrandRepairer: money.Format(sym, grandRepairer),
+		GrandProfit: money.Format(sym, grandProfit), Count: len(rows),
 	}))
 }
 
 func (a *adminUI) Receipts(c echo.Context) error {
-	jobs, err := a.p.store.ListCollected(c.Request().Context(), 100)
+	preset := c.QueryParam("preset")
+	if preset == "" && c.QueryParam("from") == "" && c.QueryParam("to") == "" {
+		preset = "this-month"
+	}
+	from, to, fromStr, toStr, err := reports.ResolveRange(preset, c.QueryParam("from"), c.QueryParam("to"))
+	if err != nil {
+		return apperr.Validation(err.Error())
+	}
+	jobs, err := a.p.store.ListCollectedRange(c.Request().Context(), from, to)
 	if err != nil {
 		return err
 	}
 	return response.RenderFragment(c, RepairsReceiptsTab(ReceiptsTabData{
 		Symbol: a.symbol(c), BaseURL: "/admin/repairs", Jobs: jobs,
+		Preset: preset, From: fromStr, To: toStr,
 	}))
 }
 

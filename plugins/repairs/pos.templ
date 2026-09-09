@@ -37,10 +37,14 @@ templ RepairApplyFragment(d FormData) {
 				<textarea name="fault" rows="2" placeholder="What's wrong with it…" class="w-full border rounded px-2 py-1 text-sm"></textarea>
 			</div>
 			<div class="flex gap-2 items-end">
-				<div>
-					<label class="block text-xs text-slate-500 mb-0.5">Warranty (days)</label>
-					<input type="number" min="0" name="warranty_days" value={ strconv.Itoa(d.WarrantyDays) } class="w-28 border rounded px-2 py-1 text-sm"/>
-				</div>
+				if d.WarrantyMode != "parts" {
+					<div>
+						<label class="block text-xs text-slate-500 mb-0.5">Warranty (days)</label>
+						<input type="number" min="0" name="warranty_days" value={ strconv.Itoa(d.WarrantyDays) } class="w-28 border rounded px-2 py-1 text-sm"/>
+					</div>
+				} else {
+					<div class="text-xs text-slate-400 flex-1">Warranty is set per part when you add each part.</div>
+				}
 				<button class="flex-1 px-3 py-1.5 rounded bg-indigo-600 text-white text-sm font-semibold">Create job</button>
 			</div>
 			<datalist id="rc-types">
@@ -64,12 +68,160 @@ templ RepairApplyFragment(d FormData) {
 
 // RepairCashierJob is the cashier-side job panel: add parts/charges, take a
 // deposit, and collect. Every action swaps this fragment back in.
+// RepairFindFragment is the scan/search panel loaded into the till menu detail
+// pane. The scanner types the ticket barcode into the box (ending in Enter); a
+// shop with no scanner types the ticket / name / phone / device instead.
+templ RepairFindFragment() {
+	<div class="p-3 space-y-2" id="rcj">
+		<div class="font-semibold">Find / scan a ticket</div>
+		<input
+			type="text"
+			name="q"
+			autofocus
+			placeholder="Scan barcode, or type ticket / name / phone / device"
+			class="w-full border rounded-lg px-3 py-2"
+			hx-get="/cashier/repairs/search"
+			hx-trigger="keyup changed delay:250ms"
+			hx-target="#rfind-results"
+			hx-swap="innerHTML"
+		/>
+		<div id="rfind-results" class="space-y-1"></div>
+	</div>
+}
+
+// RepairFindResults lists the matches; tapping one swaps the whole panel (#rcj)
+// for that job's detail, exactly like picking it from the menu list.
+templ RepairFindResults(jobs []Job) {
+	if len(jobs) == 0 {
+		<div class="text-sm text-slate-400 py-4 text-center">No match yet — scan the ticket or type more.</div>
+	}
+	for _, j := range jobs {
+		<button
+			type="button"
+			class="w-full text-left border rounded-lg px-3 py-2 hover:bg-slate-50"
+			hx-get={ "/cashier/repairs/" + strconv.FormatInt(j.ID, 10) }
+			hx-target="#rcj"
+			hx-swap="outerHTML"
+		>
+			<div class="flex justify-between gap-2">
+				<span class="font-medium">{ j.TicketNo } — { j.DeviceModel }</span>
+				<span class="text-xs text-slate-500">{ j.Status }</span>
+			</div>
+			if j.CustomerName != "" {
+				<div class="text-xs text-slate-500">{ j.CustomerName } { j.CustomerPhone }</div>
+			}
+		</button>
+	}
+}
+
+// printTicketLabel drives the shop's existing label printer (TSPL → the label
+// printer in Settings) with the repair's scannable ticket code as a CODE128
+// barcode. Reuses /…/labels/send (custom barcode) — no bespoke barcode code.
+templ printTicketLabel(sendURL string, j Job) {
+	<form hx-post={ sendURL } hx-swap="none" class="inline">
+		<input type="hidden" name="custom" value="1"/>
+		<input type="hidden" name="format" value="CODE128"/>
+		<input type="hidden" name="code" value={ j.TicketCode }/>
+		<input type="hidden" name="text" value={ j.TicketNo + " · " + j.DeviceModel }/>
+		<input type="hidden" name="qty" value="1"/>
+		<button type="submit" class="text-xs px-2 py-1 rounded-lg border text-slate-600 hover:bg-slate-50">🏷 Print label</button>
+	</form>
+}
+
+// ticketLabelPreview shows what the stuck-on ticket label will look like — the
+// CODE128 barcode of ticket_code with the ticket/device text above — using the
+// same JsBarcode the Labels page uses. Lazy-loads the vendor lib from the
+// fragment itself (x-init runs even when injected via x-html, where a plain
+// <script> would not), so nothing needs adding to the core page.
+templ ticketLabelPreview(code, top string) {
+	if code != "" {
+		<div
+			class="inline-flex flex-col items-center gap-1 border rounded-lg px-4 py-3 bg-white"
+			data-code={ code }
+			x-data="{}"
+			x-init="$nextTick(async () => { if (!window.JsBarcode) { await new Promise(r => { const s=document.createElement('script'); s.src='/static/vendor/jsbarcode.min.js'; s.onload=r; s.onerror=r; document.head.appendChild(s); }); } try { window.JsBarcode && JsBarcode($refs.tbc, $el.dataset.code, {format:'CODE128', displayValue:true, fontSize:12, height:40, margin:2, width:1.5}); } catch(e){} })"
+		>
+			if top != "" {
+				<div class="text-sm font-medium">{ top }</div>
+			}
+			<svg x-ref="tbc"></svg>
+		</div>
+	}
+}
+
 templ RepairCashierJob(d DetailData) {
 	<div class="p-3 space-y-3" id="rcj">
-		<div class="flex items-center justify-between">
+		<div class="flex items-center justify-between gap-2">
 			<div class="font-semibold">{ d.D.Job.TicketNo } — { d.D.Job.DeviceModel }</div>
-			<span class="text-xs text-slate-500">{ d.D.Job.Status }</span>
+			<div class="flex items-center gap-2">
+				@printTicketLabel("/cashier/labels/send", d.D.Job)
+				<span class="text-xs text-slate-500">{ d.D.Job.Status }</span>
+			</div>
 		</div>
+		if d.D.Job.CustomerName != "" || d.D.Job.CustomerPhone != "" {
+			<div class="text-sm text-slate-600">
+				👤 <span class="font-medium">{ d.D.Job.CustomerName }</span>
+				if d.D.Job.CustomerPhone != "" {
+					<span class="text-slate-400">· { d.D.Job.CustomerPhone }</span>
+				}
+			</div>
+		}
+		if d.D.Job.Fault != "" {
+			<div class="text-xs text-slate-500">Reported: { d.D.Job.Fault }</div>
+		}
+		if d.D.Job.ReworkOf != nil {
+			<div class="rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm px-3 py-1.5 font-medium">🛡 Warranty re-repair — no charge to the customer. Add the redo parts/labour, then Collect (free).</div>
+		}
+		if d.Editable && d.DueLabel != "" && d.DueLabel != "—" {
+			if d.Urgent {
+				<div class="rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-sm px-3 py-1.5 font-semibold">⏰ Pickup { d.DueLabel }</div>
+			} else {
+				<div class="rounded-lg bg-slate-50 border border-slate-200 text-slate-600 text-sm px-3 py-1.5">⏰ Pickup { d.DueLabel }</div>
+			}
+		}
+		if d.Editable {
+			if d.D.Job.Urgent {
+				<form hx-post={ "/cashier/repairs/" + strconv.FormatInt(d.D.Job.ID, 10) + "/urgent" } hx-target="#rcj" hx-swap="outerHTML">
+					<input type="hidden" name="urgent" value="0"/>
+					<button class="text-xs text-slate-500 underline">Remove urgent</button>
+				</form>
+			} else {
+				<form hx-post={ "/cashier/repairs/" + strconv.FormatInt(d.D.Job.ID, 10) + "/urgent" } hx-target="#rcj" hx-swap="outerHTML" class="flex items-center gap-2">
+					<input type="hidden" name="urgent" value="1"/>
+					<input type="date" name="promised_date" value={ d.PromisedInput } class="border rounded px-2 py-1 text-xs"/>
+					<button class="text-xs px-2 py-1 rounded bg-rose-600 text-white font-semibold">⚠ Mark urgent</button>
+				</form>
+			}
+		}
+		if d.CanRework {
+			<form hx-post={ "/cashier/repairs/" + strconv.FormatInt(d.D.Job.ID, 10) + "/rework" } hx-target="#rcj" hx-swap="outerHTML">
+				<button class="w-full px-3 py-2 rounded-lg bg-amber-500 text-white text-sm font-semibold">🛡 Warranty re-repair (free)</button>
+			</form>
+		}
+		if len(d.RefundLines) > 0 {
+			<details class="text-sm">
+				<summary class="cursor-pointer text-rose-600 select-none">↩ Warranty part refund</summary>
+				<form hx-post={ "/cashier/repairs/" + strconv.FormatInt(d.D.Job.ID, 10) + "/warranty-refund" } hx-target="#rcj" hx-swap="outerHTML" class="mt-2 space-y-1.5">
+					<div class="text-xs text-slate-500">Customer not satisfied — take the faulty part back and refund only its price (labour charge is kept). The returned part is written off as a loss.</div>
+					for _, rl := range d.RefundLines {
+						<label class="flex items-center justify-between gap-2 border-b last:border-0 py-1">
+							<span class="flex items-center gap-2">
+								<input type="checkbox" name="item" value={ strconv.FormatInt(rl.SaleItemID, 10) } checked/>
+								{ rl.Name }
+							</span>
+							<span class="text-slate-500">{ rl.Price }</span>
+						</label>
+					}
+					<button class="w-full px-3 py-2 rounded-lg bg-rose-500 text-white text-sm font-semibold">↩ Refund selected part(s)</button>
+				</form>
+			</details>
+		}
+		<details class="text-sm">
+			<summary class="cursor-pointer text-indigo-600 select-none">🏷 Ticket label preview</summary>
+			<div class="mt-2">
+				@ticketLabelPreview(d.D.Job.TicketCode, d.D.Job.TicketNo + " · " + d.D.Job.DeviceModel)
+			</div>
+		</details>
 		if d.Warning != "" {
 			<div class="rounded bg-amber-50 border border-amber-300 text-amber-800 text-xs px-2 py-1.5">{ d.Warning }</div>
 		}
@@ -121,6 +273,9 @@ templ RepairCashierJob(d DetailData) {
 				<input name="qty" type="number" step="0.001" min="0" value="1" class="w-14 border rounded px-1 py-1 text-sm text-center"/>
 				<input name="discount" type="number" step="0.01" min="0" placeholder="disc" class="w-16 border rounded px-1 py-1 text-sm text-right"/>
 				<select name="discount_type" class="border rounded px-1 py-1 text-xs"><option value="fixed">Rs</option><option value="percent">%</option></select>
+				if d.WarrantyMode == "parts" {
+					<input name="warranty_days" type="number" min="0" placeholder="warr. days" title="This part's warranty (days)" class="w-20 border rounded px-1 py-1 text-sm text-right"/>
+				}
 				<button type="submit" x-bind:disabled="!productId" class="px-2 py-1 rounded bg-indigo-600 text-white text-sm disabled:opacity-40">+</button>
 			</form>
 			<form hx-post={ "/cashier/repairs/" + strconv.FormatInt(d.D.Job.ID, 10) + "/charge" } hx-target="#rcj" hx-swap="outerHTML" class="flex gap-1">
@@ -151,14 +306,22 @@ templ RepairCashierJob(d DetailData) {
 }
 
 // RepairCollected confirms the sale rang and offers the repair receipt.
-templ RepairCollected(j Job) {
+templ RepairCollected(j Job, onAccount string) {
 	<div class="p-4 text-center space-y-2" id="rcj">
 		<div class="text-2xl">✅</div>
 		<div class="font-semibold">{ j.TicketNo } collected</div>
 		if j.WarrantyUntil != nil {
 			<div class="text-sm text-slate-500">Warranty until { datetime.Date(*j.WarrantyUntil) }</div>
 		}
+		if onAccount != "" {
+			<div class="rounded-lg bg-amber-50 border border-amber-200 p-3 text-sm text-amber-800">
+				<div class="font-semibold">{ onAccount } left on account</div>
+				<a class="inline-block mt-1 underline font-medium" href="/cashier/credit" target="_blank">Collect it later under Credit Collection →</a>
+			</div>
+		}
 		<a class="inline-block px-5 py-2.5 rounded-lg bg-emerald-600 text-white font-semibold" href={ templ.SafeURL("/cashier/repairs/" + strconv.FormatInt(j.ID, 10) + "/receipt") } target="_blank">🖨 Print repair slip</a>
-		<div class="text-xs text-slate-400">The sale receipt is available in Receipts → Repairs.</div>
+		<div>
+			@printTicketLabel("/cashier/labels/send", j)
+		</div>
 	</div>
 }

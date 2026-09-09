@@ -18,6 +18,22 @@ func warrantyUntil(days int, from time.Time) *time.Time {
 	return &u
 }
 
+// jobWarrantyUntil resolves the job-level warranty end. In "days" mode it's the
+// whole-repair warranty; in "parts" mode it's the LATEST of the parts' own
+// warranties (so the job stays "in warranty" while any covered part still is).
+func jobWarrantyUntil(mode string, d *Detail, from time.Time) *time.Time {
+	if mode != "parts" {
+		return warrantyUntil(d.Job.WarrantyDays, from)
+	}
+	var latest *time.Time
+	for _, pt := range d.Parts {
+		if u := warrantyUntil(pt.WarrantyDays, from); u != nil && (latest == nil || u.After(*latest)) {
+			latest = u
+		}
+	}
+	return latest
+}
+
 var hundred = decimal.NewFromInt(100)
 
 // normDiscType defaults a blank/unknown per-line discount type to "fixed".
@@ -54,6 +70,17 @@ func resolvePartDiscount(dtype string, value, gross, qty decimal.Decimal) decima
 // ponytail: a catalogue price change between add and collect can drift this from
 // the sale's recomputed total; acceptable in the short collection window —
 // re-price at collect if that ever bites.
+// PartsCost is what the shop paid for the parts on a job (qty × product cost) —
+// the COGS side of the repairs profit report. Charges (labour) have no cost of
+// their own; the repairer payout is the labour cost and is subtracted separately.
+func PartsCost(d *Detail) decimal.Decimal {
+	c := decimal.Zero
+	for _, p := range d.Parts {
+		c = c.Add(p.Qty.Mul(p.UnitCost))
+	}
+	return c.Round(2)
+}
+
 func JobTotals(d *Detail) (total, depositPaid, balance decimal.Decimal) {
 	total = decimal.Zero
 	for _, c := range d.Charges {
@@ -85,21 +112,33 @@ func JobTotals(d *Detail) (total, depositPaid, balance decimal.Decimal) {
 // saleItems turns the job's parts + charges into sale lines: one line per part
 // (priced by the catalogue, carrying its per-item discount) and one line per
 // charge (the hidden labour/service product, amount via PriceOverride).
-func saleItems(d *Detail, labourProductID int64) []sales.ItemInput {
+// saleItems turns a job's parts + charges into sale lines. free=true (a warranty
+// re-repair) knocks every line to zero: the customer pays nothing, but stock
+// still leaves and its COST is still booked by the sale, so the redo surfaces as
+// a loss (COGS with no revenue) rather than income.
+func saleItems(d *Detail, labourProductID int64, free bool) []sales.ItemInput {
 	items := make([]sales.ItemInput, 0, len(d.Parts)+len(d.Charges))
 	for _, p := range d.Parts {
-		items = append(items, sales.ItemInput{
+		it := sales.ItemInput{
 			ProductID:    p.ProductID,
 			Quantity:     p.Qty.String(),
 			Discount:     p.DiscountValue.String(),
 			DiscountType: normDiscType(p.DiscountType),
-		})
+		}
+		if free {
+			it.Discount, it.DiscountType = "100", "percent"
+		}
+		items = append(items, it)
 	}
 	for _, c := range d.Charges {
+		amt := c.Amount.String()
+		if free {
+			amt = "0"
+		}
 		items = append(items, sales.ItemInput{
 			ProductID:     labourProductID,
 			Quantity:      "1",
-			PriceOverride: c.Amount.String(),
+			PriceOverride: amt,
 		})
 	}
 	return items
@@ -131,11 +170,11 @@ func collectionTenders(depositPaid, payNow, onAccount decimal.Decimal, method st
 
 // BuildCollectionSale assembles the settling sale from the job's lines and the
 // resolved tenders.
-func BuildCollectionSale(d *Detail, labourProductID int64, customerID *int64, tenders []sales.PaymentInput) sales.CreateInput {
+func BuildCollectionSale(d *Detail, labourProductID int64, customerID *int64, tenders []sales.PaymentInput, free bool) sales.CreateInput {
 	return sales.CreateInput{
 		CustomerID: customerID,
 		SaleType:   "retail",
-		Items:      saleItems(d, labourProductID),
+		Items:      saleItems(d, labourProductID, free),
 		Payments:   tenders,
 	}
 }

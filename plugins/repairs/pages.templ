@@ -27,6 +27,11 @@ type ListData struct {
 	UserName string
 	Show     string // active filter: open | collected | cancelled | all
 	Rows     []ListRow
+	Query    string // active scan/search text
+	Preset   string // active date preset
+	From     string // date filter from (yyyy-mm-dd)
+	To       string // date filter to (yyyy-mm-dd)
+	WarrantyMode string // "days" | "parts" — shop warranty toggle
 }
 
 // listTab renders one status filter tab, highlighted when active.
@@ -38,12 +43,31 @@ templ listTab(active, key, label string) {
 	}
 }
 
+// rowTint reddens a whole list row when the job is urgent/overdue, so it stands
+// out at a glance — not just the due-date cell.
+func rowTint(urgent bool) string {
+	if urgent {
+		return "bg-rose-50 hover:bg-rose-100"
+	}
+	return "hover:bg-slate-50"
+}
+
+// dateChip is a drop-off-date preset link, keeping the active status tab.
+templ dateChip(show, key, label, active string) {
+	if active == key {
+		<a href={ templ.SafeURL("/admin/repairs?show=" + show + "&preset=" + key) } class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-sm">{ label }</a>
+	} else {
+		<a href={ templ.SafeURL("/admin/repairs?show=" + show + "&preset=" + key) } class="px-3 py-1.5 rounded-lg border text-sm text-slate-600 hover:bg-slate-50">{ label }</a>
+	}
+}
+
 type FormData struct {
 	UserName     string
 	Types        []string
 	Models       []string
 	Repairers    []string
 	WarrantyDays int
+	WarrantyMode string // "days" | "parts"
 }
 
 type DetailData struct {
@@ -56,10 +80,22 @@ type DetailData struct {
 	RepairerPaid  string
 	DueLabel      string
 	Urgent        bool
+	PromisedInput string // yyyy-mm-dd for the "rush by" date input (blank if none)
 	WarrantyLabel string
+	CanRework     bool   // collected + still within warranty → offer a free re-repair
+	RefundLines   []RefundLine // part lines of the collection sale still refundable under warranty
+	WarrantyMode  string // "days" | "parts" — controls the add-part warranty input
 	Editable      bool
 	Locations     []LocChoice // cash sources for the pay-repairer picker (lockers + tills)
 	Warning       string      // shown inline on the cashier job panel (e.g. till not open)
+}
+
+// RefundLine is one refundable part line of a collected job's sale, for the
+// warranty part-refund picker. Charges/labour are is_service and never appear.
+type RefundLine struct {
+	SaleItemID int64
+	Name       string
+	Price      string
 }
 
 // LocChoice is one cash-source option (locker or till) for the pay-repairer picker.
@@ -89,7 +125,19 @@ templ RepairsListPage(d ListData) {
 	@layouts.Admin("Repairs", d.UserName, "repairs") {
 		<div class="flex items-center justify-between mb-4">
 			<h1 class="text-2xl font-bold">Repairs</h1>
-			<a href="/admin/repairs/new" class="px-4 py-2 rounded-lg bg-indigo-600 text-white font-semibold">+ New repair</a>
+			<div class="flex items-center gap-3">
+				<form method="post" action="/admin/repairs/config/warranty-mode" class="flex items-center gap-1 text-sm bg-white rounded-lg border px-2 py-1">
+					<span class="text-slate-500 mr-1">Warranty:</span>
+					if d.WarrantyMode == "parts" {
+						<button name="mode" value="days" class="px-2 py-0.5 rounded text-slate-600 hover:bg-slate-100">By days</button>
+						<button name="mode" value="parts" class="px-2 py-0.5 rounded bg-indigo-600 text-white" disabled>By part</button>
+					} else {
+						<button name="mode" value="days" class="px-2 py-0.5 rounded bg-indigo-600 text-white" disabled>By days</button>
+						<button name="mode" value="parts" class="px-2 py-0.5 rounded text-slate-600 hover:bg-slate-100">By part</button>
+					}
+				</form>
+				<a href="/admin/repairs/new" class="px-4 py-2 rounded-lg bg-indigo-600 text-white font-semibold">+ New repair</a>
+			</div>
 		</div>
 		<div class="flex flex-wrap gap-2 mb-4">
 			@listTab(d.Show, "open", "Open")
@@ -97,6 +145,34 @@ templ RepairsListPage(d ListData) {
 			@listTab(d.Show, "cancelled", "Cancelled")
 			@listTab(d.Show, "all", "All")
 		</div>
+		<form method="get" action="/admin/repairs" class="flex flex-wrap items-end gap-2 mb-3">
+			<div>
+				<label class="block text-xs text-slate-500 mb-1">Scan or search</label>
+				<input name="q" value={ d.Query } autofocus?={ d.Query != "" } placeholder="Ticket / code / customer / phone / device" class="border rounded-lg px-3 py-1.5 w-72"/>
+			</div>
+			<button class="px-4 py-1.5 rounded-lg bg-slate-800 text-white text-sm">Search</button>
+			if d.Query != "" {
+				<a href={ templ.SafeURL("/admin/repairs?show=" + d.Show) } class="px-3 py-1.5 text-sm text-slate-500 hover:underline">Clear</a>
+			}
+		</form>
+		if d.Query == "" {
+			<div class="flex flex-wrap items-end gap-2 mb-4">
+				<span class="text-xs text-slate-500 self-center mr-1">Dropped off:</span>
+				@dateChip(d.Show, "today", "Today", d.Preset)
+				@dateChip(d.Show, "this-week", "This week", d.Preset)
+				@dateChip(d.Show, "this-month", "This month", d.Preset)
+				@dateChip(d.Show, "last-month", "Last month", d.Preset)
+				<form method="get" action="/admin/repairs" class="flex items-end gap-2">
+					<input type="hidden" name="show" value={ d.Show }/>
+					<input type="date" name="from" value={ d.From } class="border rounded-lg px-2 py-1.5 text-sm"/>
+					<input type="date" name="to" value={ d.To } class="border rounded-lg px-2 py-1.5 text-sm"/>
+					<button class="px-3 py-1.5 rounded-lg border text-sm">Apply</button>
+					if d.Preset != "" || d.From != "" || d.To != "" {
+						<a href={ templ.SafeURL("/admin/repairs?show=" + d.Show) } class="px-2 py-1.5 text-sm text-slate-500 hover:underline">Clear dates</a>
+					}
+				</form>
+			</div>
+		}
 		<div class="bg-white rounded-2xl shadow-sm overflow-hidden">
 			<table class="w-full text-sm">
 				<thead class="text-left text-slate-500 border-b">
@@ -115,8 +191,13 @@ templ RepairsListPage(d ListData) {
 						<tr><td class="py-6 px-3 text-slate-400" colspan="7">No open repairs. Click “New repair” to start one.</td></tr>
 					}
 					for _, r := range d.Rows {
-						<tr class="border-b last:border-0 hover:bg-slate-50">
-							<td class="py-2 px-3 font-medium">{ r.TicketNo }</td>
+						<tr class={ "border-b last:border-0 " + rowTint(r.Urgent) }>
+							<td class="py-2 px-3 font-medium">
+								if r.Urgent {
+									<span class="text-rose-600">⚠ </span>
+								}
+								{ r.TicketNo }
+							</td>
 							<td class="py-2 px-3">
 								{ r.Customer }
 								if r.Phone != "" {
@@ -190,10 +271,14 @@ templ RepairFormPage(d FormData) {
 					<label class="block text-sm font-medium mb-1">Promised date</label>
 					<input type="date" name="promised_date" class="w-full border rounded-lg px-3 py-2"/>
 				</div>
-				<div>
-					<label class="block text-sm font-medium mb-1">Warranty (days)</label>
-					<input type="number" min="0" name="warranty_days" value={ strconv.Itoa(d.WarrantyDays) } class="w-full border rounded-lg px-3 py-2"/>
-				</div>
+				if d.WarrantyMode != "parts" {
+					<div>
+						<label class="block text-sm font-medium mb-1">Warranty (days)</label>
+						<input type="number" min="0" name="warranty_days" value={ strconv.Itoa(d.WarrantyDays) } class="w-full border rounded-lg px-3 py-2"/>
+					</div>
+				} else {
+					<div class="text-sm text-slate-400 self-center">Part-based warranty: set each part's warranty when adding it.</div>
+				}
 				<div class="flex items-end">
 					<label class="flex items-center gap-2 text-sm"><input type="checkbox" name="urgent" value="1"/> Mark urgent</label>
 				</div>
@@ -218,7 +303,10 @@ templ RepairDetailPage(d DetailData) {
 				</h1>
 				<p class="text-sm text-slate-500">{ d.D.Job.RepairType } · { d.D.Job.DeviceModel }</p>
 			</div>
-			<a href="/admin/repairs" class="text-slate-500 hover:underline">← Back</a>
+			<div class="flex items-center gap-3">
+				@printTicketLabel("/admin/labels/send", d.D.Job)
+				<a href="/admin/repairs" class="text-slate-500 hover:underline">← Back</a>
+			</div>
 		</div>
 		<div class="grid gap-6 lg:grid-cols-3 items-start">
 			<div class="lg:col-span-2 space-y-6">
@@ -252,6 +340,12 @@ templ RepairDetailPage(d DetailData) {
 					}
 					<div class="pt-2 mt-1 border-t text-xs text-slate-400">Customer pays at the cashier till. This page is for managing the job and paying the repairer.</div>
 				</div>
+				if d.D.Job.TicketCode != "" {
+					<div class="bg-white rounded-2xl shadow-sm p-5">
+						<div class="font-semibold text-sm mb-2">Ticket label</div>
+						@ticketLabelPreview(d.D.Job.TicketCode, d.D.Job.TicketNo+" · "+d.D.Job.DeviceModel)
+					</div>
+				}
 				if d.Editable {
 					<div class="bg-white rounded-2xl shadow-sm p-5">
 						<div class="font-semibold text-sm mb-2">Status</div>
@@ -260,11 +354,40 @@ templ RepairDetailPage(d DetailData) {
 							@statusButton(d.D.Job.ID, "in_progress", "In progress")
 							@statusButton(d.D.Job.ID, "ready", "Ready")
 						</div>
+						<div class="pt-3 mt-3 border-t">
+							if d.D.Job.Urgent {
+								<form method="post" action={ templ.SafeURL("/admin/repairs/" + strconv.FormatInt(d.D.Job.ID, 10) + "/urgent") }>
+									<input type="hidden" name="urgent" value="0"/>
+									<button class="text-sm text-slate-500 hover:underline">✔ Remove urgent flag</button>
+								</form>
+							} else {
+								<form method="post" action={ templ.SafeURL("/admin/repairs/" + strconv.FormatInt(d.D.Job.ID, 10) + "/urgent") } class="flex items-end gap-2">
+									<input type="hidden" name="urgent" value="1"/>
+									<div>
+										<label class="block text-xs text-slate-500 mb-1">Rush by (optional)</label>
+										<input type="date" name="promised_date" value={ d.PromisedInput } class="border rounded px-2 py-1 text-sm"/>
+									</div>
+									<button class="px-3 py-1.5 rounded bg-rose-600 text-white text-sm font-semibold">⚠ Mark urgent</button>
+								</form>
+							}
+						</div>
 					</div>
+				}
+				if d.D.Job.Status != "cancelled" {
 					<div class="bg-white rounded-2xl shadow-sm p-5 space-y-2">
 						<div class="font-semibold text-sm">Pay the repairer</div>
-						<p class="text-xs text-slate-500">If an outside person did the repair, pay them here — it books as an expense. In-house work needs no payout.</p>
-						<form method="post" action={ templ.SafeURL("/admin/repairs/" + strconv.FormatInt(d.D.Job.ID, 10) + "/pay-repairer") } class="space-y-2">
+						if d.RepairerPaid != "" {
+							<div class="text-sm rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 px-3 py-2">
+								✅ Paid to repairer: <span class="font-semibold">{ d.RepairerPaid }</span>
+								if d.D.Job.RepairedBy != "" {
+									<span class="text-emerald-600">· { d.D.Job.RepairedBy }</span>
+								}
+							</div>
+						} else {
+							<div class="text-sm rounded-lg bg-amber-50 border border-amber-200 text-amber-800 px-3 py-2">⚠ Repairer not paid yet</div>
+						}
+						<p class="text-xs text-slate-500">Pay an outside repairer here (books as an expense) — before or after the customer collects. In-house work needs no payout.</p>
+						<form hx-post={ "/admin/repairs/" + strconv.FormatInt(d.D.Job.ID, 10) + "/pay-repairer" } hx-swap="none" class="space-y-2">
 							<input name="amount" type="number" step="0.01" min="0" placeholder="Amount to pay" class="w-full border rounded px-2 py-1 text-sm text-right"/>
 							<input name="note" placeholder="Note (optional)" class="w-full border rounded px-2 py-1 text-sm"/>
 							<label class="block text-xs text-slate-500">Take the cash from</label>
@@ -276,10 +399,11 @@ templ RepairDetailPage(d DetailData) {
 							</select>
 							<button class="w-full px-3 py-1.5 rounded bg-slate-700 text-white text-sm font-semibold">Pay repairer</button>
 						</form>
-						if d.RepairerPaid != "" {
-							<div class="text-xs text-slate-500">Paid to repairer so far: <span class="font-medium">{ d.RepairerPaid }</span></div>
-						}
-						<form method="post" action={ templ.SafeURL("/admin/repairs/" + strconv.FormatInt(d.D.Job.ID, 10) + "/cancel") } x-on:submit="return confirm('Cancel this repair?')" class="pt-2 border-t">
+					</div>
+				}
+				if d.Editable {
+					<div class="bg-white rounded-2xl shadow-sm p-5">
+						<form method="post" action={ templ.SafeURL("/admin/repairs/" + strconv.FormatInt(d.D.Job.ID, 10) + "/cancel") } x-on:submit="return confirm('Cancel this repair?')">
 							<button class="w-full px-3 py-1 rounded border text-rose-600 text-sm">Cancel repair</button>
 						</form>
 					</div>
@@ -288,6 +412,12 @@ templ RepairDetailPage(d DetailData) {
 					<div class="bg-white rounded-2xl shadow-sm p-5 text-sm">
 						<div class="font-semibold mb-1">Collected</div>
 						<a class="text-indigo-600" href={ templ.SafeURL("/admin/repairs/" + strconv.FormatInt(d.D.Job.ID, 10) + "/receipt") }>Print repair receipt →</a>
+						if d.CanRework {
+							<form method="post" action={ templ.SafeURL("/admin/repairs/" + strconv.FormatInt(d.D.Job.ID, 10) + "/rework") } class="mt-3 pt-3 border-t">
+								<button class="w-full px-3 py-1.5 rounded bg-amber-500 text-white text-sm font-semibold">🛡 Warranty re-repair (free)</button>
+								<p class="text-xs text-slate-400 mt-1">Opens a linked no-charge job for the redo.</p>
+							</form>
+						}
 					</div>
 				}
 			</div>
@@ -394,6 +524,9 @@ templ addPartForm(d DetailData) {
 				<input name="discount" type="number" step="0.01" min="0" placeholder="0" class="w-20 px-1 py-1 text-sm text-right" title="Discount"/>
 				<select name="discount_type" class="border-l px-1 py-1 text-xs bg-slate-50"><option value="fixed">Rs</option><option value="percent">%</option></select>
 			</div>
+			if d.WarrantyMode == "parts" {
+				<input name="warranty_days" type="number" min="0" placeholder="warranty days" title="This part's warranty (days)" class="w-28 border rounded px-2 py-1 text-sm text-right"/>
+			}
 			<button type="submit" x-bind:disabled="!productId" class="px-3 py-1 rounded bg-indigo-600 text-white text-sm disabled:opacity-40">Add part</button>
 		</div>
 	</form>
@@ -434,6 +567,7 @@ type ReceiptData struct {
 	Deposit       string
 	Balance       string
 	WarrantyLabel string
+	WarrantyMode  string // "days" | "parts" — parts mode lists per-part warranty
 	Narrow        bool   // 58mm when true, else 80mm
 	SwitchURL     string // toggles the paper size
 	SwitchText    string
@@ -486,11 +620,21 @@ templ RepairReceipt(d ReceiptData) {
 				if d.D.Job.CustomerName != "" {
 					<div class="r-row r-small"><span>Customer</span><span>{ d.D.Job.CustomerName } { d.D.Job.CustomerPhone }</span></div>
 				}
+				if d.WarrantyMode != "parts" && d.WarrantyLabel != "" {
+					<div class="r-row r-small"><span>Warranty until</span><span>{ d.WarrantyLabel }</span></div>
+				}
 				<div class="r-hr"></div>
 				<table class="r-items">
 					<tbody>
 						for _, p := range d.D.Parts {
-							<tr class="r-item-name"><td colspan="2">{ p.ProductName }</td></tr>
+							<tr class="r-item-name">
+								<td colspan="2">
+									{ p.ProductName }
+									if d.WarrantyMode == "parts" && p.WarrantyDays > 0 {
+										<span class="r-small"> · { strconv.Itoa(p.WarrantyDays) }d warranty</span>
+									}
+								</td>
+							</tr>
 							<tr class="r-item-line">
 								<td>{ money.Display(p.Qty) } × { money.Display(p.UnitCharge) }</td>
 								<td class="r-right">{ money.Display(p.Qty.Mul(p.UnitCharge).Sub(p.Discount)) }</td>
@@ -509,9 +653,6 @@ templ RepairReceipt(d ReceiptData) {
 				<div class="r-row"><span>Deposit</span><span>{ d.Deposit }</span></div>
 				<div class="r-row r-total"><span>BALANCE</span><span>{ d.Balance }</span></div>
 				<div class="r-hr"></div>
-				if d.WarrantyLabel != "" {
-					<div class="r-center r-small">Warranty until { d.WarrantyLabel }</div>
-				}
 				@shared.ThermalFooter(d.Footer)
 				<div class="r-print-btn">
 					<button onclick="printThermal()">🖨 Print</button>
@@ -532,9 +673,14 @@ type ReceiptsTabData struct {
 	Symbol  string
 	BaseURL string // "/admin/repairs" or "/cashier/repairs"
 	Jobs    []Job
+	Preset  string
+	From    string
+	To      string
 }
 
 templ RepairsReceiptsTab(d ReceiptsTabData) {
+	@shared.RangeForm(d.BaseURL+"/receipts", d.Preset, d.From, d.To) {
+	}
 	<div class="bg-white rounded-2xl shadow-sm overflow-hidden">
 		<table class="w-full text-sm">
 			<thead class="text-left text-slate-500 border-b bg-slate-50">
@@ -543,7 +689,7 @@ templ RepairsReceiptsTab(d ReceiptsTabData) {
 					<th class="px-4 py-2">Device</th>
 					<th class="px-4 py-2">Customer</th>
 					<th class="px-4 py-2">Collected</th>
-					<th class="px-4 py-2 text-right">Receipt</th>
+					<th class="px-4 py-2 text-right">Repair slip</th>
 				</tr>
 			</thead>
 			<tbody>
@@ -561,11 +707,8 @@ templ RepairsReceiptsTab(d ReceiptsTabData) {
 							}
 						</td>
 						<td class="px-4 py-2 text-right whitespace-nowrap">
-							if j.SaleID != nil {
-								<a class="text-indigo-600 hover:underline" target="_blank" href={ templ.SafeURL("/cashier/receipt/" + strconv.FormatInt(*j.SaleID, 10)) }>Sale slip</a>
-								<span class="text-slate-300 mx-1">·</span>
-							}
-							<a class="text-indigo-600 hover:underline" target="_blank" href={ templ.SafeURL(d.BaseURL + "/" + strconv.FormatInt(j.ID, 10) + "/receipt") }>Repair slip</a>
+							<button type="button" hx-post={ d.BaseURL + "/" + strconv.FormatInt(j.ID, 10) + "/print" } hx-swap="none" class="px-3 py-1 rounded-lg bg-indigo-600 text-white text-xs font-medium">🧾 Reprint</button>
+							<a href={ templ.SafeURL(d.BaseURL + "/" + strconv.FormatInt(j.ID, 10) + "/receipt") } target="_blank" class="ml-2 px-3 py-1 rounded-lg border text-slate-600 text-xs font-medium">View</a>
 						</td>
 					</tr>
 				}
@@ -581,17 +724,23 @@ type ReportRow struct {
 	Device    string
 	Collected string
 	Total     string
+	Parts     string // parts cost (COGS)
+	Repairer  string // outside-repairer payout
+	Profit    string // revenue − parts − repairer
 	Warranty  string
 }
 
 type ReportData struct {
-	UserName string
-	Preset   string
-	FromLbl  string
-	ToLbl    string
-	Rows     []ReportRow
-	GrandTot string
-	Count    int
+	UserName      string
+	Preset        string
+	FromLbl       string
+	ToLbl         string
+	Rows          []ReportRow
+	GrandTot      string
+	GrandParts    string
+	GrandRepairer string
+	GrandProfit   string
+	Count         int
 }
 
 // reportPreset renders one date-preset link for the report (full-page nav).
@@ -625,11 +774,20 @@ templ RepairsReportPage(d ReportData) {
 		<div class="bg-white rounded-2xl shadow-sm overflow-hidden">
 			<table class="w-full text-sm">
 				<thead class="text-left text-slate-500 border-b">
-					<tr><th class="py-2 px-3">Ticket</th><th class="py-2 px-3">Device</th><th class="py-2 px-3">Collected</th><th class="py-2 px-3 text-right">Revenue</th><th class="py-2 px-3">Warranty</th></tr>
+					<tr>
+						<th class="py-2 px-3">Ticket</th>
+						<th class="py-2 px-3">Device</th>
+						<th class="py-2 px-3">Collected</th>
+						<th class="py-2 px-3 text-right">Revenue</th>
+						<th class="py-2 px-3 text-right">Parts cost</th>
+						<th class="py-2 px-3 text-right">Repairer</th>
+						<th class="py-2 px-3 text-right">Profit</th>
+						<th class="py-2 px-3">Warranty</th>
+					</tr>
 				</thead>
 				<tbody>
 					if len(d.Rows) == 0 {
-						<tr><td class="py-4 px-3 text-slate-400" colspan="5">No repairs collected in this range.</td></tr>
+						<tr><td class="py-4 px-3 text-slate-400" colspan="8">No repairs collected in this range.</td></tr>
 					}
 					for _, r := range d.Rows {
 						<tr class="border-b last:border-0">
@@ -637,12 +795,22 @@ templ RepairsReportPage(d ReportData) {
 							<td class="py-2 px-3">{ r.Device }</td>
 							<td class="py-2 px-3">{ r.Collected }</td>
 							<td class="py-2 px-3 text-right">{ r.Total }</td>
+							<td class="py-2 px-3 text-right text-slate-500">{ r.Parts }</td>
+							<td class="py-2 px-3 text-right text-slate-500">{ r.Repairer }</td>
+							<td class="py-2 px-3 text-right font-medium text-emerald-700">{ r.Profit }</td>
 							<td class="py-2 px-3">{ r.Warranty }</td>
 						</tr>
 					}
 				</tbody>
 				<tfoot class="border-t font-bold">
-					<tr><td class="py-2 px-3" colspan="3">{ strconv.Itoa(d.Count) } repairs</td><td class="py-2 px-3 text-right">{ d.GrandTot }</td><td></td></tr>
+					<tr>
+						<td class="py-2 px-3" colspan="3">{ strconv.Itoa(d.Count) } repairs</td>
+						<td class="py-2 px-3 text-right">{ d.GrandTot }</td>
+						<td class="py-2 px-3 text-right">{ d.GrandParts }</td>
+						<td class="py-2 px-3 text-right">{ d.GrandRepairer }</td>
+						<td class="py-2 px-3 text-right text-emerald-700">{ d.GrandProfit }</td>
+						<td></td>
+					</tr>
 				</tfoot>
 			</table>
 		</div>
