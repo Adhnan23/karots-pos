@@ -11,6 +11,7 @@ import (
 	"karots-pos/internal/features/audit"
 	"karots-pos/internal/features/cashregister"
 	"karots-pos/internal/features/expenses"
+	"karots-pos/internal/features/reports"
 	"karots-pos/internal/middleware"
 	"karots-pos/internal/money"
 	"karots-pos/internal/response"
@@ -87,7 +88,22 @@ func jobInputFromForm(c echo.Context, defWarranty int) JobInput {
 
 func (a *adminUI) List(c echo.Context) error {
 	ctx := c.Request().Context()
-	jobs, err := a.p.store.ListByStatuses(ctx, []string{"received", "in_progress", "ready"})
+	// Default view is the OPEN queue; collected/cancelled are hidden but reachable
+	// via the filter tabs (not vanished).
+	show := c.QueryParam("show")
+	var statuses []string
+	switch show {
+	case "collected":
+		statuses = []string{"collected"}
+	case "cancelled":
+		statuses = []string{"cancelled"}
+	case "all":
+		statuses = []string{"received", "in_progress", "ready", "collected", "cancelled"}
+	default:
+		show = "open"
+		statuses = []string{"received", "in_progress", "ready"}
+	}
+	jobs, err := a.p.store.ListByStatuses(ctx, statuses)
 	if err != nil {
 		return err
 	}
@@ -102,6 +118,7 @@ func (a *adminUI) List(c echo.Context) error {
 	}
 	return response.RenderPage(c, RepairsListPage(ListData{
 		UserName: middleware.CurrentUserName(c),
+		Show:     show,
 		Rows:     rows,
 	}))
 }
@@ -384,13 +401,15 @@ func (a *adminUI) Cancel(c echo.Context) error {
 func (a *adminUI) Report(c echo.Context) error {
 	ctx := c.Request().Context()
 	sym := a.symbol(c)
-	to := time.Now().Truncate(24*time.Hour).AddDate(0, 0, 1)
-	from := to.AddDate(0, 0, -31)
-	if v := parseOptDate(c.QueryParam("from")); v != nil {
-		from = *v
+	// Shared preset/range resolver (today / this week / this month …), same as the
+	// core reports; default to this month when nothing is chosen.
+	preset := c.QueryParam("preset")
+	if preset == "" && c.QueryParam("from") == "" && c.QueryParam("to") == "" {
+		preset = "this-month"
 	}
-	if v := parseOptDate(c.QueryParam("to")); v != nil {
-		to = v.AddDate(0, 0, 1) // inclusive of the chosen end day
+	from, to, fromStr, toStr, err := reports.ResolveRange(preset, c.QueryParam("from"), c.QueryParam("to"))
+	if err != nil {
+		return err
 	}
 	details, err := a.p.store.ListForReport(ctx, from, to)
 	if err != nil {
@@ -416,7 +435,7 @@ func (a *adminUI) Report(c echo.Context) error {
 	}
 	return response.RenderPage(c, RepairsReportPage(ReportData{
 		UserName: middleware.CurrentUserName(c),
-		FromLbl:  from.Format("2006-01-02"), ToLbl: to.AddDate(0, 0, -1).Format("2006-01-02"),
+		Preset:   preset, FromLbl: fromStr, ToLbl: toStr,
 		Rows: rows, GrandTot: money.Format(sym, grand), Count: len(rows),
 	}))
 }

@@ -25,7 +25,17 @@ type ListRow struct {
 
 type ListData struct {
 	UserName string
+	Show     string // active filter: open | collected | cancelled | all
 	Rows     []ListRow
+}
+
+// listTab renders one status filter tab, highlighted when active.
+templ listTab(active, key, label string) {
+	if active == key {
+		<a href={ templ.SafeURL("/admin/repairs?show=" + key) } class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-sm font-medium">{ label }</a>
+	} else {
+		<a href={ templ.SafeURL("/admin/repairs?show=" + key) } class="px-3 py-1.5 rounded-lg border text-sm text-slate-600 hover:bg-slate-50">{ label }</a>
+	}
 }
 
 type FormData struct {
@@ -70,9 +80,15 @@ func statusBadge(s string) string {
 
 templ RepairsListPage(d ListData) {
 	@layouts.Admin("Repairs", d.UserName, "repairs") {
-		<div class="flex items-center justify-between mb-6">
+		<div class="flex items-center justify-between mb-4">
 			<h1 class="text-2xl font-bold">Repairs</h1>
 			<a href="/admin/repairs/new" class="px-4 py-2 rounded-lg bg-indigo-600 text-white font-semibold">+ New repair</a>
+		</div>
+		<div class="flex flex-wrap gap-2 mb-4">
+			@listTab(d.Show, "open", "Open")
+			@listTab(d.Show, "collected", "Collected")
+			@listTab(d.Show, "cancelled", "Cancelled")
+			@listTab(d.Show, "all", "All")
 		</div>
 		<div class="bg-white rounded-2xl shadow-sm overflow-hidden">
 			<table class="w-full text-sm">
@@ -544,6 +560,7 @@ type ReportRow struct {
 
 type ReportData struct {
 	UserName string
+	Preset   string
 	FromLbl  string
 	ToLbl    string
 	Rows     []ReportRow
@@ -551,11 +568,28 @@ type ReportData struct {
 	Count    int
 }
 
+// reportPreset renders one date-preset link for the report (full-page nav).
+templ reportPreset(active, key, label string) {
+	if active == key {
+		<a href={ templ.SafeURL("/admin/repairs/report?preset=" + key) } class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-sm">{ label }</a>
+	} else {
+		<a href={ templ.SafeURL("/admin/repairs/report?preset=" + key) } class="px-3 py-1.5 rounded-lg border text-slate-600 text-sm hover:bg-slate-50">{ label }</a>
+	}
+}
+
 templ RepairsReportPage(d ReportData) {
 	@layouts.Admin("Repairs report", d.UserName, "repairs") {
 		<div class="flex items-center justify-between mb-6">
 			<h1 class="text-2xl font-bold">Repairs report</h1>
 			<a href="/admin/repairs" class="text-slate-500 hover:underline">← Repairs</a>
+		</div>
+		<div class="flex flex-wrap gap-2 mb-3">
+			@reportPreset(d.Preset, "today", "Today")
+			@reportPreset(d.Preset, "this-week", "This week")
+			@reportPreset(d.Preset, "this-month", "This month")
+			@reportPreset(d.Preset, "last-week", "Last week")
+			@reportPreset(d.Preset, "last-month", "Last month")
+			@reportPreset(d.Preset, "this-year", "This year")
 		</div>
 		<form method="get" class="flex gap-2 items-end mb-4">
 			<div><label class="block text-xs text-slate-500">From</label><input type="date" name="from" value={ d.FromLbl } class="border rounded px-2 py-1 text-sm"/></div>
