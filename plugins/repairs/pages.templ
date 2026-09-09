@@ -436,6 +436,7 @@ type ReceiptData struct {
 	Narrow        bool   // 58mm when true, else 80mm
 	SwitchURL     string // toggles the paper size
 	SwitchText    string
+	PrintURL      string // server-side ESC/POS print endpoint (POST)
 }
 
 func repairRollStyle(narrow bool) string {
@@ -459,6 +460,9 @@ templ RepairReceipt(d ReceiptData) {
 			<title>Repair { d.D.Job.TicketNo }</title>
 			<link rel="stylesheet" href="/static/css/app.css"/>
 			@templ.Raw("<style>" + repairRollStyle(d.Narrow) + "</style>")
+			// Print server-side (ESC/POS) like every other receipt — never window.print,
+			// which sends a PDF a raw thermal queue mis-prints.
+			@templ.Raw("<script>function printThermal(){var m=document.getElementById('printmsg');if(m)m.textContent='Printing…';fetch('" + d.PrintURL + "',{method:'POST',credentials:'same-origin'}).then(function(r){if(m)m.textContent=r.ok?'✓ Sent to printer':'Print failed';}).catch(function(){if(m)m.textContent='Print failed';});}</script>")
 		</head>
 		<body class="receipt-body">
 			<div class={ "receipt", templ.KV("narrow", d.Narrow) } id="receipt">
@@ -509,8 +513,9 @@ templ RepairReceipt(d ReceiptData) {
 				}
 				@shared.ThermalFooter(d.Footer)
 				<div class="r-print-btn">
-					<button onclick="window.print()">🖨 Print</button>
+					<button onclick="printThermal()">🖨 Print</button>
 					<button type="button" class="r-secondary" onclick="window.history.length>1?window.history.back():window.close()">← Back</button>
+					<div id="printmsg" class="r-small r-center"></div>
 					if d.SwitchURL != "" {
 						<a href={ templ.SafeURL(d.SwitchURL) }>{ d.SwitchText }</a>
 					}

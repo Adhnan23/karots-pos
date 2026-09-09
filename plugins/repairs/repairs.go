@@ -4,6 +4,7 @@
 package repairs
 
 import (
+	"bytes"
 	"context"
 	"io/fs"
 	"strconv"
@@ -11,8 +12,11 @@ import (
 	"time"
 
 	"karots-pos/internal/apperr"
+	"karots-pos/internal/escpos"
 	"karots-pos/internal/features/audit"
 	"karots-pos/internal/features/products"
+	"karots-pos/internal/features/settings"
+	"karots-pos/internal/middleware"
 	"karots-pos/internal/money"
 	"karots-pos/internal/plugin"
 	"karots-pos/internal/response"
@@ -65,6 +69,7 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 	reg.Admin().POST("/repairs/:id/status", a.SetStatus)
 	reg.Admin().POST("/repairs/:id/cancel", a.Cancel)
 	reg.Admin().GET("/repairs/:id/receipt", a.RepairReceipt)
+	reg.Admin().POST("/repairs/:id/print", func(c echo.Context) error { return p.printRepairSlip(c) })
 
 	ch := &cashierUI{p: p}
 	reg.Cashier().GET("/repairs/menu", ch.MenuRoot)
@@ -79,6 +84,7 @@ func (p *Plugin) Setup(reg *plugin.Registry) {
 	reg.Cashier().POST("/repairs/:id/deposit", ch.TakeDeposit)
 	reg.Cashier().POST("/repairs/:id/collect", ch.Collect)
 	reg.Cashier().GET("/repairs/:id/receipt", ch.RepairReceipt)
+	reg.Cashier().POST("/repairs/:id/print", func(c echo.Context) error { return p.printRepairSlip(c) })
 
 	reg.AddAdminNav(plugin.AdminNavEntry{
 		SectionLabel: "Repairs", Icon: "🔧",
@@ -122,6 +128,110 @@ func (p *Plugin) ensureLabourProduct(ctx context.Context) (int64, error) {
 	return prod.ID, nil
 }
 
+// repairSlipESCPOS builds the repair slip as ESC/POS bytes using the shared
+// escpos primitives — the same server-side, raw, no-browser path every other
+// receipt uses (see internal/web buildReceiptSlip). Header logo/raster is left
+// to the sale receipt; this text slip carries the repair detail.
+func repairSlipESCPOS(cfg settings.Settings, d *Detail, sym string) []byte {
+	w := escpos.Columns(cfg.ReceiptWidth)
+	var b bytes.Buffer
+	escpos.Init(&b)
+	escpos.Header(&b, cfg, escpos.Options{})
+	escpos.Title(&b, "REPAIR", w)
+	escpos.Left(&b)
+	escpos.Divider(&b, w)
+	escpos.Line(&b, escpos.LeftRight("Ticket:", d.Job.TicketNo, w))
+	escpos.Line(&b, escpos.LeftRight("Date:", d.Job.CreatedAt.Format("2006-01-02 15:04"), w))
+	if dev := strings.TrimSpace(d.Job.RepairType + " " + d.Job.DeviceModel); dev != "" {
+		escpos.Line(&b, escpos.ASCII(dev))
+	}
+	if d.Job.Fault != "" {
+		for _, ln := range escpos.Wrap(escpos.ASCII("Fault: "+d.Job.Fault), w) {
+			escpos.Line(&b, ln)
+		}
+	}
+	if d.Job.CustomerName != "" {
+		escpos.Line(&b, escpos.LeftRight("Customer:", escpos.ASCII(d.Job.CustomerName), w))
+	}
+	escpos.Divider(&b, w)
+	for _, p := range d.Parts {
+		escpos.Line(&b, escpos.ASCII(p.ProductName))
+		net := p.Qty.Mul(p.UnitCharge).Sub(p.Discount)
+		escpos.Line(&b, escpos.LeftRight("  "+money.Display(p.Qty)+" x "+money.Display(p.UnitCharge), money.Display(net), w))
+	}
+	for _, ch := range d.Charges {
+		escpos.Line(&b, escpos.LeftRight(escpos.ASCII(ch.Label), money.Display(ch.Amount), w))
+	}
+	escpos.Divider(&b, w)
+	total, dep, bal := JobTotals(d)
+	escpos.Emphasis(&b, true)
+	escpos.Line(&b, escpos.LeftRight("TOTAL", money.Format(sym, total), w))
+	escpos.Emphasis(&b, false)
+	if dep.IsPositive() {
+		escpos.Line(&b, escpos.LeftRight("Deposit", money.Format(sym, dep), w))
+		escpos.Line(&b, escpos.LeftRight("Balance", money.Format(sym, bal), w))
+	}
+	if d.Job.WarrantyUntil != nil {
+		escpos.Divider(&b, w)
+		escpos.Center(&b)
+		escpos.Line(&b, "Warranty until "+d.Job.WarrantyUntil.Format("2006-01-02"))
+		escpos.Left(&b)
+	}
+	escpos.Footer(&b, cfg)
+	return b.Bytes()
+}
+
+// receiptQueue resolves the per-cashier printer target: the user's own account
+// printer, else the shop-wide setting (mirrors the core receiptQueue without the
+// auth service — the plugin only has Core.DB + Core.Settings).
+func (p *Plugin) receiptQueue(ctx context.Context, userID int64) string {
+	var pr string
+	if userID != 0 {
+		_ = p.core.DB.GetContext(ctx, &pr, `SELECT COALESCE(receipt_printer,'') FROM users WHERE id = $1`, userID)
+		if strings.TrimSpace(pr) != "" {
+			return pr
+		}
+	}
+	if cfg, err := p.core.Settings.Get(ctx); err == nil && cfg != nil {
+		return cfg.ReceiptPrinter
+	}
+	return ""
+}
+
+// printRepairSlip sends the repair slip to the resolved printer as raw ESC/POS —
+// the POST target of the receipt view's Print button (not window.print).
+func (p *Plugin) printRepairSlip(c echo.Context) error {
+	ctx := c.Request().Context()
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return apperr.BadRequest("invalid id")
+	}
+	d, err := p.store.GetJob(ctx, id)
+	if err != nil {
+		return apperr.NotFound("repair")
+	}
+	cfg, err := p.core.Settings.Get(ctx)
+	if err != nil {
+		return err
+	}
+	eff := *cfg
+	switch c.QueryParam("size") {
+	case "58":
+		eff.ReceiptWidth = "58mm"
+	case "80":
+		eff.ReceiptWidth = "80mm"
+	}
+	sym := "Rs."
+	if eff.CurrencySymbol != "" {
+		sym = eff.CurrencySymbol
+	}
+	if err := escpos.Send(ctx, p.receiptQueue(ctx, middleware.CurrentUserID(c)), repairSlipESCPOS(eff, d, sym)); err != nil {
+		return apperr.Internal("could not print repair slip", err)
+	}
+	c.Response().Header().Set("HX-Trigger", response.Toast("Repair slip sent to printer", "success"))
+	return response.OK(c, map[string]bool{"ok": true})
+}
+
 // renderReceipt renders the detailed repair receipt for the :id in the route.
 func (p *Plugin) renderReceipt(c echo.Context) error {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
@@ -148,9 +258,9 @@ func (p *Plugin) renderReceipt(c echo.Context) error {
 		warranty = d.Job.WarrantyUntil.Format("2006-01-02")
 	}
 	narrow := c.QueryParam("size") == "58"
-	switchSize, switchText := "58", "Switch to 58mm"
+	curSize, switchSize, switchText := "80", "58", "Switch to 58mm"
 	if narrow {
-		switchSize, switchText = "80", "Switch to 80mm"
+		curSize, switchSize, switchText = "58", "80", "Switch to 80mm"
 	}
 	return response.RenderPage(c, RepairReceipt(ReceiptData{
 		Symbol: sym, ShopName: shop, Address: addr, Phone: phone, Footer: footer, D: d,
@@ -159,6 +269,7 @@ func (p *Plugin) renderReceipt(c echo.Context) error {
 		Narrow:     narrow,
 		SwitchURL:  c.Request().URL.Path + "?size=" + switchSize,
 		SwitchText: switchText,
+		PrintURL:   strings.Replace(c.Request().URL.Path, "/receipt", "/print", 1) + "?size=" + curSize,
 	}))
 }
 
