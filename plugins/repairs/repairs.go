@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"karots-pos/internal/apperr"
+	"karots-pos/internal/datetime"
 	"karots-pos/internal/escpos"
 	"karots-pos/internal/features/audit"
 	"karots-pos/internal/features/products"
@@ -19,8 +20,10 @@ import (
 	"karots-pos/internal/middleware"
 	"karots-pos/internal/money"
 	"karots-pos/internal/plugin"
+	"karots-pos/internal/receiptimg"
 	"karots-pos/internal/response"
 	"karots-pos/plugins/repairs/migrations"
+	poststatic "karots-pos/static"
 
 	"github.com/labstack/echo/v4"
 	"github.com/shopspring/decimal"
@@ -132,16 +135,16 @@ func (p *Plugin) ensureLabourProduct(ctx context.Context) (int64, error) {
 // escpos primitives — the same server-side, raw, no-browser path every other
 // receipt uses (see internal/web buildReceiptSlip). Header logo/raster is left
 // to the sale receipt; this text slip carries the repair detail.
-func repairSlipESCPOS(cfg settings.Settings, d *Detail, sym string) []byte {
+func repairSlipESCPOS(cfg settings.Settings, d *Detail, sym string, opts escpos.Options) []byte {
 	w := escpos.Columns(cfg.ReceiptWidth)
 	var b bytes.Buffer
 	escpos.Init(&b)
-	escpos.Header(&b, cfg, escpos.Options{})
+	escpos.Header(&b, cfg, opts)
 	escpos.Title(&b, "REPAIR", w)
 	escpos.Left(&b)
 	escpos.Divider(&b, w)
 	escpos.Line(&b, escpos.LeftRight("Ticket:", d.Job.TicketNo, w))
-	escpos.Line(&b, escpos.LeftRight("Date:", d.Job.CreatedAt.Format("2006-01-02 15:04"), w))
+	escpos.Line(&b, escpos.LeftRight("Date:", datetime.DateTime(d.Job.CreatedAt), w))
 	if dev := strings.TrimSpace(d.Job.RepairType + " " + d.Job.DeviceModel); dev != "" {
 		escpos.Line(&b, escpos.ASCII(dev))
 	}
@@ -174,7 +177,7 @@ func repairSlipESCPOS(cfg settings.Settings, d *Detail, sym string) []byte {
 	if d.Job.WarrantyUntil != nil {
 		escpos.Divider(&b, w)
 		escpos.Center(&b)
-		escpos.Line(&b, "Warranty until "+d.Job.WarrantyUntil.Format("2006-01-02"))
+		escpos.Line(&b, "Warranty until "+datetime.Date(*d.Job.WarrantyUntil))
 		escpos.Left(&b)
 	}
 	escpos.Footer(&b, cfg)
@@ -225,7 +228,8 @@ func (p *Plugin) printRepairSlip(c echo.Context) error {
 	if eff.CurrencySymbol != "" {
 		sym = eff.CurrencySymbol
 	}
-	if err := escpos.Send(ctx, p.receiptQueue(ctx, middleware.CurrentUserID(c)), repairSlipESCPOS(eff, d, sym)); err != nil {
+	opts := receiptimg.SlipOptions(ctx, &eff, poststatic.Files)
+	if err := escpos.Send(ctx, p.receiptQueue(ctx, middleware.CurrentUserID(c)), repairSlipESCPOS(eff, d, sym, opts)); err != nil {
 		return apperr.Internal("could not print repair slip", err)
 	}
 	c.Response().Header().Set("HX-Trigger", response.Toast("Repair slip sent to printer", "success"))
@@ -255,7 +259,7 @@ func (p *Plugin) renderReceipt(c echo.Context) error {
 	total, dep, bal := JobTotals(d)
 	warranty := ""
 	if d.Job.WarrantyUntil != nil {
-		warranty = d.Job.WarrantyUntil.Format("2006-01-02")
+		warranty = datetime.Date(*d.Job.WarrantyUntil)
 	}
 	narrow := c.QueryParam("size") == "58"
 	curSize, switchSize, switchText := "80", "58", "Switch to 58mm"

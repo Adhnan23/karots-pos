@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"karots-pos/internal/apperr"
+	"karots-pos/internal/datetime"
 	appdb "karots-pos/internal/db"
 	"karots-pos/internal/features/audit"
 	"karots-pos/internal/features/cashflow"
@@ -44,6 +45,16 @@ func parseOptDate(s string) *time.Time {
 	return nil
 }
 
+// jobDue is dueLabel for a whole job: a finished (collected/cancelled) job is
+// never "due" or urgent, so its promised-date warning is dropped.
+func jobDue(status string, promised *time.Time, urgentFlag bool) (string, bool) {
+	if status == "collected" || status == "cancelled" {
+		return "—", false
+	}
+	label, urgent := dueLabel(promised)
+	return label, urgent || urgentFlag
+}
+
 // dueLabel describes how long until (or past) the promised date, and whether
 // the job should read as urgent (overdue or due today/tomorrow).
 func dueLabel(promised *time.Time) (string, bool) {
@@ -66,12 +77,20 @@ func dueLabel(promised *time.Time) (string, bool) {
 }
 
 // cashLocations lists the real cash sources (lockers + open tills) for the
-// pay-repairer picker, mirroring the core expense/bill-pay location choices.
+// pay-repairer picker, mirroring the core expense/bill-pay location choices —
+// including each locker's balance so the owner sees what's available.
 func (a *adminUI) cashLocations(ctx context.Context) []LocChoice {
+	sym := "Rs."
+	if cfg, err := a.p.core.Settings.Get(ctx); err == nil && cfg != nil && cfg.CurrencySymbol != "" {
+		sym = cfg.CurrencySymbol
+	}
 	var out []LocChoice
 	if lks, err := a.p.core.Lockers.List(ctx, true); err == nil {
 		for _, l := range lks {
-			out = append(out, LocChoice{Value: "locker:" + strconv.FormatInt(l.ID, 10), Label: l.Name, Group: "Lockers"})
+			out = append(out, LocChoice{
+				Value: "locker:" + strconv.FormatInt(l.ID, 10),
+				Label: l.Name + " (" + money.Format(sym, l.Balance) + ")", Group: "Lockers",
+			})
 		}
 	}
 	if tills, err := a.p.core.CashRegister.OpenSessions(ctx); err == nil {
@@ -82,28 +101,29 @@ func (a *adminUI) cashLocations(ctx context.Context) []LocChoice {
 	return out
 }
 
-// parseCashLocation turns a picker value ("locker:ID" / "till:UID" / "external")
-// into a cashflow endpoint — same encoding as the core location picker.
-func parseCashLocation(v string) (cashflow.Location, bool, error) {
+// parseCashLocation turns a picker value ("locker:ID" / "till:UID") into a
+// cashflow endpoint — same encoding as the core location picker. A real source
+// is required: money always moves from a tracked location (no untracked option).
+func parseCashLocation(v string) (cashflow.Location, error) {
 	v = strings.TrimSpace(v)
 	if v == "" || v == "external" {
-		return cashflow.Location{}, false, nil // untracked: expense only, no cash move
+		return cashflow.Location{}, apperr.Validation("pick where the cash comes from")
 	}
 	kind, idStr, ok := strings.Cut(v, ":")
 	if !ok {
-		return cashflow.Location{}, false, apperr.Validation("invalid cash location")
+		return cashflow.Location{}, apperr.Validation("invalid cash location")
 	}
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
-		return cashflow.Location{}, false, apperr.Validation("invalid cash location")
+		return cashflow.Location{}, apperr.Validation("invalid cash location")
 	}
 	switch kind {
 	case "locker":
-		return cashflow.Locker(id), true, nil
+		return cashflow.Locker(id), nil
 	case "till":
-		return cashflow.Till(id), true, nil
+		return cashflow.Till(id), nil
 	}
-	return cashflow.Location{}, false, apperr.Validation("invalid cash location")
+	return cashflow.Location{}, apperr.Validation("invalid cash location")
 }
 
 // jobInputFromForm reads the shared job fields from a POST form.
@@ -153,11 +173,11 @@ func (a *adminUI) List(c echo.Context) error {
 	}
 	rows := make([]ListRow, 0, len(jobs))
 	for _, j := range jobs {
-		label, urgent := dueLabel(j.PromisedDate)
+		label, urgent := jobDue(j.Status, j.PromisedDate, j.Urgent)
 		rows = append(rows, ListRow{
 			ID: j.ID, TicketNo: j.TicketNo, Customer: j.CustomerName, Phone: j.CustomerPhone,
 			Device: j.DeviceModel, RepairType: j.RepairType, Status: j.Status,
-			DueLabel: label, Urgent: urgent || j.Urgent,
+			DueLabel: label, Urgent: urgent,
 		})
 	}
 	return response.RenderPage(c, RepairsListPage(ListData{
@@ -214,10 +234,10 @@ func (a *adminUI) detailData(c echo.Context, d *Detail) DetailData {
 	ctx := c.Request().Context()
 	sym := a.symbol(c)
 	total, dep, bal := JobTotals(d)
-	label, urgent := dueLabel(d.Job.PromisedDate)
+	label, urgent := jobDue(d.Job.Status, d.Job.PromisedDate, d.Job.Urgent)
 	warranty := ""
 	if d.Job.WarrantyUntil != nil {
-		warranty = d.Job.WarrantyUntil.Format("2006-01-02")
+		warranty = datetime.Date(*d.Job.WarrantyUntil)
 	} else if d.Job.WarrantyDays > 0 {
 		warranty = fmt.Sprintf("%d days from pickup", d.Job.WarrantyDays)
 	}
@@ -230,7 +250,7 @@ func (a *adminUI) detailData(c echo.Context, d *Detail) DetailData {
 		Balance:       money.Format(sym, bal),
 		RepairerPaid:  money.Format(sym, d.Job.RepairerPaid),
 		DueLabel:      label,
-		Urgent:        urgent || d.Job.Urgent,
+		Urgent:        urgent,
 		WarrantyLabel: warranty,
 		Editable:      d.Job.Status != "collected" && d.Job.Status != "cancelled",
 		Locations:     a.cashLocations(ctx),
@@ -395,7 +415,7 @@ func (a *adminUI) PayRepairer(c echo.Context) error {
 	if n := strings.TrimSpace(c.FormValue("note")); n != "" {
 		note += " (" + n + ")"
 	}
-	loc, tracked, err := parseCashLocation(c.FormValue("source"))
+	loc, err := parseCashLocation(c.FormValue("source"))
 	if err != nil {
 		return err
 	}
@@ -404,20 +424,18 @@ func (a *adminUI) PayRepairer(c echo.Context) error {
 		ExpenseDate: time.Now().Format("2006-01-02"),
 	}
 	// Book the expense, debit the chosen cash location, and stamp the job — all in
-	// one tx (mirrors the core expense-with-location flow). An untracked source
-	// books the expense only, no cash move.
+	// one tx (mirrors the core expense-with-location flow). Money always moves from
+	// a tracked location; there is no untracked option.
 	err = appdb.WithTx(ctx, a.p.core.DB, func(tx *sqlx.Tx) error {
 		e, err := a.p.core.Expenses.CreateInTx(ctx, tx, in, uid)
 		if err != nil {
 			return err
 		}
-		if tracked {
-			if _, err := a.p.core.Cashflow.MoveTx(ctx, tx, cashflow.MoveInput{
-				From: loc, To: cashflow.External(), Amount: e.Amount, Reason: note,
-				ReceiptKind: "expense", Ref: &cashflow.Ref{Kind: "expense", ID: e.ID}, ActorID: uid,
-			}); err != nil {
-				return err
-			}
+		if _, err := a.p.core.Cashflow.MoveTx(ctx, tx, cashflow.MoveInput{
+			From: loc, To: cashflow.External(), Amount: e.Amount, Reason: note,
+			ReceiptKind: "expense", Ref: &cashflow.Ref{Kind: "expense", ID: e.ID}, ActorID: uid,
+		}); err != nil {
+			return err
 		}
 		return newStoreQ(tx).AddRepairerPayment(ctx, id, amount)
 	})
@@ -474,10 +492,10 @@ func (a *adminUI) Report(c echo.Context) error {
 		grand = grand.Add(total)
 		collected, warranty := "", ""
 		if d.Job.CollectedAt != nil {
-			collected = d.Job.CollectedAt.Format("2006-01-02")
+			collected = datetime.Date(*d.Job.CollectedAt)
 		}
 		if d.Job.WarrantyUntil != nil {
-			warranty = d.Job.WarrantyUntil.Format("2006-01-02")
+			warranty = datetime.Date(*d.Job.WarrantyUntil)
 		}
 		rows = append(rows, ReportRow{
 			TicketNo: d.Job.TicketNo, Device: d.Job.DeviceModel, Collected: collected,

@@ -1,0 +1,7 @@
+{
+  "key": "repairs",
+  "name": "Repairs",
+  "import": "karots-pos/plugins/repairs",
+  "version": "1.0.0",
+  "description": "Tracks device repair jobs from drop-off to pickup: parts + labour/charges, deposits, warranty, customer register, and a repair slip. Settles as a normal sale at the till; the admin pays outside repairers from any cash location."
+}
