@@ -126,10 +126,13 @@ html.dark body.bg-slate-100 { background-color: #0b1120 !important; color: #e2e8
    Solid action buttons (bg-*-600/700, white text) are intentionally left alone —
    they already read well on dark. */
 
-/* Accent TEXT — lighten to the ~400 shade for contrast on dark surfaces. */
+/* Accent TEXT — lighten to the ~400 shade for contrast on dark surfaces.
+   Indigo is the BRAND accent, so it follows the active skin via --brand-text-dark
+   (default indigo below in the Appearance section). emerald/amber/rose/red stay
+   fixed — they are semantic (success/warning/danger), not the brand. */
 .dark .text-indigo-700,
 .dark .text-indigo-600,
-.dark .text-indigo-500 { color: #a5b4fc !important; }
+.dark .text-indigo-500 { color: var(--brand-text-dark) !important; }
 .dark .text-emerald-800,
 .dark .text-emerald-700,
 .dark .text-emerald-600 { color: #34d399 !important; }
@@ -148,8 +151,8 @@ html.dark body.bg-slate-100 { background-color: #0b1120 !important; color: #e2e8
 
 /* Pale accent BACKGROUNDS (-50/-100) — translucent dark tint of the same hue,
    so they blend into the near-black page instead of glowing. */
-.dark .bg-indigo-50  { background-color: rgba(99,102,241,0.10) !important; }
-.dark .bg-indigo-100 { background-color: rgba(99,102,241,0.18) !important; }
+.dark .bg-indigo-50  { background-color: rgba(var(--brand-rgb),0.10) !important; }
+.dark .bg-indigo-100 { background-color: rgba(var(--brand-rgb),0.18) !important; }
 .dark .bg-emerald-50  { background-color: rgba(16,185,129,0.10) !important; }
 .dark .bg-emerald-100 { background-color: rgba(16,185,129,0.18) !important; }
 .dark .bg-amber-50  { background-color: rgba(245,158,11,0.10) !important; }
@@ -164,7 +167,7 @@ html.dark body.bg-slate-100 { background-color: #0b1120 !important; color: #e2e8
 .dark .border-amber-300,
 .dark .border-amber-400 { border-color: rgba(245,158,11,0.40) !important; }
 .dark .border-indigo-200,
-.dark .border-indigo-300 { border-color: rgba(99,102,241,0.40) !important; }
+.dark .border-indigo-300 { border-color: rgba(var(--brand-rgb),0.40) !important; }
 .dark .border-emerald-200,
 .dark .border-emerald-300 { border-color: rgba(16,185,129,0.40) !important; }
 
@@ -267,3 +270,82 @@ html.dark body.bg-slate-100 { background-color: #0b1120 !important; color: #e2e8
   .po-break { break-after: page; page-break-after: always; }
   @page { margin: 12mm; }
 }
+
+/* ================= Appearance skins =================
+   System-user-locked brand identity, keyed off data-skin / data-density on
+   <html> (set server-side by base.templ). "indigo" is the brand accent; these
+   tokens re-point the ~15 indigo utilities used across the app + the dark
+   accent rules above, so ONE token swap reskins core and every plugin with no
+   template edits. Loaded after tailwind.css, so unprefixed overrides win by
+   source order (no !important needed in light mode).
+
+   Adding a skin = one [data-skin=key] block below + the key in
+   settings.Skins. No Go/template change. */
+
+:root {
+  /* default = indigo */
+  --brand-50:  #eef2ff;
+  --brand-100: #e0e7ff;
+  --brand-500: #6366f1;
+  --brand-600: #4f46e5;
+  --brand-700: #4338ca;
+  --brand-rgb: 99, 102, 241;   /* for dark translucent tints */
+  --brand-text-dark: #a5b4fc;  /* lightened accent text on dark surfaces */
+  --radius:    0.5rem;         /* rounded-lg  */
+  --radius-lg: 0.75rem;        /* rounded-xl  */
+  --density-4: 1rem;           /* p-4/gap-4 base; compact shrinks these */
+  --density-3: 0.75rem;        /* p-3         */
+}
+
+:root[data-skin="teal"] {
+  --brand-50:  #f0fdfa;
+  --brand-100: #ccfbf1;
+  --brand-500: #14b8a6;
+  --brand-600: #0d9488;
+  --brand-700: #0f766e;
+  --brand-rgb: 20, 184, 166;
+  --brand-text-dark: #5eead4;
+  --radius:    0.375rem;
+  --radius-lg: 0.5rem;
+}
+
+:root[data-skin="plum"] {
+  --brand-50:  #fdf4ff;
+  --brand-100: #fae8ff;
+  --brand-500: #c026d3;
+  --brand-600: #a21caf;
+  --brand-700: #86198f;
+  --brand-rgb: 192, 38, 211;
+  --brand-text-dark: #f0abfc;
+  --radius:    0.875rem;
+  --radius-lg: 1rem;
+}
+
+/* Brand accent remap — light mode (dark handled in the dark-accent block). */
+.bg-indigo-600  { background-color: var(--brand-600); }
+.bg-indigo-700  { background-color: var(--brand-700); }
+.bg-indigo-500  { background-color: var(--brand-500); }
+.bg-indigo-100  { background-color: var(--brand-100); }
+.bg-indigo-50   { background-color: var(--brand-50); }
+.text-indigo-700 { color: var(--brand-700); }
+.text-indigo-600 { color: var(--brand-600); }
+.text-indigo-500 { color: var(--brand-500); }
+.border-indigo-600 { border-color: var(--brand-600); }
+.ring-indigo-500 { --tw-ring-color: var(--brand-500); }
+.ring-indigo-400 { --tw-ring-color: var(--brand-500); }
+.ring-indigo-300 { --tw-ring-color: var(--brand-100); }
+.hover\:bg-indigo-700:hover { background-color: var(--brand-700); }
+.hover\:bg-indigo-500:hover { background-color: var(--brand-500); }
+.hover\:text-indigo-600:hover { color: var(--brand-600); }
+
+/* Card / control shape — corner radius follows the skin. */
+.rounded-lg { border-radius: var(--radius); }
+.rounded-xl { border-radius: var(--radius-lg); }
+
+/* Density — compact tightens the common container paddings/gaps. Conservative:
+   only the most-used spacing utilities, so layouts stay intact. */
+:root[data-density="compact"] .p-4  { padding: 0.625rem; }
+:root[data-density="compact"] .p-3  { padding: 0.5rem; }
+:root[data-density="compact"] .gap-4 { gap: 0.625rem; }
+:root[data-density="compact"] .gap-3 { gap: 0.5rem; }
+:root[data-density="compact"] .py-3 { padding-top: 0.5rem; padding-bottom: 0.5rem; }

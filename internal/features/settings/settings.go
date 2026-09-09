@@ -70,7 +70,7 @@ type Settings struct {
 // Known appearance values. Anything else falls back to the first (default) so a
 // bad or blank value never renders blank.
 var (
-	Skins         = []string{"default", "teal", "slate"}
+	Skins         = []string{"default", "teal", "plum"}
 	Densities     = []string{"comfortable", "compact"}
 	ReceiptStyles = []string{"classic", "compact", "bold", "minimal"}
 )
