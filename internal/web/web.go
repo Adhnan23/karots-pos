@@ -197,7 +197,7 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	}, jwt)
 
 	// Cashier (all authenticated roles)
-	cg := e.Group("/cashier", jwt, lockGuard, pinGuard)
+	cg := e.Group("/cashier", jwt, lockGuard, pinGuard, withAppearance(s.settings))
 	cg.GET("", cashier.POS)
 	cg.POST("/drawer/open", cashier.OpenDrawer)
 	cg.POST("/quick-item", cashier.QuickItem)
@@ -277,7 +277,7 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	xg.POST("", cashier.ExpenseRecord)
 
 	// Admin (manager/admin)
-	ag := e.Group("/admin", jwt, lockGuard, pinGuard, middleware.RequireRole(auth.RoleAdmin, auth.RoleManager))
+	ag := e.Group("/admin", jwt, lockGuard, pinGuard, middleware.RequireRole(auth.RoleAdmin, auth.RoleManager), withAppearance(s.settings))
 	ag.GET("", admin.Dashboard)
 	ag.GET("/dashboard/charts", admin.DashboardCharts)
 	ag.GET("/products", admin.Products)

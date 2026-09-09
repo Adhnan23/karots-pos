@@ -7,7 +7,7 @@ import "karots-pos/internal/middleware"
 // cashier topbar) compose this via Admin()/Cashier() below.
 templ Base(title string) {
 	<!DOCTYPE html>
-	<html lang="en" class="h-full">
+	<html lang="en" class="h-full" data-skin={ skinAttr(ctx) } data-density={ densityAttr(ctx) }>
 		<head>
 			<meta charset="UTF-8"/>
 			<meta name="viewport" content="width=device-width, initial-scale=1"/>
