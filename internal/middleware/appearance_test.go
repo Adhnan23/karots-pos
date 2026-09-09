@@ -13,7 +13,7 @@ func TestAppearanceCtxDefaults(t *testing.T) {
 }
 
 func TestAppearanceCtxRoundTrip(t *testing.T) {
-	ctx := SetAppearanceCtx(context.Background(), "teal", "compact")
+	ctx := SetAppearanceCtx(context.Background(), "teal", "compact", "", "")
 	skin, density := AppearanceCtx(ctx)
 	if skin != "teal" || density != "compact" {
 		t.Fatalf("got %q/%q, want teal/compact", skin, density)

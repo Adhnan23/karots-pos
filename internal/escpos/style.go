@@ -1,6 +1,10 @@
 package escpos
 
-import "karots-pos/internal/features/settings"
+import (
+	"bytes"
+
+	"karots-pos/internal/features/settings"
+)
 
 // ReceiptStyle is the system-user-locked look of the printed receipt. It only
 // tunes the shared Header/Footer (where a shop's branding lives), so every core
@@ -33,4 +37,50 @@ func StyleFor(cfg settings.Settings) ReceiptStyle {
 	default: // classic
 		return ReceiptStyle{Key: "classic", Rule: "-", NameDouble: true, ThankYou: true, Breathing: true}
 	}
+}
+
+// SamplePreview renders a small sample receipt for cfg and returns it as plain
+// text — the SAME Header/Footer/rows the real printer gets, with the ESC/POS
+// control sequences stripped — so the appearance panel can show exactly how the
+// chosen ReceiptStyle looks (rule, name size, thank-you, spacing) without a
+// separate mock that could drift. No logo/sub-name raster is used.
+func SamplePreview(cfg settings.Settings) string {
+	var b bytes.Buffer
+	w := columns(cfg.ReceiptWidth)
+	Header(&b, cfg, Options{})
+	line(&b, leftRight("Widget", "500.00", w))
+	line(&b, leftRight("Gadget x2", "300.00", w))
+	divider(&b, w)
+	bigLine(&b, "TOTAL", "800.00", w)
+	Footer(&b, cfg)
+	return plainText(b.Bytes())
+}
+
+// plainText strips the ESC/POS control sequences this package emits, leaving the
+// human-readable lines (spacing/centering preserved). It knows only the commands
+// used by Header/Footer/Title/bigLine — enough for the sample preview.
+func plainText(raw []byte) string {
+	var out bytes.Buffer
+	for i := 0; i < len(raw); i++ {
+		c := raw[i]
+		switch c {
+		case esc: // ESC cmd [param]
+			if i+1 < len(raw) {
+				cmd := raw[i+1]
+				i++
+				if cmd != '@' && i+1 < len(raw) { // '@' (init) has no parameter
+					i++
+				}
+			}
+		case gs: // GS cmd param
+			if i+2 < len(raw) {
+				i += 2
+			}
+		case '\r':
+			// drop
+		default:
+			out.WriteByte(c)
+		}
+	}
+	return out.String()
 }

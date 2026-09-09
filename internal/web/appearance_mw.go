@@ -22,7 +22,8 @@ func withAppearance(svc *settings.Service) echo.MiddlewareFunc {
 		return func(c echo.Context) error {
 			if s, err := svc.Get(c.Request().Context()); err == nil {
 				ctx := middleware.SetAppearanceCtx(c.Request().Context(),
-					settings.ValidSkin(s.Skin), settings.ValidDensity(s.Density))
+					settings.ValidSkin(s.Skin), settings.ValidDensity(s.Density),
+					settings.ValidHexColor(s.SkinCustom), settings.ValidRadius(s.SkinRadius))
 				c.SetRequest(c.Request().WithContext(ctx))
 			}
 			return next(c)

@@ -199,6 +199,7 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	sysg := e.Group("/system", jwt, lockGuard, pinGuard, middleware.RequireSystemUser(), withAppearance(s.settings))
 	sysg.GET("/appearance", system.AppearanceForm)
 	sysg.POST("/appearance", system.AppearanceSave)
+	sysg.GET("/appearance/receipt-preview", system.ReceiptPreview)
 
 	// Root: send the user to their home by role.
 	e.GET("/", func(c echo.Context) error {

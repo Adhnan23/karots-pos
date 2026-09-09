@@ -13,7 +13,7 @@ import (
 templ AppearancePanel(cur *settings.Settings, saved bool) {
 	@layouts.Base("Appearance") {
 		<div class="min-h-full flex items-center justify-center p-6"
-			x-data="{ skin: $root.closest('html') ? document.documentElement.getAttribute('data-skin') : 'default' }">
+			x-data={ "{ skin: '" + cur.Skin + "' }" }>
 			<div class="w-full max-w-lg bg-white rounded-2xl shadow-sm p-8">
 				<h1 class="text-2xl font-bold text-slate-800">Appearance</h1>
 				<p class="text-slate-500 mt-1 text-sm">
@@ -25,13 +25,31 @@ templ AppearancePanel(cur *settings.Settings, saved bool) {
 				<form method="post" action="/system/appearance" class="mt-6 space-y-5">
 					<div>
 						<label class="block text-sm font-medium text-slate-600 mb-1">Skin (brand colour + card shape)</label>
-						<select name="skin"
-							x-on:change="document.documentElement.setAttribute('data-skin', $event.target.value)"
+						<select name="skin" x-model="skin"
+							x-on:change="document.documentElement.setAttribute('data-skin', skin)"
 							class="w-full border rounded-lg px-3 py-2.5">
 							for _, s := range settings.Skins {
 								<option value={ s } selected?={ s == cur.Skin }>{ s }</option>
 							}
 						</select>
+						<div class="mt-2 space-y-2" x-show="skin === 'custom'">
+							<div class="flex items-center gap-2">
+								<label class="text-sm text-slate-600 w-24">Brand colour</label>
+								<input type="color" name="skin_custom" value={ defaultHex(cur.SkinCustom) }
+									x-on:input="document.documentElement.style.setProperty('--brand-600', $event.target.value)"
+									class="h-9 w-16 rounded border"/>
+								<span class="text-xs text-slate-400">shades derive automatically</span>
+							</div>
+							<div class="flex items-center gap-2">
+								<label class="text-sm text-slate-600 w-24">Card shape</label>
+								<select name="skin_radius" class="border rounded-lg px-3 py-2 text-sm">
+									for _, rd := range settings.Radii {
+										<option value={ rd } selected?={ rd == cur.SkinRadius }>{ rd }</option>
+									}
+								</select>
+								<span class="text-xs text-slate-400">Save to preview corners</span>
+							</div>
+						</div>
 					</div>
 					<div>
 						<label class="block text-sm font-medium text-slate-600 mb-1">Density</label>
@@ -45,12 +63,20 @@ templ AppearancePanel(cur *settings.Settings, saved bool) {
 					</div>
 					<div>
 						<label class="block text-sm font-medium text-slate-600 mb-1">Receipt style</label>
-						<select name="receipt_style" class="w-full border rounded-lg px-3 py-2.5">
+						<select name="receipt_style"
+							hx-get="/system/appearance/receipt-preview" hx-target="#rcpt-preview" hx-swap="innerHTML"
+							hx-trigger="change" hx-include="this"
+							class="w-full border rounded-lg px-3 py-2.5">
 							for _, r := range settings.ReceiptStyles {
 								<option value={ r } selected?={ r == cur.ReceiptStyle }>{ r }</option>
 							}
 						</select>
-						<p class="text-xs text-slate-400 mt-1">Applies to every printed receipt — core and plugins.</p>
+						<p class="text-xs text-slate-400 mt-1">Applies to every printed receipt — core and plugins. Sample below:</p>
+						<div id="rcpt-preview" class="mt-2"
+							hx-get={ "/system/appearance/receipt-preview?receipt_style=" + cur.ReceiptStyle }
+							hx-trigger="load" hx-swap="innerHTML">
+							@ReceiptPreview("")
+						</div>
 					</div>
 					<div class="flex gap-2 pt-2">
 						<button type="submit" class="flex-1 py-3 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700">Save</button>
@@ -60,4 +86,10 @@ templ AppearancePanel(cur *settings.Settings, saved bool) {
 			</div>
 		</div>
 	}
+}
+
+// ReceiptPreview shows the sample receipt text on faux thermal paper. Monospace
+// so the space-padded centering/rules line up exactly like the printer.
+templ ReceiptPreview(text string) {
+	<pre class="bg-white text-slate-800 border rounded-lg p-3 text-[11px] leading-tight font-mono whitespace-pre overflow-x-auto max-w-[300px] shadow-inner">{ text }</pre>
 }
