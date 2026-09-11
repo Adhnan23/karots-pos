@@ -91,7 +91,7 @@ func (h *cashierUI) MoneyReceipt(c echo.Context) error {
 	}
 	base := "/cashier/money-receipts/" + strconv.FormatInt(id, 10)
 	return response.RenderPage(c, cashierpages.MoneyReceiptPage(cashierpages.MoneyReceiptViewData{
-		Thermal:  shared.ThermalFrom(cfg.ReceiptWidth, c.QueryParam("size"), "Receipt "+rec.ReceiptNo, base, base+"/print"),
+		Thermal:  shared.ThermalFrom(cfg.ReceiptWidth, cfg.ReceiptStyle, c.QueryParam("size"), "Receipt "+rec.ReceiptNo, base, base+"/print"),
 		Symbol:   h.cashierSymbol(ctx),
 		Settings: *cfg,
 		Receipt:  *rec,
@@ -190,7 +190,7 @@ func (h *cashierUI) DebtReceiptView(c echo.Context) error {
 	}
 	base := "/cashier/receipts/credit/" + strconv.FormatInt(id, 10)
 	return response.RenderPage(c, cashierpages.DebtReceiptPage(cashierpages.DebtReceiptViewData{
-		Thermal:  shared.ThermalFrom(cfg.ReceiptWidth, c.QueryParam("size"), "Receipt "+r.ReceiptNo, base, base+"/print"),
+		Thermal:  shared.ThermalFrom(cfg.ReceiptWidth, cfg.ReceiptStyle, c.QueryParam("size"), "Receipt "+r.ReceiptNo, base, base+"/print"),
 		Symbol:   h.cashierSymbol(ctx),
 		Settings: *cfg,
 		Receipt:  *r,
@@ -264,7 +264,7 @@ func (h *cashierUI) WarrantyReceiptView(c echo.Context) error {
 	until, left := h.s.warrantyCover(ctx, cl)
 	base := "/cashier/receipts/warranty/" + strconv.FormatInt(id, 10)
 	return response.RenderPage(c, cashierpages.WarrantyReceiptPage(cashierpages.WarrantyReceiptViewData{
-		Thermal:       shared.ThermalFrom(cfg.ReceiptWidth, c.QueryParam("size"), "Warranty slip", base, "/cashier/warranty/"+strconv.FormatInt(id, 10)+"/print"),
+		Thermal:       shared.ThermalFrom(cfg.ReceiptWidth, cfg.ReceiptStyle, c.QueryParam("size"), "Warranty slip", base, "/cashier/warranty/"+strconv.FormatInt(id, 10)+"/print"),
 		Settings:      *cfg,
 		Claim:         *cl,
 		WarrantyUntil: until,

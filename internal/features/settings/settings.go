@@ -79,7 +79,7 @@ type Settings struct {
 var (
 	Skins         = []string{"default", "teal", "plum", "custom"}
 	Densities     = []string{"comfortable", "compact"}
-	ReceiptStyles = []string{"classic", "compact", "bold", "minimal"}
+	ReceiptStyles = []string{"classic", "modern", "boxed", "compact"}
 	Radii         = []string{"sharp", "rounded", "round"}
 )
 

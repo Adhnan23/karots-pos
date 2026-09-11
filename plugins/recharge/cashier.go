@@ -420,7 +420,7 @@ func (h *cashierUI) TxView(c echo.Context) error {
 		return err
 	}
 	base := "/cashier/recharge/tx/" + strconv.FormatInt(t.ID, 10)
-	thermal := shared.ThermalFrom(cfg.ReceiptWidth, c.QueryParam("size"), "Slip "+floatNo(t.ID), base, base+"/print")
+	thermal := shared.ThermalFrom(cfg.ReceiptWidth, cfg.ReceiptStyle, c.QueryParam("size"), "Slip "+floatNo(t.ID), base, base+"/print")
 	return response.RenderPage(c, TxSlipPage(*cfg, thermal, t))
 }
 
@@ -441,7 +441,7 @@ func (h *cashierUI) BillView(c echo.Context) error {
 		return err
 	}
 	base := "/cashier/recharge/bill/" + strconv.FormatInt(t.ID, 10)
-	thermal := shared.ThermalFrom(cfg.ReceiptWidth, c.QueryParam("size"), "Slip "+billNo(t.ID), base, base+"/print")
+	thermal := shared.ThermalFrom(cfg.ReceiptWidth, cfg.ReceiptStyle, c.QueryParam("size"), "Slip "+billNo(t.ID), base, base+"/print")
 	return response.RenderPage(c, BillSlipPage(*cfg, thermal, t))
 }
 

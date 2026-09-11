@@ -92,11 +92,11 @@ func buildSlip(cfg *settings.Settings, opts escpos.Options, d slipData) []byte {
 	var b bytes.Buffer
 	escpos.Init(&b)
 	escpos.Header(&b, *cfg, opts)
-	escpos.Title(&b, txLabel(d.Kind), w)
+	escpos.Title(&b, *cfg, txLabel(d.Kind), w)
 
 	// --- Meta (left, values right-aligned like the sale) ---
 	escpos.Left(&b)
-	escpos.Divider(&b, w)
+	escpos.Divider(&b, *cfg, w)
 	if strings.TrimSpace(d.ReceiptNo) != "" {
 		escpos.Line(&b, escpos.LeftRight("Receipt:", d.ReceiptNo, w))
 	}
@@ -119,7 +119,7 @@ func buildSlip(cfg *settings.Settings, opts escpos.Options, d slipData) []byte {
 	if strings.TrimSpace(d.Operator) != "" {
 		escpos.Line(&b, escpos.LeftRight("By:", escpos.ASCII(d.Operator), w))
 	}
-	escpos.Divider(&b, w)
+	escpos.Divider(&b, *cfg, w)
 
 	// --- Amounts (Total/Amount emphasized like the sale's TOTAL) ---
 	due := d.Amount
@@ -144,7 +144,7 @@ func buildSlip(cfg *settings.Settings, opts escpos.Options, d slipData) []byte {
 			escpos.Line(&b, escpos.LeftRight("Change", money.Format(sym, change), w))
 		}
 	}
-	escpos.Divider(&b, w)
+	escpos.Divider(&b, *cfg, w)
 
 	escpos.Footer(&b, *cfg)
 	return b.Bytes()

@@ -72,7 +72,7 @@ func (a *adminUI) MoneyReceipt(c echo.Context) error {
 	}
 	base := "/admin/money-receipts/" + strconv.FormatInt(id, 10)
 	return response.RenderPage(c, adminpages.MoneyReceiptPage(adminpages.MoneyReceiptData{
-		Thermal:  shared.ThermalFrom(cfg.ReceiptWidth, c.QueryParam("size"), "Receipt "+rec.ReceiptNo, base, base+"/print"),
+		Thermal:  shared.ThermalFrom(cfg.ReceiptWidth, cfg.ReceiptStyle, c.QueryParam("size"), "Receipt "+rec.ReceiptNo, base, base+"/print"),
 		Settings: *cfg,
 		Receipt:  *rec,
 	}))
@@ -185,11 +185,11 @@ func buildReceiptSlip(cfg *settings.Settings, r cashflow.Receipt, opts escpos.Op
 	var b bytes.Buffer
 	escpos.Init(&b)
 	escpos.Header(&b, *cfg, opts)
-	escpos.Title(&b, receiptKindLabel(r.Kind), w)
+	escpos.Title(&b, *cfg, receiptKindLabel(r.Kind), w)
 
 	// --- Meta (left, values right-aligned like the sale) ---
 	escpos.Left(&b)
-	escpos.Divider(&b, w)
+	escpos.Divider(&b, *cfg, w)
 	escpos.Line(&b, escpos.LeftRight("Receipt:", r.ReceiptNo, w))
 	escpos.Line(&b, escpos.LeftRight("Date:", r.CreatedAt.Format("2006-01-02 15:04"), w))
 	escpos.Line(&b, escpos.LeftRight("From:", escpos.ASCII(r.FromLabel), w))
@@ -200,7 +200,7 @@ func buildReceiptSlip(cfg *settings.Settings, r cashflow.Receipt, opts escpos.Op
 	if r.CreatedByName != nil && *r.CreatedByName != "" {
 		escpos.Line(&b, escpos.LeftRight("By:", escpos.ASCII(*r.CreatedByName), w))
 	}
-	escpos.Divider(&b, w)
+	escpos.Divider(&b, *cfg, w)
 
 	// --- Amount (emphasized, like the sale's TOTAL) ---
 	escpos.Emphasis(&b, true)
@@ -211,7 +211,7 @@ func buildReceiptSlip(cfg *settings.Settings, r cashflow.Receipt, opts escpos.Op
 			escpos.Line(&b, ln)
 		}
 	}
-	escpos.Divider(&b, w)
+	escpos.Divider(&b, *cfg, w)
 
 	// A money receipt is a cash hand-over, so keep a signature strip.
 	escpos.Center(&b)

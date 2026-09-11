@@ -8,7 +8,7 @@ import "strings"
 // the sales receipt. receiptWidth is Settings.ReceiptWidth ("58"/"80"); base is
 // the view's own URL (no query); printURL is the POST endpoint that re-sends the
 // ESC/POS slip.
-func ThermalFrom(receiptWidth, sizeParam, title, base, printURL string) ThermalData {
+func ThermalFrom(receiptWidth, receiptStyle, sizeParam, title, base, printURL string) ThermalData {
 	narrow := receiptWidth == "58"
 	if sizeParam != "" {
 		narrow = sizeParam == "58"
@@ -31,5 +31,17 @@ func ThermalFrom(receiptWidth, sizeParam, title, base, printURL string) ThermalD
 		PrintURL:   printURL + sep + "size=" + size,
 		SwitchURL:  switchURL,
 		SwitchText: switchText,
+		Style:      rstyle(receiptStyle),
+	}
+}
+
+// rstyle normalises a receipt-style key for the web view, defaulting blank or
+// unknown to classic so the .receipt[data-rstyle] CSS always has a real value.
+func rstyle(s string) string {
+	switch s {
+	case "modern", "boxed", "compact":
+		return s
+	default:
+		return "classic"
 	}
 }

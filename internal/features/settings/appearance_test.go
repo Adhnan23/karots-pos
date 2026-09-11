@@ -14,7 +14,7 @@ func TestValidAppearanceFallsBack(t *testing.T) {
 		{"unknown density → comfortable", ValidDensity("huge"), "comfortable"},
 		{"known density passes", ValidDensity("compact"), "compact"},
 		{"blank receipt → classic", ValidReceiptStyle(""), "classic"},
-		{"known receipt passes", ValidReceiptStyle("bold"), "bold"},
+		{"known receipt passes", ValidReceiptStyle("boxed"), "boxed"},
 	}
 	for _, c := range cases {
 		if c.got != c.want {
