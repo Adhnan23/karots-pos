@@ -3,6 +3,8 @@ package settings
 
 import (
 	"context"
+	"regexp"
+	"strings"
 	"time"
 
 	"karots-pos/internal/apperr"
@@ -57,8 +59,60 @@ type Settings struct {
 	// developer, who derives the support PIN from it — it is an identifier, not a
 	// secret, so showing it is safe and is the whole point.
 	InstallID string    `db:"install_id" json:"install_id"`
-	UpdatedAt time.Time `db:"updated_at" json:"updated_at"`
+	// Skin/Density/ReceiptStyle are the system-user-locked appearance (see
+	// migration 0068). Skin = vendor brand identity (colour/cards, light+dark);
+	// distinct from the per-user light/dark "theme" toggle. Only the system-user
+	// panel writes these; the admin Settings UPDATE never touches them.
+	Skin         string    `db:"skin"          json:"skin"`
+	Density      string    `db:"density"       json:"density"`
+	ReceiptStyle string    `db:"receipt_style" json:"receipt_style"`
+	// SkinCustom is a brand hex (e.g. "#7c3aed") used when Skin == "custom"; the
+	// full colour ramp is derived from it at render time. Blank otherwise.
+	SkinCustom string `db:"skin_custom" json:"skin_custom"`
+	// SkinRadius is the custom skin's card shape (sharp|rounded|round).
+	SkinRadius string    `db:"skin_radius" json:"skin_radius"`
+	UpdatedAt  time.Time `db:"updated_at" json:"updated_at"`
 }
+
+// Known appearance values. Anything else falls back to the first (default) so a
+// bad or blank value never renders blank.
+var (
+	Skins         = []string{"default", "teal", "plum", "custom"}
+	Densities     = []string{"comfortable", "compact"}
+	ReceiptStyles = []string{"classic", "compact", "bold", "minimal"}
+	Radii         = []string{"sharp", "rounded", "round"}
+)
+
+func ValidRadius(v string) string { return oneOf(v, Radii, "rounded") }
+
+// hexColor matches #RGB or #RRGGBB (the two forms an <input type=color> and
+// hand-typed values produce).
+var hexColor = regexp.MustCompile(`^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$`)
+
+// ValidHexColor returns the trimmed hex if it is a valid #RGB/#RRGGBB colour,
+// else "". A blank custom colour is allowed (the skin falls back to default
+// tokens), so callers treat "" as "no custom colour".
+func ValidHexColor(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" || !hexColor.MatchString(v) {
+		return ""
+	}
+	return v
+}
+
+func oneOf(v string, allowed []string, def string) string {
+	for _, a := range allowed {
+		if v == a {
+			return v
+		}
+	}
+	return def
+}
+
+// ValidSkin/ValidDensity/ValidReceiptStyle echo a known value or the default.
+func ValidSkin(v string) string         { return oneOf(v, Skins, "default") }
+func ValidDensity(v string) string      { return oneOf(v, Densities, "comfortable") }
+func ValidReceiptStyle(v string) string { return oneOf(v, ReceiptStyles, "classic") }
 
 type UpdateInput struct {
 	ShopName              string  `json:"shop_name"         form:"shop_name"         validate:"required,min=1,max=150"`
@@ -187,6 +241,15 @@ func (r *Repository) SetLogoData(ctx context.Context, dataURI string) error {
 	return err
 }
 
+// SetAppearance writes the three appearance columns. Callers pass already-
+// validated values (see ValidSkin/ValidDensity/ValidReceiptStyle).
+func (r *Repository) SetAppearance(ctx context.Context, skin, density, receiptStyle, skinCustom, skinRadius string) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE settings SET skin=$1, density=$2, receipt_style=$3, skin_custom=$4, skin_radius=$5 WHERE id = 1`,
+		skin, density, receiptStyle, skinCustom, skinRadius)
+	return err
+}
+
 type Service struct{ repo *Repository }
 
 func NewService(q db.Queryer) *Service { return &Service{repo: NewRepository(q)} }
@@ -205,6 +268,16 @@ func (s *Service) Get(ctx context.Context) (*Settings, error) {
 		return nil, apperr.Internal("failed to load settings", err)
 	}
 	return cfg, nil
+}
+
+// SetAppearance validates and stores the system-user-locked appearance. Unknown
+// values fall back to the safe defaults rather than erroring, so a stale form
+// can't brick the look.
+func (s *Service) SetAppearance(ctx context.Context, skin, density, receiptStyle, skinCustom, skinRadius string) (*Settings, error) {
+	if err := s.repo.SetAppearance(ctx, ValidSkin(skin), ValidDensity(density), ValidReceiptStyle(receiptStyle), ValidHexColor(skinCustom), ValidRadius(skinRadius)); err != nil {
+		return nil, apperr.Internal("failed to update appearance", err)
+	}
+	return s.Get(ctx)
 }
 
 func (s *Service) Update(ctx context.Context, in UpdateInput) (*Settings, error) {

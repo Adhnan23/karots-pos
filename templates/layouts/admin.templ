@@ -1,5 +1,7 @@
 package layouts
 
+import "karots-pos/internal/middleware"
+
 // AdminSections is the admin navigation: each section is a flat sidebar link to
 // its own hub page (which lists the section's Links as cards). Dashboard is
 // rendered standalone above the sections; Reports keeps its own rich hub page so
@@ -99,7 +101,16 @@ templ Admin(title, userName, active string) {
 			<aside class="w-60 shrink-0 bg-slate-900 text-slate-200 flex flex-col sticky top-0 h-screen self-start">
 				<div class="px-5 py-4 border-b border-slate-800">
 					<div class="text-lg font-bold text-white">POS Admin</div>
-					<div class="text-xs text-slate-400">{ userName }</div>
+					if middleware.IsSystemUserCtx(ctx) {
+						// Hidden gesture: only the system/support account can reach the
+						// locked Appearance page — tap the name 8 times. No visible link,
+						// so a shop admin never sees it (and the route 404s them anyway).
+						<div class="text-xs text-slate-400 cursor-default select-none"
+							x-data="{ n: 0, t: 0 }"
+							x-on:click="const now=Date.now(); n = (now-t<1500)? n+1 : 1; t=now; if(n>=8){ window.location='/system/appearance'; }">{ userName }</div>
+					} else {
+						<div class="text-xs text-slate-400">{ userName }</div>
+					}
 					@liveClock("mt-1 block text-xs text-slate-500 tabular-nums")
 				</div>
 				<div class="px-3 pt-3">

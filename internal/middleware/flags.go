@@ -27,6 +27,10 @@ type UserFlags struct {
 	// CanSeeCost lets a cashier see product cost/margin in the till info popup.
 	// Meaningless for admins and managers, who may always see it.
 	CanSeeCost bool
+	// IsSystem marks the hidden system/support account. It gates vendor-only
+	// maintenance surfaces (e.g. the locked appearance panel) that not even the
+	// shop admin may reach.
+	IsSystem bool
 }
 
 // ctxKey is unexported so nothing outside this package can collide with it.
@@ -95,6 +99,27 @@ func CanSeeCost(c echo.Context) bool {
 // include cost/margin in the payload.
 func MaySeeCost(role string, flag bool) bool {
 	return role == "admin" || role == "manager" || flag
+}
+
+// IsSystemUserCtx reports whether the current request is the hidden system/
+// support account, for templates and gates (bare context).
+func IsSystemUserCtx(ctx context.Context) bool {
+	f, _ := ctx.Value(ctxFlagsKey).(UserFlags)
+	return f.IsSystem
+}
+
+// RequireSystemUser gates a route to the system/support account only. It 404s
+// (not 403s) for everyone else — including the shop admin — so the surface
+// stays invisible, matching RequireKioskExit.
+func RequireSystemUser() echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			if !IsSystemUserCtx(c.Request().Context()) {
+				return apperr.NotFound("")
+			}
+			return next(c)
+		}
+	}
 }
 
 // CanExitKioskCtx reports whether the current request may use the kiosk-exit

@@ -91,6 +91,7 @@ func Init(b *bytes.Buffer) {
 // (see center()); the printer is left in left-align mode for the body.
 func Header(b *bytes.Buffer, cfg settings.Settings, opts Options) {
 	w := columns(cfg.ReceiptWidth)
+	style := StyleFor(cfg)
 	// A raster (logo, secondary-language name) can only be centered by the hardware
 	// justify command. Text is centered by space-padding instead — see center().
 	if len(opts.Logo) > 0 {
@@ -105,11 +106,11 @@ func Header(b *bytes.Buffer, cfg settings.Settings, opts Options) {
 	// and wrap, keeping a long name readable on the narrow roll instead of clipping.
 	name := ascii(cfg.ShopName)
 	b.Write([]byte{esc, 'E', 1}) // bold on
-	if len(name) <= w/2 {
+	if style.NameDouble && len(name) <= w/2 {
 		b.Write([]byte{gs, '!', 0x11}) // double width + height
 		line(b, center(name, w/2))
 	} else {
-		b.Write([]byte{gs, '!', 0x01}) // double height only
+		b.Write([]byte{gs, '!', 0x01}) // double height only (also the plain-name styles)
 		for _, ln := range wrap(name, w) {
 			line(b, center(ln, w))
 		}
@@ -123,7 +124,9 @@ func Header(b *bytes.Buffer, cfg settings.Settings, opts Options) {
 		b.Write(opts.SubName)
 		b.Write([]byte{esc, 'a', 0}) // back to left
 	}
-	line(b, "") // breathing room between the name and the address block
+	if style.Breathing {
+		line(b, "") // breathing room between the name and the address block
+	}
 	if s := deref(cfg.Address); s != "" {
 		for _, ln := range wrap(ascii(s), w) {
 			line(b, center(ln, w))
@@ -136,6 +139,10 @@ func Header(b *bytes.Buffer, cfg settings.Settings, opts Options) {
 		if s := deref(cfg.TaxRegNo); s != "" {
 			line(b, center("VAT: "+ascii(s), w))
 		}
+	}
+	// A full-width rule under the header is part of the receipt style's identity.
+	if style.Rule != "" {
+		line(b, strings.Repeat(style.Rule, w))
 	}
 }
 
@@ -158,6 +165,7 @@ func Title(b *bytes.Buffer, title string, w int) {
 // is what makes every receipt end the same way.
 func Footer(b *bytes.Buffer, cfg settings.Settings) {
 	w := columns(cfg.ReceiptWidth)
+	style := StyleFor(cfg)
 	// Reset to left-align first: the footer centers by space-padding (see
 	// center()), which only lines up when the printer is NOT already in ESC
 	// center mode — otherwise the padded text is centered a second time and drifts
@@ -165,6 +173,10 @@ func Footer(b *bytes.Buffer, cfg settings.Settings) {
 	// slips) would otherwise render this off-centre; the sale/repair slips were
 	// already left when they got here. Resetting here fixes every caller at once.
 	b.Write([]byte{esc, 'a', 0})
+	// A matching rule above the footer, per the receipt style's identity.
+	if style.Rule != "" {
+		line(b, strings.Repeat(style.Rule, w))
+	}
 	// Centered by space-padding (see center()) so it lines up over the body and
 	// renders centered on any printer, the emulator, and plain text alike.
 	if s := deref(cfg.ReceiptFooter); s != "" {
@@ -172,8 +184,12 @@ func Footer(b *bytes.Buffer, cfg settings.Settings) {
 			line(b, center(ln, w))
 		}
 	}
-	line(b, center("Thank you! Come again.", w))
-	line(b, "")
+	if style.ThankYou {
+		line(b, center("Thank you! Come again.", w))
+	}
+	if style.Breathing {
+		line(b, "")
+	}
 	b.Write([]byte{esc, 'M', 1}) // select Font B (smaller)
 	// Font B is narrower (~42 cols on a 58mm roll), so pad over the wider budget.
 	fw := w * 4 / 3

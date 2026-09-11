@@ -123,6 +123,7 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	}
 	admin := &adminUI{s: s, db: db}
 	cashier := &cashierUI{s: s}
+	system := &systemUI{settings: s.settings}
 
 	limiter := auth.NewLoginLimiter()
 	// Reject tokens whose user has since been deleted or deactivated. One small
@@ -154,6 +155,7 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 			// Admin or the hidden support account may escape the kiosk; a cashier
 			// never can.
 			CanExitKiosk: row.IsSystem || row.Role == "admin",
+			IsSystem:     row.IsSystem,
 		}, row.Active
 	})
 	jwt := middleware.JWTAuth(cfg.JWTSecret)
@@ -191,13 +193,21 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	e.GET("/account/pin", a.ChangePINForm, jwt, lockGuard)
 	e.POST("/account/pin", a.ChangePIN, jwt, lockGuard)
 
+	// System-user-only maintenance surfaces (vendor). Gated 404 for everyone
+	// else — the shop admin never sees these. Appearance is a locked shop-wide
+	// look the vendor sets at onboard.
+	sysg := e.Group("/system", jwt, lockGuard, pinGuard, middleware.RequireSystemUser(), withAppearance(s.settings))
+	sysg.GET("/appearance", system.AppearanceForm)
+	sysg.POST("/appearance", system.AppearanceSave)
+	sysg.GET("/appearance/receipt-preview", system.ReceiptPreview)
+
 	// Root: send the user to their home by role.
 	e.GET("/", func(c echo.Context) error {
 		return c.Redirect(http.StatusSeeOther, auth.HomePath(middleware.CurrentRole(c)))
 	}, jwt)
 
 	// Cashier (all authenticated roles)
-	cg := e.Group("/cashier", jwt, lockGuard, pinGuard)
+	cg := e.Group("/cashier", jwt, lockGuard, pinGuard, withAppearance(s.settings))
 	cg.GET("", cashier.POS)
 	cg.POST("/drawer/open", cashier.OpenDrawer)
 	cg.POST("/quick-item", cashier.QuickItem)
@@ -277,7 +287,7 @@ func RegisterUI(e *echo.Echo, db *sqlx.DB, cfg *config.Config, authSvc *auth.Ser
 	xg.POST("", cashier.ExpenseRecord)
 
 	// Admin (manager/admin)
-	ag := e.Group("/admin", jwt, lockGuard, pinGuard, middleware.RequireRole(auth.RoleAdmin, auth.RoleManager))
+	ag := e.Group("/admin", jwt, lockGuard, pinGuard, middleware.RequireRole(auth.RoleAdmin, auth.RoleManager), withAppearance(s.settings))
 	ag.GET("", admin.Dashboard)
 	ag.GET("/dashboard/charts", admin.DashboardCharts)
 	ag.GET("/products", admin.Products)
