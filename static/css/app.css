@@ -207,6 +207,32 @@ html.dark body.bg-slate-100 { background-color: #0b1120 !important; color: #e2e8
 .r-items { width: 100%; border-collapse: collapse; }
 .r-items td { padding: 0; vertical-align: top; }
 .r-item-name td { padding-top: 3px; font-weight: 600; }
+
+/* ---- Receipt styles (data-rstyle) — mirror the printed ESC/POS look so the
+   web view of a slip matches what the thermal printer produces. classic is the
+   default rules above (centered, dashed, double-height total). ---- */
+
+/* modern: left-aligned header, no rule lines (whitespace separation), plain
+   bold total. Airy, unlike the ruled classic. */
+.receipt[data-rstyle="modern"] { text-align: left; }
+.receipt[data-rstyle="modern"] .r-center { text-align: left; }
+.receipt[data-rstyle="modern"] .r-logo { margin-left: 0; }
+.receipt[data-rstyle="modern"] .r-hr { border-top: 0; margin: 7px 0; }
+.receipt[data-rstyle="modern"] .r-shop { font-size: 16px; }
+.receipt[data-rstyle="modern"] .r-total { font-size: 15px; }
+
+/* boxed: a framed slip with dotted separators and a reverse-video total bar. */
+.receipt[data-rstyle="boxed"] { border: 2px solid #000; }
+.receipt[data-rstyle="boxed"] .r-hr { border-top-style: dotted; }
+.receipt[data-rstyle="boxed"] .r-total { background: #000; color: #fff; padding: 2px 8px; margin: 8px 0; }
+
+/* compact: dense, small type, thin dotted rules, plain total — a corner-shop chit. */
+.receipt[data-rstyle="compact"] { font-size: 11px; line-height: 1.2; padding: 4px 6px; }
+.receipt[data-rstyle="compact"] .r-shop { font-size: 13px; }
+.receipt[data-rstyle="compact"] .r-hr { border-top-style: dotted; margin: 2px 0; }
+.receipt[data-rstyle="compact"] .r-total,
+.receipt[data-rstyle="compact"] .r-big { font-size: 13px; margin: 3px 0; }
+
 .r-print-btn { text-align: center; margin-top: 10px; }
 .r-print-btn button {
   padding: 8px 18px;

@@ -1,7 +1,6 @@
 package web
 
 import (
-	"karots-pos/internal/escpos"
 	"karots-pos/internal/features/settings"
 	"karots-pos/internal/response"
 	systempages "karots-pos/templates/pages/system"
@@ -35,15 +34,15 @@ func (h *systemUI) AppearanceSave(c echo.Context) error {
 	return response.RenderPage(c, systempages.AppearancePanel(cur, true))
 }
 
-// ReceiptPreview renders a sample receipt as plain text for the chosen style
-// (real Header/Footer output, control codes stripped) so the picker shows how
-// each style prints. Uses the shop's real name/address with the style overridden.
+// ReceiptPreview renders a sample receipt for the chosen style using the real
+// web-receipt markup/CSS (data-rstyle), so the picker shows exactly how each
+// style looks on screen — bold name, centering, framing, reverse-video total.
+// Uses the shop's real name with the style overridden.
 func (h *systemUI) ReceiptPreview(c echo.Context) error {
 	cur, err := h.settings.Get(c.Request().Context())
 	if err != nil {
 		return err
 	}
-	cfg := *cur
-	cfg.ReceiptStyle = settings.ValidReceiptStyle(c.QueryParam("receipt_style"))
-	return response.RenderFragment(c, systempages.ReceiptPreview(escpos.SamplePreview(cfg)))
+	style := settings.ValidReceiptStyle(c.QueryParam("receipt_style"))
+	return response.RenderFragment(c, systempages.ReceiptPreview(style, cur.ShopName))
 }

@@ -145,7 +145,7 @@ func (a *adminUI) WarrantyReceiptView(c echo.Context) error {
 	until, left := a.s.warrantyCover(ctx, cl)
 	base := "/admin/receipts/warranty/" + strconv.FormatInt(id, 10)
 	return response.RenderPage(c, adminpages.RcWarrantyReceiptPage(adminpages.RcWarrantyViewData{
-		Thermal:       shared.ThermalFrom(cfg.ReceiptWidth, c.QueryParam("size"), "Warranty slip", base, base+"/print"),
+		Thermal:       shared.ThermalFrom(cfg.ReceiptWidth, cfg.ReceiptStyle, c.QueryParam("size"), "Warranty slip", base, base+"/print"),
 		Settings:      *cfg,
 		Claim:         *cl,
 		WarrantyUntil: until,
@@ -187,7 +187,7 @@ func (a *adminUI) DebtReceiptView(c echo.Context) error {
 	}
 	base := "/admin/receipts/credit/" + strconv.FormatInt(id, 10)
 	return response.RenderPage(c, adminpages.RcDebtReceiptPage(adminpages.RcDebtViewData{
-		Thermal:  shared.ThermalFrom(cfg.ReceiptWidth, c.QueryParam("size"), "Receipt "+r.ReceiptNo, base, base+"/print"),
+		Thermal:  shared.ThermalFrom(cfg.ReceiptWidth, cfg.ReceiptStyle, c.QueryParam("size"), "Receipt "+r.ReceiptNo, base, base+"/print"),
 		Symbol:   a.symbol(ctx),
 		Settings: *cfg,
 		Receipt:  *r,

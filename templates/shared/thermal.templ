@@ -11,6 +11,10 @@ type ThermalData struct {
 	PrintURL   string // POST endpoint that (re)prints the thermal slip
 	SwitchURL  string // GET link that toggles the paper size
 	SwitchText string // label for the switch link, e.g. "Switch to 58mm"
+	// Style is the system-locked receipt style key (classic/modern/boxed/compact);
+	// stamped as data-rstyle on the .receipt shell so app.css restyles the web view
+	// to match the printed slip. Blank renders as classic.
+	Style string
 }
 
 // thermalStyle is the per-receipt print stylesheet so the printed page matches the
@@ -40,7 +44,7 @@ templ ThermalReceipt(d ThermalData) {
 			@templ.Raw("<script>function printThermal(){var m=document.getElementById('printmsg');if(m)m.textContent='Printing…';fetch('" + d.PrintURL + "',{method:'POST',credentials:'same-origin'}).then(function(r){if(m)m.textContent=r.ok?'✓ Sent to printer':'Print failed';}).catch(function(){if(m)m.textContent='Print failed';});}</script>")
 		</head>
 		<body class="receipt-body">
-			<div class={ "receipt", templ.KV("narrow", d.Narrow) } id="receipt">
+			<div class={ "receipt", templ.KV("narrow", d.Narrow) } id="receipt" data-rstyle={ rstyle(d.Style) }>
 				{ children... }
 				<div class="r-print-btn">
 					<button onclick="printThermal()">🖨 Print</button>

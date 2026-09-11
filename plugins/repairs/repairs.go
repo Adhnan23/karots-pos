@@ -153,9 +153,9 @@ func repairSlipESCPOS(cfg settings.Settings, d *Detail, sym string, opts escpos.
 	var b bytes.Buffer
 	escpos.Init(&b)
 	escpos.Header(&b, cfg, opts)
-	escpos.Title(&b, "REPAIR", w)
+	escpos.Title(&b, cfg, "REPAIR", w)
 	escpos.Left(&b)
-	escpos.Divider(&b, w)
+	escpos.Divider(&b, cfg, w)
 	escpos.Line(&b, escpos.LeftRight("Ticket:", d.Job.TicketNo, w))
 	escpos.Line(&b, escpos.LeftRight("Date:", datetime.DateTime(d.Job.CreatedAt), w))
 	if dev := strings.TrimSpace(d.Job.RepairType + " " + d.Job.DeviceModel); dev != "" {
@@ -172,7 +172,7 @@ func repairSlipESCPOS(cfg settings.Settings, d *Detail, sym string, opts escpos.
 	if mode != "parts" && d.Job.WarrantyUntil != nil {
 		escpos.Line(&b, escpos.LeftRight("Warranty until:", datetime.Date(*d.Job.WarrantyUntil), w))
 	}
-	escpos.Divider(&b, w)
+	escpos.Divider(&b, cfg, w)
 	for _, p := range d.Parts {
 		name := p.ProductName
 		if mode == "parts" && p.WarrantyDays > 0 {
@@ -185,7 +185,7 @@ func repairSlipESCPOS(cfg settings.Settings, d *Detail, sym string, opts escpos.
 	for _, ch := range d.Charges {
 		escpos.Line(&b, escpos.LeftRight(escpos.ASCII(ch.Label), money.Display(ch.Amount), w))
 	}
-	escpos.Divider(&b, w)
+	escpos.Divider(&b, cfg, w)
 	total, dep, bal := JobTotals(d)
 	escpos.Emphasis(&b, true)
 	escpos.Line(&b, escpos.LeftRight("TOTAL", money.Format(sym, total), w))
@@ -206,9 +206,9 @@ func advanceSlipESCPOS(cfg settings.Settings, d *Detail, sym string, amount deci
 	var b bytes.Buffer
 	escpos.Init(&b)
 	escpos.Header(&b, cfg, opts)
-	escpos.Title(&b, "DEPOSIT", w)
+	escpos.Title(&b, cfg, "DEPOSIT", w)
 	escpos.Left(&b)
-	escpos.Divider(&b, w)
+	escpos.Divider(&b, cfg, w)
 	escpos.Line(&b, escpos.LeftRight("Ticket:", d.Job.TicketNo, w))
 	escpos.Line(&b, escpos.LeftRight("Date:", datetime.DateTime(time.Now()), w))
 	if dev := strings.TrimSpace(d.Job.RepairType + " " + d.Job.DeviceModel); dev != "" {
@@ -217,7 +217,7 @@ func advanceSlipESCPOS(cfg settings.Settings, d *Detail, sym string, amount deci
 	if d.Job.CustomerName != "" {
 		escpos.Line(&b, escpos.LeftRight("Customer:", escpos.ASCII(d.Job.CustomerName), w))
 	}
-	escpos.Divider(&b, w)
+	escpos.Divider(&b, cfg, w)
 	total, dep, bal := JobTotals(d)
 	escpos.Emphasis(&b, true)
 	escpos.Line(&b, escpos.LeftRight("DEPOSIT PAID", money.Format(sym, amount), w))

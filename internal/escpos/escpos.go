@@ -8,6 +8,7 @@ package escpos
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -100,19 +101,26 @@ func Header(b *bytes.Buffer, cfg settings.Settings, opts Options) {
 		b.Write([]byte{esc, 'a', 0}) // back to left for the padded text
 		line(b, "")
 	}
+	name := ascii(cfg.ShopName)
+	// Framed look: an ASCII +==+ / | … | box around the whole branding block. Its
+	// column maths only hold at normal glyph size, so a framed header never uses
+	// the double-size name — the frame itself is the emphasis.
+	if style.Framed {
+		framedHeader(b, w, name, cfg, opts)
+		return
+	}
 	// Shop name: a double-WIDTH glyph is 2 columns, so its budget is only w/2
 	// (16 on a 58mm roll) — center it over w/2. A name wider than that runs off the
 	// edge, so drop to double-height-only (full-width glyphs, still bold and tall)
 	// and wrap, keeping a long name readable on the narrow roll instead of clipping.
-	name := ascii(cfg.ShopName)
 	b.Write([]byte{esc, 'E', 1}) // bold on
 	if style.NameDouble && len(name) <= w/2 {
 		b.Write([]byte{gs, '!', 0x11}) // double width + height
-		line(b, center(name, w/2))
+		line(b, hpad(name, w, style, w/2))
 	} else {
 		b.Write([]byte{gs, '!', 0x01}) // double height only (also the plain-name styles)
 		for _, ln := range wrap(name, w) {
-			line(b, center(ln, w))
+			line(b, hpad(ln, w, style, w))
 		}
 	}
 	b.Write([]byte{gs, '!', 0x00}) // normal size
@@ -129,33 +137,84 @@ func Header(b *bytes.Buffer, cfg settings.Settings, opts Options) {
 	}
 	if s := deref(cfg.Address); s != "" {
 		for _, ln := range wrap(ascii(s), w) {
-			line(b, center(ln, w))
+			line(b, hpad(ln, w, style, w))
 		}
 	}
 	if s := deref(cfg.Phone); s != "" {
-		line(b, center("Tel: "+ascii(s), w))
+		line(b, hpad("Tel: "+ascii(s), w, style, w))
 	}
 	if cfg.TaxRegistered {
 		if s := deref(cfg.TaxRegNo); s != "" {
-			line(b, center("VAT: "+ascii(s), w))
+			line(b, hpad("VAT: "+ascii(s), w, style, w))
 		}
 	}
 	// A full-width rule under the header is part of the receipt style's identity.
-	if style.Rule != "" {
-		line(b, strings.Repeat(style.Rule, w))
+	if style.HeaderRule != "" {
+		line(b, strings.Repeat(style.HeaderRule, w))
 	}
 }
 
-// Title writes a bold, star-wrapped receipt title (e.g. "*** REFUND ***") under
-// the header, centered by space-padding over w columns. An empty title prints
-// nothing — a sale needs no title line.
-func Title(b *bytes.Buffer, title string, w int) {
+// hpad places a header string per the style: left-flush (modern) or centered
+// (everything else) over the given budget. Keeps every header line consistent.
+func hpad(s string, w int, style ReceiptStyle, budget int) string {
+	if style.HeaderLeft {
+		return s
+	}
+	return center(s, budget)
+}
+
+// framedHeader draws the branding block inside an ASCII box, normal glyph size
+// so the borders line up on the roll. Name in bold, address/phone/VAT stacked
+// inside the same frame.
+func framedHeader(b *bytes.Buffer, w int, name string, cfg settings.Settings, opts Options) {
+	inner := w - 2 // room between the "|" side borders
+	border := func() { line(b, "+"+strings.Repeat("=", inner)+"+") }
+	// center() only left-pads; a box needs the content padded to the FULL inner
+	// width so the closing "|" lands on the right edge, not against the text.
+	boxed := func(s string) { line(b, "|"+centerBox(s, inner)+"|") }
+	border()
+	b.Write([]byte{esc, 'E', 1}) // bold name
+	for _, ln := range wrap(name, inner) {
+		boxed(ln)
+	}
+	b.Write([]byte{esc, 'E', 0})
+	if s := deref(cfg.Address); s != "" {
+		for _, ln := range wrap(ascii(s), inner) {
+			boxed(ln)
+		}
+	}
+	if s := deref(cfg.Phone); s != "" {
+		boxed("Tel: " + ascii(s))
+	}
+	if cfg.TaxRegistered {
+		if s := deref(cfg.TaxRegNo); s != "" {
+			boxed("VAT: " + ascii(s))
+		}
+	}
+	border()
+	// Secondary-language raster can't live inside the ASCII box; center it under.
+	if len(opts.SubName) > 0 {
+		b.Write([]byte{esc, 'a', 1})
+		b.Write(opts.SubName)
+		b.Write([]byte{esc, 'a', 0})
+	}
+}
+
+// Title writes a bold, decorated receipt title (e.g. "*** REFUND ***" or
+// "[ REFUND ]" depending on the style) under the header, centered by
+// space-padding over w columns. An empty title prints nothing — a sale needs no
+// title line. cfg selects the decoration (ReceiptStyle.TitleDeco).
+func Title(b *bytes.Buffer, cfg settings.Settings, title string, w int) {
 	if strings.TrimSpace(title) == "" {
 		return
 	}
+	deco := StyleFor(cfg).TitleDeco
+	if !strings.Contains(deco, "%s") {
+		deco = "%s"
+	}
 	line(b, "")
 	b.Write([]byte{esc, 'E', 1})
-	line(b, center("*** "+strings.ToUpper(ascii(title))+" ***", w))
+	line(b, center(fmt.Sprintf(deco, strings.ToUpper(ascii(title))), w))
 	b.Write([]byte{esc, 'E', 0})
 }
 
@@ -174,8 +233,8 @@ func Footer(b *bytes.Buffer, cfg settings.Settings) {
 	// already left when they got here. Resetting here fixes every caller at once.
 	b.Write([]byte{esc, 'a', 0})
 	// A matching rule above the footer, per the receipt style's identity.
-	if style.Rule != "" {
-		line(b, strings.Repeat(style.Rule, w))
+	if style.HeaderRule != "" {
+		line(b, strings.Repeat(style.HeaderRule, w))
 	}
 	// Centered by space-padding (see center()) so it lines up over the body and
 	// renders centered on any printer, the emulator, and plain text alike.
@@ -204,9 +263,11 @@ func Footer(b *bytes.Buffer, cfg settings.Settings) {
 // Exported thin wrappers so slip builders in other packages (money receipts,
 // recharge) render rows with exactly the same alignment as the sale receipt.
 func Line(b *bytes.Buffer, s string)              { line(b, s) }
-func Divider(b *bytes.Buffer, w int)              { divider(b, w) }
+func Divider(b *bytes.Buffer, cfg settings.Settings, w int) { divider(b, cfg, w) }
 func LeftRight(l, r string, w int) string         { return leftRight(l, r, w) }
-func BigLine(b *bytes.Buffer, l, r string, w int) { bigLine(b, l, r, w) }
+func BigLine(b *bytes.Buffer, cfg settings.Settings, l, r string, w int) {
+	bigLine(b, cfg, l, r, w)
+}
 func Columns(width string) int                    { return columns(width) }
 func Wrap(s string, w int) []string               { return wrap(s, w) }
 func Left(b *bytes.Buffer)                         { b.Write([]byte{esc, 'a', 0}) }
@@ -236,14 +297,14 @@ func Document(d sales.Detail, cfg settings.Settings, opts Options) []byte {
 
 	// --- Meta (left) ---
 	b.Write([]byte{esc, 'a', 0}) // left
-	divider(&b, w)
+	divider(&b, cfg, w)
 	line(&b, leftRight("Receipt:", d.Sale.ReceiptNo, w))
 	line(&b, leftRight("Date:", datetime.DateTime(d.Sale.CreatedAt), w))
 	line(&b, leftRight("Cashier:", ascii(d.Sale.CashierName), w))
 	if d.Sale.CustomerName != nil && *d.Sale.CustomerName != "" {
 		line(&b, leftRight("Customer:", ascii(*d.Sale.CustomerName), w))
 	}
-	divider(&b, w)
+	divider(&b, cfg, w)
 
 	// --- Items ---
 	itemDisc := decimal.Zero
@@ -277,7 +338,7 @@ func Document(d sales.Detail, cfg settings.Settings, opts Options) []byte {
 			}
 		}
 	}
-	divider(&b, w)
+	divider(&b, cfg, w)
 
 	// --- Totals ---
 	// Sale.Discount holds item discounts + bill discount; split them so the
@@ -294,7 +355,7 @@ func Document(d sales.Detail, cfg settings.Settings, opts Options) []byte {
 	}
 	// TOTAL — emphasized and set off with blank lines so it stands out.
 	line(&b, "")
-	bigLine(&b, "TOTAL", money.Format(sym, d.Sale.Total), w)
+	bigLine(&b, cfg, "TOTAL", money.Format(sym, d.Sale.Total), w)
 	if d.Sale.Discount.IsPositive() {
 		line(&b, leftRight("You saved", money.Format(sym, d.Sale.Discount), w))
 	}
@@ -316,17 +377,17 @@ func Document(d sales.Detail, cfg settings.Settings, opts Options) []byte {
 	switch {
 	case d.Sale.Status == "credit" && thisDue.IsPositive():
 		line(&b, "")
-		bigLine(&b, "DUE", money.Format(sym, thisDue), w)
+		bigLine(&b, cfg, "DUE", money.Format(sym, thisDue), w)
 		// Total due = the customer's running balance. Fall back to this sale's
 		// due if the balance lookup was unavailable, so we never print 0.00.
 		totalDue := opts.CustomerDue
 		if totalDue.LessThan(thisDue) {
 			totalDue = thisDue
 		}
-		bigLine(&b, "TOTAL DUE", money.Format(sym, totalDue), w)
+		bigLine(&b, cfg, "TOTAL DUE", money.Format(sym, totalDue), w)
 	case d.Sale.ChangeGiven.IsPositive():
 		line(&b, "")
-		bigLine(&b, "CHANGE", money.Format(sym, d.Sale.ChangeGiven), w)
+		bigLine(&b, cfg, "CHANGE", money.Format(sym, d.Sale.ChangeGiven), w)
 	}
 	// Rounding: cash the customer left behind (paid - change - total). It stayed
 	// in the drawer; shown here so the slip explains why cash out < change due —
@@ -340,7 +401,7 @@ func Document(d sales.Detail, cfg settings.Settings, opts Options) []byte {
 			line(&b, leftRight("Change kept", money.Format(sym, cash), w))
 		}
 	}
-	divider(&b, w)
+	divider(&b, cfg, w)
 
 	Footer(&b, cfg)
 	return b.Bytes()
@@ -371,10 +432,10 @@ func TestDocument(cfg settings.Settings) []byte {
 	line(&b, "")
 
 	b.Write([]byte{esc, 'a', 0}) // left
-	divider(&b, w)
+	divider(&b, cfg, w)
 	line(&b, leftRight("Width:", cfg.ReceiptWidth+"mm ("+strconv.Itoa(w)+" cols)", w))
 	line(&b, leftRight("Printed:", datetime.DateTime(time.Now()), w))
-	divider(&b, w)
+	divider(&b, cfg, w)
 
 	b.Write([]byte{esc, 'a', 1}) // center
 	line(&b, "If you can read this,")
@@ -398,11 +459,11 @@ func ReturnDocument(rr sales.ReturnReceipt, cfg settings.Settings, opts Options)
 	var b bytes.Buffer
 	Init(&b)
 	Header(&b, cfg, opts)
-	Title(&b, "REFUND", w)
+	Title(&b, cfg, "REFUND", w)
 
 	// --- Meta (left) ---
 	b.Write([]byte{esc, 'a', 0})
-	divider(&b, w)
+	divider(&b, cfg, w)
 	line(&b, leftRight("Orig. receipt:", rr.ReceiptNo, w))
 	line(&b, leftRight("Date:", datetime.DateTime(rr.CreatedAt), w))
 	if rr.CustomerName != nil && *rr.CustomerName != "" {
@@ -413,7 +474,7 @@ func ReturnDocument(rr sales.ReturnReceipt, cfg settings.Settings, opts Options)
 			line(&b, ln)
 		}
 	}
-	divider(&b, w)
+	divider(&b, cfg, w)
 
 	// --- Returned items ---
 	for _, it := range rr.Items {
@@ -423,7 +484,7 @@ func ReturnDocument(rr sales.ReturnReceipt, cfg settings.Settings, opts Options)
 		qty := money.Display(it.Quantity) + " " + ascii(it.UnitAbbr)
 		line(&b, leftRight("  "+qty, money.Format(sym, it.Refund), w))
 	}
-	divider(&b, w)
+	divider(&b, cfg, w)
 
 	// --- Totals ---
 	b.Write([]byte{esc, 'E', 1})
@@ -435,7 +496,7 @@ func ReturnDocument(rr sales.ReturnReceipt, cfg settings.Settings, opts Options)
 	if rr.RemainingBalance != nil {
 		line(&b, leftRight("Balance due", money.Format(sym, *rr.RemainingBalance), w))
 	}
-	divider(&b, w)
+	divider(&b, cfg, w)
 
 	// --- Footer (centered) ---
 	b.Write([]byte{esc, 'a', 1})
@@ -464,11 +525,11 @@ func WarrantyDocument(s WarrantySlip, cfg settings.Settings, opts Options) []byt
 	var b bytes.Buffer
 	Init(&b)
 	Header(&b, cfg, opts)
-	Title(&b, "WARRANTY REPLACEMENT", w)
+	Title(&b, cfg, "WARRANTY REPLACEMENT", w)
 
 	// --- Body (left) ---
 	b.Write([]byte{esc, 'a', 0})
-	divider(&b, w)
+	divider(&b, cfg, w)
 	line(&b, leftRight("Date:", datetime.Date(time.Now()), w))
 	if s.CustomerName != "" {
 		line(&b, leftRight("Customer:", ascii(s.CustomerName), w))
@@ -476,7 +537,7 @@ func WarrantyDocument(s WarrantySlip, cfg settings.Settings, opts Options) []byt
 	for _, ln := range wrap("Product: "+ascii(s.ProductName), w) {
 		line(&b, ln)
 	}
-	divider(&b, w)
+	divider(&b, cfg, w)
 	for _, ln := range wrap("Returned serial: "+ascii(s.OldSerial), w) {
 		line(&b, ln)
 	}
@@ -492,7 +553,7 @@ func WarrantyDocument(s WarrantySlip, cfg settings.Settings, opts Options) []byt
 		}
 		line(&b, leftRight("Warranty until:", ascii(until), w))
 	}
-	divider(&b, w)
+	divider(&b, cfg, w)
 
 	// --- Footer (centered) ---
 	b.Write([]byte{esc, 'a', 1})
@@ -522,17 +583,17 @@ func DebtDocument(s DebtSlip, cfg settings.Settings, opts Options) []byte {
 	var b bytes.Buffer
 	Init(&b)
 	Header(&b, cfg, opts)
-	Title(&b, "CREDIT PAYMENT", w)
+	Title(&b, cfg, "CREDIT PAYMENT", w)
 	// meta
 	b.Write([]byte{esc, 'a', 0})
-	divider(&b, w)
+	divider(&b, cfg, w)
 	line(&b, leftRight("Receipt:", s.ReceiptNo, w))
 	line(&b, leftRight("Date:", s.Date, w))
 	line(&b, leftRight("Customer:", ascii(s.CustomerName), w))
 	if s.CustomerPhone != "" {
 		line(&b, leftRight("Phone:", ascii(s.CustomerPhone), w))
 	}
-	divider(&b, w)
+	divider(&b, cfg, w)
 	// amount
 	b.Write([]byte{esc, 'E', 1})
 	line(&b, leftRight("Amount paid", money.Format(sym, s.Amount), w))
@@ -540,13 +601,13 @@ func DebtDocument(s DebtSlip, cfg settings.Settings, opts Options) []byte {
 	line(&b, leftRight("Method:", s.Method, w))
 	// balances (omitted for backfilled rows)
 	if s.BalanceBefore != nil && s.BalanceAfter != nil {
-		divider(&b, w)
+		divider(&b, cfg, w)
 		line(&b, leftRight("Previous balance", money.Format(sym, *s.BalanceBefore), w))
 		b.Write([]byte{esc, 'E', 1})
 		line(&b, leftRight("Remaining balance", money.Format(sym, *s.BalanceAfter), w))
 		b.Write([]byte{esc, 'E', 0})
 	}
-	divider(&b, w)
+	divider(&b, cfg, w)
 	b.Write([]byte{esc, 'a', 1})
 	if s.CashierName != "" {
 		line(&b, "Served by: "+ascii(s.CashierName))
@@ -596,18 +657,46 @@ func line(b *bytes.Buffer, s string) {
 	b.WriteByte('\n')
 }
 
-func divider(b *bytes.Buffer, w int) { line(b, strings.Repeat("-", w)) }
+// divider draws the body separator between sections, per the receipt style —
+// the receipt's visual skeleton and its biggest differentiator (a solid dash
+// rule, a blank gap, a dotted line, or a short rule). Takes cfg so every core
+// and plugin slip that calls the exported Divider gets the shop's chosen look.
+func divider(b *bytes.Buffer, cfg settings.Settings, w int) {
+	switch StyleFor(cfg).Body {
+	case "blank": // modern: whitespace instead of a rule
+		line(b, "")
+	case "dots": // boxed: a dotted separator
+		line(b, strings.Repeat(".", w))
+	case "compact": // compact chit: a short centered rule
+		line(b, center(strings.Repeat("-", w/2), w))
+	default: // dash (classic)
+		line(b, strings.Repeat("-", w))
+	}
+}
 
-// bigLine prints a label/amount line in double-height bold text for emphasis
-// (TOTAL, CHANGE, DUE, TOTAL DUE). Double-height only (not double-width) keeps
-// the character count the same, so leftRight's padding still lines up on the
-// 48/58-column roll without risk of overflow.
-func bigLine(b *bytes.Buffer, l, r string, w int) {
-	b.Write([]byte{esc, 'E', 1})   // bold on
-	b.Write([]byte{gs, '!', 0x01}) // double height
-	line(b, leftRight(l, r, w))
-	b.Write([]byte{gs, '!', 0x00}) // normal size
-	b.Write([]byte{esc, 'E', 0})   // bold off
+// bigLine prints a label/amount line emphasised per the style's TotalMode:
+// "double" (double-height bold, the character count stays the same so
+// leftRight's padding still lines up), "reverse" (a white-on-black bar), or
+// "bold" (a plain bold single line). Used for TOTAL, CHANGE, DUE, TOTAL DUE.
+func bigLine(b *bytes.Buffer, cfg settings.Settings, l, r string, w int) {
+	switch StyleFor(cfg).TotalMode {
+	case "reverse": // white-on-black bar (GS B 1 … GS B 0)
+		b.Write([]byte{esc, 'E', 1})
+		b.Write([]byte{gs, 'B', 1})
+		line(b, leftRight(l, r, w))
+		b.Write([]byte{gs, 'B', 0})
+		b.Write([]byte{esc, 'E', 0})
+	case "bold": // plain bold single line
+		b.Write([]byte{esc, 'E', 1})
+		line(b, leftRight(l, r, w))
+		b.Write([]byte{esc, 'E', 0})
+	default: // "double": double-height bold
+		b.Write([]byte{esc, 'E', 1})   // bold on
+		b.Write([]byte{gs, '!', 0x01}) // double height
+		line(b, leftRight(l, r, w))
+		b.Write([]byte{gs, '!', 0x00}) // normal size
+		b.Write([]byte{esc, 'E', 0})   // bold off
+	}
 }
 
 // center pads s with leading spaces so its text sits centered within a w-column
@@ -621,6 +710,18 @@ func center(s string, w int) string {
 		return s
 	}
 	return strings.Repeat(" ", (w-len(s))/2) + s
+}
+
+// centerBox centers s within EXACTLY w columns, padding both sides (unlike
+// center, which only left-pads). Used for framed-header lines so the right
+// border sits flush at the edge. Overlong strings are clipped to w.
+func centerBox(s string, w int) string {
+	if len(s) >= w {
+		return s[:w]
+	}
+	total := w - len(s)
+	left := total / 2
+	return strings.Repeat(" ", left) + s + strings.Repeat(" ", total-left)
 }
 
 // leftRight pads a left and right label out to w columns. The left side is

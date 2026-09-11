@@ -12,9 +12,8 @@ import (
 // stamps data-skin/data-density on <html>); Save persists it shop-wide.
 templ AppearancePanel(cur *settings.Settings, saved bool) {
 	@layouts.Base("Appearance") {
-		<div class="min-h-full flex items-center justify-center p-6"
-			x-data={ "{ skin: '" + cur.Skin + "' }" }>
-			<div class="w-full max-w-lg bg-white rounded-2xl shadow-sm p-8">
+		<div class="min-h-full p-6" x-data={ "{ skin: '" + cur.Skin + "' }" }>
+			<div class="max-w-5xl mx-auto">
 				<h1 class="text-2xl font-bold text-slate-800">Appearance</h1>
 				<p class="text-slate-500 mt-1 text-sm">
 					System-only. Sets the shop's locked look and receipt style. The shop admin cannot change this.
@@ -22,65 +21,74 @@ templ AppearancePanel(cur *settings.Settings, saved bool) {
 				if saved {
 					<div class="mt-4 rounded-lg bg-emerald-50 text-emerald-700 px-4 py-3 text-sm">Saved. The new look is live shop-wide.</div>
 				}
-				<form method="post" action="/system/appearance" class="mt-6 space-y-5">
-					<div>
-						<label class="block text-sm font-medium text-slate-600 mb-1">Skin (brand colour + card shape)</label>
-						<select name="skin" x-model="skin"
-							x-on:change="document.documentElement.setAttribute('data-skin', skin)"
-							class="w-full border rounded-lg px-3 py-2.5">
-							for _, s := range settings.Skins {
-								<option value={ s } selected?={ s == cur.Skin }>{ s }</option>
-							}
-						</select>
-						<div class="mt-2 space-y-2" x-show="skin === 'custom'">
-							<div class="flex items-center gap-2">
-								<label class="text-sm text-slate-600 w-24">Brand colour</label>
-								<input type="color" name="skin_custom" value={ defaultHex(cur.SkinCustom) }
-									x-on:input="document.documentElement.style.setProperty('--brand-600', $event.target.value)"
-									class="h-9 w-16 rounded border"/>
-								<span class="text-xs text-slate-400">shades derive automatically</span>
-							</div>
-							<div class="flex items-center gap-2">
-								<label class="text-sm text-slate-600 w-24">Card shape</label>
-								<select name="skin_radius" class="border rounded-lg px-3 py-2 text-sm">
-									for _, rd := range settings.Radii {
-										<option value={ rd } selected?={ rd == cur.SkinRadius }>{ rd }</option>
-									}
-								</select>
-								<span class="text-xs text-slate-400">Save to preview corners</span>
+				<form method="post" action="/system/appearance"
+					class="mt-6 grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(320px,auto)]">
+					<!-- Left: the controls -->
+					<div class="bg-white rounded-2xl shadow-sm p-6 space-y-5">
+						<div>
+							<label class="block text-sm font-medium text-slate-600 mb-1">Skin (brand colour + card shape)</label>
+							<select name="skin" x-model="skin"
+								x-on:change="document.documentElement.setAttribute('data-skin', skin)"
+								class="w-full border rounded-lg px-3 py-2.5">
+								for _, s := range settings.Skins {
+									<option value={ s } selected?={ s == cur.Skin }>{ s }</option>
+								}
+							</select>
+							<div class="mt-2 space-y-2" x-show="skin === 'custom'">
+								<div class="flex items-center gap-2">
+									<label class="text-sm text-slate-600 w-24">Brand colour</label>
+									<input type="color" name="skin_custom" value={ defaultHex(cur.SkinCustom) }
+										x-on:input="document.documentElement.style.setProperty('--brand-600', $event.target.value)"
+										class="h-9 w-16 rounded border"/>
+									<span class="text-xs text-slate-400">shades derive automatically</span>
+								</div>
+								<div class="flex items-center gap-2">
+									<label class="text-sm text-slate-600 w-24">Card shape</label>
+									<select name="skin_radius" class="border rounded-lg px-3 py-2 text-sm">
+										for _, rd := range settings.Radii {
+											<option value={ rd } selected?={ rd == cur.SkinRadius }>{ rd }</option>
+										}
+									</select>
+									<span class="text-xs text-slate-400">Save to preview corners</span>
+								</div>
 							</div>
 						</div>
+						<div>
+							<label class="block text-sm font-medium text-slate-600 mb-1">Density</label>
+							<select name="density"
+								x-on:change="document.documentElement.setAttribute('data-density', $event.target.value)"
+								class="w-full border rounded-lg px-3 py-2.5">
+								for _, d := range settings.Densities {
+									<option value={ d } selected?={ d == cur.Density }>{ d }</option>
+								}
+							</select>
+						</div>
+						<div>
+							<label class="block text-sm font-medium text-slate-600 mb-1">Receipt style</label>
+							<select name="receipt_style"
+								hx-get="/system/appearance/receipt-preview" hx-target="#rcpt-preview" hx-swap="innerHTML"
+								hx-trigger="change" hx-include="this"
+								class="w-full border rounded-lg px-3 py-2.5">
+								for _, r := range settings.ReceiptStyles {
+									<option value={ r } selected?={ r == cur.ReceiptStyle }>{ r }</option>
+								}
+							</select>
+							<p class="text-xs text-slate-400 mt-1">Applies to every printed receipt — core and plugins. The live sample is on the right.</p>
+						</div>
+						<div class="flex gap-2 pt-2">
+							<button type="submit" class="flex-1 py-3 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700">Save</button>
+							<a href="/admin" class="py-3 px-4 rounded-lg border text-slate-600">Back</a>
+						</div>
 					</div>
-					<div>
-						<label class="block text-sm font-medium text-slate-600 mb-1">Density</label>
-						<select name="density"
-							x-on:change="document.documentElement.setAttribute('data-density', $event.target.value)"
-							class="w-full border rounded-lg px-3 py-2.5">
-							for _, d := range settings.Densities {
-								<option value={ d } selected?={ d == cur.Density }>{ d }</option>
-							}
-						</select>
-					</div>
-					<div>
-						<label class="block text-sm font-medium text-slate-600 mb-1">Receipt style</label>
-						<select name="receipt_style"
-							hx-get="/system/appearance/receipt-preview" hx-target="#rcpt-preview" hx-swap="innerHTML"
-							hx-trigger="change" hx-include="this"
-							class="w-full border rounded-lg px-3 py-2.5">
-							for _, r := range settings.ReceiptStyles {
-								<option value={ r } selected?={ r == cur.ReceiptStyle }>{ r }</option>
-							}
-						</select>
-						<p class="text-xs text-slate-400 mt-1">Applies to every printed receipt — core and plugins. Sample below:</p>
-						<div id="rcpt-preview" class="mt-2"
+					<!-- Right: the live receipt preview -->
+					<div class="bg-white rounded-2xl shadow-sm p-6">
+						<div class="text-sm font-medium text-slate-600 mb-3">Receipt preview</div>
+						<div id="rcpt-preview"
 							hx-get={ "/system/appearance/receipt-preview?receipt_style=" + cur.ReceiptStyle }
 							hx-trigger="load" hx-swap="innerHTML">
-							@ReceiptPreview("")
+							@ReceiptPreview(settings.ValidReceiptStyle(cur.ReceiptStyle), cur.ShopName)
 						</div>
-					</div>
-					<div class="flex gap-2 pt-2">
-						<button type="submit" class="flex-1 py-3 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700">Save</button>
-						<a href="/admin" class="py-3 px-4 rounded-lg border text-slate-600">Back</a>
+						<p class="text-xs text-slate-400 mt-3">The exact printed output — updates as you change the receipt style.</p>
 					</div>
 				</form>
 			</div>
@@ -88,8 +96,27 @@ templ AppearancePanel(cur *settings.Settings, saved bool) {
 	}
 }
 
-// ReceiptPreview shows the sample receipt text on faux thermal paper. Monospace
-// so the space-padded centering/rules line up exactly like the printer.
-templ ReceiptPreview(text string) {
-	<pre class="bg-white text-slate-800 border rounded-lg p-3 text-[11px] leading-tight font-mono whitespace-pre overflow-x-auto max-w-[300px] shadow-inner">{ text }</pre>
+// ReceiptPreview renders a sample receipt using the SAME .receipt / .r-* markup
+// and CSS the real web receipt view uses, stamped with data-rstyle — so the
+// panel shows each style ACCURATELY (bold shop name, real centering, the framed
+// border, the reverse-video total) instead of the lossy plain-text approximation
+// that couldn't show bold/size/alignment. It matches exactly what a customer
+// sees on the on-screen receipt.
+templ ReceiptPreview(style, shopName string) {
+	<div class="receipt mx-auto" data-rstyle={ style } style="margin-top:0;margin-bottom:0;box-shadow:0 1px 3px rgba(0,0,0,.12)">
+		<div class="r-center r-shop">{ shopName }</div>
+		<div class="r-center r-small">Main Street, Kandakuliya.</div>
+		<div class="r-center r-small">Tel: 0322260680</div>
+		<div class="r-hr"></div>
+		<div class="r-row r-small"><span>Receipt:</span><span>S-01024</span></div>
+		<div class="r-row r-small"><span>Date:</span><span>2026-09-11 14:30</span></div>
+		<div class="r-hr"></div>
+		<div class="r-row"><span>Bluetooth Speaker</span><span>500.00</span></div>
+		<div class="r-row"><span>USB Cable x2</span><span>300.00</span></div>
+		<div class="r-hr"></div>
+		<div class="r-row"><span>Subtotal</span><span>Rs. 800.00</span></div>
+		<div class="r-row r-total"><span>TOTAL</span><span>Rs. 800.00</span></div>
+		<div class="r-hr"></div>
+		<div class="r-center r-small">Thank you! Come again.</div>
+	</div>
 }
