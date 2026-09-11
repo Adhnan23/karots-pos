@@ -126,10 +126,14 @@ func (r *Repository) MarkHasExpiry(ctx context.Context, productID int64) error {
 // product's real cost, which the info popup shows and the COGS zero-cost rescue
 // falls back to. Zero on either field leaves that field untouched.
 func (r *Repository) RefreshProductPricing(ctx context.Context, productID int64, cost, selling decimal.Decimal) error {
+	// $1/$2 are cast to numeric explicitly: with a bare `$1 > 0` Postgres infers
+	// the parameter type from the integer literal 0 and then rejects a fractional
+	// price like "3.4" (22P02) — the intermittent counter-receive failure. Whole
+	// prices happened to parse as int, decimals did not.
 	_, err := r.q.ExecContext(ctx, `
 		UPDATE products
-		SET cost_price    = CASE WHEN $1 > 0 THEN $1 ELSE cost_price END,
-		    selling_price = CASE WHEN $2 > 0 THEN $2 ELSE selling_price END
+		SET cost_price    = CASE WHEN $1::numeric > 0 THEN $1::numeric ELSE cost_price END,
+		    selling_price = CASE WHEN $2::numeric > 0 THEN $2::numeric ELSE selling_price END
 		WHERE id = $3`, cost, selling, productID)
 	return err
 }
