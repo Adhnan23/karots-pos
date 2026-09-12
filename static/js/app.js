@@ -3567,6 +3567,24 @@ function saleReturn(saleId, opts) {
 }
 
 // labels: live barcode preview for the Barcode Labels page (product + custom).
+// Label top/bottom line defaults persist per device so the chosen source (Name,
+// Price, or a Product Plus field) sticks across intake, cashier and admin instead
+// of always resetting to Name/Price. Shared key so all three surfaces agree.
+function labelSlotDefault(which, fallback) {
+  try {
+    return localStorage.getItem("label.slot." + which) || fallback;
+  } catch (_) {
+    return fallback;
+  }
+}
+function saveLabelSlot(which, val) {
+  try {
+    localStorage.setItem("label.slot." + which, val);
+  } catch (_) {
+    /* private mode / blocked storage: fall back to per-session default */
+  }
+}
+
 function labels(sym) {
   return {
     sym: sym,
@@ -3584,8 +3602,14 @@ function labels(sym) {
     cBottom: "",
     // top/bottom line pickers (product form): which source fills each line.
     labelFields: [], // [{label,value}] custom fields flagged print_on_label
-    pTop: "name",
-    pBottom: "price",
+    pTop: labelSlotDefault("top", "name"),
+    pBottom: labelSlotDefault("bottom", "price"),
+    // persistSlots remembers the current top/bottom choice for next time (shared
+    // across intake/cashier/admin). Called on change from the dropdowns.
+    persistSlots() {
+      saveLabelSlot("top", this.pTop);
+      saveLabelSlot("bottom", this.pBottom);
+    },
 
     // productSlotOptions is the choice list for the Top/Bottom dropdowns: name,
     // price, each label-flagged custom field, then "none". Values are read live
@@ -3759,14 +3783,21 @@ function intake(sym) {
     cBarcode: "",
     cCost: "",
     cSelling: "",
-    cMarkup: "",
+    cMarkup: "1.4", // default markup; set to 0/blank to type cost & selling by hand
+    lastNew: null, // snapshot of the last created item, for "Add another like this"
     // shared form state
     qty: "",
     labelQty: "1",
     printLabels: true,
     // label top/bottom line pickers (resolved against the saved item at print time)
-    iTop: "name",
-    iBottom: "price",
+    iTop: labelSlotDefault("top", "name"),
+    iBottom: labelSlotDefault("bottom", "price"),
+    // persistSlots remembers the current top/bottom choice for next time (shared
+    // across intake/cashier/admin). Called on change from the dropdowns.
+    persistSlots() {
+      saveLabelSlot("top", this.iTop);
+      saveLabelSlot("bottom", this.iBottom);
+    },
     labelFields: [], // [{label,value}] custom fields flagged print_on_label (restock only)
 
     // productSlotOptions is the Top/Bottom choice list: name, price, each
@@ -3966,7 +3997,7 @@ function intake(sym) {
       this.cBarcode = "";
       this.cCost = "";
       this.cSelling = "";
-      this.cMarkup = "";
+      this.cMarkup = "1.4";
       this.qty = "";
       this.labelQty = "1";
       this.$nextTick(() => this.$refs.searchInput && this.$refs.searchInput.focus());
@@ -4100,8 +4131,32 @@ function intake(sym) {
       this.items.unshift(item);
       // Rapid loop: after a create, stay in New with category/unit/supplier/markup
       // retained; a restock returns to the search box.
-      if (wasNew) this.softResetNew();
-      else this.reset();
+      if (wasNew) {
+        // Snapshot for "Add another like this" — kept before softResetNew wipes
+        // the per-item fields. Name comes from the saved item (authoritative).
+        this.lastNew = { name: item.name || this.newName, cost: this.cCost, selling: this.cSelling };
+        this.softResetNew();
+      } else this.reset();
+    },
+    // likeLast refills the New form from the last created item — same name (for a
+    // quick token tweak), cost and selling; barcode + qty cleared so each variant
+    // gets its own. Category/unit/markup already persist across the loop. The name
+    // is selected so you just overtype the part that differs (5 → 10 → 20).
+    likeLast() {
+      if (!this.lastNew) return;
+      this.mode = "new";
+      this.newName = this.lastNew.name;
+      this.cCost = this.lastNew.cost;
+      this.cSelling = this.lastNew.selling;
+      this.cBarcode = "";
+      this.qty = "";
+      this.labelQty = "1";
+      this.open = false;
+      this.drawNew();
+      this.$nextTick(() => {
+        const el = document.querySelector("#intake-new-name");
+        if (el) { el.focus(); el.select(); }
+      });
     },
     async sendLabels(item, fd) {
       const p = new URLSearchParams();

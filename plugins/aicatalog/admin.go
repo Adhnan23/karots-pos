@@ -533,11 +533,16 @@ func (a *adminUI) Save(c echo.Context) error {
 		ProductID: p.ID, ResolvedName: w.Name, SuggestedCategory: w.Category,
 		Specs: w.Specs, UserExplanation: w.Explanation, Source: w.Source, RawQuery: w.Query,
 	})
-	// Fire a label print for N labels via the core endpoint.
+	// Fire a label print for N labels via the core endpoint. Build the trigger as
+	// a map so the ai-print-labels event carries a real {product_id, qty} payload;
+	// ToastAnd only takes bare event names (it quotes each arg as the event name),
+	// so a raw JSON string there would never reach the body listener.
 	trigger := response.Toast("Saved: "+p.Name, "success")
 	if labels := strings.TrimSpace(c.FormValue("labels")); labels != "" && labels != "0" {
-		trigger = response.ToastAnd("Saved: "+p.Name, "success",
-			`{"ai-print-labels":{"product_id":`+strconv.FormatInt(p.ID, 10)+`,"qty":"`+labels+`"}}`)
+		trigger = response.Trigger(map[string]any{
+			"show-toast":      map[string]string{"message": "Saved: " + p.Name, "level": "success"},
+			"ai-print-labels": map[string]any{"product_id": p.ID, "qty": labels},
+		})
 	}
 	// Bulk: auto-advance to the next queued item, carrying the toast.
 	if len(w.Queue) > 0 {

@@ -148,7 +148,7 @@ templ labelSizePicker() {
 // slotSelect is one Top/Bottom dropdown for the product form; both share the same
 // live option list (name / price / label fields / none) via productSlotOptions().
 templ slotSelect(model string) {
-	<select x-model={ model } class="w-full border rounded-lg px-3 py-2">
+	<select x-model={ model } x-on:change="persistSlots()" x-init={ "$nextTick(() => { $el.value = " + model + " })" } class="w-full border rounded-lg px-3 py-2">
 		<template x-for="o in productSlotOptions()" x-bind:key="o.key">
 			<option x-bind:value="o.key" x-text="o.label"></option>
 		</template>
